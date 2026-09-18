@@ -408,7 +408,7 @@ Before deploying:
 
 - The Turtle Earn API requires an API key. Confirm `TURTLE_EARN_API_KEY` is set on the server; the `/api/internal/proxy/turtle` route logs `reason: missing-api-key` and answers 503 when it is not.
 - A 502 with `upstream failed` and `status: 401` in the logs means Turtle rejected the configured key (revoked or wrong environment).
-- Turtle campaigns missing from vault snapshots (`/api/internal/vaults`) with no proxy errors means the server SDK was built without the key: it then sets `rewardsEnableTurtle: false` instead of calling Turtle unauthenticated. Fix the env and restart; the per-chain SDK is cached at boot.
+- Turtle campaigns missing from vault snapshots (`/api/internal/vaults`) with no proxy errors means the server SDK was built without the key: it then sets `rewardsEnableTurtle: false` instead of calling Turtle unauthenticated. Fix the env and restart; each chain's SDK is cached on first use (normally during startup warm-up).
 
 ### Build Errors
 

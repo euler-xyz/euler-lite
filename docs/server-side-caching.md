@@ -60,10 +60,10 @@ Fixed rules, not configurable per provider:
 
 | Endpoint | Upstream | Methods | Allowlist (`rewards-proxy-allowlist.ts`) | Credential | Server TTL | Browser hint | Rate limit |
 |---|---|---|---|---|---|---|---|
-| `/api/internal/proxy/merkl/{...}` | `api.merkl.xyz/v4` (fixed) | GET, HEAD | `opportunities` (`chainId`, `type`, `campaigns`, `mainProtocolId`), `users/0x…/rewards` (`chainId`, `type`; `type=TOKEN` defaulted when absent) | optional `MERKL_API_KEY` → `X-API-Key` | 60 s | `public, max-age=60` | 600 / min |
+| `/api/internal/proxy/merkl/{...}` | `api.merkl.xyz/v4` (fixed; `redirect: manual`) | GET, HEAD | `opportunities` (`chainId`, `type`, `campaigns`, `mainProtocolId`), `users/0x…/rewards` (`chainId`, `type`; `type=TOKEN` defaulted when absent) | optional `MERKL_API_KEY` → `X-API-Key` | 60 s | `public, max-age=60` | 600 / min |
 | `/api/internal/proxy/fuul/{...}` | `api.fuul.xyz/api/v1`; override `FUUL_API_URL` / `NUXT_PUBLIC_FUUL_API_URL` | GET, HEAD | `incentives` (`protocol`, `chain_id`), `claimable-rewards` (`protocol`, `user_address`, `chain_id`) | none | 60 s | `public, max-age=30, stale-while-revalidate=30` | 600 / min |
 | `/api/internal/proxy/incentra/{...}` | `incentra-prd.brevis.network`; override `INCENTRA_API_URL` / `NUXT_PUBLIC_INCENTRA_API_URL` | POST (body forwarded verbatim, no query) | `sdk/v1/eulerCampaigns`, `v1/getMerkleProofsBatch` | none | 60 s | `public, max-age=30, stale-while-revalidate=30` | 600 / min |
-| `/api/internal/proxy/turtle/{...}` | `earn.turtle.xyz/v1` (fixed, no override; `redirect: manual`) | GET, HEAD | `streams/merkle_proofs` (`wallet`, `streamIds`) | **required** `TURTLE_EARN_API_KEY` → `X-API-Key`; 503 without it | bypass (per-wallet proofs) | `no-store` | 300 / min |
+| `/api/internal/proxy/turtle/{...}` | `earn.turtle.xyz/v1` (fixed, no override; `redirect: manual`) | GET, HEAD | `streams/merkle_proofs` (`wallet`, `streamIds`) | **required** `TURTLE_EARN_API_KEY` → `X-API-Key`; 503 when unset or blank | bypass (per-wallet proofs) | `no-store` | 300 / min |
 
 Turtle is the only provider whose credential is required: Turtle rejects unauthenticated requests, so the route fails closed rather than forwarding a request that would 401 anyway. Merkl works anonymously on a shared quota and only attaches a key when one is configured.
 
@@ -76,13 +76,13 @@ Turtle is the only provider whose credential is required: Turtle rejects unauthe
 
 ### Goldsky subgraph
 
-`/api/internal/proxy/subgraph/{chainId}` (`[chainId].post.ts`) is not built with the factory: its upstream is selected per chain from the router param (`SUBGRAPH_URL_<chainId>`, then `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`), an unconfigured chain is a 404 rather than a 503, and an empty body is a 400. It still forwards through `external-proxy.ts` (POST only, 30 s TTL, `public, max-age=30, stale-while-revalidate=30`) and carries its own rate limiter.
+`/api/internal/proxy/subgraph/{chainId}` (`[chainId].post.ts`) is not built with the factory: its upstream is selected per chain from the router param (`SUBGRAPH_URL_<chainId>`, then `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`), an unconfigured chain is a 404 rather than a 503, and an empty body is a 400. It still forwards through `external-proxy.ts` (POST only) with `bypassCache: true` and a `no-store` browser hint — account positions are freshness-critical, so nothing is cached server-side and concurrent identical queries are only coalesced in flight. It carries its own rate limiter.
 
 ### Why route through these proxies
 
 - **Fuul, Incentra/Brevis, Merkl**: provider APIs don't set permissive CORS; direct browser fetches fail. Proxying also shares one warm response across every connected wallet and keeps the optional Merkl key server-side.
 - **Turtle**: the API key must stay off the client; the browser only fetches reward proofs through the proxy, while stream discovery happens in the server-side SDK (see below).
-- **Goldsky subgraph**: each chain's URL is a per-deployment Goldsky deployment ID. Proxying keeps the project ID server-side and amortizes GraphQL responses across tabs.
+- **Goldsky subgraph**: each chain's URL is a per-deployment Goldsky deployment ID. Proxying keeps the project ID server-side; responses are not cached because account positions must reflect the latest block.
 
 ### Labels
 
@@ -243,7 +243,7 @@ A boot-time warning fires if `SERVER_VAULT_CACHE_SOURCE` (or `NUXT_PUBLIC_BROWSE
 
 `labels-view.ts` shares the same `getServerSdk` instance per chain.
 
-**Turtle rewards.** The direct and fallback rewards adapters inside the server SDK call Turtle Earn upstream themselves (not through `/api/internal/proxy/turtle`), and every Turtle endpoint requires `X-API-Key`. `resolveServerTurtleRewardsConfig()` therefore hands the SDK the same server-only `TURTLE_EARN_API_KEY` as `rewardsTurtleApiKey`, pinned to the same fixed upstream the proxy uses. When the key is unset, the builder emits `rewardsEnableTurtle: false` so the snapshot is built without Turtle rather than issuing guaranteed-401 requests. The SDK never follows redirects on credentialed Turtle requests. Because the SDK is cached per chain at first use, changing the key requires a restart.
+**Turtle rewards.** The direct and fallback rewards adapters inside the server SDK call Turtle Earn upstream themselves (not through `/api/internal/proxy/turtle`), and every Turtle endpoint requires `X-API-Key`. `resolveServerTurtleRewardsConfig()` therefore hands the SDK the same server-only `TURTLE_EARN_API_KEY` as `rewardsTurtleApiKey`, pinned to the same fixed upstream the proxy uses. When the key is unset or blank after trimming, the builder emits `rewardsEnableTurtle: false` so the snapshot is built without Turtle rather than issuing guaranteed-401 requests. The SDK never follows redirects on credentialed Turtle requests. Because the SDK is cached per chain at first use, changing the key requires a restart.
 
 Every server-side SDK build resolves the deployments manifest through the euler-chains cache chain rather than fetching euler-interfaces directly: `server/plugins/sdk-deployments.ts` installs `DeploymentService.setQueryDeployments(loadEulerChains)` at boot, so all server SDK builds share one cached copy with its 7-day stale window instead of issuing their own GitHub fetches.
 
@@ -390,7 +390,7 @@ The snapshot remains active in all modes (unless `DISABLE_SERVER_VAULT_CACHE=tru
 | `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` | browser (exposed) | `fallback` \| `onchain` \| `v3` | `fallback` | Adapter chain in `composables/useEulerSdk.ts:getEulerSdk()`. `getEulerSdkForChain(chainId)` uses `onchain` for `ONCHAIN_SDK_CHAINS` chains. The "fresh" / plan-time SDK is always `onchain` regardless. |
 | `DEPRECATED_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Chains shown collapsed in the chain selector and skipped by per-chain warm-cache work. |
 | `ONCHAIN_SDK_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Chains pinned to onchain adapters in chain-aware browser SDK reads and server snapshot builds. |
-| `TURTLE_EARN_API_KEY` | server | Turtle Earn server key | unset | Passed to the server SDK as `rewardsTurtleApiKey` (and sent by the Turtle proxy). Unset, the server SDK is built with `rewardsEnableTurtle: false`. |
+| `TURTLE_EARN_API_KEY` | server | Turtle Earn server key | unset | Passed to the server SDK as `rewardsTurtleApiKey` (and sent by the Turtle proxy). Unset or blank, the proxy answers 503 and the server SDK is built with `rewardsEnableTurtle: false`. |
 | `EVAULT_FETCH_CHUNK_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Chains whose EVault list reads are split into small sequential SDK calls in Lite. |
 | `DISABLE_SERVER_VAULT_CACHE` | server | `true` \| `false` | `false` | When true: warm-cache skips the vault cycle, `/api/internal/vaults` returns 503, browser falls through to RPC pipeline. |
 | `V3_API_URL` *(plus aliases)* | server | URL | unset | Required upstream when any source ∈ `{fallback, v3}` actually needs V3. Boot warning fires when unset and a V3-requiring source is configured. |

@@ -26,6 +26,8 @@ export default defineEventHandler(createProviderProxy({
   methods: ['GET', 'HEAD'],
   allow: isAllowedMerklProxyRequest,
   headers: buildMerklProxyRequestHeaders,
+  // The optional key rides along, so a redirect must not replay it elsewhere.
+  redirect: 'manual',
   rateLimit: { max: 600, windowMs: 60_000 },
   // Short cache: the adapter polls on its own cadence; this lets concurrent
   // tabs and users share one upstream response per query.
