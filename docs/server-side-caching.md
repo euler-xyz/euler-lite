@@ -17,7 +17,7 @@ This document covers the per-host proxies, the vault snapshot pipeline, the warm
 | `server/api/internal/proxy/merkl/[...path].ts` | Proxies Merkl v4 (`api.merkl.xyz/v4`) |
 | `server/api/internal/proxy/fuul/[...path].ts` | Proxies Fuul (`api.fuul.xyz/api/v1`) |
 | `server/api/internal/proxy/turtle/[...path].ts` | Proxies Turtle Earn reward proofs (`earn.turtle.xyz/v1`); attaches the server-only API key |
-| `server/utils/turtle-proxy.ts` | Turtle upstream trust check (`https://` on `turtle.xyz` only) and `X-API-Key` header builder |
+| `server/utils/turtle-proxy.ts` | Turtle upstream trust check (`https://` on `turtle.xyz`, plus `http://` loopback for local mocks) and `X-API-Key` header builder |
 | `server/api/internal/proxy/incentra/[...path].ts` | Proxies Incentra / Brevis (`incentra-prd.brevis.network`) |
 | `server/api/internal/proxy/subgraph/[chainId].post.ts` | Proxies the per-chain Goldsky subgraph |
 | `server/api/internal/labels/[file].get.ts` | Query-shape labels endpoint (`?chainId=X`) — used internally |
@@ -60,11 +60,11 @@ Cache key is `sha1(method + '\0' + target + '\0' + body)`. Concurrent misses sha
 | `/api/internal/proxy/incentra/{...}` | `incentra-prd.brevis.network` | `INCENTRA_API_URL` / `NUXT_PUBLIC_INCENTRA_API_URL` | `sdk/v1/`, `v1/` | GET, HEAD, POST | `public, max-age=30, swr=30` |
 | `/api/internal/proxy/subgraph/{chainId}` | per-chain Goldsky URL | `SUBGRAPH_URL_<chainId>` (server-only) or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` | (POST only — chain-level guard) | POST | `public, max-age=30, swr=30` |
 | `/api/internal/proxy/merkl/{...}` | `api.merkl.xyz/v4` | (none) | `opportunities`, `users`, `campaigns` | GET, HEAD | `public, max-age=60` |
-| `/api/internal/proxy/turtle/{...}` | `earn.turtle.xyz/v1` | `TURTLE_EARN_API_URL` / `NUXT_PUBLIC_TURTLE_EARN_API_URL` (`https://` on `turtle.xyz` only); `TURTLE_EARN_API_KEY` (server-only, required) | `streams/merkle_proofs` (`wallet`, `streamIds` params only) | GET, HEAD | `no-store` |
+| `/api/internal/proxy/turtle/{...}` | `earn.turtle.xyz/v1` | `TURTLE_EARN_API_URL` / `NUXT_PUBLIC_TURTLE_EARN_API_URL` (`https://` on `turtle.xyz`, or `http://` loopback for local mocks); `TURTLE_EARN_API_KEY` (server-only, required) | `streams/merkle_proofs` (`wallet`, `streamIds` params only) | GET, HEAD | `no-store` |
 
 Each proxy carries a rate limiter (`createRateLimiter`) and returns 405 for disallowed methods, 404 for paths outside the allowlist, 502 on upstream errors when no stale entry exists. The `x-cache: hit | miss | stale-fallback` response header reports the cache state for observability.
 
-The Turtle proxy is the exception on caching: it bypasses the TTL cache because reward proofs are per wallet, and it is the only proxy that attaches a credential. Turtle rejects unauthenticated requests, so the route answers 503 without contacting upstream when `TURTLE_EARN_API_KEY` is unset or the upstream override is not a trusted `https://turtle.xyz` host, never forwards caller headers, and does not follow redirects so the key cannot be replayed against another host.
+The Turtle proxy is the exception on caching: it bypasses the TTL cache because reward proofs are per wallet, and it is the only proxy that attaches a credential. Turtle rejects unauthenticated requests, so the route answers 503 without contacting upstream when `TURTLE_EARN_API_KEY` is unset or the upstream override is not a trusted host (`https://` on `turtle.xyz`, or plain `http://` on `localhost`, `127.0.0.1` or `[::1]` for local mocks), never forwards caller headers, and does not follow redirects so the key cannot be replayed against another host.
 
 ### Why route through these proxies
 
