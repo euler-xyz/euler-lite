@@ -84,7 +84,6 @@ Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for 
 | `FUUL_API_URL` or `NUXT_PUBLIC_FUUL_API_URL` | Optional Fuul API upstream override. |
 | `INCENTRA_API_URL` or `NUXT_PUBLIC_INCENTRA_API_URL` | Optional Incentra/Brevis API upstream override. |
 | `TURTLE_EARN_API_KEY` | **Required when `NUXT_PUBLIC_CONFIG_ENABLE_TURTLE` is on.** Server-only Turtle Earn API key sent as `X-API-Key` by `/api/internal/proxy/turtle` and by the server-side SDK's rewards adapters (`server/utils/sdk-server.ts`), which call Turtle directly for stream discovery. Turtle rejects unauthenticated requests with 401; without this variable the proxy answers 503 and never calls upstream, and the server SDK disables Turtle discovery instead of issuing unauthenticated calls, so Turtle campaigns, reward proofs and claims are unavailable. Configure the secret before rolling out. Never exposed to the browser. |
-| `TURTLE_EARN_API_URL` or `NUXT_PUBLIC_TURTLE_EARN_API_URL` | Optional Turtle reward-proof upstream override; defaults to `https://earn.turtle.xyz/v1`. Because the API key is attached, only `https://` URLs on `turtle.xyz` hosts are accepted (loopback `http://` allowed for local mocks); anything else makes the proxy answer 503. Redirects are not followed. |
 
 #### Branding & Feature Flags
 
@@ -408,9 +407,8 @@ Before deploying:
 ### Turtle rewards missing or claims failing
 
 - The Turtle Earn API requires an API key. Confirm `TURTLE_EARN_API_KEY` is set on the server; the `/api/internal/proxy/turtle` route logs `reason: missing-api-key` and answers 503 when it is not.
-- If `TURTLE_EARN_API_URL` is overridden, it must be an `https://` URL on a `turtle.xyz` host, or a plain `http://` URL on `localhost`, `127.0.0.1` or `[::1]` for a local mock — the route logs `reason: untrusted-host` / `insecure-protocol` and answers 503 otherwise.
 - A 502 with `upstream failed` and `status: 401` in the logs means Turtle rejected the configured key (revoked or wrong environment).
-- Turtle campaigns missing from vault snapshots (`/api/internal/vaults`) with no proxy errors means the server SDK was built without the key or with an untrusted `TURTLE_EARN_API_URL`: it then sets `rewardsEnableTurtle: false` instead of calling Turtle unauthenticated. Fix the env and restart; the per-chain SDK is cached at boot.
+- Turtle campaigns missing from vault snapshots (`/api/internal/vaults`) with no proxy errors means the server SDK was built without the key: it then sets `rewardsEnableTurtle: false` instead of calling Turtle unauthenticated. Fix the env and restart; the per-chain SDK is cached at boot.
 
 ### Build Errors
 

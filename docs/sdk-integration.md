@@ -123,7 +123,7 @@ The server-side snapshot builder has its own independent `SERVER_VAULT_CACHE_SOU
 
 Reward provider toggles (`rewardsEnableMerkl`, `rewardsEnableBrevis`, `rewardsEnableFuul`, `rewardsEnableTurtle`) are emitted as `false` only when `useDeployConfig()` disables them.
 
-The server-side SDK (`server/utils/sdk-server.ts`) differs for Turtle: its rewards adapters call `earn.turtle.xyz` directly, so it receives the server-only `TURTLE_EARN_API_KEY` as `rewardsTurtleApiKey` plus the trust-checked upstream as `rewardsTurtleApiUrl`, and is built with `rewardsEnableTurtle: false` when no usable key is configured. The key never enters the browser config. See [server-side caching](./server-side-caching.md#server-side-sdk-builder).
+The server-side SDK (`server/utils/sdk-server.ts`) differs for Turtle: its rewards adapters call `earn.turtle.xyz` directly, so it receives the server-only `TURTLE_EARN_API_KEY` as `rewardsTurtleApiKey` pinned to the fixed Turtle upstream, and is built with `rewardsEnableTurtle: false` when no usable key is configured. The key never enters the browser config. See [server-side caching](./server-side-caching.md#server-side-sdk-builder).
 
 The full object is serialized into `staticCacheKey`, so any change produces a new instance.
 

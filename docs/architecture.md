@@ -210,7 +210,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 | `/api/internal/vaults` | 2 min (V3) / 5 min (no V3) | Pre-computed chain vault snapshot. Handler is read-only — no request-triggered refresh; warm-cache rewrites at the same cadence as the TTL |
 | `/api/internal/proxy/merkl/{path}` | 60 s | Same-origin proxy to Merkl v4; path allowlist; GET/HEAD only |
 | `/api/internal/proxy/fuul/{path}` | 30 s | Same-origin proxy to Fuul; path allowlist; GET/HEAD/POST |
-| `/api/internal/proxy/turtle/{path}` | none (`no-store`) | Same-origin proxy to Turtle Earn reward proofs; `streams/merkle_proofs` allowlist; GET/HEAD only. Attaches the server-only `TURTLE_EARN_API_KEY` and fails closed with 503 without it; upstream override must be `https://` on `turtle.xyz` (plain `http://` allowed only for loopback mocks); redirects not followed |
+| `/api/internal/proxy/turtle/{path}` | none (`no-store`) | Same-origin proxy to Turtle Earn reward proofs; `streams/merkle_proofs` allowlist; GET/HEAD only. Attaches the server-only `TURTLE_EARN_API_KEY` and fails closed with 503 without it; upstream is a fixed constant (no env override) and redirects are not followed |
 | `/api/internal/proxy/incentra/{path}` | 30 s | Same-origin proxy to Incentra/Brevis; path allowlist; GET/HEAD/POST |
 | `/api/internal/proxy/subgraph/{chainId}` | 30 s | Same-origin proxy to per-chain Goldsky subgraph; POST only |
 | `/api/internal/v3/{...path}` | request-scoped | Rate-limited proxy for the exact SDK browser V3 endpoint allowlist; no TTL — V3 manages its own caching |

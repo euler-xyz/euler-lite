@@ -66,8 +66,6 @@ const everythingLogged = () => JSON.stringify([...mocks.warn.mock.calls, ...mock
 describe('/api/internal/proxy/turtle route', () => {
   beforeEach(() => {
     vi.stubEnv('TURTLE_EARN_API_KEY', API_KEY)
-    vi.stubEnv('TURTLE_EARN_API_URL', '')
-    vi.stubEnv('NUXT_PUBLIC_TURTLE_EARN_API_URL', '')
   })
 
   afterEach(() => {
@@ -147,27 +145,15 @@ describe('/api/internal/proxy/turtle route', () => {
     expect(mocks.fetchWithTimeout).not.toHaveBeenCalled()
   })
 
-  it('refuses to send the key to an untrusted upstream override', async () => {
+  it('ignores upstream URL variables: the key only ever goes to the fixed Turtle host', async () => {
     vi.stubEnv('TURTLE_EARN_API_URL', 'https://evil.example/v1')
+    vi.stubEnv('NUXT_PUBLIC_TURTLE_EARN_API_URL', 'https://evil.example/v1')
+    mocks.fetchWithTimeout.mockResolvedValueOnce(upstreamResponse(200, '[]'))
 
-    await expect(handler(makeEvent(PROOFS_URL))).rejects.toMatchObject({
-      statusCode: 503,
-      statusMessage: 'Turtle upstream not configured',
-    })
+    await handler(makeEvent(PROOFS_URL))
 
-    expect(mocks.fetchWithTimeout).not.toHaveBeenCalled()
-    expect(mocks.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ ctx: 'turtle-proxy', reason: 'untrusted-host' }),
-      'request rejected',
-    )
-    expect(everythingLogged()).not.toContain(API_KEY)
-  })
-
-  it('refuses a plain-http upstream override for a non-loopback host', async () => {
-    vi.stubEnv('TURTLE_EARN_API_URL', 'http://earn.turtle.xyz/v1')
-
-    await expect(handler(makeEvent(PROOFS_URL))).rejects.toMatchObject({ statusCode: 503 })
-    expect(mocks.fetchWithTimeout).not.toHaveBeenCalled()
+    const [target] = mocks.fetchWithTimeout.mock.calls[0]
+    expect(target).toMatch(/^https:\/\/earn\.turtle\.xyz\/v1\//)
   })
 
   it.each([
