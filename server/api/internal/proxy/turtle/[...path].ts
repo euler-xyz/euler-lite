@@ -7,6 +7,13 @@
  * The handler forwards to Turtle Earn (`TURTLE_EARN_API_URL`, default
  * `https://earn.turtle.xyz/v1`) while keeping the browser same-origin and
  * allowlisting only the reward proof endpoint needed for claim planning.
+ *
+ * Turtle requires an API key on every request. The server-only
+ * `TURTLE_EARN_API_KEY` is attached as `X-API-Key` here and nowhere else:
+ * caller headers are never forwarded, the key is never logged, and when it is
+ * missing the route answers 503 without contacting upstream. The key is only
+ * sent to destinations accepted by `resolveTurtleUpstreamBase`, and redirects
+ * are not followed so it cannot be replayed against another host.
  */
 import {
   createError,
@@ -24,12 +31,9 @@ import {
   forwardProxied,
 } from '~/server/utils/external-proxy'
 import { isAllowedTurtleProxyRequest } from '~/server/utils/rewards-proxy-allowlist'
+import { buildTurtleProxyRequestHeaders, resolveTurtleUpstreamBase } from '~/server/utils/turtle-proxy'
 
 const PROXY_PREFIX = '/api/internal/proxy/turtle/'
-
-const DEFAULT_TURTLE_EARN_API_URL = 'https://earn.turtle.xyz/v1'
-
-const TURTLE_EARN_API_URL_ENV_KEYS = ['TURTLE_EARN_API_URL', 'NUXT_PUBLIC_TURTLE_EARN_API_URL'] as const
 
 const CACHE_TTL_MS = 15_000
 const BROWSER_CACHE_CONTROL = 'no-store'
@@ -44,14 +48,6 @@ const rateLimiter = createRateLimiter({
 })
 
 const stripLeadingSlash = (s: string): string => (s.startsWith('/') ? s.slice(1) : s)
-
-const readUpstreamBase = (): string => {
-  for (const key of TURTLE_EARN_API_URL_ENV_KEYS) {
-    const v = process.env[key]
-    if (v && v.trim()) return v.trim().replace(/\/+$/, '')
-  }
-  return DEFAULT_TURTLE_EARN_API_URL
-}
 
 export default defineEventHandler(async (event) => {
   const method = getMethod(event).toUpperCase()
@@ -69,8 +65,21 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: 'Turtle path not allowed' })
   }
 
-  const target = `${readUpstreamBase()}/${rest}${requestUrl.search}`
   await rateLimiter.consume(event)
+
+  const headers = buildTurtleProxyRequestHeaders()
+  if (!headers) {
+    logger.warn({ ctx: 'turtle-proxy', reason: 'missing-api-key' }, 'request rejected')
+    throw createError({ statusCode: 503, statusMessage: 'Turtle API key not configured' })
+  }
+
+  const upstream = resolveTurtleUpstreamBase()
+  if (upstream.ok === false) {
+    logger.warn({ ctx: 'turtle-proxy', reason: upstream.reason }, 'request rejected')
+    throw createError({ statusCode: 503, statusMessage: 'Turtle upstream not configured' })
+  }
+
+  const target = `${upstream.base}/${rest}${requestUrl.search}`
 
   try {
     const res = await forwardProxied({
@@ -78,9 +87,10 @@ export default defineEventHandler(async (event) => {
       inFlight,
       method,
       target,
-      headers: { accept: 'application/json' },
+      headers,
       ctx: 'turtle-proxy',
       bypassCache: true,
+      redirect: 'manual',
     })
     setResponseStatus(event, res.status, res.statusText)
     setResponseHeaders(event, {

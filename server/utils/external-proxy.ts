@@ -39,6 +39,13 @@ export interface ProxyForwardArgs {
    * subgraph response predates.
    */
   bypassCache?: boolean
+  /**
+   * Fetch redirect policy. Proxies that attach an upstream credential should
+   * pass `'manual'` so a redirect is surfaced as a non-2xx upstream failure
+   * instead of being followed — otherwise the credential would be replayed
+   * against whatever host the redirect names.
+   */
+  redirect?: RequestRedirect
 }
 
 export interface ProxyForwardResult {
@@ -75,7 +82,7 @@ export function createProxyInFlight(): InFlightDedup<string, string> {
 }
 
 export async function forwardProxied(args: ProxyForwardArgs): Promise<ProxyForwardResult> {
-  const { cache, inFlight, method, target, headers, body, ctx, bypassCache } = args
+  const { cache, inFlight, method, target, headers, body, ctx, bypassCache, redirect } = args
   const cacheKey = buildCacheKey(method, target, body)
 
   if (!bypassCache) {
@@ -91,6 +98,7 @@ export async function forwardProxied(args: ProxyForwardArgs): Promise<ProxyForwa
         method,
         headers,
         body: body ?? undefined,
+        ...(redirect ? { redirect } : {}),
       })
       if (!upstream.ok) {
         const text = await upstream.text().catch(() => '')
