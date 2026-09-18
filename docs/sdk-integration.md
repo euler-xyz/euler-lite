@@ -114,14 +114,16 @@ The server-side snapshot builder has its own independent `SERVER_VAULT_CACHE_SOU
 | `rewardsFuulApiUrl` | `/api/internal/proxy/fuul` | Fuul proxy |
 | `rewardsBrevisApiUrl` | `/api/internal/proxy/incentra/sdk/v1/eulerCampaigns` | Incentra/Brevis proxy |
 | `rewardsBrevisProofsApiUrl` | `/api/internal/proxy/incentra/v1/getMerkleProofsBatch` | Incentra/Brevis proxy |
-| `rewardsTurtleApiUrl` | `/api/internal/proxy/turtle` | Turtle Earn proxy; the server attaches the API key. Browser reward-proof fetches only (`rewardsEnableTurtle` is `false`, so Turtle campaign APYs come from V3) |
+| `rewardsTurtleApiUrl` | `/api/internal/proxy/turtle` | Turtle Earn proxy; the server attaches the API key. Only `streams/merkle_proofs` passes the proxy allowlist, so the browser SDK fetches reward proofs for claims here while Turtle stream discovery (campaign APYs) happens in the server-side SDK, which holds the key (see below) |
 | `accountVaultsSubgraphUrls[chainId]` | `/api/internal/proxy/subgraph/{chainId}` | Goldsky subgraph proxy |
 | `vaultTypeSubgraphUrls[chainId]` | `/api/internal/proxy/subgraph/{chainId}` | Goldsky subgraph proxy |
 | `rpcUrls[chainId]` | `/api/internal/rpc/{chainId}` | JSON-RPC proxy |
 | Adapter block | `fallbackAdapterConfig` / `onchainAdapterConfig` / `v3AdapterConfig` per `browserVaultSource` (default browsing), `onchainAdapterConfig` (`ONCHAIN_SDK_CHAINS` browsing and plan-time) | — |
 | `disableV3` | `true` only when the resolved fast source is `fallback` and `!enableV3Backend` | — |
 
-Reward provider toggles (`rewardsEnableMerkl`, `rewardsEnableBrevis`, `rewardsEnableFuul`) are emitted as `false` only when `useDeployConfig()` disables them.
+Reward provider toggles (`rewardsEnableMerkl`, `rewardsEnableBrevis`, `rewardsEnableFuul`, `rewardsEnableTurtle`) are emitted as `false` only when `useDeployConfig()` disables them.
+
+The server-side SDK (`server/utils/sdk-server.ts`) differs for Turtle: its rewards adapters call `earn.turtle.xyz` directly, so it receives the server-only `TURTLE_EARN_API_KEY` as `rewardsTurtleApiKey` plus the trust-checked upstream as `rewardsTurtleApiUrl`, and is built with `rewardsEnableTurtle: false` when no usable key is configured. The key never enters the browser config. See [server-side caching](./server-side-caching.md#server-side-sdk-builder).
 
 The full object is serialized into `staticCacheKey`, so any change produces a new instance.
 
