@@ -17,7 +17,7 @@ This document covers the per-host proxies, the vault snapshot pipeline, the warm
 | `server/api/internal/proxy/merkl/[...path].ts` | Proxies Merkl v4 (`api.merkl.xyz/v4`) |
 | `server/api/internal/proxy/fuul/[...path].ts` | Proxies Fuul (`api.fuul.xyz/api/v1`) |
 | `server/api/internal/proxy/turtle/[...path].ts` | Proxies Turtle Earn reward proofs (`earn.turtle.xyz/v1`); attaches the server-only API key |
-| `server/utils/turtle-proxy.ts` | Turtle upstream trust check (`https://` on `turtle.xyz`, plus `http://` loopback for local mocks) and `X-API-Key` header builder |
+| `server/utils/turtle-proxy.ts` | Fixed Turtle upstream constant and `X-API-Key` header builder shared by the proxy and the server SDK builder |
 | `server/api/internal/proxy/incentra/[...path].ts` | Proxies Incentra / Brevis (`incentra-prd.brevis.network`) |
 | `server/api/internal/proxy/subgraph/[chainId].post.ts` | Proxies the per-chain Goldsky subgraph |
 | `server/api/internal/labels/[file].get.ts` | Query-shape labels endpoint (`?chainId=X`) — used internally |
@@ -60,11 +60,11 @@ Cache key is `sha1(method + '\0' + target + '\0' + body)`. Concurrent misses sha
 | `/api/internal/proxy/incentra/{...}` | `incentra-prd.brevis.network` | `INCENTRA_API_URL` / `NUXT_PUBLIC_INCENTRA_API_URL` | `sdk/v1/`, `v1/` | GET, HEAD, POST | `public, max-age=30, swr=30` |
 | `/api/internal/proxy/subgraph/{chainId}` | per-chain Goldsky URL | `SUBGRAPH_URL_<chainId>` (server-only) or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` | (POST only — chain-level guard) | POST | `public, max-age=30, swr=30` |
 | `/api/internal/proxy/merkl/{...}` | `api.merkl.xyz/v4` | (none) | `opportunities`, `users`, `campaigns` | GET, HEAD | `public, max-age=60` |
-| `/api/internal/proxy/turtle/{...}` | `earn.turtle.xyz/v1` | `TURTLE_EARN_API_URL` / `NUXT_PUBLIC_TURTLE_EARN_API_URL` (`https://` on `turtle.xyz`, or `http://` loopback for local mocks); `TURTLE_EARN_API_KEY` (server-only, required) | `streams/merkle_proofs` (`wallet`, `streamIds` params only) | GET, HEAD | `no-store` |
+| `/api/internal/proxy/turtle/{...}` | `earn.turtle.xyz/v1` | (none — fixed because the key rides along); `TURTLE_EARN_API_KEY` (server-only, required) | `streams/merkle_proofs` (`wallet`, `streamIds` params only) | GET, HEAD | `no-store` |
 
 Each proxy carries a rate limiter (`createRateLimiter`) and returns 405 for disallowed methods, 404 for paths outside the allowlist, 502 on upstream errors when no stale entry exists. The `x-cache: hit | miss | stale-fallback` response header reports the cache state for observability.
 
-The Turtle proxy is the exception on caching: it bypasses the TTL cache because reward proofs are per wallet, and it is the only proxy whose credential is required rather than optional (the Merkl and V3 proxies send `X-API-Key` only when a key is configured and work without one). Turtle rejects unauthenticated requests, so the route answers 503 without contacting upstream when `TURTLE_EARN_API_KEY` is unset or the upstream override is not a trusted host (`https://` on `turtle.xyz`, or plain `http://` on `localhost`, `127.0.0.1` or `[::1]` for local mocks), never forwards caller headers, and does not follow redirects so the key cannot be replayed against another host.
+The Turtle proxy is the exception on caching: it bypasses the TTL cache because reward proofs are per wallet, and it is the only proxy whose credential is required rather than optional (the Merkl and V3 proxies send `X-API-Key` only when a key is configured and work without one). Turtle rejects unauthenticated requests, so the route answers 503 without contacting upstream when `TURTLE_EARN_API_KEY` is unset, never forwards caller headers, and does not follow redirects so the key cannot be replayed against another host. The upstream deliberately has no env override: with a credential attached, a configurable URL is a leak waiting for a typo.
 
 ### Why route through these proxies
 
@@ -231,7 +231,7 @@ A boot-time warning fires if `SERVER_VAULT_CACHE_SOURCE` (or `NUXT_PUBLIC_BROWSE
 
 `labels-view.ts` shares the same `getServerSdk` instance per chain.
 
-**Turtle rewards.** The direct and fallback rewards adapters inside the server SDK call Turtle Earn upstream themselves (not through `/api/internal/proxy/turtle`), and every Turtle endpoint requires `X-API-Key`. `resolveServerTurtleRewardsConfig()` therefore hands the SDK the same server-only `TURTLE_EARN_API_KEY` as `rewardsTurtleApiKey`, together with the upstream base that passed the proxy's trust check (`resolveTurtleUpstreamBase`, so the key can only travel to `https://` `turtle.xyz` hosts or a loopback mock). When the key is unset or the upstream override is untrusted, the builder emits `rewardsEnableTurtle: false` so the snapshot is built without Turtle rather than issuing guaranteed-401 requests. The SDK never follows redirects on credentialed Turtle requests. Because the SDK is cached per chain at first use, changing the key requires a restart.
+**Turtle rewards.** The direct and fallback rewards adapters inside the server SDK call Turtle Earn upstream themselves (not through `/api/internal/proxy/turtle`), and every Turtle endpoint requires `X-API-Key`. `resolveServerTurtleRewardsConfig()` therefore hands the SDK the same server-only `TURTLE_EARN_API_KEY` as `rewardsTurtleApiKey`, pinned to the same fixed upstream the proxy uses. When the key is unset, the builder emits `rewardsEnableTurtle: false` so the snapshot is built without Turtle rather than issuing guaranteed-401 requests. The SDK never follows redirects on credentialed Turtle requests. Because the SDK is cached per chain at first use, changing the key requires a restart.
 
 Every server-side SDK build resolves the deployments manifest through the euler-chains cache chain rather than fetching euler-interfaces directly: `server/plugins/sdk-deployments.ts` installs `DeploymentService.setQueryDeployments(loadEulerChains)` at boot, so all server SDK builds share one cached copy with its 7-day stale window instead of issuing their own GitHub fetches.
 
@@ -378,7 +378,7 @@ The snapshot remains active in all modes (unless `DISABLE_SERVER_VAULT_CACHE=tru
 | `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` | browser (exposed) | `fallback` \| `onchain` \| `v3` | `fallback` | Adapter chain in `composables/useEulerSdk.ts:getEulerSdk()`. `getEulerSdkForChain(chainId)` uses `onchain` for `ONCHAIN_SDK_CHAINS` chains. The "fresh" / plan-time SDK is always `onchain` regardless. |
 | `DEPRECATED_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Chains shown collapsed in the chain selector and skipped by per-chain warm-cache work. |
 | `ONCHAIN_SDK_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Chains pinned to onchain adapters in chain-aware browser SDK reads and server snapshot builds. |
-| `TURTLE_EARN_API_KEY` | server | Turtle Earn server key | unset | Passed to the server SDK as `rewardsTurtleApiKey` (and sent by the Turtle proxy). Unset, or with an untrusted `TURTLE_EARN_API_URL`, the server SDK is built with `rewardsEnableTurtle: false`. |
+| `TURTLE_EARN_API_KEY` | server | Turtle Earn server key | unset | Passed to the server SDK as `rewardsTurtleApiKey` (and sent by the Turtle proxy). Unset, the server SDK is built with `rewardsEnableTurtle: false`. |
 | `EVAULT_FETCH_CHUNK_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Chains whose EVault list reads are split into small sequential SDK calls in Lite. |
 | `DISABLE_SERVER_VAULT_CACHE` | server | `true` \| `false` | `false` | When true: warm-cache skips the vault cycle, `/api/internal/vaults` returns 503, browser falls through to RPC pipeline. |
 | `V3_API_URL` *(plus aliases)* | server | URL | unset | Required upstream when any source ∈ `{fallback, v3}` actually needs V3. Boot warning fires when unset and a V3-requiring source is configured. |

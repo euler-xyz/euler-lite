@@ -22,9 +22,8 @@
  * Turtle Earn requires `X-API-Key` on every endpoint. The direct and
  * fallback rewards adapters call Turtle upstream themselves rather than via
  * `/api/internal/proxy/turtle`, so the builder hands them the same server-only
- * `TURTLE_EARN_API_KEY` and trust-checked upstream the proxy uses. Without a
- * usable key every Turtle call is a guaranteed 401, so Turtle discovery is
- * disabled instead of hammering upstream.
+ * `TURTLE_EARN_API_KEY` the proxy uses. Without a key every Turtle call is a
+ * guaranteed 401, so Turtle discovery is disabled instead of hammering upstream.
  */
 import {
   buildEulerSDK,
@@ -42,7 +41,7 @@ import {
 import { parseChainIds } from '~/utils/parseChainIds'
 import { resolveRpcUrl } from './rpc'
 import { resolveLabelsBaseUrl } from './labels-base-url'
-import { resolveTurtleUpstreamBase } from './turtle-proxy'
+import { TURTLE_EARN_API_URL } from './turtle-proxy'
 
 const sdkByChain = new Map<number, Promise<EulerSDK>>()
 
@@ -76,17 +75,16 @@ const adapterConfigForSource = (source: VaultDataSource): Partial<EulerSDKConfig
 }
 
 /**
- * Turtle rewards config for the server SDK. The key only travels to an
- * upstream that passed the proxy's trust check; a missing key or an untrusted
- * override disables Turtle discovery rather than issuing unauthenticated calls.
+ * Turtle rewards config for the server SDK: the server-only key plus the same
+ * fixed upstream the proxy uses. A missing key disables Turtle discovery
+ * rather than issuing unauthenticated calls.
  */
 export const resolveServerTurtleRewardsConfig = (
   env: NodeJS.ProcessEnv = process.env,
 ): Partial<EulerSDKConfig> => {
   const apiKey = readTurtleEarnApiKey(env).trim()
-  const upstream = resolveTurtleUpstreamBase(env)
-  if (!apiKey || !upstream.ok) return { rewardsEnableTurtle: false }
-  return { rewardsTurtleApiKey: apiKey, rewardsTurtleApiUrl: upstream.base }
+  if (!apiKey) return { rewardsEnableTurtle: false }
+  return { rewardsTurtleApiKey: apiKey, rewardsTurtleApiUrl: TURTLE_EARN_API_URL }
 }
 
 const isOnchainSdkChain = (chainId: number): boolean =>
