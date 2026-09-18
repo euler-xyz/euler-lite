@@ -21,6 +21,7 @@ This document covers the per-host proxies, the vault snapshot pipeline, the warm
 | `server/api/internal/labels/[file].get.ts` | Query-shape labels endpoint (`?chainId=X`) — used internally |
 | `server/api/internal/labels/[chainId]/[file].get.ts` | Path-shape labels endpoint — matches the SDK's default URL template |
 | `server/api/internal/v3/[...path].ts` | Rate-limited V3 backend proxy for SDK browser endpoints (`/api/internal/v3/...` → `v3.euler.finance/v3/...`) |
+| `server/api/internal/proxy/intrinsic-apy-overrides.get.ts` | Lite intrinsic-APY overlay for HyperEVM / Monad; chain-keyed 5-min cache |
 | `server/api/internal/vaults.get.ts` | Per-chain consolidated vault snapshot endpoint |
 | `server/utils/vaults-cache.ts` | `refreshChainVaults` + `vaultsCache` |
 | `server/utils/sdk-server.ts` | Lazy per-chain server-side SDK builder |
@@ -66,6 +67,10 @@ Each proxy carries a rate limiter (`createRateLimiter`) and returns 405 for disa
 - **Fuul, Incentra/Brevis**: provider APIs don't set permissive CORS; direct browser fetches fail. Pre-proxying also lets us share one warm response across every connected wallet.
 - **Goldsky subgraph**: Each chain's URL is a per-deployment Goldsky deployment ID. Proxying keeps the project ID server-side and amortizes GraphQL responses across tabs.
 - **Merkl**: CORS, plus credential handling.
+
+### Intrinsic APY overlay
+
+`GET|HEAD /api/internal/proxy/intrinsic-apy-overrides?chainId=` is a Lite-owned aggregator, not `external-proxy.ts`. Origin results are cached 5 minutes **by `chainId` only** — extra query parameters must not create extra origin fetches. Concurrent callers coalesce per chain. Unsupported chains return `[]` without fetching. HyperEVM all-source failure caches an empty array until TTL expiry; a Monad origin throw is not cached. Browser `Cache-Control: public, max-age=300`; Nitro route rules add CDN `s-maxage=300, stale-while-revalidate=600`. Rate limiter: 300 / 60 s. End-to-end behavior, V3 overlay rules, and the unwrapped server snapshot are in [Intrinsic APY](./intrinsic-apy.md#lite-override-proxy).
 
 ### Labels
 
