@@ -52,7 +52,7 @@ cp .env.example .env
 | `SWAP_API_URL` or `NUXT_PUBLIC_SWAP_API_URL` | —           | Euler swap API                        |
 | `PYTH_API_KEY` | — | Server-side API key sent to `https://hermes.pyth.network` as Bearer authentication by `/api/internal/pyth/updates` |
 
-> **Doppler compatibility:** If your secret manager injects prefixed URL names, the server also accepts `EULER_SDK_V3_API_URL` and `NUXT_PUBLIC_V3_API_URL`. API keys use server-side names such as `EULER_SDK_V3_API_KEY` and `PYTH_API_KEY`.
+> **Doppler compatibility:** If your secret manager injects prefixed URL names, the server also accepts `EULER_SDK_V3_API_URL` and `NUXT_PUBLIC_V3_API_URL`. API keys use server-side names such as `EULER_SDK_V3_API_KEY`, `PYTH_API_KEY`, and `TURTLE_EARN_API_KEY`.
 
 #### SDK Data Source Controls
 
@@ -83,7 +83,8 @@ Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for 
 | `TENDERLY_ACCESS_KEY`, `TENDERLY_ACCOUNT_SLUG`, `TENDERLY_PROJECT_SLUG` | Optional Tenderly simulation configuration. |
 | `FUUL_API_URL` or `NUXT_PUBLIC_FUUL_API_URL` | Optional Fuul API upstream override. |
 | `INCENTRA_API_URL` or `NUXT_PUBLIC_INCENTRA_API_URL` | Optional Incentra/Brevis API upstream override. |
-| `TURTLE_EARN_API_URL` or `NUXT_PUBLIC_TURTLE_EARN_API_URL` | Optional Turtle reward-proof upstream override; defaults to `https://earn.turtle.xyz/v1`. |
+| `TURTLE_EARN_API_KEY` | **Required when `NUXT_PUBLIC_CONFIG_ENABLE_TURTLE` is on.** Server-only Turtle Earn API key sent as `X-API-Key` by `/api/internal/proxy/turtle`. Turtle rejects unauthenticated requests with 401; without this variable the proxy answers 503 and never calls upstream, so Turtle reward proofs (and claims) are unavailable. Configure the secret before rolling out. Never exposed to the browser. |
+| `TURTLE_EARN_API_URL` or `NUXT_PUBLIC_TURTLE_EARN_API_URL` | Optional Turtle reward-proof upstream override; defaults to `https://earn.turtle.xyz/v1`. Because the API key is attached, only `https://` URLs on `turtle.xyz` hosts are accepted (loopback `http://` allowed for local mocks); anything else makes the proxy answer 503. Redirects are not followed. |
 
 #### Branding & Feature Flags
 
@@ -390,6 +391,7 @@ Before deploying:
 - [ ] Copied `.env.example` to `.env` and filled in values
 - [ ] Set `APPKIT_PROJECT_ID` and `NUXT_PUBLIC_APP_URL`
 - [ ] Set `V3_API_URL`, optional `EULER_SDK_V3_API_KEY`, and `SWAP_API_URL`
+- [ ] Set `TURTLE_EARN_API_KEY` if Turtle rewards stay enabled (`NUXT_PUBLIC_CONFIG_ENABLE_TURTLE`), otherwise Turtle reward proofs return 503
 - [ ] Added at least one `RPC_URL_<chainId>` with matching `SUBGRAPH_URL_<chainId>` or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`
 - [ ] Configured branding via `NUXT_PUBLIC_CONFIG_*` env vars (title, description, logo, social links, social share image)
 - [ ] Customized theme colors in `assets/styles/variables.scss` (THEME CONFIGURATION section)
@@ -402,6 +404,12 @@ Before deploying:
 
 - Verify `V3_API_URL` is set correctly. If the V3 deployment requires authentication, verify `EULER_SDK_V3_API_KEY` is set. If using Doppler, ensure the URL env var name matches (`V3_API_URL`, `EULER_SDK_V3_API_URL`, or `NUXT_PUBLIC_V3_API_URL`).
 - Token data is fetched server-side via `/api/internal/token-list` which aggregates Euler V3, DefiLlama, Uniswap, and Merkl sources with fallback. Check server logs for upstream failures.
+
+### Turtle rewards missing or claims failing
+
+- The Turtle Earn API requires an API key. Confirm `TURTLE_EARN_API_KEY` is set on the server; the `/api/internal/proxy/turtle` route logs `reason: missing-api-key` and answers 503 when it is not.
+- If `TURTLE_EARN_API_URL` is overridden, it must be an `https://` URL on a `turtle.xyz` host — the route logs `reason: untrusted-host` / `insecure-protocol` and answers 503 otherwise.
+- A 502 with `upstream failed` and `status: 401` in the logs means Turtle rejected the configured key (revoked or wrong environment).
 
 ### Build Errors
 

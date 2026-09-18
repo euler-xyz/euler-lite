@@ -114,6 +114,7 @@ The server-side snapshot builder has its own independent `SERVER_VAULT_CACHE_SOU
 | `rewardsFuulApiUrl` | `/api/internal/proxy/fuul` | Fuul proxy |
 | `rewardsBrevisApiUrl` | `/api/internal/proxy/incentra/sdk/v1/eulerCampaigns` | Incentra/Brevis proxy |
 | `rewardsBrevisProofsApiUrl` | `/api/internal/proxy/incentra/v1/getMerkleProofsBatch` | Incentra/Brevis proxy |
+| `rewardsTurtleApiUrl` | `/api/internal/proxy/turtle` | Turtle Earn proxy; the server attaches the API key. Browser reward-proof fetches only (`rewardsEnableTurtle` is `false`, so Turtle campaign APYs come from V3) |
 | `accountVaultsSubgraphUrls[chainId]` | `/api/internal/proxy/subgraph/{chainId}` | Goldsky subgraph proxy |
 | `vaultTypeSubgraphUrls[chainId]` | `/api/internal/proxy/subgraph/{chainId}` | Goldsky subgraph proxy |
 | `rpcUrls[chainId]` | `/api/internal/rpc/{chainId}` | JSON-RPC proxy |
