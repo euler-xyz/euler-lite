@@ -64,7 +64,7 @@ Cache key is `sha1(method + '\0' + target + '\0' + body)`. Concurrent misses sha
 
 Each proxy carries a rate limiter (`createRateLimiter`) and returns 405 for disallowed methods, 404 for paths outside the allowlist, 502 on upstream errors when no stale entry exists. The `x-cache: hit | miss | stale-fallback` response header reports the cache state for observability.
 
-The Turtle proxy is the exception on caching: it bypasses the TTL cache because reward proofs are per wallet, and it is the only proxy that attaches a credential. Turtle rejects unauthenticated requests, so the route answers 503 without contacting upstream when `TURTLE_EARN_API_KEY` is unset or the upstream override is not a trusted host (`https://` on `turtle.xyz`, or plain `http://` on `localhost`, `127.0.0.1` or `[::1]` for local mocks), never forwards caller headers, and does not follow redirects so the key cannot be replayed against another host.
+The Turtle proxy is the exception on caching: it bypasses the TTL cache because reward proofs are per wallet, and it is the only proxy whose credential is required rather than optional (the Merkl and V3 proxies send `X-API-Key` only when a key is configured and work without one). Turtle rejects unauthenticated requests, so the route answers 503 without contacting upstream when `TURTLE_EARN_API_KEY` is unset or the upstream override is not a trusted host (`https://` on `turtle.xyz`, or plain `http://` on `localhost`, `127.0.0.1` or `[::1]` for local mocks), never forwards caller headers, and does not follow redirects so the key cannot be replayed against another host.
 
 ### Why route through these proxies
 
