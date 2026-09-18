@@ -146,6 +146,8 @@ export class ReviewedExecutionPreparationService {
     await assertContext()
     const compiled = await this.dependencies.compiler.compile(request.intents, { snapshot, runtime: request.runtime }, assertCurrent)
     await assertContext()
+    // Plugins retain approval item references that the SDK resolver mutates in place.
+    const rawCanonical = toCanonicalValue(compiled.plan)
 
     const pluginIdentity = cacheIdentity(request, snapshot, 'plugins')
     let prefetched = this.cache.get(pluginIdentity, this.now())
@@ -158,7 +160,6 @@ export class ReviewedExecutionPreparationService {
     await assertContext()
     const resolved = await this.dependencies.resolveApprovals(preview, request.wallet, snapshot)
     await assertContext()
-    const rawCanonical = toCanonicalValue(compiled.plan)
     const previewCanonical = toCanonicalValue(resolved)
     const pluginPlans = deepFreezeSerializable({
       rawPlan: rawCanonical,
