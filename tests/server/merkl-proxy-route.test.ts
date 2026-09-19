@@ -51,6 +51,27 @@ const makeEvent = (url: string): TestEvent => ({
 describe('/api/internal/proxy/merkl route', () => {
   afterEach(() => vi.clearAllMocks())
 
+  it('does not follow upstream redirects, so an attached key never reaches a redirect target', async () => {
+    mocks.fetchWithTimeout.mockResolvedValueOnce({
+      ok: false,
+      status: 302,
+      statusText: 'Found',
+      headers: new Headers({ location: 'https://evil.example/capture' }),
+      text: async () => '',
+    })
+    const event = makeEvent('https://app.example/api/internal/proxy/merkl/opportunities?chainId=1&type=EULER&campaigns=true')
+
+    await expect(handler(event)).rejects.toMatchObject({
+      statusCode: 502,
+      statusMessage: 'Merkl upstream unavailable',
+    })
+
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(1)
+    const [, , init] = mocks.fetchWithTimeout.mock.calls[0]
+    expect(init.redirect).toBe('manual')
+    expect(JSON.stringify(mocks.warn.mock.calls)).not.toContain('evil.example')
+  })
+
   it('records aborts as soft upstream timeouts without forwarding error text', async () => {
     mocks.fetchWithTimeout.mockRejectedValueOnce(new DOMException('attacker-controlled text', 'AbortError'))
     const event = makeEvent('https://app.example/api/internal/proxy/merkl/opportunities?chainId=1&type=EULER&campaigns=true')
