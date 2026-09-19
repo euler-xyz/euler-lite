@@ -83,7 +83,7 @@ Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for 
 | `TENDERLY_ACCESS_KEY`, `TENDERLY_ACCOUNT_SLUG`, `TENDERLY_PROJECT_SLUG` | Optional Tenderly simulation configuration. |
 | `FUUL_API_URL` or `NUXT_PUBLIC_FUUL_API_URL` | Optional Fuul API upstream override. |
 | `INCENTRA_API_URL` or `NUXT_PUBLIC_INCENTRA_API_URL` | Optional Incentra/Brevis API upstream override. |
-| `TURTLE_EARN_API_KEY` | **Required when `NUXT_PUBLIC_CONFIG_ENABLE_TURTLE` is on.** Server-only Turtle Earn API key sent as `X-API-Key` by `/api/internal/proxy/turtle` and by the server-side SDK's rewards adapters (`server/utils/sdk-server.ts`), which call Turtle directly for stream discovery. Turtle rejects unauthenticated requests with 401; without this variable the proxy answers 503 and never calls upstream, and the server SDK disables Turtle discovery instead of issuing unauthenticated calls, so Turtle campaigns, reward proofs and claims are unavailable. Configure the secret before rolling out. Never exposed to the browser. |
+| `TURTLE_EARN_API_KEY` | **Required when `NUXT_PUBLIC_CONFIG_ENABLE_TURTLE` is on.** Server-only Turtle Earn API key sent as `X-API-Key` by `/api/internal/proxy/turtle` and by the server-side SDK's rewards adapters (`server/utils/sdk-server.ts`), which call Turtle directly for stream discovery. Turtle rejects unauthenticated requests with 401; without this variable the proxy answers 503 and never calls upstream, and the server SDK disables direct Turtle discovery (`rewardsEnableTurtle: false`) instead of issuing unauthenticated calls, so reward proofs and claims are unavailable. Turtle campaigns sourced from euler-data-v3 may still appear in snapshots and APYs, because the flag only gates the SDK's direct adapter. Configure the secret before rolling out. Never exposed to the browser. |
 
 #### Branding & Feature Flags
 
@@ -408,7 +408,8 @@ Before deploying:
 
 - The Turtle Earn API requires an API key. Confirm `TURTLE_EARN_API_KEY` is set on the server; the `/api/internal/proxy/turtle` route logs `reason: missing-api-key` and answers 503 when it is not.
 - A 502 with `upstream failed` and `status: 401` in the logs means Turtle rejected the configured key (revoked or wrong environment).
-- Turtle campaigns missing from vault snapshots (`/api/internal/vaults`) with no proxy errors means the server SDK was built without the key: it then sets `rewardsEnableTurtle: false` instead of calling Turtle unauthenticated. Fix the env and restart; each chain's SDK is cached on first use (normally during startup warm-up).
+- Without the key the server SDK is built with `rewardsEnableTurtle: false`, which disables the SDK's direct Turtle discovery only. The server SDK runs in fallback mode (euler-data-v3 primary), so Turtle campaigns sourced from V3 can remain visible in vault snapshots (`/api/internal/vaults`) and APYs while proof requests through the proxy fail with 503. Visible campaigns therefore do not prove the key is set; check the proxy logs.
+- Turtle campaigns missing from snapshots is not by itself a missing-key symptom. It also happens when euler-data-v3 is failing or has no active Turtle streams. If the key was the cause, fix the env and restart; each chain's SDK is cached on first use (normally during startup warm-up).
 
 ### Build Errors
 
