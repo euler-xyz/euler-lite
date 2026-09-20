@@ -343,7 +343,7 @@ const onClaimClick = async () => {
         class="text-center text-p3 text-content-tertiary"
         data-testid="reward-unresolved-token"
       >
-        This reward token could not be identified, so its amount cannot be shown
+        {{ UNRESOLVED_TOKEN_MESSAGE }}
       </p>
       <p
         v-if="isREULBatchBlocked"

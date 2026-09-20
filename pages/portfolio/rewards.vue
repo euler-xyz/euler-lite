@@ -11,7 +11,13 @@ const { locks, isLocksLoading } = useREULLocks()
 // Rewards whose token decimals never resolved have no comparable USD value, so
 // they sort last rather than being treated as worth zero or NaN.
 const sortRewardsByUsd = (items: UserReward[]) =>
-  [...items].sort((a, b) => (rewardUnclaimedUsdValue(b) ?? -1) - (rewardUnclaimedUsdValue(a) ?? -1))
+  [...items].sort((a, b) => {
+    const left = rewardUnclaimedUsdValue(a)
+    const right = rewardUnclaimedUsdValue(b)
+    if (left === undefined) return right === undefined ? 0 : 1
+    if (right === undefined) return -1
+    return right - left
+  })
 
 const sortedMerklRewards = computed(() => sortRewardsByUsd(rewards.value.filter(reward => reward.provider === 'merkl')))
 const sortedBrevisRewards = computed(() => sortRewardsByUsd(rewards.value.filter(reward => reward.provider === 'brevis')))
