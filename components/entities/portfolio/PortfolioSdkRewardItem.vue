@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { formatUnits } from 'viem'
 import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import type { UserReward } from '~/entities/reward-campaign'
+import { rewardUnclaimedAmount } from '~/entities/reward-campaign'
 import { useToast } from '~/components/ui/composables/useToast'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber, formatUsdValue } from '~/utils/string-utils'
@@ -21,6 +21,11 @@ const REWARD_PROVIDER_TYPES: Record<UserReward['provider'], 'reward' | 'brevis-r
   fuul: 'fuul-reward',
   turtle: 'turtle-reward',
 }
+
+// Signing a claim whose amount we cannot state is worse than not offering it;
+// the raw balance and proof are untouched, so the claim works again as soon as
+// the token resolves.
+const UNRESOLVED_TOKEN_MESSAGE = 'This reward token could not be identified, so its amount cannot be shown'
 
 const { reward } = defineProps<{ reward: UserReward }>()
 const rewardKey = computed(() =>
@@ -54,8 +59,13 @@ const isPreparing = ref(false)
 const isAddingToBatch = ref(false)
 const plan = ref<TransactionPlan | null>(null)
 
-const rewardAmount = computed(() => Number(formatUnits(BigInt(reward.unclaimed), reward.token.decimals)))
-const rewardUsdValue = computed(() => rewardAmount.value * reward.tokenPrice)
+// `undefined` when no upstream source resolved the token's decimals: the raw
+// amount cannot be scaled, so the amount and its USD value are unknown.
+const rewardDecimals = computed(() => reward.token.decimals)
+const rewardAmount = computed(() => rewardUnclaimedAmount(reward))
+const hasResolvedAmount = computed(() => rewardAmount.value !== undefined)
+const rewardUsdValue = computed(() =>
+  rewardAmount.value === undefined ? undefined : rewardAmount.value * reward.tokenPrice)
 const providerLabel = computed(() => REWARD_PROVIDER_LABELS[reward.provider] ?? reward.provider)
 const planKind = computed(() => REWARD_PROVIDER_TYPES[reward.provider] ?? 'reward')
 const isREULReward = computed(() => {
@@ -107,6 +117,12 @@ const createRewardIntent = () => {
 
 const onAddToBatchClick = async () => {
   if (!canAddToBatch.value || isPreparing.value || isClaiming.value || isAddingToBatch.value || isInBatch.value) return
+  const decimals = rewardDecimals.value
+  const amount = rewardAmount.value
+  if (decimals === undefined || amount === undefined) {
+    error(UNRESOLVED_TOKEN_MESSAGE)
+    return
+  }
   if (walletChainId.value !== reward.chainId) {
     error('Switch to the reward network before adding this claim to the batch')
     return
@@ -123,10 +139,10 @@ const onAddToBatchClick = async () => {
         asset: {
           symbol: reward.token.symbol,
           address: reward.token.address,
-          decimals: reward.token.decimals,
+          decimals,
         },
         assetIconUrl: externalIconUrl.value,
-        amount: rewardAmount.value,
+        amount,
         submittingLabel: 'Claiming...',
       },
     })
@@ -148,6 +164,12 @@ const onAddToBatchClick = async () => {
 }
 
 const onClaimClick = async () => {
+  const decimals = rewardDecimals.value
+  const amount = rewardAmount.value
+  if (decimals === undefined || amount === undefined) {
+    error(UNRESOLVED_TOKEN_MESSAGE)
+    return
+  }
   if (isREULBatchBlocked.value) {
     error('Clear the current batch before claiming rEUL')
     return
@@ -172,10 +194,10 @@ const onClaimClick = async () => {
         asset: {
           symbol: reward.token.symbol,
           address: reward.token.address,
-          decimals: reward.token.decimals,
+          decimals,
         },
         assetIconUrl: externalIconUrl.value,
-        amount: rewardAmount.value,
+        amount,
         submittingLabel: 'Claiming...',
       },
       onSucceeded: async () => {
@@ -277,7 +299,7 @@ const onClaimClick = async () => {
             data-field="reward-usd-value"
             :data-value="rewardUsdValue"
           >
-            {{ formatUsdValue(rewardUsdValue) }}
+            {{ rewardUsdValue === undefined ? '—' : formatUsdValue(rewardUsdValue) }}
           </p>
           <p
             class="text-p3 text-content-tertiary"
@@ -286,7 +308,12 @@ const onClaimClick = async () => {
             data-field="reward-amount"
             :data-value="rewardAmount"
           >
-            ~ {{ rewardAmount < 0.01 ? '< 0.01' : formatNumber(rewardAmount, 2) }} {{ reward.token.symbol }}
+            <template v-if="rewardAmount === undefined">
+              Amount unavailable
+            </template>
+            <template v-else>
+              ~ {{ rewardAmount < 0.01 ? '< 0.01' : formatNumber(rewardAmount, 2) }} {{ reward.token.symbol }}
+            </template>
           </p>
         </div>
       </div>
@@ -294,7 +321,7 @@ const onClaimClick = async () => {
         <UiButton
           rounded
           :loading="isClaiming || isPreparing"
-          :disabled="isSpyMode || isAddingToBatch || isInBatch || isREULBatchBlocked"
+          :disabled="isSpyMode || isAddingToBatch || isInBatch || isREULBatchBlocked || !hasResolvedAmount"
           @click="onClaimClick"
         >
           Claim
@@ -305,12 +332,19 @@ const onClaimClick = async () => {
           rounded
           variant="primary-stroke"
           :loading="isAddingToBatch"
-          :disabled="isSpyMode || isClaiming || isPreparing || isInBatch"
+          :disabled="isSpyMode || isClaiming || isPreparing || isInBatch || !hasResolvedAmount"
           @click="onAddToBatchClick"
         >
           {{ isInBatch ? 'In batch' : 'Add to batch' }}
         </UiButton>
       </div>
+      <p
+        v-if="!hasResolvedAmount"
+        class="text-center text-p3 text-content-tertiary"
+        data-testid="reward-unresolved-token"
+      >
+        This reward token could not be identified, so its amount cannot be shown
+      </p>
       <p
         v-if="isREULBatchBlocked"
         class="text-center text-p3 text-content-tertiary"

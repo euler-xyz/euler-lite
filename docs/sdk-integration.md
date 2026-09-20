@@ -125,6 +125,24 @@ Reward provider toggles (`rewardsEnableMerkl`, `rewardsEnableBrevis`, `rewardsEn
 
 The server-side SDK (`server/utils/sdk-server.ts`) differs for Turtle: its rewards adapters call `earn.turtle.xyz` directly, so it receives the server-only `TURTLE_EARN_API_KEY` as `rewardsTurtleApiKey` pinned to the fixed Turtle upstream, and is built with `rewardsEnableTurtle: false` when no usable key is configured. The key never enters the browser config. See [server-side caching](./server-side-caching.md#server-side-sdk-builder).
 
+### Reward token decimals
+
+`UserRewardToken.decimals` is optional. The SDK omits it when no source — the
+breakdown row, the campaign entry in `/v3/apys/rewards`, or the per-row
+`rewardTokenMetadata` the V3 backend resolves independently of campaign
+availability — could resolve the token; it no longer falls back to 18, which
+used to mis-scale every reward token that is not 18 decimals (a USDC reward of
+603375 raw units read as ~6.03e-13 instead of 0.603375).
+
+`entities/reward-campaign.ts` owns the scaling: `rewardUnclaimedAmount()` and
+`rewardUnclaimedUsdValue()` return `undefined` for an unresolved token rather
+than guessing. `PortfolioSdkRewardItem.vue` then shows "Amount unavailable"
+with an em dash in place of the USD value, and disables both Claim and Add to batch, because
+signing a claim whose amount cannot be stated is worse than not offering it.
+The raw balance and proof are untouched, so the row becomes claimable again as
+soon as the token resolves upstream. Unresolved rows sort last in
+`pages/portfolio/rewards.vue` instead of being treated as worth zero.
+
 The full object is serialized into `staticCacheKey`, so any change produces a new instance.
 
 ## Query Policy (single source of truth)
