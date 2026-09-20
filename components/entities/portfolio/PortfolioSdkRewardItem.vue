@@ -6,7 +6,13 @@ import { useToast } from '~/components/ui/composables/useToast'
 import { logWarn } from '~/utils/errorHandling'
 import { formatNumber, formatUsdValue } from '~/utils/string-utils'
 import { getTxErrorMessage } from '~/utils/tx-errors'
-import { rewardClaimId, rewardClaimSetDigest } from '~/features/reviewed-execution/domain/rewards'
+import {
+  hasRewardDrifted,
+  rewardClaimId,
+  rewardClaimSetDigest,
+  rewardClaimSnapshot,
+  type RewardClaimSnapshot,
+} from '~/features/reviewed-execution/domain/rewards'
 
 const REWARD_PROVIDER_LABELS: Record<UserReward['provider'], string> = {
   merkl: 'Merkl',
@@ -31,15 +37,7 @@ const { reward } = defineProps<{ reward: UserReward }>()
 const rewardKey = computed(() =>
   `${reward.chainId}:${reward.provider}:${reward.token.address.toLowerCase()}:${reward.unclaimed}`,
 )
-const rewardClaimKey = computed(() => [
-  reward.chainId,
-  reward.provider,
-  reward.claimAddress?.toLowerCase() ?? '',
-  reward.campaignId ?? '',
-  reward.streamId ?? '',
-  reward.token.address.toLowerCase(),
-  reward.unclaimed,
-].join(':'))
+const rewardClaimKey = computed(() => rewardClaimId(reward))
 
 const { buildClaimRewardPlan, refreshRewards } = useSdkRewards()
 const { refreshLocks } = useREULLocks()
@@ -61,7 +59,6 @@ const plan = ref<TransactionPlan | null>(null)
 
 // `undefined` when no upstream source resolved the token's decimals: the raw
 // amount cannot be scaled, so the amount and its USD value are unknown.
-const rewardDecimals = computed(() => reward.token.decimals)
 const rewardAmount = computed(() => rewardUnclaimedAmount(reward))
 const hasResolvedAmount = computed(() => rewardAmount.value !== undefined)
 const rewardUsdValue = computed(() =>
@@ -92,23 +89,22 @@ const avatarAsset = computed(() => isEulFamily.value
   ? { address: reward.token.address, symbol: 'EUL' }
   : { address: reward.token.address, symbol: reward.token.symbol })
 
-const ensureWalletOnClaimChain = async () => {
-  const targetChainId = reward.chainId
+const ensureWalletOnClaimChain = async (targetChainId: number) => {
   if (walletChainId.value === targetChainId) return
 
   await switchChain({ chainId: targetChainId })
   await until(walletChainId).toBe(targetChainId, { timeout: 8000, throwOnTimeout: false })
 }
 
-const createRewardIntent = () => {
-  const claimId = rewardClaimId(reward)
+const createRewardIntent = (snapshot: RewardClaimSnapshot) => {
+  const { reward: claimed, claimId } = snapshot
   return createIntent({
     kind: 'reward-claim',
     planner: 'reward-claim',
     args: {
       claimIds: [claimId],
-      provider: reward.provider,
-      rewardsDigest: rewardClaimSetDigest([reward]),
+      provider: claimed.provider,
+      rewardsDigest: rewardClaimSetDigest([claimed]),
     },
     constraints: [{ kind: 'selected-rewards', claimIds: [claimId] }],
     source: 'components/entities/portfolio/PortfolioSdkRewardItem.vue',
@@ -117,28 +113,28 @@ const createRewardIntent = () => {
 
 const onAddToBatchClick = async () => {
   if (!canAddToBatch.value || isPreparing.value || isClaiming.value || isAddingToBatch.value || isInBatch.value) return
-  const decimals = rewardDecimals.value
-  const amount = rewardAmount.value
-  if (decimals === undefined || amount === undefined) {
+  const snapshot = rewardClaimSnapshot(reward)
+  if (!snapshot) {
     error(UNRESOLVED_TOKEN_MESSAGE)
     return
   }
-  if (walletChainId.value !== reward.chainId) {
+  const { reward: claimed, decimals, amount } = snapshot
+  if (walletChainId.value !== claimed.chainId) {
     error('Switch to the reward network before adding this claim to the batch')
     return
   }
   isAddingToBatch.value = true
   try {
-    const intent = createRewardIntent()
+    const intent = createRewardIntent(snapshot)
     await addBatchEntry({
       intent,
-      label: `Claim ${reward.token.symbol}`,
-      rewardClaimKey: rewardClaimKey.value,
+      label: `Claim ${claimed.token.symbol}`,
+      rewardClaimKey: snapshot.claimId,
       review: {
         type: planKind.value,
         asset: {
-          symbol: reward.token.symbol,
-          address: reward.token.address,
+          symbol: claimed.token.symbol,
+          address: claimed.token.address,
           decimals,
         },
         assetIconUrl: externalIconUrl.value,
@@ -164,12 +160,15 @@ const onAddToBatchClick = async () => {
 }
 
 const onClaimClick = async () => {
-  const decimals = rewardDecimals.value
-  const amount = rewardAmount.value
-  if (decimals === undefined || amount === undefined) {
+  // Frozen before any await: the row can be replaced while the wallet switches
+  // network, and the review must not pair one reward's amount with another's
+  // claim intent.
+  const snapshot = rewardClaimSnapshot(reward)
+  if (!snapshot) {
     error(UNRESOLVED_TOKEN_MESSAGE)
     return
   }
+  const { reward: claimed, decimals, amount } = snapshot
   if (isREULBatchBlocked.value) {
     error('Clear the current batch before claiming rEUL')
     return
@@ -184,16 +183,23 @@ const onClaimClick = async () => {
   if (isPreparing.value || isAddingToBatch.value) return
   isPreparing.value = true
   try {
-    await ensureWalletOnClaimChain()
+    await ensureWalletOnClaimChain(claimed.chainId)
 
-    const intent = createRewardIntent()
+    if (hasRewardDrifted(snapshot, reward)) {
+      error('This reward changed while switching networks', {
+        description: 'Open it again to claim the current amount.',
+      })
+      return
+    }
+
+    const intent = createRewardIntent(snapshot)
     const reviewLaunch = captureReviewState([intent], {
       presentationKind: planKind.value,
       review: {
         type: planKind.value,
         asset: {
-          symbol: reward.token.symbol,
-          address: reward.token.address,
+          symbol: claimed.token.symbol,
+          address: claimed.token.address,
           decimals,
         },
         assetIconUrl: externalIconUrl.value,
@@ -211,7 +217,7 @@ const onClaimClick = async () => {
     })
 
     try {
-      plan.value = await buildClaimRewardPlan(reward)
+      plan.value = await buildClaimRewardPlan(claimed)
     }
     catch (e) {
       logWarn('PortfolioSdkRewardItem/buildPlan', e)

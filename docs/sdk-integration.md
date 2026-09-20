@@ -143,6 +143,16 @@ The raw balance and proof are untouched, so the row becomes claimable again as
 soon as the token resolves upstream. Unresolved rows sort last in
 `pages/portfolio/rewards.vue` instead of being treated as worth zero.
 
+Claiming freezes the clicked reward first. `rewardClaimSnapshot()` in
+`features/reviewed-execution/domain/rewards.ts` returns the reward together with
+the decimals and amount the review will state, or `undefined` when the token is
+unresolved. The claim then awaits a wallet network switch, during which the
+portfolio list can refresh and replace the row, so everything after that await —
+the intent, the plan and the review payload — is built from the snapshot, and
+`hasRewardDrifted()` aborts with a toast when the live row no longer matches it.
+Without that guard the review can show one reward's amount beside another
+reward's claim intent.
+
 The full object is serialized into `staticCacheKey`, so any change produces a new instance.
 
 ## Query Policy (single source of truth)
