@@ -29,6 +29,16 @@ The reviewed execution depends only on public SDK APIs and deliberately does not
 
 Lite's migration compiler, plugin-data collector, and finalizer fail closed when these capabilities are unavailable instead of emulating them. During sealing, Lite invokes the SDK materializer with pinned Permit2 nonce/deadline/expiration values and the reviewed EVC address, then independently rejects any request-byte, signature-slot, or insertion-coordinate disagreement with its richer effect projection. For an EOA with static prerequisites before its single Pyth-bearing request, Lite gives the reviewed static prefix to `executeMaterialized`, refreshes and finalizes Pyth only after the SDK receipts that prefix, then gives the finalized suffix to `executeMaterialized`; the SDK owns receipt sequencing within both segments. Other EOA executions use one already-finalized vector. Awaited pre-prompt hooks verify the wallet binding and exact request. Safe transport seals its atomic EIP-5792 envelope while retaining the calls-ID status adapter and current-session detachment behavior.
 
+### Installing a new SDK release
+
+`.npmrc` sets `min-release-age=7`, so a freshly published package cannot be
+installed for seven days — a supply-chain cooldown that applies to `npm install`
+locally and to `npm ci` in CI and the Docker build alike. `@eulerxyz/euler-v2-sdk`
+is listed in `min-release-age-exclude` because it is published from this org's
+own reviewed monorepo, so an SDK bump can be adopted the day it ships. The
+cooldown still applies to every third-party dependency, and Dependabot keeps its
+own separate seven-day `cooldown` in `.github/dependabot.yml`.
+
 ## SDK Entry Points
 
 The app exposes three SDK entry points, all produced by the same factory in `composables/useEulerSdk.ts`:
