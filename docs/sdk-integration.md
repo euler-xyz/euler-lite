@@ -114,13 +114,16 @@ The server-side snapshot builder has its own independent `SERVER_VAULT_CACHE_SOU
 | `rewardsFuulApiUrl` | `/api/internal/proxy/fuul` | Fuul proxy |
 | `rewardsBrevisApiUrl` | `/api/internal/proxy/incentra/sdk/v1/eulerCampaigns` | Incentra/Brevis proxy |
 | `rewardsBrevisProofsApiUrl` | `/api/internal/proxy/incentra/v1/getMerkleProofsBatch` | Incentra/Brevis proxy |
+| `rewardsTurtleApiUrl` | `/api/internal/proxy/turtle` | Turtle Earn proxy; only reward proofs pass its allowlist, so the browser fetches proofs here while stream discovery runs in the server-side SDK (see below) |
 | `accountVaultsSubgraphUrls[chainId]` | `/api/internal/proxy/subgraph/{chainId}` | Goldsky subgraph proxy |
 | `vaultTypeSubgraphUrls[chainId]` | `/api/internal/proxy/subgraph/{chainId}` | Goldsky subgraph proxy |
 | `rpcUrls[chainId]` | `/api/internal/rpc/{chainId}` | JSON-RPC proxy |
 | Adapter block | `fallbackAdapterConfig` / `onchainAdapterConfig` / `v3AdapterConfig` per `browserVaultSource` (default browsing), `onchainAdapterConfig` (`ONCHAIN_SDK_CHAINS` browsing and plan-time) | — |
 | `disableV3` | `true` only when the resolved fast source is `fallback` and `!enableV3Backend` | — |
 
-Reward provider toggles (`rewardsEnableMerkl`, `rewardsEnableBrevis`, `rewardsEnableFuul`) are emitted as `false` only when `useDeployConfig()` disables them.
+Reward provider toggles (`rewardsEnableMerkl`, `rewardsEnableBrevis`, `rewardsEnableFuul`, `rewardsEnableTurtle`) are emitted as `false` only when `useDeployConfig()` disables them.
+
+The server-side SDK (`server/utils/sdk-server.ts`) differs for Turtle: its rewards adapters call `earn.turtle.xyz` directly, so it receives the server-only `TURTLE_EARN_API_KEY` as `rewardsTurtleApiKey` pinned to the fixed Turtle upstream, and is built with `rewardsEnableTurtle: false` when no usable key is configured. That flag disables the direct adapter's Turtle discovery only; Turtle campaigns sourced from euler-data-v3 may still be returned in fallback mode. The key never enters the browser config. See [server-side caching](./server-side-caching.md#server-side-sdk-builder).
 
 The full object is serialized into `staticCacheKey`, so any change produces a new instance.
 
@@ -278,5 +281,5 @@ How fresh that snapshot actually is depends on the path taken:
 | A new SDK config field | `buildSdkStaticConfig` in `composables/useEulerSdk.ts` (it folds into the existing cache key automatically) |
 | A new stale-time policy for an existing query | One row in `SDK_QUERY_POLICY` (`utils/sdk-query-policy.ts`). Derived exports re-compute automatically. |
 | A new plan-critical query | Same row, add a shorter `formStaleTimeMs` (`0` to bypass the plan-time cache entirely) and/or `invalidateAfterTx: true`. |
-| A new app-side proxy that SDK calls through | Add a same-origin proxy under `server/api/internal/proxy/...`, point the corresponding SDK config field at it in `buildSdkStaticConfig`. See [server-side caching](./server-side-caching.md) for the shared `external-proxy.ts` helper. |
+| A new app-side proxy that SDK calls through | Add a same-origin proxy under `server/api/internal/proxy/...`, point the corresponding SDK config field at it in `buildSdkStaticConfig`. Build it with `createProviderProxy` — the pipeline, rules and checklist are in [Server-Side Caching → Adding a provider](./server-side-caching.md#adding-a-provider). |
 | A new planner | Add the wrapper in `composables/useEulerTx.ts` using `freshPlanContext()` to get a fresh SDK + `Account` |

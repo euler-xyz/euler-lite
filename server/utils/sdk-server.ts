@@ -18,6 +18,14 @@
  *   - `v3`: pin to V3; SDK build throws when V3 is not configured.
  *
  * Chains listed in `ONCHAIN_SDK_CHAINS` always use the onchain config.
+ *
+ * Turtle Earn requires `X-API-Key` on every endpoint. The direct and
+ * fallback rewards adapters call Turtle upstream themselves rather than via
+ * `/api/internal/proxy/turtle`, so the builder hands them the same server-only
+ * `TURTLE_EARN_API_KEY` the proxy uses. Without a key every Turtle call is a
+ * guaranteed 401, so direct Turtle discovery is disabled instead of hammering
+ * upstream. The flag only gates the direct adapter: V3-sourced Turtle campaigns
+ * still flow through in fallback mode, while proof requests fail at the proxy.
  */
 import {
   buildEulerSDK,
@@ -27,6 +35,7 @@ import {
 import {
   readResolvedV3ApiUrl,
   readServerVaultCacheSource,
+  readTurtleEarnApiKey,
   readV3ApiKey,
   readV3ApiUrl,
   type VaultDataSource,
@@ -34,6 +43,7 @@ import {
 import { parseChainIds } from '~/utils/parseChainIds'
 import { resolveRpcUrl } from './rpc'
 import { resolveLabelsBaseUrl } from './labels-base-url'
+import { TURTLE_EARN_API_URL } from './turtle-proxy'
 
 const sdkByChain = new Map<number, Promise<EulerSDK>>()
 
@@ -66,6 +76,20 @@ const adapterConfigForSource = (source: VaultDataSource): Partial<EulerSDKConfig
   }
 }
 
+/**
+ * Turtle rewards config for the server SDK: the server-only key plus the same
+ * fixed upstream the proxy uses. A missing key disables the direct adapter's
+ * Turtle discovery rather than issuing unauthenticated calls; it does not
+ * remove V3-sourced Turtle campaigns.
+ */
+export const resolveServerTurtleRewardsConfig = (
+  env: NodeJS.ProcessEnv = process.env,
+): Partial<EulerSDKConfig> => {
+  const apiKey = readTurtleEarnApiKey(env).trim()
+  if (!apiKey) return { rewardsEnableTurtle: false }
+  return { rewardsTurtleApiKey: apiKey, rewardsTurtleApiUrl: TURTLE_EARN_API_URL }
+}
+
 const isOnchainSdkChain = (chainId: number): boolean =>
   parseChainIds(process.env.ONCHAIN_SDK_CHAINS, new Set([chainId])).includes(chainId)
 
@@ -84,6 +108,7 @@ const buildServerSdkConfig = (chainId: number): EulerSDKConfig => {
     eulerLabelsBaseUrl: resolveLabelsBaseUrl(),
     tokenlistApiBaseUrl: v3ApiUrl,
     ...(v3ApiKey ? { v3ApiKey } : {}),
+    ...resolveServerTurtleRewardsConfig(),
     ...adapterConfigForSource(source),
     // Fallback short-circuits to onchain when no V3 is configured —
     // otherwise the SDK keeps trying V3 and every refresh logs failures.

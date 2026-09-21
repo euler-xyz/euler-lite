@@ -1,3 +1,4 @@
+import { zeroAddress } from 'viem'
 import type { Address, PublicClient } from 'viem'
 import { getEulerSdk } from '~/composables/useEulerSdk'
 import { batchLensCalls } from '~/utils/multicall'
@@ -31,7 +32,22 @@ const toAdjustedRateState = (request: ProjectedRatesRequest) => {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic lens contract return
 const parseProjectedRatesResult = (result: Record<string, any> | null): ProjectedRates | null => {
-  if (!result || result.queryFailure || !result.interestRateInfo?.length) {
+  if (!result) {
+    return null
+  }
+
+  // A collateral-only vault has no interest rate model, so the lens reports a
+  // query failure with no rate info instead of a rate of zero. Its rates are
+  // definitionally 0% and cannot move with cash or borrows, so this is a
+  // complete projection, not a missing one. Returning null here would leave
+  // every projection that touches such a vault incomplete, collapsing the whole
+  // projected-yield block (ROE, net APY, rate lines) to "-" for the position.
+  if (typeof result.interestRateModel === 'string'
+    && result.interestRateModel.toLowerCase() === zeroAddress) {
+    return { supplyAPY: 0n, borrowAPY: 0n }
+  }
+
+  if (result.queryFailure || !result.interestRateInfo?.length) {
     return null
   }
 

@@ -151,5 +151,4 @@ For form previews, the intrinsic component is recomputed against projected marke
 |---|---|
 | HyperEVM / Monad APY missing on first paint, then appears | Snapshot is V3-only; wait for the silent client refresh, or hard-refresh after the override proxy is warm. |
 | Override APY stuck after an origin fix | In-process TTL still serving the previous chain result, including a cached empty HyperEVM miss. Wait 5 minutes or restart Nitro. |
-| Origin traffic doubles per page load | Extra query params on the override URL. The handler ignores them; do not encode cache-busters. |
 | Non-999/143 chain shows no overlay | Expected: the proxy returns `[]` and V3 is the only source. |
