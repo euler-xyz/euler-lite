@@ -41,7 +41,6 @@ export interface VaultEntry {
 
 interface VaultEntryMetadata {
   verified?: boolean
-  vaultCategory?: 'standard' | 'escrow'
 }
 
 // Registry state
@@ -114,18 +113,6 @@ const getType = (address: string): VaultType | undefined => {
 }
 
 // Register a vault
-const inferEntryMetadata = (
-  vault: AnyVault,
-  type: VaultType,
-  metadata?: VaultEntryMetadata,
-  existingCategory?: VaultEntryMetadata['vaultCategory'],
-): VaultEntryMetadata => ({
-  verified: metadata?.verified,
-  vaultCategory: type === 'evk'
-    ? resolveEVaultCategory(vault, metadata?.vaultCategory ?? existingCategory)
-    : undefined,
-})
-
 const set = (
   address: string,
   vault: AnyVault,
@@ -135,14 +122,13 @@ const set = (
 ): void => {
   if (!targetChainId) throw new Error('Cannot register a vault without a chain')
   const key = registryKey(targetChainId, address)
-  // Preserve verification and use existing category only when the SDK flag is unknown.
+  // Preserve verification when refresh callers omit it; classification always comes from the SDK.
   // Refresh paths (updateVault, getBorrowVaultPair fallbacks) re-set a vault
   // with no metadata; without this they'd downgrade an already-verified vault
   // to verified:false, dropping it from getVerifiedEVaults() and the lists.
   const existing = registry.value.get(key)
-  const entryMetadata = inferEntryMetadata(vault, type, metadata, existing?.vaultCategory)
-  const verified = entryMetadata.verified ?? existing?.verified ?? false
-  const vaultCategory = entryMetadata.vaultCategory
+  const verified = metadata?.verified ?? existing?.verified ?? false
+  const vaultCategory = type === 'evk' ? resolveEVaultCategory(vault) : undefined
   registry.value.set(key, {
     vault,
     type,
@@ -159,14 +145,13 @@ const setMany = (
   targetChainId = getActiveChainId(),
 ): void => {
   if (!targetChainId) throw new Error('Cannot register vaults without a chain')
-  entries.forEach(({ address, vault, type, verified, vaultCategory }) => {
-    const existing = getForChain(targetChainId, address)
-    const entryMetadata = inferEntryMetadata(vault, type, { verified, vaultCategory }, existing?.vaultCategory)
+  entries.forEach(({ address, vault, type, verified }) => {
+    const vaultCategory = type === 'evk' ? resolveEVaultCategory(vault) : undefined
     registry.value.set(registryKey(targetChainId, address), {
       vault,
       type,
-      verified: entryMetadata.verified ?? false,
-      ...(entryMetadata.vaultCategory ? { vaultCategory: entryMetadata.vaultCategory } : {}),
+      verified: verified ?? false,
+      ...(vaultCategory ? { vaultCategory } : {}),
     })
   })
   registry.value = new Map(registry.value) // Trigger reactivity
@@ -245,7 +230,7 @@ const getEscrowVaults = (): EVault[] => {
 // Standard EVaults (non-escrow)
 const getStandardEVaults = (): EVault[] => {
   return activeEntries()
-    .filter(entry => entry.type === 'evk' && entry.vaultCategory !== 'escrow')
+    .filter(entry => entry.type === 'evk' && entry.vaultCategory === 'standard')
     .map(entry => entry.vault) as EVault[]
 }
 
@@ -283,7 +268,8 @@ const isVerifiedVault = (address: string): boolean => {
     || earnVaults.value.some(vault => normalizeAddress(vault) === normalized)
 }
 const getVaultCategory = (address: string): 'standard' | 'escrow' | undefined => {
-  return get(address)?.vaultCategory ?? (isKnownEscrowAddress(address) ? 'escrow' : undefined)
+  const entry = get(address)
+  return entry ? entry.vaultCategory : (isKnownEscrowAddress(address) ? 'escrow' : undefined)
 }
 
 // Reactive size for watchers
@@ -378,7 +364,7 @@ const resolveUnknown = async (
   if (type === 'evk' && category === 'escrow') {
     const vault = await fetchVaultByType(normalized, 'evk', targetChainId)
     if (!isCurrentResolution(targetChainId, generation)) return undefined
-    set(normalized, vault, 'evk', { verified: true, vaultCategory: 'escrow' }, targetChainId)
+    set(normalized, vault, 'evk', { verified: true }, targetChainId)
     return getForChain(targetChainId, normalized)
   }
 

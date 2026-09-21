@@ -97,8 +97,9 @@ describe('SDK escrow classification in public views', () => {
       },
     } as never)
     const view = await buildLabelsView(991)
-    expect(view.snapshot.escrowVaults.map(vault => vault.address)).toEqual([flagged, unknown])
+    expect(view.snapshot.escrowVaults.map(vault => vault.address)).toEqual([flagged])
     expect(view.snapshot.evkVaults.find(vault => vault.address === standard)).toMatchObject({ vaultCategory: 'standard' })
+    expect(view.snapshot.evkVaults.find(vault => vault.address === unknown)).toMatchObject({ isEscrow: null, vaultCategory: undefined })
     expect(view.escrowAddresses).toEqual(new Set([standard, unknown, unloaded]))
 
     const verified = await refreshVerifiedAddressSet(991)
@@ -107,6 +108,7 @@ describe('SDK escrow classification in public views', () => {
 
     const metadata = await refreshChainVaultMetadata(991)
     expect(metadata.get(standard)?.name).toBe('Normal vault')
+    expect(metadata.get(unknown)?.name).toBe('Normal vault')
     expect(metadata.get(flagged)?.name).not.toBe('Normal vault')
     expect(metadata.has(unloaded)).toBe(true)
   })

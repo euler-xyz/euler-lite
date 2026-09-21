@@ -34,12 +34,12 @@ describe('useVaultRegistry chain-scoped identity', () => {
     chainId.value = 1
   })
 
-  it.each([1, 146])('uses SDK flags over discovered and cached categories on chain %s', (id) => {
+  it.each([1, 146])('uses only SDK flags for loaded categories on chain %s', (id) => {
     chainId.value = id
     const registry = useVaultRegistry()
     registry.setEscrowAddresses([VAULT])
     registry.set(VAULT, { ...vault(ASSET_ONE), isEscrow: false } as never, 'evk', {
-      verified: true, vaultCategory: 'escrow',
+      verified: true,
     })
     expect(registry.getVaultCategory(VAULT)).toBe('standard')
     expect(registry.isEscrowVault(VAULT)).toBe(false)
@@ -48,15 +48,18 @@ describe('useVaultRegistry chain-scoped identity', () => {
     expect(registry.isKnownEscrowAddress(VAULT)).toBe(true)
 
     registry.setMany([{ address: VAULT, vault: { ...vault(ASSET_ONE), isEscrow: true } as never,
-      type: 'evk', vaultCategory: 'standard' }])
+      type: 'evk' }])
     expect(registry.isEscrowVault(VAULT)).toBe(true)
     expect(registry.get(VAULT)?.verified).toBe(false)
     expect(registry.getEscrowVaults()).toHaveLength(1)
 
     registry.set(VAULT, { ...vault(ASSET_ONE), isEscrow: null } as never, 'evk')
-    expect(registry.getVaultCategory(VAULT)).toBe('escrow')
+    expect(registry.getVaultCategory(VAULT)).toBeUndefined()
+    expect(registry.getEscrowVaults()).toEqual([])
+    expect(registry.getStandardEVaults()).toEqual([])
+    expect(registry.isKnownEscrowAddress(VAULT)).toBe(true)
     registry.setMany([{ address: VAULT, vault: vault(ASSET_ONE) as never, type: 'evk' }])
-    expect(registry.getVaultCategory(VAULT)).toBe('escrow')
+    expect(registry.getVaultCategory(VAULT)).toBeUndefined()
   })
 
   it('does not infer escrow categories for other vault types', () => {

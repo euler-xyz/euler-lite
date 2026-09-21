@@ -1,5 +1,4 @@
 import type { Address } from 'viem'
-import { resolveEVaultCategory } from '~/utils/vault/escrow-category'
 import { createTtlCache } from './cache'
 import { tryChecksum } from './labels-helpers'
 import { resolveLabelsBaseUrl } from './labels-base-url'
@@ -122,8 +121,8 @@ function buildEvkMetadata(
   const addr = tryChecksum(vault.address)
   if (!addr) return null
 
-  // SDK classification controls presentation; perspective membership is the fallback.
-  if (type === 'evk' && resolveEVaultCategory(vault as EVault, ctx.view.escrowAddresses.has(addr) ? 'escrow' : undefined) === 'escrow') {
+  // Loaded vault presentation follows the SDK classification.
+  if (type === 'evk' && (vault as EVault).isEscrow === true) {
     return buildEscrowMetadata(addr, vault as EVault, ctx)
   }
 
@@ -247,13 +246,12 @@ function computeMetadata(ctx: BuildContext): Map<string, VaultMetadata> {
     const addr = tryChecksum(v.address)
     if (addr) escrowFromSnapshot.set(addr, v)
   }
-  const explicitStandard = new Set(ctx.view.snapshot.evkVaults
-    .filter(vault => vault.isEscrow === false).map(vault => tryChecksum(vault.address)))
+  const loadedEVaults = new Set(ctx.view.snapshot.evkVaults.map(vault => tryChecksum(vault.address)))
   const allEscrow = new Set<Address>()
   for (const a of ctx.view.escrowAddresses) allEscrow.add(a)
   for (const a of escrowFromSnapshot.keys()) allEscrow.add(a)
   for (const addr of allEscrow) {
-    if (explicitStandard.has(addr)) continue
+    if (loadedEVaults.has(addr)) continue
     const entry = buildEscrowMetadata(addr, escrowFromSnapshot.get(addr), ctx)
     result.set(addr, entry)
   }

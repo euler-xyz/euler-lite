@@ -299,7 +299,7 @@ async function buildSnapshot(
   const evkVaults = fetchedEVaults.map(vault =>
     withVaultMetadata(vault, {
       verified: true,
-      vaultCategory: resolveEVaultCategory(vault, escrowAddresses.has(vault.address) ? 'escrow' : 'standard'),
+      vaultCategory: resolveEVaultCategory(vault),
     }),
   )
   const securitizeVaults = (securitize.result.filter(Boolean) as SecuritizeCollateralVault[])
@@ -323,14 +323,12 @@ async function buildSnapshot(
   const referencedVaults = (fetchedEscrow.result.filter(Boolean) as EVault[]).map(vault =>
     withVaultMetadata(vault, {
       verified: true,
-      vaultCategory: resolveEVaultCategory(vault, 'escrow'),
+      vaultCategory: resolveEVaultCategory(vault),
     }),
   )
-  const escrowVaults = [...evkVaults, ...referencedVaults]
-    .filter(vault => resolveEVaultCategory(vault, escrowAddresses.has(vault.address) ? 'escrow' : 'standard') === 'escrow')
-  // Keep referenced vaults available even when their SDK flag is explicitly false.
   const existingEVaults = new Set(evkVaults.map(vault => vault.address))
-  evkVaults.push(...referencedVaults.filter(vault => vault.isEscrow === false && !existingEVaults.has(vault.address)))
+  evkVaults.push(...referencedVaults.filter(vault => !existingEVaults.has(vault.address)))
+  const escrowVaults = evkVaults.filter(vault => vault.isEscrow === true)
 
   return {
     escrowAddresses,
