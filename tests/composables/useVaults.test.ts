@@ -20,6 +20,7 @@ const EULER_ROUTER_GOVERNOR = getAddress('0x000000000000000000000000000000000000
 const makeVault = (address: string): EVault => ({
   address: getAddress(address),
   collaterals: [],
+  isEscrow: address === ESCROW_EVAULT,
 }) as unknown as EVault
 
 const makeEarnVault = (address: string): EulerEarn => ({
@@ -85,6 +86,33 @@ describe('useVaults EVault verification metadata', () => {
     vi.useRealTimers()
     useVaultRegistry().clear()
     vi.unstubAllGlobals()
+  })
+
+  it('refreshes SDK classification without promoting an unverified vault', async () => {
+    const registry = useVaultRegistry()
+    registry.set(DYNAMIC_EVAULT, makeVault(DYNAMIC_EVAULT), 'evk')
+    fetchVaults.mockResolvedValueOnce({ errors: [], result: [{ ...makeVault(DYNAMIC_EVAULT), isEscrow: true }] })
+    await useVaults().updateEVaults([DYNAMIC_EVAULT], undefined, true)
+    expect(registry.getVaultCategory(DYNAMIC_EVAULT)).toBe('escrow')
+    expect(registry.get(DYNAMIC_EVAULT)?.verified).toBe(false)
+
+    fetchVaults.mockResolvedValueOnce({ errors: [], result: [{ ...makeVault(DYNAMIC_EVAULT), isEscrow: false }] })
+    await useVaults().updateEVaults([DYNAMIC_EVAULT], undefined, true)
+    expect(registry.getVaultCategory(DYNAMIC_EVAULT)).toBe('standard')
+    expect(registry.get(DYNAMIC_EVAULT)?.verified).toBe(false)
+  })
+
+  it('does not grant verification when refreshing an SDK-classified escrow outside the perspective', async () => {
+    const vault = Object.assign(makeVault(DYNAMIC_EVAULT), { isEscrow: true })
+    vi.stubGlobal('useEulerSdk', () => ({ getEulerSdkForChain: async () => ({
+      eVaultService: { fetchVault: async () => ({ result: vault, errors: [] }) },
+    }) }))
+    const registry = useVaultRegistry()
+    registry.set(DYNAMIC_EVAULT, vault, 'evk')
+    await useVaults().updateEscrowVault(DYNAMIC_EVAULT)
+    expect(registry.isEscrowVault(DYNAMIC_EVAULT)).toBe(true)
+    expect(registry.get(DYNAMIC_EVAULT)?.verified).toBe(false)
+    expect(useVaults().isVaultGovernorVerified(vault)).toBe(false)
   })
 
   it('keeps EVault batches out of verified lists unless explicitly display-verified', async () => {
@@ -331,13 +359,13 @@ describe('useVaults EVault verification metadata', () => {
 
   it('preserves registry verification only when refresh metadata omits it', () => {
     const registry = useVaultRegistry()
-    registry.set(LABELED_EVAULT, makeVault(LABELED_EVAULT), 'evk', { verified: true, vaultCategory: 'escrow' })
+    registry.set(LABELED_EVAULT, makeVault(LABELED_EVAULT), 'evk', { verified: true })
 
     registry.set(LABELED_EVAULT, makeVault(LABELED_EVAULT), 'evk')
     expect(registry.get(LABELED_EVAULT)?.verified).toBe(true)
-    expect(registry.get(LABELED_EVAULT)?.vaultCategory).toBe('escrow')
+    expect(registry.get(LABELED_EVAULT)?.vaultCategory).toBe('standard')
 
-    registry.set(LABELED_EVAULT, makeVault(LABELED_EVAULT), 'evk', { verified: false, vaultCategory: 'standard' })
+    registry.set(LABELED_EVAULT, makeVault(LABELED_EVAULT), 'evk', { verified: false })
     expect(registry.get(LABELED_EVAULT)?.verified).toBe(false)
     expect(registry.get(LABELED_EVAULT)?.vaultCategory).toBe('standard')
     expect(registry.getVerifiedEVaults()).toEqual([])

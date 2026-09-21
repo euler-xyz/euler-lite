@@ -82,6 +82,24 @@ describe('vaults cache', () => {
     })
   })
 
+  it('preserves SDK flags through wire encoding and SDK hydration without changing discovery buckets', async () => {
+    const { refreshChainVaults } = await import('~/server/utils/vaults-cache')
+    const { decodeBigints } = await import('~/utils/snapshot-codec')
+    mocks.fetchVerifiedVaultAddresses.mockResolvedValue([VAULTS[0]])
+    mocks.fetchVaults.mockImplementation(async (_chainId, addresses) => ({
+      errors: [],
+      result: addresses.map((address: string) => ({
+        address, isEscrow: address === VAULTS[0] ? false : true,
+        asset: { decimals: 18 }, shares: { decimals: 18 }, collaterals: [], oracle: { oracle: VAULTS[0] },
+      })),
+    }))
+    const snapshot = decodeBigints(await refreshChainVaults(1)) as SerialisedSnapshot
+    expect(snapshot.escrowVaults).toHaveLength(1)
+    const hydrated = new SdkEVault(snapshot.escrowVaults[0].data as IEVault)
+    expect(hydrated.isEscrow).toBe(false)
+    expect(new SdkEVault(snapshot.evkVaults[1].data as IEVault).isEscrow).toBe(true)
+  })
+
   it('does not replace the previous snapshot when a chunked eVault refresh throws', async () => {
     const { refreshChainVaults, vaultsCache } = await import('~/server/utils/vaults-cache')
     const previous: SerialisedSnapshot = {

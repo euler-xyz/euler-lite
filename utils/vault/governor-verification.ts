@@ -24,6 +24,8 @@ interface VerifiableVault {
   oracleDetailedInfo?: OracleDetailedInfo | null
   eulerRouterGovernor?: Address | null
   verified?: boolean
+  /** Membership in the on-chain escrow perspective, independent of SDK classification. */
+  escrowVerified?: boolean
   vaultCategory?: 'standard' | 'escrow'
 }
 
@@ -75,7 +77,7 @@ export const isVaultGovernorVerified = (
 ): boolean => {
   // Escrow vaults have no risk manager — labels treat them as a separate
   // trust anchor (EscrowedCollateralPerspective), no entity matching applies.
-  if ('vaultCategory' in vault && vault.vaultCategory === 'escrow') return true
+  if (vault.escrowVerified === true) return true
 
   if (!vault.verified) return false
 

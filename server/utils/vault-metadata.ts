@@ -121,11 +121,8 @@ function buildEvkMetadata(
   const addr = tryChecksum(vault.address)
   if (!addr) return null
 
-  // Defensive escrow short-circuit: if an escrow address slips into the EVK
-  // list (the loader puts them in `escrowVaults`, but a future reshuffle of
-  // the snapshot could leak one), render it the same way buildEscrowMetadata
-  // would. Mirrors isVaultGovernorVerified's `vaultCategory === 'escrow'` guard.
-  if (ctx.view.escrowAddresses.has(addr) || ('vaultCategory' in vault && vault.vaultCategory === 'escrow')) {
+  // Loaded vault presentation follows the SDK classification.
+  if (type === 'evk' && (vault as EVault).isEscrow === true) {
     return buildEscrowMetadata(addr, vault as EVault, ctx)
   }
 
@@ -249,10 +246,12 @@ function computeMetadata(ctx: BuildContext): Map<string, VaultMetadata> {
     const addr = tryChecksum(v.address)
     if (addr) escrowFromSnapshot.set(addr, v)
   }
+  const loadedEVaults = new Set(ctx.view.snapshot.evkVaults.map(vault => tryChecksum(vault.address)))
   const allEscrow = new Set<Address>()
   for (const a of ctx.view.escrowAddresses) allEscrow.add(a)
   for (const a of escrowFromSnapshot.keys()) allEscrow.add(a)
   for (const addr of allEscrow) {
+    if (loadedEVaults.has(addr)) continue
     const entry = buildEscrowMetadata(addr, escrowFromSnapshot.get(addr), ctx)
     result.set(addr, entry)
   }
