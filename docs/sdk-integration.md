@@ -31,11 +31,17 @@ Lite's migration compiler, plugin-data collector, and finalizer fail closed when
 
 ### Installing a new SDK release
 
-`.npmrc` sets `min-release-age=7`, so a freshly published package cannot be
-installed for seven days — a supply-chain cooldown that applies to `npm install`
-locally and to `npm ci` in CI and the Docker build alike. `@eulerxyz/euler-v2-sdk`
-is listed in `min-release-age-exclude` because it is published from this org's
-own reviewed monorepo, so an SDK bump can be adopted the day it ships. The
+`.npmrc` sets `min-release-age=7`: a supply-chain cooldown that refuses to
+*resolve* a version published less than seven days ago. It applies to
+`npm install`, which fails with `ETARGET` — "No matching version found ... with
+a date before <date>". It does **not** apply to `npm ci`, which installs the
+lockfile as written, so CI and the Docker build are unaffected either way.
+
+`@eulerxyz/euler-v2-sdk` is listed in `min-release-age-exclude` because it is
+published from this org's own reviewed monorepo and does not carry the
+third-party risk the cooldown absorbs. Without that entry, nobody can run
+`npm install` to write a same-day SDK release into the lockfile in the first
+place — the one-week wait lands on whoever does the bump, not on CI. The
 cooldown still applies to every third-party dependency, and Dependabot keeps its
 own separate seven-day `cooldown` in `.github/dependabot.yml`.
 
