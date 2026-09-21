@@ -6,9 +6,9 @@ Euler Lite includes this intrinsic yield in APY displays so users see the effect
 
 ## Architecture
 
-Intrinsic APY data is **populated onto the vault entity by the SDK at fetch time**. Every vault that goes through `eVaultService.fetchVaults` (or `eulerEarnService.fetchVaults`, `securitizeVaultService.fetchVaults`) carries an `intrinsicApy?: IntrinsicApyInfo` field. Lite reads it directly off the entity — no separate request from the browser, no address-keyed lookup table.
+Intrinsic APY data is **populated onto the vault entity by the SDK at fetch time**. Every vault that goes through `eVaultService.fetchVaults` (or `eulerEarnService.fetchVaults`, `securitizeVaultService.fetchVaults`) carries an `intrinsicApy?: IntrinsicApyInfo` field. Display helpers read that field — they do not look up APY by asset address themselves.
 
-The SDK's `intrinsicApyService` is what actually pulls the data from V3 (`/v3/apys/intrinsic`), which in turn aggregates DefiLlama, Pendle, Securitize, Stablewatch, Ether.fi, Puffer, Spark, Treehouse, Ondo, Renzo, Midas, Yo, and more. Toggle is `populateIntrinsicApy: true` in the fetch options.
+The browsing SDK does not use the SDK's V3 adapter alone. `useEulerSdk` wraps it with `createYuzuIntrinsicApyService` (`utils/yuzu-intrinsic-apy.ts`) and installs the wrapper via `servicesOverrides.intrinsicApyService`. The wrapper still reads V3 (`/v3/apys/intrinsic` through `/api/internal/v3`), then overlays Lite-owned rows from `GET /api/internal/proxy/intrinsic-apy-overrides?chainId=`. A matching override **wins** over V3 for that asset.
 
 ```text
 ┌───────────────────────────────────────────────────────────────────┐
@@ -26,17 +26,19 @@ The SDK's `intrinsicApyService` is what actually pulls the data from V3 (`/v3/ap
                                     │ populated by
                                     ▼
 ┌───────────────────────────────────────────────────────────────────┐
-│   sdk.eVaultService.fetchVaults(chainId, addrs, {                  │
-│     populateIntrinsicApy: true, …                                  │
-│   })                                                                │
-│   sdk.intrinsicApyService.fetchChainIntrinsicApys(chainId)          │
+│   createYuzuIntrinsicApyService (browser SDK only)                 │
+│     V3 IntrinsicApyService  +  /api/internal/proxy/                │
+│                                intrinsic-apy-overrides?chainId=    │
 └───────────────────────────────────┬───────────────────────────────┘
-                                    │ V3 batched/paginated reads via
-                                    │  /api/internal/v3/apys/intrinsic
-                                    ▼
-                              euler v3 backend
-                       (DefiLlama, Pendle, Securitize, …)
+                    ┌───────────────┴───────────────┐
+                    ▼                               ▼
+        /api/internal/v3/apys/intrinsic    Lite override proxy
+        (DefiLlama, Pendle, Securitize, …) (HyperEVM 999, Monad 143)
 ```
+
+The **server snapshot SDK is unwrapped**. `/api/internal/vaults` therefore ships V3-only intrinsic APY. First paint restores those snapshot values through `buildSnapshotIntrinsicApyAdapter`. The silent client refresh (`getEulerSdkForChain` + `populateIntrinsicApy: true`) applies Lite overlays. HyperEVM / Monad APY that exists only as an override can lag the snapshot by one hydrate cycle.
+
+Toggle is `populateIntrinsicApy: true` in the fetch options.
 
 ## Where it's populated
 
@@ -64,7 +66,7 @@ export const liteSecuritizeVaultFetchOptions = {
 }
 ```
 
-These options flow into every place the registry is filled: `composables/useVaults.ts` for the chain-wide pass, `composables/useVaultRegistry.ts:getOrFetch` for lazy resolution, and `server/utils/vaults-cache.ts` for the warm snapshot pipeline.
+These options flow into every place the registry is filled: `composables/useVaults.ts` for the chain-wide pass, `composables/useVaultRegistry.ts:getOrFetch` for lazy resolution, and `server/utils/vaults-cache.ts` for the warm snapshot pipeline. The snapshot builder sets the same `populateIntrinsicApy: true` flag but uses the unwrapped server SDK, so snapshot rows do not include Lite overlays.
 
 ## Helpers
 
@@ -102,17 +104,51 @@ Pair-level Net APY and Max ROE screens use the same compounded helper for consis
 
 `composables/useUserSettings.ts` defines `enableIntrinsicApy: boolean` (default `true`). The toggle lives in `components/entities/settings/SettingsModal.vue`. Every call site that displays intrinsic APY reads the flag and passes it into the helper, so toggling off reverts displays to base APY without rebuilding the registry.
 
+## Lite override proxy
+
+`GET|HEAD /api/internal/proxy/intrinsic-apy-overrides?chainId=` is the Lite-owned overlay for assets V3 does not yet cover. It is not the shared `external-proxy.ts` forwarder: the handler aggregates a fixed set of origin URLs and returns `IntrinsicApyOverrideRow[]`.
+
+| Constraint | Behavior |
+|---|---|
+| Supported chains | `999` (HyperEVM) and `143` (Monad). Any other `chainId` returns `[]` without origin fetches. Missing/NaN `chainId` is `400`. |
+| Cache key | `String(chainId)` only. Extra query parameters must not bust the origin cache. |
+| TTL | 5 minutes in-process (`createTtlCache`, `maxEntries: 2`) plus `Cache-Control: public, max-age=300`. Nitro route rules add CDN `s-maxage=300, stale-while-revalidate=600`. This path is cacheable — `shouldForceNoStoreForPath` leaves it to those route rules. |
+| In-flight | One origin aggregation per `chainId`; concurrent callers coalesce. |
+| HEAD | Sets headers and returns; does not fetch origins. |
+| Rate limit | `intrinsic-apy-overrides-proxy`, 300 requests / 60 s. |
+| Browser wrapper cache | Separate 5-minute per-chain map in `createYuzuIntrinsicApyService`. |
+
+HyperEVM (`999`) fans out eight origin groups (Valantis, Kinetiq, Hyperbeat, LHYPE, LSTHYPE, Noon, Pendle kHYPE, DefiLlama) through `Promise.all` + `safe()`. A single origin failure logs and drops that row; an all-source miss caches `[]` until TTL expiry. Monad (`143`) is DefiLlama-only for `yzPrime`; an upstream throw is **not** cached, so the next request retries.
+
+Override fetch is fail-soft against V3: `Promise.allSettled` in the wrapper. A matching override replaces the V3 row. A failed override fetch leaves a successful V3 result in place. If V3 fails and there is no override row, the wrapper throws.
+
+Do not add a Lite override when V3 already publishes the asset. The durable path is still the V3 adapter. Lite rows exist only for the hardcoded HyperEVM / Monad addresses in `server/api/internal/proxy/intrinsic-apy-overrides.get.ts`.
+
+### Adding a Lite override
+
+1. Add the origin URL and address in `intrinsic-apy-overrides.get.ts` (HyperEVM `fetchHyperevm` or Monad `monadDefillamaSources`).
+2. Keep parsers in `utils/yuzu-intrinsic-apy.ts` when the payload is not a plain number (`extractValantisApy`, `extractHyperbeatWeightedApr`).
+3. Cover cache isolation and origin failure in `tests/server/intrinsic-apy-overrides.test.ts`.
+4. Confirm `chainId` is the cache key: two requests that differ only by extra query params must share one origin pass.
+
 ## Data refresh cadence
 
 Intrinsic APY values rotate when the V3 backend's source providers update — typically once per epoch / once per day for slow-moving assets, more often for staked-token rates. The data is part of the vault entity, so it refreshes whenever the vault entity does:
 
-- **Snapshot pipeline** (`server/utils/vaults-cache.ts`): rewarmed every minute when V3 is configured, every 5 min otherwise. See [server-side caching](./server-side-caching.md).
-- **In-session refresh**: the browsing SDK's QueryClient cache for `queryEVaultInfoFull` is 5 min stale. Subsequent vault reads (e.g. lazy resolution of an off-label vault) re-fetch through the SDK and update `vault.intrinsicApy` in place.
+- **Snapshot pipeline** (`server/utils/vaults-cache.ts`): rewarmed every minute when V3 is configured, every 5 min otherwise. V3-only; see [server-side caching](./server-side-caching.md).
+- **In-session refresh**: the browsing SDK's QueryClient cache for `queryEVaultInfoFull` is 5 min stale. Subsequent vault reads (e.g. lazy resolution of an off-label vault) re-fetch through the wrapped SDK and update `vault.intrinsicApy` in place, including Lite overlays.
+- **Override proxy / wrapper**: 5 min each, keyed by chain. Changing an origin row is not visible until both TTLs expire.
 
-## Adding a new provider
+## Adding a V3 provider
 
-V3 owns the provider list. Add the asset upstream in the V3 backend's intrinsic-APY adapter and it appears in `vault.intrinsicApy` here automatically the next time the snapshot warms.
-
-If a provider needs Lite-specific handling before it is available in V3, keep the data on an explicit current data path such as a labels payload field and wire it into the vault display code with tests. The preferred durable path is upstream into V3.
+V3 owns the general provider list. Add the asset upstream in the V3 backend's intrinsic-APY adapter and it appears in `vault.intrinsicApy` here automatically the next time the snapshot warms. Prefer that over a Lite override.
 
 For form previews, the intrinsic component is recomputed against projected market rates and included in the before/after contribution breakdown. See [Projected Yield](./projected-yield.md).
+
+## Troubleshooting
+
+| Symptom | Cause |
+|---|---|
+| HyperEVM / Monad APY missing on first paint, then appears | Snapshot is V3-only; wait for the silent client refresh, or hard-refresh after the override proxy is warm. |
+| Override APY stuck after an origin fix | In-process TTL still serving the previous chain result, including a cached empty HyperEVM miss. Wait 5 minutes or restart Nitro. |
+| Non-999/143 chain shows no overlay | Expected: the proxy returns `[]` and V3 is the only source. |

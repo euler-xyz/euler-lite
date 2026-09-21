@@ -82,7 +82,7 @@ On a cache miss, `buildInstance({ backend, buildQuery })` does:
 
 1. Resolves `rpcUrls` from `useEulerAddresses()`. RPC routes through `/api/internal/rpc/<chainId>`, absolute on the server and relative on the client.
 2. Builds the static config (see below). For `backend === 'fast'` it picks one of `fallbackAdapterConfig` / `onchainAdapterConfig` / `v3AdapterConfig` from `browserVaultSource`; for `backend === 'onchain'` it forces `onchainAdapterConfig`.
-3. Calls `buildEulerSDK({ config, buildQuery, plugins: [createPythPlugin(...), createKeyringPlugin(...), createLiteTosPlugin()] })`.
+3. Calls `buildEulerSDK({ config, buildQuery, plugins: [createPythPlugin(...), createKeyringPlugin(...), createLiteTosPlugin()], servicesOverrides: { intrinsicApyService } })`. The override wraps V3 intrinsic APY with Lite rows from `/api/internal/proxy/intrinsic-apy-overrides` — see [Intrinsic APY](./intrinsic-apy.md#lite-override-proxy). The server snapshot SDK does not install this wrapper.
 4. Wires app-side proxy callbacks via `configureAppProxies` for SDK services that do not natively use the shared V3 base, currently the ABI service. Oracle assessment and router queries use the SDK's native V3 methods and `/api/internal/v3/...` allowlist.
 
 If `buildEulerSDK` rejects, the map entry is cleared so the next caller retries instead of being stuck on a poisoned promise.

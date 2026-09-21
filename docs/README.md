@@ -50,6 +50,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Vault verification and trust levels
 - Label data sources and types
 - Unknown vault resolution
+- Earn refresh re-derives `verified` from current `earn-vaults.json` (unlisted/delisted vaults are not promoted)
 - SDK 2.0 governance hydration guard (`hasResolvedGovernorAdmin`)
 - Oracle provider logos from the V3 managed-image namespace (not `V3_API_URL`)
 - Shared Oracles-block / Explore-matrix adapter display is covered in [Oracle Adapter Display](./oracle-adapter-display.md)
@@ -68,6 +69,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Sub-accounts and position isolation
 - Simulation performance tuning, batch-cart slot-hint / account prefetch, and plugin-layer mapping
 - [User-facing review compatibility](./transaction-building.md#user-facing-review-compatibility): exhaustive internal reviewed executions remain separate from the unchanged handcrafted review
+- Add-time `captureSwapReview` keeps Swap row amounts when the live quote resets; batch close discards cached preparation so reopen reprepares
 - Spy-mode review uses `prepareReadOnly` and a synthetic approval-only wallet binding; confirm stays disabled
 - Wallet screening is connect-time only; reviewed execution does not re-screen or consult VPN evidence
 
@@ -105,6 +107,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 ### 🗄️ [Server-Side Caching](./server-side-caching.md)
 
 - Per-host external proxies (Merkl, Fuul, Incentra, Goldsky subgraph) with TTL + in-flight dedup
+- Lite intrinsic-APY overlay (`/api/internal/proxy/intrinsic-apy-overrides`) with chain-keyed 5-min cache
 - Vault snapshot pipeline (`/api/internal/vaults`) with two-pass client hydration
 - V3 proxy allowlist, rate limits, failure backoff, and troubleshooting
 - V3-conditional warm-cache cadence (1-min vaults timer with V3, 5-min without)
@@ -118,10 +121,11 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 
 ### 📈 [Intrinsic APY](./intrinsic-apy.md)
 
-- SDK/V3 provider architecture
+- SDK/V3 provider architecture plus the Lite override wrapper for HyperEVM / Monad
+- `/api/internal/proxy/intrinsic-apy-overrides` chain-keyed 5-min cache (extra query params ignored)
 - Vault-entity intrinsic APY fields and refresh cadence
 - Source attribution in APY modals
-- Adding new providers and tokens
+- Adding V3 providers vs Lite override rows
 
 ### 🔐 [Keyring Hooks (Private Vaults)](./keyring-hooks.md)
 
