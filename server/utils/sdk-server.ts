@@ -23,7 +23,9 @@
  * fallback rewards adapters call Turtle upstream themselves rather than via
  * `/api/internal/proxy/turtle`, so the builder hands them the same server-only
  * `TURTLE_EARN_API_KEY` the proxy uses. Without a key every Turtle call is a
- * guaranteed 401, so Turtle discovery is disabled instead of hammering upstream.
+ * guaranteed 401, so direct Turtle discovery is disabled instead of hammering
+ * upstream. The flag only gates the direct adapter: V3-sourced Turtle campaigns
+ * still flow through in fallback mode, while proof requests fail at the proxy.
  */
 import {
   buildEulerSDK,
@@ -76,8 +78,9 @@ const adapterConfigForSource = (source: VaultDataSource): Partial<EulerSDKConfig
 
 /**
  * Turtle rewards config for the server SDK: the server-only key plus the same
- * fixed upstream the proxy uses. A missing key disables Turtle discovery
- * rather than issuing unauthenticated calls.
+ * fixed upstream the proxy uses. A missing key disables the direct adapter's
+ * Turtle discovery rather than issuing unauthenticated calls; it does not
+ * remove V3-sourced Turtle campaigns.
  */
 export const resolveServerTurtleRewardsConfig = (
   env: NodeJS.ProcessEnv = process.env,
