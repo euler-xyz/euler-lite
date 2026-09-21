@@ -87,6 +87,33 @@ describe('useVaults EVault verification metadata', () => {
     vi.unstubAllGlobals()
   })
 
+  it('refreshes SDK classification without promoting an unverified vault', async () => {
+    const registry = useVaultRegistry()
+    registry.set(DYNAMIC_EVAULT, makeVault(DYNAMIC_EVAULT), 'evk', { vaultCategory: 'standard' })
+    fetchVaults.mockResolvedValueOnce({ errors: [], result: [{ ...makeVault(DYNAMIC_EVAULT), isEscrow: true }] })
+    await useVaults().updateEVaults([DYNAMIC_EVAULT], undefined, true)
+    expect(registry.getVaultCategory(DYNAMIC_EVAULT)).toBe('escrow')
+    expect(registry.get(DYNAMIC_EVAULT)?.verified).toBe(false)
+
+    fetchVaults.mockResolvedValueOnce({ errors: [], result: [{ ...makeVault(DYNAMIC_EVAULT), isEscrow: false }] })
+    await useVaults().updateEVaults([DYNAMIC_EVAULT], undefined, true)
+    expect(registry.getVaultCategory(DYNAMIC_EVAULT)).toBe('standard')
+    expect(registry.get(DYNAMIC_EVAULT)?.verified).toBe(false)
+  })
+
+  it('does not grant verification when refreshing an SDK-classified escrow outside the perspective', async () => {
+    const vault = Object.assign(makeVault(DYNAMIC_EVAULT), { isEscrow: true })
+    vi.stubGlobal('useEulerSdk', () => ({ getEulerSdkForChain: async () => ({
+      eVaultService: { fetchVault: async () => ({ result: vault, errors: [] }) },
+    }) }))
+    const registry = useVaultRegistry()
+    registry.set(DYNAMIC_EVAULT, vault, 'evk')
+    await useVaults().updateEscrowVault(DYNAMIC_EVAULT)
+    expect(registry.isEscrowVault(DYNAMIC_EVAULT)).toBe(true)
+    expect(registry.get(DYNAMIC_EVAULT)?.verified).toBe(false)
+    expect(useVaults().isVaultGovernorVerified(vault)).toBe(false)
+  })
+
   it('keeps EVault batches out of verified lists unless explicitly display-verified', async () => {
     await useVaults().updateEVaults([LABELED_EVAULT], undefined, true)
 

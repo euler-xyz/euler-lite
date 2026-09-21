@@ -1,4 +1,5 @@
 import type { Address } from 'viem'
+import { resolveEVaultCategory } from '~/utils/vault/escrow-category'
 import { createTtlCache } from './cache'
 import { tryChecksum } from './labels-helpers'
 import { resolveLabelsBaseUrl } from './labels-base-url'
@@ -121,11 +122,8 @@ function buildEvkMetadata(
   const addr = tryChecksum(vault.address)
   if (!addr) return null
 
-  // Defensive escrow short-circuit: if an escrow address slips into the EVK
-  // list (the loader puts them in `escrowVaults`, but a future reshuffle of
-  // the snapshot could leak one), render it the same way buildEscrowMetadata
-  // would. Mirrors isVaultGovernorVerified's `vaultCategory === 'escrow'` guard.
-  if (ctx.view.escrowAddresses.has(addr) || ('vaultCategory' in vault && vault.vaultCategory === 'escrow')) {
+  // SDK classification controls presentation; perspective membership is the fallback.
+  if (type === 'evk' && resolveEVaultCategory(vault as EVault, ctx.view.escrowAddresses.has(addr) ? 'escrow' : undefined) === 'escrow') {
     return buildEscrowMetadata(addr, vault as EVault, ctx)
   }
 
@@ -249,10 +247,13 @@ function computeMetadata(ctx: BuildContext): Map<string, VaultMetadata> {
     const addr = tryChecksum(v.address)
     if (addr) escrowFromSnapshot.set(addr, v)
   }
+  const explicitStandard = new Set(ctx.view.snapshot.evkVaults
+    .filter(vault => vault.isEscrow === false).map(vault => tryChecksum(vault.address)))
   const allEscrow = new Set<Address>()
   for (const a of ctx.view.escrowAddresses) allEscrow.add(a)
   for (const a of escrowFromSnapshot.keys()) allEscrow.add(a)
   for (const addr of allEscrow) {
+    if (explicitStandard.has(addr)) continue
     const entry = buildEscrowMetadata(addr, escrowFromSnapshot.get(addr), ctx)
     result.set(addr, entry)
   }

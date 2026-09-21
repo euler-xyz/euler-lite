@@ -325,7 +325,7 @@ Registry presence is not Earn verification. `updateEarnVaults` / `refreshVaults`
 
 One on-chain perspective contract provides additional verification:
 
-- **`escrowedCollateralPerspective`**: Lists all verified escrow collateral vaults. Vaults from this perspective are marked `verified: true` and `vaultCategory: 'escrow'`.
+- **`escrowedCollateralPerspective`**: Lists all verified escrow collateral vaults. Vaults from this perspective are marked `verified: true`; membership also supplies an escrow category when the fetched SDK flag is unknown.
 
 ## Vault Categories and Types
 
@@ -362,6 +362,10 @@ The client keeps an in-session categorization cache with this shape:
   escrow: string[]     // subset of evk from the SDK escrow verified array
 }
 ```
+
+Loaded EVaults use the SDK's `isEscrow` flag: `true` means `escrow`, `false` means `standard`, and `null`/missing retains the discovered or cached category. This applies to registry inserts, refreshes, server-snapshot hydration, and the server labels view. Classification does not grant verification: labels and on-chain perspective membership retain their existing trust rules. Snapshot buckets retain discovery provenance; the flag determines the loaded category.
+
+The selected SDK adapter supplies the flag: V3 first with on-chain fallback for normal browsing, and on-chain reads for `ONCHAIN_SDK_CHAINS`. A successful V3 entity with an unknown flag does not trigger automatic SDK fallback. Full escrow address discovery remains an on-chain perspective read on every chain.
 
 For per-address lookups during direct navigation to a not-yet-cached vault, `fetchVaultCategory(address)` checks the SDK escrow verified array first, then asks `vaultMetaService.fetchVaultType` for the vault type.
 

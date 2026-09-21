@@ -1,4 +1,5 @@
 import type { EulerEarn, SecuritizeCollateralVault, EVault, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { resolveEVaultCategory } from '~/utils/vault/escrow-category'
 import { fetchVaultCategory } from '~/utils/vault/categories'
 import { getAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
@@ -27,6 +28,7 @@ export interface AnyVault {
   asset: RegistryToken
   totalShares: bigint
   totalAssets: bigint
+  isEscrow?: boolean | null
 }
 
 // Registry entry containing vault and its type
@@ -112,9 +114,16 @@ const getType = (address: string): VaultType | undefined => {
 }
 
 // Register a vault
-const inferEntryMetadata = (_vault: AnyVault, _type: VaultType, metadata?: VaultEntryMetadata): VaultEntryMetadata => ({
+const inferEntryMetadata = (
+  vault: AnyVault,
+  type: VaultType,
+  metadata?: VaultEntryMetadata,
+  existingCategory?: VaultEntryMetadata['vaultCategory'],
+): VaultEntryMetadata => ({
   verified: metadata?.verified,
-  vaultCategory: metadata?.vaultCategory,
+  vaultCategory: type === 'evk'
+    ? resolveEVaultCategory(vault, metadata?.vaultCategory ?? existingCategory)
+    : undefined,
 })
 
 const set = (
@@ -126,14 +135,14 @@ const set = (
 ): void => {
   if (!targetChainId) throw new Error('Cannot register a vault without a chain')
   const key = registryKey(targetChainId, address)
-  // Preserve existing verification/category when the caller doesn't supply it.
+  // Preserve verification and use existing category only when the SDK flag is unknown.
   // Refresh paths (updateVault, getBorrowVaultPair fallbacks) re-set a vault
   // with no metadata; without this they'd downgrade an already-verified vault
   // to verified:false, dropping it from getVerifiedEVaults() and the lists.
   const existing = registry.value.get(key)
-  const entryMetadata = inferEntryMetadata(vault, type, metadata)
+  const entryMetadata = inferEntryMetadata(vault, type, metadata, existing?.vaultCategory)
   const verified = entryMetadata.verified ?? existing?.verified ?? false
-  const vaultCategory = entryMetadata.vaultCategory ?? existing?.vaultCategory
+  const vaultCategory = entryMetadata.vaultCategory
   registry.value.set(key, {
     vault,
     type,
@@ -151,7 +160,8 @@ const setMany = (
 ): void => {
   if (!targetChainId) throw new Error('Cannot register vaults without a chain')
   entries.forEach(({ address, vault, type, verified, vaultCategory }) => {
-    const entryMetadata = inferEntryMetadata(vault, type, { verified, vaultCategory })
+    const existing = getForChain(targetChainId, address)
+    const entryMetadata = inferEntryMetadata(vault, type, { verified, vaultCategory }, existing?.vaultCategory)
     registry.value.set(registryKey(targetChainId, address), {
       vault,
       type,
@@ -326,8 +336,8 @@ const fetchVaultByType = async (
 
 /**
  * Resolve an unknown vault using SDK vault metadata, fetch with the appropriate
- * SDK service, and cache in the registry. Escrow category comes from the SDK
- * verified-array read, so no separate local perspective probe is needed.
+ * SDK service, and cache in the registry. The fetched SDK escrow flag takes
+ * precedence over the category discovered through the verified-array read.
  */
 const resolveUnknown = async (
   address: string,
