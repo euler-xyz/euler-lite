@@ -3,6 +3,7 @@ import { Account, ExecutionService, flattenBatchEntries, type IHasVaultAddress, 
 import { decodeFunctionData, getAddress, maxUint256, parseAbi, type Hash } from 'viem'
 import { createOperationIntent } from '~/features/reviewed-execution/domain/factory'
 import { assertExpectedIntentPlans, captureIntentPlanExpectation } from '~/features/reviewed-execution/planning/compiler'
+import { ReviewedPlanDivergenceError } from '~/features/reviewed-execution/planning/errors'
 import { createLiteIntentCompilerRegistry } from '~/features/reviewed-execution/planning/lite-compilers'
 import type { PlanningSnapshot } from '~/features/reviewed-execution/planning/snapshot-loader'
 import { buildRefinanceIntentArgs } from '~/utils/refinance-intent'
@@ -140,7 +141,10 @@ describe('Lite intent compiler wrapper parity', () => {
       { functionName: 'disableCollateral', args: [SUB_ACCOUNT, VAULT] },
       { functionName: 'disableCollateral', args: [SUB_ACCOUNT, sourceVault] },
     ]))
-    expect(() => assertExpectedIntentPlans(compiled.intentPlans, expected)).toThrow(/Batch operations changed/)
+    expect(() => assertExpectedIntentPlans(compiled.intentPlans, expected)).toThrow(ReviewedPlanDivergenceError)
+    expect(() => assertExpectedIntentPlans(compiled.intentPlans, expected)).toThrow(expect.objectContaining({
+      intentIds: [refinance.intentId],
+    }))
     expect(() => assertExpectedIntentPlans(secondPreview.intentPlans, [expected[1]])).not.toThrow()
   })
 

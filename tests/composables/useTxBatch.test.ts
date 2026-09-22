@@ -15,6 +15,8 @@ import { activeLayerVaultsRef } from '~/composables/useLayeredVaults'
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 import { createOperationIntent } from '~/features/reviewed-execution/domain/factory'
 import { captureIntentPlanExpectation } from '~/features/reviewed-execution/planning/compiler'
+import { BatchPreviewNotReadyError } from '~/features/reviewed-execution/planning/errors'
+import { logger } from '~/utils/logger'
 import { validateIntentSet } from '~/features/reviewed-execution/domain/validators'
 import type { SignatureSlot } from '~/features/reviewed-execution/domain/reviewed-execution'
 import { finalizeSuccessfulSubmission } from '~/features/reviewed-execution/review/submission-completion'
@@ -1505,6 +1507,35 @@ describe('useTxBatch execution errors', () => {
     release()
     await adding
     expect(batch.entries.value[0]?.preparing).toBe(false)
+  })
+
+  it('skips warm-up without warnings while a remaining row is still compiling', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    const batch = useTxBatch()
+    const ready = intentFor(singleOperationPlan('supply'), [subAccount])
+    const pending = intentFor(singleOperationPlan('borrow'), [subAccount])
+    const warmed = { execution: { reviewId: '0x01' }, previewPlan: [], prepared: {} }
+    executionMocks.prepare.mockResolvedValue(warmed as never)
+    await batch.addEntry({ intent: ready, label: 'Supply USDC', subAccount })
+    executionMocks.prepare.mockClear()
+
+    let release!: () => void
+    executionMocks.compilePreview.mockImplementationOnce(() => new Promise<TransactionPlan>((resolve) => {
+      release = () => resolve(testIntentPlans.get(pending.intentId)!)
+    }))
+    const adding = batch.addEntry({ intent: pending, label: 'Borrow USDC', subAccount })
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+
+    expect(() => batch.prepareBatchExecutionReview()).toThrow(BatchPreviewNotReadyError)
+    batch.removeEntry(ready.intentId)
+    expect(batch.entries.value).toMatchObject([{ id: pending.intentId, preparing: true }])
+    expect(executionMocks.prepare).not.toHaveBeenCalled()
+    expect(warn).not.toHaveBeenCalledWith(expect.objectContaining({ ctx: 'useTxBatch/warmBatchExecutionReview' }), expect.anything())
+
+    release()
+    await adding
+    await expect(batch.prepareBatchExecutionReview()).resolves.toBe(warmed)
+    expect(executionMocks.prepare).toHaveBeenCalledOnce()
   })
 
   it('keeps the add-time identity when adopting matching warmed batch semantics', async () => {

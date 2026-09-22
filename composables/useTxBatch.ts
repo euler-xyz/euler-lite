@@ -36,6 +36,7 @@ import type { BatchDraftEntry, OperationIntent } from '~/features/reviewed-execu
 import { canonicalDigest, deepFreezeSerializable, toCanonicalValue } from '~/features/reviewed-execution/domain/canonical'
 import { GenerationPublisher } from '~/features/reviewed-execution/planning/cache'
 import { captureIntentPlanExpectation, type IntentPlanExpectation } from '~/features/reviewed-execution/planning/compiler'
+import { BatchPreviewNotReadyError } from '~/features/reviewed-execution/planning/errors'
 import { intentSetDigest, selectMatchingPreparedIntents } from '~/features/reviewed-execution/planning/requirements'
 
 export interface BatchWalletChange {
@@ -2385,7 +2386,7 @@ export const useTxBatch = () => {
     const expectedIntentPlans = intents.map((intent) => {
       const expected = entryPlanExpectationsById.value[intent.intentId]
       if (!expected || expected.intentRevision !== intent.revision) {
-        throw new Error('Batch preview is not ready. Wait for every operation to finish preparing.')
+        throw new BatchPreviewNotReadyError()
       }
       return expected
     })
@@ -2430,7 +2431,7 @@ export const useTxBatch = () => {
   }
 
   const warmBatchExecutionReview = async (cartGeneration: number) => {
-    if (!draftEntries.value.length) return
+    if (!draftEntries.value.length || entries.value.some(entry => entry.preparing)) return
     try {
       await startBatchExecutionPreparation(cartGeneration)
     }

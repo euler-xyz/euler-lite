@@ -13,6 +13,7 @@ import { preparationCacheKey, type GenerationPublisher, type PreparationCache, t
 import { collectPlanningRequirements } from './requirements'
 import { assertExpectedIntentPlans, type CompiledIntentSet, type IntentCompilerRegistry, type IntentPlanExpectation } from './compiler'
 import type { PlanningSnapshot, PlanningSnapshotLoader } from './snapshot-loader'
+import { BatchPreviewNotReadyError } from './errors'
 
 export interface ReviewedExecutionDependencies {
   compiler: IntentCompilerRegistry
@@ -138,7 +139,7 @@ export class ReviewedExecutionPreparationService {
   async prepare(request: PrepareReviewedExecutionRequest): Promise<PreparedReviewedExecution> {
     const expectedIntentPlans = request.expectedIntentPlans?.map(expected => ({ ...expected }))
     if (request.presentationKind === 'batch' && !expectedIntentPlans?.length) {
-      throw new Error('Batch preview is not ready. Wait for every operation to finish preparing.')
+      throw new BatchPreviewNotReadyError()
     }
     const assertCurrent = () => this.generation.assertCurrent(request.cartGeneration)
     const assertContext = async () => {

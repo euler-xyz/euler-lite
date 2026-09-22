@@ -7,6 +7,7 @@ import type { OperationIntent } from '~/features/reviewed-execution/domain/inten
 import { createOperationIntent } from '~/features/reviewed-execution/domain/factory'
 import { materializePreparedPlan } from '~/features/reviewed-execution/materialization/prepared-plan'
 import { captureIntentPlanExpectation, IntentCompilerRegistry } from '~/features/reviewed-execution/planning/compiler'
+import { BatchPreviewNotReadyError, ReviewedPlanDivergenceError } from '~/features/reviewed-execution/planning/errors'
 import { GenerationPublisher, PreparationCache } from '~/features/reviewed-execution/planning/cache'
 import { ReviewedExecutionPreparationService, type ReviewedExecutionDependencies } from '~/features/reviewed-execution/planning/service'
 import { PlanningSnapshotLoader, type SnapshotLoaderDependencies } from '~/features/reviewed-execution/planning/snapshot-loader'
@@ -246,7 +247,7 @@ describe('authoritative reviewed execution preparation', () => {
     compilerCall.mockResolvedValueOnce([{ type: 'evcBatch', items: [{
       targetContract: VAULT, onBehalfOfAccount: ACCOUNT, value: 0n, data: '0x87654321',
     }] }])
-    await expect(service.prepare(batchRequest)).rejects.toThrow(/Batch operations changed/)
+    await expect(service.prepare(batchRequest)).rejects.toThrow(ReviewedPlanDivergenceError)
     expect(pluginPrefetch).toHaveBeenCalledTimes(prefetchedCount)
     expect(simulation).toHaveBeenCalledTimes(simulatedCount)
 
@@ -258,7 +259,9 @@ describe('authoritative reviewed execution preparation', () => {
       [{ ...batchRequest.expectedIntentPlans[0], intentRevision: 2 }],
       [...batchRequest.expectedIntentPlans, ...batchRequest.expectedIntentPlans],
     ]) {
-      await expect(service.prepare({ ...batchRequest, expectedIntentPlans })).rejects.toThrow(/Batch/)
+      await expect(service.prepare({ ...batchRequest, expectedIntentPlans })).rejects.toThrow(
+        expectedIntentPlans?.length ? ReviewedPlanDivergenceError : BatchPreviewNotReadyError,
+      )
     }
     expect(pluginPrefetch).toHaveBeenCalledTimes(prefetchedCount)
     expect(simulation).toHaveBeenCalledTimes(simulatedCount)

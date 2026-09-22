@@ -6,6 +6,7 @@ import { assertOperationIntent } from '../domain/schemas'
 import { validateIntentSet } from '../domain/validators'
 import type { EffectOwner, EffectOwnership } from '../materialization/prepared-plan'
 import type { PlanningSnapshot } from './snapshot-loader'
+import { ReviewedPlanDivergenceError } from './errors'
 
 export interface IntentCompilerContext {
   snapshot: PlanningSnapshot
@@ -48,14 +49,20 @@ export const assertExpectedIntentPlans = (
   compiled: CompiledIntentSet['intentPlans'],
   expected: readonly IntentPlanExpectation[],
 ) => {
-  if (compiled.length !== expected.length || compiled.some((entry, index) => {
+  const diverged = new Set<string>()
+  for (let index = 0; index < Math.max(compiled.length, expected.length); index++) {
+    const entry = compiled[index]
     const expectation = expected[index]
-    return !expectation
+    if (!entry || !expectation
       || entry.intentId !== expectation.intentId
       || entry.intentRevision !== expectation.intentRevision
-      || intentPlanDigest(entry.plan) !== expectation.planDigest
-  })) {
-    throw new Error('Batch operations changed during preparation. Rebuild the batch or submit them separately.')
+      || intentPlanDigest(entry.plan) !== expectation.planDigest) {
+      if (entry) diverged.add(entry.intentId)
+      if (expectation) diverged.add(expectation.intentId)
+    }
+  }
+  if (compiled.length !== expected.length || diverged.size) {
+    throw new ReviewedPlanDivergenceError([...diverged])
   }
 }
 
