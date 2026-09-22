@@ -6,7 +6,7 @@ import type { PolicyState, WalletBinding } from '~/features/reviewed-execution/d
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 import { createOperationIntent } from '~/features/reviewed-execution/domain/factory'
 import { materializePreparedPlan } from '~/features/reviewed-execution/materialization/prepared-plan'
-import { IntentCompilerRegistry } from '~/features/reviewed-execution/planning/compiler'
+import { captureIntentPlanExpectation, IntentCompilerRegistry } from '~/features/reviewed-execution/planning/compiler'
 import { GenerationPublisher, PreparationCache } from '~/features/reviewed-execution/planning/cache'
 import { ReviewedExecutionPreparationService, type ReviewedExecutionDependencies } from '~/features/reviewed-execution/planning/service'
 import { PlanningSnapshotLoader, type SnapshotLoaderDependencies } from '~/features/reviewed-execution/planning/snapshot-loader'
@@ -231,13 +231,37 @@ describe('authoritative reviewed execution preparation', () => {
     expect(simulation.mock.calls[0]?.[5]).toEqual({ pyth: [], keyring: [] })
     expect(dependencyLoad).toHaveBeenCalled()
 
-    const batchExecution = await service.prepare({
+    const batchRequest = {
       ...request,
       presentationKind: 'batch',
       presentationInputs: [{ id: intent.intentId, review: request.presentationInputs }],
-    })
+      expectedIntentPlans: [captureIntentPlanExpectation(intent, plan)],
+    }
+    const batchExecution = await service.prepare(batchRequest)
     expect(batchExecution.execution.requestDigest).toBe(execution.requestDigest)
     expect(batchExecution.execution.requestSet).toEqual(execution.requestSet)
+
+    const prefetchedCount = pluginPrefetch.mock.calls.length
+    const simulatedCount = simulation.mock.calls.length
+    compilerCall.mockResolvedValueOnce([{ type: 'evcBatch', items: [{
+      targetContract: VAULT, onBehalfOfAccount: ACCOUNT, value: 0n, data: '0x87654321',
+    }] }])
+    await expect(service.prepare(batchRequest)).rejects.toThrow(/Batch operations changed/)
+    expect(pluginPrefetch).toHaveBeenCalledTimes(prefetchedCount)
+    expect(simulation).toHaveBeenCalledTimes(simulatedCount)
+
+    // A warm execution cannot bypass a missing, stale, or incomplete row baseline.
+    for (const expectedIntentPlans of [
+      undefined,
+      [],
+      [{ ...batchRequest.expectedIntentPlans[0], intentId: 'another-row' }],
+      [{ ...batchRequest.expectedIntentPlans[0], intentRevision: 2 }],
+      [...batchRequest.expectedIntentPlans, ...batchRequest.expectedIntentPlans],
+    ]) {
+      await expect(service.prepare({ ...batchRequest, expectedIntentPlans })).rejects.toThrow(/Batch/)
+    }
+    expect(pluginPrefetch).toHaveBeenCalledTimes(prefetchedCount)
+    expect(simulation).toHaveBeenCalledTimes(simulatedCount)
   })
 
   it('discards every result published after the cart generation advances', async () => {
@@ -296,6 +320,7 @@ describe('authoritative reviewed execution preparation', () => {
     const service = createAppPolicyService('cross-protocol-migration')
     const { execution } = await service.prepare({
       intents: [aaveMigrationIntent],
+      expectedIntentPlans: presentationKind === 'batch' ? [captureIntentPlanExpectation(aaveMigrationIntent, plan)] : undefined,
       wallet: aaveWallet,
       cartGeneration: 0,
       runtime: {},
@@ -326,6 +351,7 @@ describe('authoritative reviewed execution preparation', () => {
 
     const { execution } = await service.prepare({
       intents: [migrationIntent],
+      expectedIntentPlans: presentationKind === 'batch' ? [captureIntentPlanExpectation(migrationIntent, plan)] : undefined,
       wallet: aaveWallet,
       cartGeneration: 0,
       runtime: {},
@@ -433,6 +459,7 @@ describe('authoritative reviewed execution preparation', () => {
 
     const { execution } = await service.prepare({
       intents: [reulIntent],
+      expectedIntentPlans: presentationKind === 'batch' ? [captureIntentPlanExpectation(reulIntent, plan)] : undefined,
       wallet,
       cartGeneration: 0,
       runtime: {},

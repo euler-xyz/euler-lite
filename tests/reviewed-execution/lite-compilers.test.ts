@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { Account, IHasVaultAddress, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
-import { getAddress, type Hash } from 'viem'
+import { Account, ExecutionService, flattenBatchEntries, type IHasVaultAddress, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { decodeFunctionData, getAddress, maxUint256, parseAbi, type Hash } from 'viem'
 import { createOperationIntent } from '~/features/reviewed-execution/domain/factory'
+import { assertExpectedIntentPlans, captureIntentPlanExpectation } from '~/features/reviewed-execution/planning/compiler'
 import { createLiteIntentCompilerRegistry } from '~/features/reviewed-execution/planning/lite-compilers'
 import type { PlanningSnapshot } from '~/features/reviewed-execution/planning/snapshot-loader'
+import { buildRefinanceIntentArgs } from '~/utils/refinance-intent'
 import { makeSwapQuote } from './swap-quote.test-fixture'
 
 const ACCOUNT = getAddress('0x1000000000000000000000000000000000000000')
@@ -72,6 +74,76 @@ const compile = async (planner: Parameters<typeof createOperationIntent>[0]['pla
 }
 
 describe('Lite intent compiler wrapper parity', () => {
+  it('rejects a cart recompilation that drops the previewed collateral re-enable', async () => {
+    const sourceVault = getAddress('0x5000000000000000000000000000000000000000')
+    const evc = getAddress('0x6000000000000000000000000000000000000000')
+    const sdk = { executionService: new ExecutionService({
+      getDeployment: () => ({ addresses: { coreAddrs: { evc } } }),
+    } as never) }
+    const accountAtStage = (beforeWithdrawal: boolean) => new Account({
+      chainId: 1,
+      owner: ACCOUNT,
+      subAccounts: {
+        [SUB_ACCOUNT]: {
+          timestamp: 0, account: SUB_ACCOUNT, owner: ACCOUNT, lastAccountStatusCheckTimestamp: 0,
+          enabledControllers: [],
+          enabledCollaterals: beforeWithdrawal ? [sourceVault, VAULT] : [sourceVault],
+          positions: (beforeWithdrawal ? [sourceVault, VAULT] : [sourceVault]).map(vaultAddress => ({
+            account: SUB_ACCOUNT, vaultAddress, asset: TOKEN, shares: 10n, assets: 10n,
+            borrowed: 0n, isController: false, isCollateral: true, balanceForwarderEnabled: false,
+          })),
+        },
+      },
+    })
+    const baseAccount = accountAtStage(true)
+    const projectedAccount = accountAtStage(false)
+    const quote = {
+      ...makeSwapQuote(),
+      vaultIn: sourceVault, receiver: VAULT, accountIn: SUB_ACCOUNT, accountOut: SUB_ACCOUNT,
+    }
+    const withdraw = createOperationIntent({
+      kind: 'withdraw', planner: 'redeem',
+      args: { vaultAddress: VAULT, shares: maxUint256, owner: SUB_ACCOUNT, disableCollateral: true },
+      chainId: 1, account: ACCOUNT, subAccounts: [SUB_ACCOUNT], source: 'test', createdAt: 1,
+    })
+    const refinance = createOperationIntent({
+      kind: 'refinance', planner: 'refinance-position',
+      args: buildRefinanceIntentArgs({ collateral: {
+        fromVault: sourceVault, toVault: VAULT, amount: 10n, positionAccount: SUB_ACCOUNT,
+        fromAsset: quote.tokenIn.address, toAsset: quote.tokenOut.address,
+        isMax: true, enableCollateralTo: true, disableCollateralFrom: true, swapQuote: quote, swapperMode: 0,
+      } }),
+      chainId: 1, account: ACCOUNT, subAccounts: [SUB_ACCOUNT], source: 'test', createdAt: 2,
+    })
+    const registry = createLiteIntentCompilerRegistry(sdk)
+    const compileAgainst = (intents: readonly ReturnType<typeof createOperationIntent>[], account: Account<IHasVaultAddress>) =>
+      registry.compile(intents, { snapshot, runtime: { account, sdk } }, () => {})
+    const firstPreview = await compileAgainst([withdraw], baseAccount)
+    const secondPreview = await compileAgainst([refinance], projectedAccount)
+    const expected = [
+      captureIntentPlanExpectation(withdraw, firstPreview.plan),
+      captureIntentPlanExpectation(refinance, secondPreview.plan),
+    ]
+    const compiled = await compileAgainst([withdraw, refinance], baseAccount)
+    const collateralAbi = parseAbi([
+      'function enableCollateral(address account, address vault) payable',
+      'function disableCollateral(address account, address vault) payable',
+    ])
+    const evcCalls = (plan: TransactionPlan) => plan.flatMap(item => item.type === 'evcBatch'
+      ? flattenBatchEntries(item.items).filter(call => call.targetContract === evc)
+          .map(call => decodeFunctionData({ abi: collateralAbi, data: call.data }))
+      : [])
+
+    expect(evcCalls(secondPreview.plan)).toContainEqual({ functionName: 'enableCollateral', args: [SUB_ACCOUNT, VAULT] })
+    expect(evcCalls(compiled.plan)).not.toContainEqual({ functionName: 'enableCollateral', args: [SUB_ACCOUNT, VAULT] })
+    expect(evcCalls(compiled.plan)).toEqual(expect.arrayContaining([
+      { functionName: 'disableCollateral', args: [SUB_ACCOUNT, VAULT] },
+      { functionName: 'disableCollateral', args: [SUB_ACCOUNT, sourceVault] },
+    ]))
+    expect(() => assertExpectedIntentPlans(compiled.intentPlans, expected)).toThrow(/Batch operations changed/)
+    expect(() => assertExpectedIntentPlans(secondPreview.intentPlans, [expected[1]])).not.toThrow()
+  })
+
   it.each([
     ['deposit', { vaultAddress: VAULT, assetAddress: TOKEN, amount: 1n }, 'planDeposit'],
     ['withdraw', { vaultAddress: VAULT, owner: SUB_ACCOUNT, assets: 1n }, 'planWithdraw'],
