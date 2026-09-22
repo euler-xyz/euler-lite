@@ -8,7 +8,8 @@ import { createOperationIntent } from '~/features/reviewed-execution/domain/fact
 import { materializePreparedPlan } from '~/features/reviewed-execution/materialization/prepared-plan'
 import { IntentCompilerRegistry } from '~/features/reviewed-execution/planning/compiler'
 import { GenerationPublisher, PreparationCache } from '~/features/reviewed-execution/planning/cache'
-import { ReviewedExecutionPreparationService, type ReviewedExecutionDependencies } from '~/features/reviewed-execution/planning/service'
+import { ReviewedExecutionPreparationService, ReviewedPlanDivergenceError, type ReviewedExecutionDependencies } from '~/features/reviewed-execution/planning/service'
+import { transactionPlanDigest } from '~/features/reviewed-execution/planning/plan-digest'
 import { PlanningSnapshotLoader, type SnapshotLoaderDependencies } from '~/features/reviewed-execution/planning/snapshot-loader'
 import { createAppSnapshotDependencies } from '~/features/reviewed-execution/planning/app-snapshot'
 import { collectPlanningRequirements } from '~/features/reviewed-execution/planning/requirements'
@@ -459,5 +460,54 @@ describe('authoritative reviewed execution preparation', () => {
       observedBlock: 100n,
       version: 'compiler-v1',
     })
+  })
+})
+
+describe('reviewed plan parity', () => {
+  const request = {
+    intents: [intent],
+    wallet,
+    cartGeneration: 0,
+    runtime: {},
+    presentationKind: 'batch',
+    presentationInputs: [{ id: intent.intentId, review: {} }],
+    compilerVersion: 'compiler-v1',
+    policyVersionDigest: keccak256(toHex('policy-v1')),
+    freshUntil: 5_000,
+  } as const
+
+  it('seals when every recompiled intent plan matches its reviewed digest', async () => {
+    const service = createAppPolicyService('deposit')
+    const prepared = await service.prepare({
+      ...request,
+      reviewedIntentPlanDigests: { [intent.intentId]: { intentRevision: intent.revision, digest: transactionPlanDigest(plan) } },
+    })
+    expect(prepared.execution.reviewId).toBeDefined()
+  })
+
+  it('refuses to seal when a recompiled plan differs from the reviewed one', async () => {
+    const service = createAppPolicyService('deposit')
+    const reviewedPlan: TransactionPlan = [{ type: 'evcBatch', items: [{ targetContract: VAULT, onBehalfOfAccount: ACCOUNT, value: 0n, data: '0x87654321' }] }]
+    const attempt = service.prepare({
+      ...request,
+      reviewedIntentPlanDigests: { [intent.intentId]: { intentRevision: intent.revision, digest: transactionPlanDigest(reviewedPlan) } },
+    })
+    await expect(attempt).rejects.toBeInstanceOf(ReviewedPlanDivergenceError)
+    await expect(attempt).rejects.toMatchObject({ intentIds: [intent.intentId] })
+  })
+
+  it('refuses to seal when an intent has no reviewed plan or the digest belongs to another revision', async () => {
+    const service = createAppPolicyService('deposit')
+    await expect(service.prepare({ ...request, reviewedIntentPlanDigests: {} })).rejects.toBeInstanceOf(ReviewedPlanDivergenceError)
+    await expect(service.prepare({
+      ...request,
+      reviewedIntentPlanDigests: { [intent.intentId]: { intentRevision: intent.revision + 1, digest: transactionPlanDigest(plan) } },
+    })).rejects.toBeInstanceOf(ReviewedPlanDivergenceError)
+  })
+
+  it('does not check parity when no reviewed digests are supplied', async () => {
+    const service = createAppPolicyService('deposit')
+    const prepared = await service.prepare(request)
+    expect(prepared.execution.reviewId).toBeDefined()
   })
 })

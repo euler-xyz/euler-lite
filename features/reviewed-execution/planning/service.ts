@@ -12,6 +12,7 @@ import { buildReviewedSimulation } from '../simulation/coverage'
 import { preparationCacheKey, type GenerationPublisher, type PreparationCache, type PreparationCacheIdentity } from './cache'
 import { collectPlanningRequirements } from './requirements'
 import type { CompiledIntentSet, IntentCompilerRegistry } from './compiler'
+import { transactionPlanDigest } from './plan-digest'
 import type { PlanningSnapshot, PlanningSnapshotLoader } from './snapshot-loader'
 
 export interface ReviewedExecutionDependencies {
@@ -51,8 +52,43 @@ export interface PrepareReviewedExecutionRequest {
   before?: readonly AdditionalMaterializedCall[]
   after?: readonly AdditionalMaterializedCall[]
   adopt?: PreparationCacheIdentity
+  /**
+   * Digest of each intent's plan as it was compiled for the review the user is
+   * looking at, keyed by intent id. Preparation recompiles every intent against
+   * one fresh account, while a batch previews each row against the simulated
+   * state left by the rows before it. When the two disagree for any intent, the
+   * reviewed batch is not the batch that would execute, so preparation refuses
+   * to seal instead of executing a plan nobody saw.
+   */
+  reviewedIntentPlanDigests?: Readonly<Record<string, ReviewedIntentPlanDigest>>
   /** Rechecks mutable wallet/session context at every asynchronous boundary. */
   assertContext?: () => Promise<void>
+}
+
+export interface ReviewedIntentPlanDigest {
+  intentRevision: number
+  digest: Hash
+}
+
+/** The recompiled plan of at least one intent differs from the plan that was reviewed. */
+export class ReviewedPlanDivergenceError extends Error {
+  constructor(readonly intentIds: readonly string[]) {
+    super(`Recompiled plan differs from the reviewed plan for ${intentIds.join(', ')}`)
+    this.name = 'ReviewedPlanDivergenceError'
+  }
+}
+
+const assertReviewedIntentPlans = (
+  intentPlans: CompiledIntentSet['intentPlans'],
+  reviewed: Readonly<Record<string, ReviewedIntentPlanDigest>>,
+) => {
+  const diverged = intentPlans
+    .filter(({ intentId, intentRevision, plan }) => {
+      const expected = reviewed[intentId]
+      return !expected || expected.intentRevision !== intentRevision || expected.digest !== transactionPlanDigest(plan)
+    })
+    .map(({ intentId }) => intentId)
+  if (diverged.length) throw new ReviewedPlanDivergenceError(diverged)
 }
 
 export interface PreparedReviewedExecution {
@@ -146,6 +182,7 @@ export class ReviewedExecutionPreparationService {
     await assertContext()
     const compiled = await this.dependencies.compiler.compile(request.intents, { snapshot, runtime: request.runtime }, assertCurrent)
     await assertContext()
+    if (request.reviewedIntentPlanDigests) assertReviewedIntentPlans(compiled.intentPlans, request.reviewedIntentPlanDigests)
     // Plugins retain approval item references that the SDK resolver mutates in place.
     const rawCanonical = toCanonicalValue(compiled.plan)
 

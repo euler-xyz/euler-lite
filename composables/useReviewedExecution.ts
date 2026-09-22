@@ -76,6 +76,8 @@ export interface PrepareReviewedExecutionOptions {
   presentationInputs: unknown
   cartGeneration?: number
   generation?: GenerationPublisher
+  /** Per-intent digests of the reviewed plans; preparation fails closed when recompilation diverges. */
+  reviewedIntentPlanDigests?: PrepareReviewedExecutionRequest['reviewedIntentPlanDigests']
 }
 
 export interface PreparedExecutionReview {
@@ -479,6 +481,7 @@ export const useReviewedExecution = () => {
       ...(safeAtomicCapability ? { safeAtomicCapability } : {}),
       before: migrationBefore,
       after: migrationAfter,
+      ...(options.reviewedIntentPlanDigests ? { reviewedIntentPlanDigests: options.reviewedIntentPlanDigests } : {}),
       assertContext: assertPreparationContext,
     })
     const previewPlan = pluginPlans.previewPlan as unknown as TransactionPlan

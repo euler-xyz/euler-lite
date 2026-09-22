@@ -1,7 +1,8 @@
 import { getAddress, type Address, type Hash } from 'viem'
 import type { PlanMigrationSimulationResult, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
-import { canonicalDigest, deepFreezeSerializable, toCanonicalValue, type CanonicalValue } from '../domain/canonical'
+import { deepFreezeSerializable, toCanonicalValue, type CanonicalValue } from '../domain/canonical'
 import type { OperationIntent } from '../domain/intents'
+import { transactionPlanDigest as planDigest } from './plan-digest'
 import { collectPlanningRequirements, intentSetDigest } from './requirements'
 
 interface PreviewPluginCache {
@@ -69,9 +70,6 @@ const pruneRecords = <T extends { freshUntil: number }>(records: Map<Hash, Reado
     records.delete(oldest)
   }
 }
-
-const planDigest = (plan: TransactionPlan) =>
-  canonicalDigest('preview-plan-v1', toCanonicalValue(plan))
 
 const accountOwner = (account: TransactionPlanPrepared['account']): Address =>
   getAddress(typeof account === 'string' ? account : account.owner)
