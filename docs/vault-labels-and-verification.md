@@ -146,7 +146,7 @@ Structure: `Record<string, Entity>` — keys are entity identifiers (e.g. `"eule
     "social": {                                    // Social media links (stored but not currently displayed)
       "twitter": "https://twitter.com/eulerfinance",
       "youtube": "",
-      "discord": "https://discord.gg/euler",
+      "discord": "https://discord.euler.finance/",
       "telegram": "",
       "github": "https://github.com/euler-xyz"
     }
