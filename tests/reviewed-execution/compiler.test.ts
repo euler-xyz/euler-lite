@@ -5,7 +5,8 @@ import { EVC_ABI } from '~/abis/evc'
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 import { validateReviewedRequestSet } from '~/features/reviewed-execution/domain/validators'
 import { materializePreparedPlan } from '~/features/reviewed-execution/materialization/prepared-plan'
-import { IntentCompilerRegistry } from '~/features/reviewed-execution/planning/compiler'
+import { assertExpectedIntentPlans, captureIntentPlanExpectation, IntentCompilerRegistry } from '~/features/reviewed-execution/planning/compiler'
+import { ReviewedPlanDivergenceError } from '~/features/reviewed-execution/planning/errors'
 
 const ACCOUNT = getAddress('0x1000000000000000000000000000000000000000')
 const TOKEN = getAddress('0x2000000000000000000000000000000000000000')
@@ -134,5 +135,25 @@ describe('intent compiler merged prerequisite ownership', () => {
         { targetContract: VAULT, onBehalfOfAccount: SUB_ACCOUNT_B, value: 0n, data: '0x22222222' },
       ] },
     ])).rejects.toThrow(/changed a required approval/)
+  })
+})
+
+describe('ordered batch preview expectations', () => {
+  const expected = intents.map(intent => captureIntentPlanExpectation(intent, sourcePlans.get(intent.intentId)!))
+
+  it('accepts complete previews in cart order', async () => {
+    const compiled = await compile()
+    expect(() => assertExpectedIntentPlans(compiled.intentPlans, expected)).not.toThrow()
+  })
+
+  it.each([
+    { mismatch: 'reordered', expectations: [expected[1]!, expected[0]!] },
+    { mismatch: 'missing', expectations: [expected[0]!] },
+    { mismatch: 'extra', expectations: [...expected, expected[0]!] },
+    { mismatch: 'duplicated', expectations: [expected[0]!, expected[0]!] },
+    { mismatch: 'stale revision', expectations: [expected[0]!, { ...expected[1]!, intentRevision: 2 }] },
+  ])('rejects $mismatch expectations', async ({ expectations }) => {
+    const compiled = await compile()
+    expect(() => assertExpectedIntentPlans(compiled.intentPlans, expectations)).toThrow(ReviewedPlanDivergenceError)
   })
 })

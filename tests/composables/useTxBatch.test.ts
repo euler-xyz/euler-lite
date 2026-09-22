@@ -14,6 +14,9 @@ import {
 import { activeLayerVaultsRef } from '~/composables/useLayeredVaults'
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 import { createOperationIntent } from '~/features/reviewed-execution/domain/factory'
+import { captureIntentPlanExpectation } from '~/features/reviewed-execution/planning/compiler'
+import { BatchPreviewNotReadyError } from '~/features/reviewed-execution/planning/errors'
+import { logger } from '~/utils/logger'
 import { validateIntentSet } from '~/features/reviewed-execution/domain/validators'
 import type { SignatureSlot } from '~/features/reviewed-execution/domain/reviewed-execution'
 import { finalizeSuccessfulSubmission } from '~/features/reviewed-execution/review/submission-completion'
@@ -910,6 +913,9 @@ describe('useTxBatch execution errors', () => {
     await vi.waitFor(() => expect(sdk.executionService.simulateTransactionPlan).toHaveBeenCalled())
 
     expect(useTxBatch().entries.value[0]?.plan).toBe(planWithoutSignatureCall)
+    expect(executionMocks.prepare).toHaveBeenCalledWith([intent], expect.objectContaining({
+      expectedIntentPlans: [captureIntentPlanExpectation(intent, reviewedPlan)],
+    }))
     expect(useTxBatch().entries.value[0]?.stateOverrides).toEqual(migrationStateOverrides)
     expect(sdk.executionService.simulateTransactionPlan).toHaveBeenCalledWith(
       1,
@@ -1503,6 +1509,35 @@ describe('useTxBatch execution errors', () => {
     expect(batch.entries.value[0]?.preparing).toBe(false)
   })
 
+  it('skips warm-up without warnings while a remaining row is still compiling', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    const batch = useTxBatch()
+    const ready = intentFor(singleOperationPlan('supply'), [subAccount])
+    const pending = intentFor(singleOperationPlan('borrow'), [subAccount])
+    const warmed = { execution: { reviewId: '0x01' }, previewPlan: [], prepared: {} }
+    executionMocks.prepare.mockResolvedValue(warmed as never)
+    await batch.addEntry({ intent: ready, label: 'Supply USDC', subAccount })
+    executionMocks.prepare.mockClear()
+
+    let release!: () => void
+    executionMocks.compilePreview.mockImplementationOnce(() => new Promise<TransactionPlan>((resolve) => {
+      release = () => resolve(testIntentPlans.get(pending.intentId)!)
+    }))
+    const adding = batch.addEntry({ intent: pending, label: 'Borrow USDC', subAccount })
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+
+    expect(() => batch.prepareBatchExecutionReview()).toThrow(BatchPreviewNotReadyError)
+    batch.removeEntry(ready.intentId)
+    expect(batch.entries.value).toMatchObject([{ id: pending.intentId, preparing: true }])
+    expect(executionMocks.prepare).not.toHaveBeenCalled()
+    expect(warn).not.toHaveBeenCalledWith(expect.objectContaining({ ctx: 'useTxBatch/warmBatchExecutionReview' }), expect.anything())
+
+    release()
+    await adding
+    await expect(batch.prepareBatchExecutionReview()).resolves.toBe(warmed)
+    expect(executionMocks.prepare).toHaveBeenCalledOnce()
+  })
+
   it('keeps the add-time identity when adopting matching warmed batch semantics', async () => {
     const batch = useTxBatch()
     const preparedIntent = intentFor([] as TransactionPlan, [subAccount])
@@ -1564,6 +1599,9 @@ describe('useTxBatch execution errors', () => {
     expect(batch.entries.value).toHaveLength(1)
     expect(batch.entries.value[0]).toMatchObject({ id: secondIntent.intentId, intent: secondIntent, review: { amount: '10.0' } })
     await expect(batch.prepareBatchExecutionReview()).resolves.toBe(preparedReview)
+    expect(executionMocks.prepare).toHaveBeenLastCalledWith([secondIntent], expect.objectContaining({
+      expectedIntentPlans: [captureIntentPlanExpectation(secondIntent, [])],
+    }))
     expect(preparedIntent).toEqual(createIntent('warm', 1))
   })
 
@@ -1590,6 +1628,25 @@ describe('useTxBatch execution errors', () => {
     expect(executionMocks.compilePreview).toHaveBeenCalledWith([currentIntent], expect.anything())
   })
 
+  it('retains the add-time digest when a stored preview plan is later mutated', async () => {
+    const batch = useTxBatch()
+    const call: EVCBatchItem = { targetContract: vault, onBehalfOfAccount: subAccount, value: 0n, data: '0x12345678' }
+    const plan: TransactionPlan = [{ type: 'evcBatch', items: [call] }]
+    const intent = intentFor(plan, [subAccount])
+    const expected = captureIntentPlanExpectation(intent, plan)
+    const warmed = { execution: { reviewId: '0x01' }, previewPlan: [], prepared: {} }
+    executionMocks.prepare.mockResolvedValue(warmed as never)
+
+    await batch.addEntry({ intent, label: 'Supply', subAccount })
+    await batch.prepareBatchExecutionReview()
+    call.data = '0x87654321'
+    batch.discardBatchExecutionReview('0x01')
+    await batch.prepareBatchExecutionReview()
+
+    expect(captureIntentPlanExpectation(intent, plan)).not.toEqual(expected)
+    expect(executionMocks.prepare).toHaveBeenLastCalledWith([intent], expect.objectContaining({ expectedIntentPlans: [expected] }))
+  })
+
   it('adopts the exact generation-bound whole-cart preparation warmed after add', async () => {
     const batch = useTxBatch()
     const intent = intentFor([] as TransactionPlan, [subAccount])
@@ -1600,6 +1657,7 @@ describe('useTxBatch execution errors', () => {
     await vi.waitFor(() => expect(executionMocks.prepare).toHaveBeenCalledOnce())
 
     expect(executionMocks.prepare).toHaveBeenCalledWith([intent], expect.objectContaining({
+      expectedIntentPlans: [captureIntentPlanExpectation(intent, [])],
       presentationInputs: [{
         id: intent.intentId,
         review: { type: 'supply' },

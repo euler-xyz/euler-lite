@@ -11,8 +11,9 @@ import type { EulerSimulationProjection } from '../simulation/coverage'
 import { buildReviewedSimulation } from '../simulation/coverage'
 import { preparationCacheKey, type GenerationPublisher, type PreparationCache, type PreparationCacheIdentity } from './cache'
 import { collectPlanningRequirements } from './requirements'
-import type { CompiledIntentSet, IntentCompilerRegistry } from './compiler'
+import { assertExpectedIntentPlans, type CompiledIntentSet, type IntentCompilerRegistry, type IntentPlanExpectation } from './compiler'
 import type { PlanningSnapshot, PlanningSnapshotLoader } from './snapshot-loader'
+import { BatchPreviewNotReadyError } from './errors'
 
 export interface ReviewedExecutionDependencies {
   compiler: IntentCompilerRegistry
@@ -44,6 +45,8 @@ export interface PrepareReviewedExecutionRequest {
   runtime: Readonly<Record<string, unknown>>
   presentationKind: string
   presentationInputs: CanonicalValue
+  /** Required for carts; captured from each row's executable compiler preview. */
+  expectedIntentPlans?: readonly IntentPlanExpectation[]
   compilerVersion: string
   policyVersionDigest: Hash
   freshUntil: number
@@ -134,6 +137,10 @@ export class ReviewedExecutionPreparationService {
   }
 
   async prepare(request: PrepareReviewedExecutionRequest): Promise<PreparedReviewedExecution> {
+    const expectedIntentPlans = request.expectedIntentPlans?.map(expected => ({ ...expected }))
+    if (request.presentationKind === 'batch' && !expectedIntentPlans?.length) {
+      throw new BatchPreviewNotReadyError()
+    }
     const assertCurrent = () => this.generation.assertCurrent(request.cartGeneration)
     const assertContext = async () => {
       assertCurrent()
@@ -146,6 +153,9 @@ export class ReviewedExecutionPreparationService {
     await assertContext()
     const compiled = await this.dependencies.compiler.compile(request.intents, { snapshot, runtime: request.runtime }, assertCurrent)
     await assertContext()
+    // Check before plugin processing and every cache-adoption path. A successful
+    // simulation alone does not establish parity with the cart's row previews.
+    if (expectedIntentPlans) assertExpectedIntentPlans(compiled.intentPlans, expectedIntentPlans)
     // Plugins retain approval item references that the SDK resolver mutates in place.
     const rawCanonical = toCanonicalValue(compiled.plan)
 
