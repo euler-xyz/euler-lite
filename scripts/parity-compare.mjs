@@ -3412,7 +3412,6 @@ const ROUTE_VAULT_CONTEXT_FIELDS = new Set([
   'Rate at kink',
   'Repayment APY',
   'Repayment window',
-  'Risk manager',
   'Share token exchange rate',
   'Supply APY',
   'Supply cap',
