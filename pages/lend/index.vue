@@ -53,7 +53,7 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<EVault>((vaul
 
 const selectedCollateral = ref<string[]>([])
 const selectedMarkets = ref<string[]>([])
-const selectedRiskManagers = ref<string[]>([])
+const selectedCurators = ref<string[]>([])
 const sortBy = ref<string>('Total Supply')
 const sortDir = ref<'desc' | 'asc'>('desc')
 
@@ -63,7 +63,7 @@ useUrlQuerySync([
   { ref: sortDir, default: 'desc', queryKey: 'dir' },
   { ref: selectedCollateral, default: [], queryKey: 'vault' },
   { ref: selectedMarkets, default: [], queryKey: 'market' },
-  { ref: selectedRiskManagers, default: [], queryKey: 'riskManager' },
+  { ref: selectedCurators, default: [], queryKey: 'curator', legacyKeys: ['riskManager'] },
 ])
 
 // Cache for USD values used in sorting and filtering (keyed by vault address)
@@ -108,7 +108,7 @@ watch(chainId, (newChainId, oldChainId) => {
     clearSearch()
     selectedCollateral.value = []
     selectedMarkets.value = []
-    selectedRiskManagers.value = []
+    selectedCurators.value = []
     clearCustomFilters()
   }
 })
@@ -212,7 +212,7 @@ const assetOptions = computed(() => {
     )
 })
 
-const riskManagerOptions = computed(() => {
+const curatorOptions = computed(() => {
   return buildTvlSortedOptions(borrowableVaults.value.flatMap((vault) => {
     const tvl = vaultUsdValues.value.get(vault.address) ?? 0
     return getEntitiesByVault(vault).map(entity => ({
@@ -226,8 +226,8 @@ const filteredList = computed(() => {
     .filter(matchesSearch)
     .filter(vault => selectedCollateral.value.length ? selectedCollateral.value.includes(vault.asset.address) : true)
     .filter(vault => selectedMarkets.value.length ? selectedMarkets.value.includes(getProductByVault(vault.address).name) : true)
-    .filter(vault => selectedRiskManagers.value.length
-      ? getEntitiesByVault(vault).some(e => selectedRiskManagers.value.includes(e.name))
+    .filter(vault => selectedCurators.value.length
+      ? getEntitiesByVault(vault).some(e => selectedCurators.value.includes(e.name))
       : true)
     .filter(matchesCustomFilters)
 })
@@ -282,7 +282,7 @@ const hasActiveFilters = computed(() =>
   searchQuery.value.trim().length > 0
   || selectedCollateral.value.length > 0
   || selectedMarkets.value.length > 0
-  || selectedRiskManagers.value.length > 0
+  || selectedCurators.value.length > 0
   || customFilters.value.length > 0,
 )
 const hasLendMarkets = computed(() => borrowableVaults.value.length > 0)
@@ -298,7 +298,7 @@ const clearLendFilters = () => {
   clearSearch()
   selectedCollateral.value = []
   selectedMarkets.value = []
-  selectedRiskManagers.value = []
+  selectedCurators.value = []
   clearCustomFilters()
 }
 </script>
@@ -334,12 +334,12 @@ const clearLendFilters = () => {
         />
         <UiSelect
           v-if="enableEntityBranding"
-          :key="`risk-managers-${chainId}`"
-          v-model="selectedRiskManagers"
-          :options="riskManagerOptions"
-          placeholder="Risk manager"
-          title="Risk manager"
-          modal-input-placeholder="Search risk manager"
+          :key="`curators-${chainId}`"
+          v-model="selectedCurators"
+          :options="curatorOptions"
+          placeholder="Curator"
+          title="Curator"
+          modal-input-placeholder="Search curator"
           icon="shield"
         />
         <UiSelect
