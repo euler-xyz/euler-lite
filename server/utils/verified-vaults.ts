@@ -14,7 +14,7 @@ function computeVerifiedSet(view: LabelsView): Set<string> {
 
   // Trust anchor: every address surfaced by the on-chain
   // EscrowedCollateralPerspective is considered known. Matches the client's
-  // `vaultCategory === 'escrow'` short-circuit, but applies before the
+  // perspective-membership check, but applies before the
   // snapshot lookup so escrow vaults missing from the snapshot's collateral
   // subset are still covered.
   for (const addr of view.escrowAddresses) result.add(addr)
@@ -22,14 +22,14 @@ function computeVerifiedSet(view: LabelsView): Set<string> {
   for (const vault of view.snapshot.evkVaults) {
     const addr = tryChecksum(vault.address)
     if (addr && view.productByVault.get(addr)?.forceUnverified === true) continue
-    if (isVaultGovernorVerified(vault, view.verificationLabels)) {
+    if (isVaultGovernorVerified({ ...vault, escrowVerified: !!addr && view.escrowAddresses.has(addr) }, view.verificationLabels)) {
       if (addr) result.add(addr)
     }
   }
   for (const vault of view.snapshot.securitizeVaults) {
     const addr = tryChecksum(vault.address)
     if (addr && view.productByVault.get(addr)?.forceUnverified === true) continue
-    if (isVaultGovernorVerified(vault, view.verificationLabels)) {
+    if (isVaultGovernorVerified({ ...vault, escrowVerified: false }, view.verificationLabels)) {
       if (addr) result.add(addr)
     }
   }

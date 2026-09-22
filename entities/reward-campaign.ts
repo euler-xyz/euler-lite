@@ -1,5 +1,5 @@
 import { DateTime } from 'luxon'
-import type { Address } from 'viem'
+import { formatUnits, type Address } from 'viem'
 import type {
   RewardAction,
   RewardCampaign as SdkRewardCampaign,
@@ -27,6 +27,30 @@ export type UserReward = Omit<SdkUserReward, 'provider'> & {
   // Matches the SDK's `UserReward.timestamp` (ISO string or Unix seconds), so
   // SDK `userRewards` are assignable without narrowing.
   timestamp?: string | number
+}
+
+/**
+ * Scale a raw reward amount to whole tokens.
+ *
+ * The SDK omits `token.decimals` when no upstream source resolved them, which
+ * is distinct from a token that genuinely has 0 decimals. Returns `undefined`
+ * in the unresolved case so callers surface "unknown" rather than a number
+ * scaled by a guessed value — a 6-decimal token read as 18 is off by 1e12.
+ */
+export const rewardTokenAmount = (reward: UserReward, raw: string): number | undefined => {
+  const { decimals } = reward.token
+  if (decimals === undefined) return undefined
+  return Number(formatUnits(BigInt(raw), decimals))
+}
+
+/** Unclaimed reward in whole tokens, or `undefined` when decimals are unresolved. */
+export const rewardUnclaimedAmount = (reward: UserReward): number | undefined =>
+  rewardTokenAmount(reward, reward.unclaimed)
+
+/** Unclaimed reward in USD, or `undefined` when decimals are unresolved. */
+export const rewardUnclaimedUsdValue = (reward: UserReward): number | undefined => {
+  const amount = rewardUnclaimedAmount(reward)
+  return amount === undefined ? undefined : amount * reward.tokenPrice
 }
 
 export interface RewardCampaignDisplay {

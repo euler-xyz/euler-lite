@@ -314,16 +314,18 @@ This keeps the bridge endpoint verification aligned with the UI: label/entity ma
 | Vault Source | Verification Method |
 |-------------|---------------------|
 | **EVaults** | Address appears in `verifiedVaultAddresses` from labels |
-| **Earn vaults** | Verified if in `earnVaults` from labels (`earn-vaults.json`) |
+| **Earn vaults** | Address is in the **current** `earnVaults` labels (`earn-vaults.json`). Refresh recomputes this from labels, not from the previous registry flag. |
 | **Escrow vaults** | Loaded from `escrowedCollateralPerspective` on-chain (always verified) |
 | **Securitize vaults** | Address appears in `verifiedVaultAddresses` from labels |
 | **Unknown vaults** | Resolved via subgraph; verified only if in labels |
+
+Registry presence is not Earn verification. `updateEarnVaults` / `refreshVaults` builds `verified` as `curatedAddresses.has(vault.address)` from `useEulerLabels().earnVaults`. On-demand unlisted Earn vaults stay unverified after a refresh that still fetches them. Removing an address from `earn-vaults.json` clears stale verification on the next Earn update — do not copy the prior `verified: true`. Server snapshot hydration can mark snapshot Earn rows verified because that snapshot only includes labeled earn addresses.
 
 ### On-Chain Perspectives
 
 One on-chain perspective contract provides additional verification:
 
-- **`escrowedCollateralPerspective`**: Lists all verified escrow collateral vaults. Vaults from this perspective are marked `verified: true` and `vaultCategory: 'escrow'`.
+- **`escrowedCollateralPerspective`**: Lists all verified escrow collateral vaults. Vaults from this perspective are marked `verified: true`. Membership is used for discovery and verification; loaded classification comes from the SDK.
 
 ## Vault Categories and Types
 
@@ -360,6 +362,10 @@ The client keeps an in-session categorization cache with this shape:
   escrow: string[]     // subset of evk from the SDK escrow verified array
 }
 ```
+
+Loaded EVaults use the SDK's `isEscrow` flag: `true` means `escrow`, `false` means `standard`, and `null`/missing remains unknown, clearing any previous category. Lite does not recover classification from cached categories, snapshot buckets, or perspective membership. This applies to registry inserts, refreshes, server-snapshot hydration, and the server labels view. Classification does not grant verification: labels and on-chain perspective membership retain their existing trust rules. Snapshot buckets retain discovery provenance; the flag determines the loaded category. Before details load, perspective membership can identify discovery entries.
+
+The selected SDK adapter supplies the flag: V3 first with on-chain fallback for normal browsing, and on-chain reads for `ONCHAIN_SDK_CHAINS`. A successful V3 entity with an unknown flag does not trigger automatic SDK fallback. Full escrow address discovery remains an on-chain perspective read on every chain.
 
 For per-address lookups during direct navigation to a not-yet-cached vault, `fetchVaultCategory(address)` checks the SDK escrow verified array first, then asks `vaultMetaService.fetchVaultType` for the vault type.
 
