@@ -287,7 +287,7 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
       vault: vaultByAddr.get(addr)!,
       // A node can be "known" (resolved vault, full identity) yet still flagged
       // as unknown when its governor isn't part of any declared product entity
-      // — same signal as the per-pair "Unknown" risk-manager pill. Keep the
+      // — same signal as the per-pair "Unknown" curator pill. Keep the
       // logo/symbol but render the red badge in either case.
       isUnknown: unknownSet.has(addr),
     })),
