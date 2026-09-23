@@ -4,6 +4,11 @@ import { lstatSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const themeBootstrapScript = '(function(){var theme="dark";try{theme=localStorage.getItem("theme")==="light"?"light":"dark"}catch(e){}document.documentElement.setAttribute("data-theme",theme);document.documentElement.style.colorScheme=theme})()'
+// HelpScout Beacon loader (official embed snippet, minified) + init call.
+// Defers the actual https://beacon-v2.helpscout.net download until window load.
+// Executes under CSP via the per-request nonce injected by server/plugins/csp.ts;
+// 'strict-dynamic' then trusts the beacon script it inserts.
+const helpScoutBeaconScript = '!function(e,t,n){function a(){var e=t.getElementsByTagName("script")[0],n=t.createElement("script");n.type="text/javascript",n.async=!0,n.src="https://beacon-v2.helpscout.net",e.parentNode.insertBefore(n,e)}if(e.Beacon=n=function(t,n,a){e.Beacon.readyQueue.push({method:t,options:n,data:a})},n.readyQueue=[],"complete"===t.readyState)return a();e.attachEvent?e.attachEvent("onload",a):e.addEventListener("load",a,!1)}(window,document,window.Beacon||function(){});window.Beacon("init","29adfc12-af7e-46bc-8bfa-c3eb13225889")'
 const eulerSdkPackage = '@eulerxyz/euler-v2-sdk'
 const chartPackages = ['chart.js', 'chartjs-plugin-annotation']
 const isLinkedEulerSdk = (() => {
@@ -53,6 +58,11 @@ export default defineNuxtConfig({
           innerHTML: themeBootstrapScript,
           tagPosition: 'head',
           tagPriority: 'critical',
+        },
+        {
+          id: 'helpscout-beacon',
+          innerHTML: helpScoutBeaconScript,
+          tagPosition: 'bodyClose',
         },
       ],
       meta: [
