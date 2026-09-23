@@ -1,5 +1,10 @@
-import type { ActivityEvent } from '@eulerxyz/euler-v2-sdk'
-import type { ActivityLiquidationDisplayDetails } from '~/utils/activity-display'
+import type { ActivityAssetAmount, ActivityEvent } from '@eulerxyz/euler-v2-sdk'
+import {
+  formatActivityAssetAmount,
+  formatActivityAssetUsd,
+  getActivityAssetLabel,
+  type ActivityLiquidationDisplayDetails,
+} from '~/utils/activity-display'
 
 const QUEUE_EVENT_TYPES: readonly ActivityEvent['type'][] = [
   'set_supply_queue',
@@ -32,5 +37,26 @@ export const getActivityLiquidationBonusEntry = (
         : undefined,
     valueTitle: display.bonusTitle,
     addresses: undefined,
+  }
+}
+
+/** Liquidation USD and native conversion are independent enrichments. */
+export const getActivityAssetDisplayValues = (
+  asset: ActivityAssetAmount,
+  event: Pick<ActivityEvent, 'type' | 'category'>,
+  liquidation: ActivityLiquidationDisplayDetails | null,
+) => {
+  const converted = asset.kind === 'collateral' ? liquidation?.collateralAmount : undefined
+  const usd = asset.kind === 'assets'
+    ? liquidation?.repayUsd
+    : asset.kind === 'collateral'
+      ? liquidation?.collateralUsd
+      : undefined
+  return {
+    amount: converted ?? formatActivityAssetAmount(asset, event.type),
+    label: converted
+      ? 'Collateral seized'
+      : getActivityAssetLabel(asset.kind, event.category, event.type),
+    usd: usd ?? formatActivityAssetUsd(asset),
   }
 }

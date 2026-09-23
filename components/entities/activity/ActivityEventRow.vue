@@ -5,19 +5,17 @@ import { getExplorerLink } from '~/utils/block-explorer'
 import { fetchVaultCategory } from '~/utils/vault/categories'
 import {
   getActivityAddressCollectionSummary,
+  getActivityAssetDisplayValues,
   getActivityLiquidationBonusEntry,
 } from '~/components/entities/activity/activityEventRowDetails'
 import {
   enrichActivityAssetForDisplay,
-  formatActivityAssetAmount,
-  formatActivityAssetUsd,
   formatActivityEventLabel,
   formatActivityRelativeTimestamp,
   formatActivityTimestamp,
   formatActivityValuationForAssets,
   getActivityAmountDirection,
   getActivityAssetAddressLabel,
-  getActivityAssetLabel,
   getActivityAssetsForDisplay,
   getActivityCategoryLabel,
   getActivityChangeEntries,
@@ -162,18 +160,11 @@ const assets = computed(() => {
       getRegistryVault,
       tokenMetadata,
     )
-    const converted = enriched.kind === 'collateral'
-      ? liquidationDisplay.value?.collateralAmount
-      : undefined
-    const amount = converted ?? formatActivityAssetAmount(enriched, event.type)
+    const { amount, label, usd } = getActivityAssetDisplayValues(enriched, event, liquidationDisplay.value)
     // Portfolio event verbs already communicate direction. Signs there make
     // borrow/repay read backwards, while vault history still benefits from
     // explicit inflow/outflow direction.
     const signed = !showVault && amount !== 'Amount unavailable' && direction
-    // Once converted to underlying units the quantity is no longer in shares.
-    const label = converted
-      ? 'Collateral seized'
-      : getActivityAssetLabel(enriched.kind, event.category, event.type)
     return {
       kind: 'asset' as const,
       address: enriched.address,
@@ -187,11 +178,7 @@ const assets = computed(() => {
       // The generic "Assets" label restates what the amount already shows —
       // keep only informative labels (Allowance, Debt repaid, …).
       label: label === 'Assets' ? undefined : label,
-      usd: formatActivityAssetUsd(enriched)
-        ?? (enriched.kind === 'assets'
-          ? liquidationDisplay.value?.repayUsd
-          : liquidationDisplay.value?.collateralUsd)
-        ?? null,
+      usd,
     }
   })
 })
