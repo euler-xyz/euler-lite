@@ -16,6 +16,7 @@ import { PlanningSnapshotLoader } from '~/features/reviewed-execution/planning/s
 import { createAppSnapshotDependencies, assertRuntimeAccountContext } from '~/features/reviewed-execution/planning/app-snapshot'
 import { createLiteIntentCompilerRegistry, asCompilerRuntime, type LiteCompilerRuntime } from '~/features/reviewed-execution/planning/lite-compilers'
 import { ReviewedExecutionPreparationService } from '~/features/reviewed-execution/planning/service'
+import type { IntentPlanExpectation } from '~/features/reviewed-execution/planning/compiler'
 import { assertPluginPlanBundleIntegrity } from '~/features/reviewed-execution/domain/seal'
 import { collectPythPreviewData, rehydratePluginPrefetch, serializePluginPrefetch } from '~/features/reviewed-execution/planning/plugin-data'
 import { PYTH_FRESHNESS_POLICY, PYTH_MAX_UPDATE_FEE } from '~/features/reviewed-execution/planning/plugin-config'
@@ -74,6 +75,7 @@ interface ProviderWithSession {
 export interface PrepareReviewedExecutionOptions {
   presentationKind: string
   presentationInputs: unknown
+  expectedIntentPlans?: readonly IntentPlanExpectation[]
   cartGeneration?: number
   generation?: GenerationPublisher
 }
@@ -245,6 +247,7 @@ export const useReviewedExecution = () => {
     readOnly: boolean,
   ): Promise<PreparedExecutionReview> => {
     validateIntentSet(intents)
+    const expectedIntentPlans = options.expectedIntentPlans?.map(expected => ({ ...expected }))
     const publisher = options.generation ?? new GenerationPublisher()
     const cartGeneration = options.cartGeneration ?? publisher.advance()
     if (options.cartGeneration !== undefined) publisher.assertCurrent(cartGeneration)
@@ -473,6 +476,7 @@ export const useReviewedExecution = () => {
       runtime: asCompilerRuntime(runtime),
       presentationKind: options.presentationKind,
       presentationInputs,
+      expectedIntentPlans,
       compilerVersion: COMPILER_VERSION,
       policyVersionDigest,
       freshUntil: Date.now() + PREPARATION_CACHE_TTL_MS,

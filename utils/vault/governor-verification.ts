@@ -75,7 +75,7 @@ export const isVaultGovernorVerified = (
   vault: VerifiableVault,
   labels: VerificationLabels,
 ): boolean => {
-  // Escrow vaults have no risk manager — labels treat them as a separate
+  // Escrow vaults have no curator — labels treat them as a separate
   // trust anchor (EscrowedCollateralPerspective), no entity matching applies.
   if (vault.escrowVerified === true) return true
 
@@ -134,7 +134,7 @@ export const isEarnVaultOwnerVerified = (
 /**
  * Returns every declared entity key whose addresses contain the vault's
  * governorAdmin, in declared-key order. Companion to `isVaultGovernorVerified`
- * — answers "which entities are the risk managers?" rather than "is the vault
+ * — answers "which entities are the curators?" rather than "is the vault
  * verified?". A product may declare multiple entities and more than one can
  * match; the empty array is returned when none match (or the vault is escrow,
  * unverified, or not in any product). The router-governor gate is NOT consulted

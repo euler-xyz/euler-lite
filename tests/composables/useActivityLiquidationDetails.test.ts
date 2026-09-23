@@ -1,6 +1,7 @@
 import { effectScope } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ActivityEvent } from '@eulerxyz/euler-v2-sdk'
+import { ActivityService, type ActivityEvent } from '@eulerxyz/euler-v2-sdk'
+import { liquidationPage, oracleUsdLiquidation } from '~/tests/fixtures/liquidation-oracle-usd'
 import { useActivityLiquidationDetails } from '~/composables/useActivityLiquidationDetails'
 
 const VAULT = '0xe0a80d35bB6618CBA260120b279d357978c42BCE'
@@ -49,7 +50,7 @@ const liquidationRecord = () => ({
     bonusValue: '130000000000000000',
     blockNumber: '25562800',
   },
-  valuation: { status: 'available' as const },
+  valuation: { status: 'available' as const, source: 'historical-price-snapshots' as const },
   blockNumber: '25562800',
   txHash: TX,
   timestamp: '2026-07-18T23:13:35.000Z',
@@ -103,6 +104,41 @@ describe('useActivityLiquidationDetails', () => {
     expect(details.getLiquidationDetails(
       liquidationEvent({ type: 'deposit', category: 'lending' } as Partial<ActivityEvent>),
     )).toBeUndefined()
+  })
+
+  it('joins oracle-enriched responses through the real SDK parser with null native collateral', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(liquidationPage([oracleUsdLiquidation])))))
+    const service = new ActivityService({ endpoint: '/api/internal' })
+    const getEulerSdkForChain = vi.fn(async () => ({ activityService: service }))
+    vi.stubGlobal('useEulerSdk', () => ({ getEulerSdkForChain }))
+    const event = liquidationEvent({
+      chainId: oracleUsdLiquidation.chainId,
+      vault: oracleUsdLiquidation.vault,
+      txHash: oracleUsdLiquidation.txHash,
+      timestamp: oracleUsdLiquidation.timestamp,
+      blockNumber: oracleUsdLiquidation.blockNumber,
+      payload: {
+        violator: oracleUsdLiquidation.violator,
+        collateral: oracleUsdLiquidation.collateral,
+        repay_assets: oracleUsdLiquidation.repayAssets,
+      },
+    })
+    const scope = effectScope()
+    try {
+      const details = scope.run(() => useActivityLiquidationDetails({ events: () => [event] }))!
+      await vi.waitFor(() => expect(details.getLiquidationDetails(event)).toMatchObject({
+        repayAssetsUsd: 8.035877854117,
+        collateralAssetsUsd: 8.152917338544528,
+        bonusUsd: 0.11703948442752718,
+        valuation: { status: 'available', source: 'historical-protocol-oracle' },
+      }))
+      expect(getEulerSdkForChain).toHaveBeenCalledWith(130)
+      expect(details.getLiquidationDetails(event)).not.toHaveProperty('collateralAssets')
+      expect(details.getLiquidationDetails(event)).not.toHaveProperty('collateralAssetDecimals')
+    }
+    finally {
+      scope.stop()
+    }
   })
 
   it('leaves rows unenriched when the lookup fails', async () => {

@@ -176,7 +176,7 @@ const supplyCapPercentageDisplay = computed(() => {
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue
         v-if="enableEntityBrandingDisplay"
-        label="Risk manager"
+        label="Curator"
       >
         <div
           v-if="entities.length && isGovernorVerified"
@@ -329,7 +329,7 @@ const supplyCapPercentageDisplay = computed(() => {
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue
         v-if="vault.governor && vault.governor !== '0x0000000000000000000000000000000000000000'"
-        label="Risk manager"
+        label="Curator"
         orientation="horizontal"
       >
         <VaultOverviewAddressValue

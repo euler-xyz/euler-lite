@@ -1,10 +1,12 @@
 import { flattenBatchEntries, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
-import { getAddress } from 'viem'
+import { getAddress, type Hash } from 'viem'
+import { canonicalDigest, toCanonicalValue } from '../domain/canonical'
 import type { OperationIntent, PlannerName } from '../domain/intents'
 import { assertOperationIntent } from '../domain/schemas'
 import { validateIntentSet } from '../domain/validators'
 import type { EffectOwner, EffectOwnership } from '../materialization/prepared-plan'
 import type { PlanningSnapshot } from './snapshot-loader'
+import { ReviewedPlanDivergenceError } from './errors'
 
 export interface IntentCompilerContext {
   snapshot: PlanningSnapshot
@@ -25,6 +27,43 @@ export interface CompiledIntentSet {
     plan: TransactionPlan
   }[]
   effectOwners: Readonly<Record<string, EffectOwnership>>
+}
+
+export interface IntentPlanExpectation {
+  readonly intentId: string
+  readonly intentRevision: number
+  readonly planDigest: Hash
+}
+
+const intentPlanDigest = (plan: TransactionPlan): Hash =>
+  canonicalDigest('intent-compiler-plan-v1', toCanonicalValue(plan))
+
+/** Capture before simulation, plugins, or approval resolution can mutate the plan. */
+export const captureIntentPlanExpectation = (intent: OperationIntent, plan: TransactionPlan): IntentPlanExpectation => Object.freeze({
+  intentId: intent.intentId,
+  intentRevision: intent.revision,
+  planDigest: intentPlanDigest(plan),
+})
+
+export const assertExpectedIntentPlans = (
+  compiled: CompiledIntentSet['intentPlans'],
+  expected: readonly IntentPlanExpectation[],
+) => {
+  const diverged = new Set<string>()
+  for (let index = 0; index < Math.max(compiled.length, expected.length); index++) {
+    const entry = compiled[index]
+    const expectation = expected[index]
+    if (!entry || !expectation
+      || entry.intentId !== expectation.intentId
+      || entry.intentRevision !== expectation.intentRevision
+      || intentPlanDigest(entry.plan) !== expectation.planDigest) {
+      if (entry) diverged.add(entry.intentId)
+      if (expectation) diverged.add(expectation.intentId)
+    }
+  }
+  if (compiled.length !== expected.length || diverged.size) {
+    throw new ReviewedPlanDivergenceError([...diverged])
+  }
 }
 
 type RequiredApproval = Extract<TransactionPlan[number], { type: 'requiredApproval' }>

@@ -182,7 +182,7 @@ watchEffect(async () => {
         v-if="enableEntityBranding"
         class="flex-1"
       >
-        <div class="text-content-tertiary text-p3 mb-4">Risk manager</div>
+        <div class="text-content-tertiary text-p3 mb-4">Curator</div>
         <div
           v-if="!isGovernorVerified"
           class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
@@ -207,7 +207,7 @@ watchEffect(async () => {
             class="text-p2 text-content-primary truncate"
             data-id="data-point"
             :data-key="vault.address.toLowerCase()"
-            data-field="risk-manager"
+            data-field="curator"
             :data-value="entityName"
           >{{ entityName }}</span>
         </div>
@@ -257,7 +257,7 @@ watchEffect(async () => {
         class="flex w-full justify-between"
       >
         <div class="flex-1">
-          <div class="text-content-tertiary text-p3">Risk manager</div>
+          <div class="text-content-tertiary text-p3">Curator</div>
         </div>
         <div class="flex gap-8 justify-end items-center text-right flex-1">
           <div

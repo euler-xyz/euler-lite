@@ -201,23 +201,23 @@ export const getIsBorrowCapReached = (vault: EVault): boolean => {
 const hookDisabledCopy = (op: VaultOperation): { title: string, message: string } | null => {
   switch (op) {
     case OP_DEPOSIT:
-      return { title: 'Deposits disabled', message: 'The vault risk manager has disabled deposits. New deposits will fail.' }
+      return { title: 'Deposits disabled', message: 'The vault\'s curator has disabled deposits. New deposits will fail.' }
     case OP_MINT:
-      return { title: 'Minting disabled', message: 'The vault risk manager has disabled share minting. Minting shares directly will fail.' }
+      return { title: 'Minting disabled', message: 'The vault\'s curator has disabled share minting. Minting shares directly will fail.' }
     case OP_WITHDRAW:
-      return { title: 'Withdrawals disabled', message: 'The vault risk manager has disabled withdrawals. Withdrawals will fail.' }
+      return { title: 'Withdrawals disabled', message: 'The vault\'s curator has disabled withdrawals. Withdrawals will fail.' }
     case OP_REDEEM:
-      return { title: 'Redemptions disabled', message: 'The vault risk manager has disabled share redemptions. Redemptions will fail.' }
+      return { title: 'Redemptions disabled', message: 'The vault\'s curator has disabled share redemptions. Redemptions will fail.' }
     case OP_TRANSFER:
-      return { title: 'Share transfers disabled', message: 'The vault risk manager has disabled share transfers. Flows that route shares between sub-accounts will fail.' }
+      return { title: 'Share transfers disabled', message: 'The vault\'s curator has disabled share transfers. Flows that route shares between sub-accounts will fail.' }
     case OP_SKIM:
-      return { title: 'Skim disabled', message: 'The vault risk manager has disabled skim. Flows that mint shares for unaccounted assets (repay with shares, same-asset swap) will fail.' }
+      return { title: 'Skim disabled', message: 'The vault\'s curator has disabled skim. Flows that mint shares for unaccounted assets (repay with shares, same-asset swap) will fail.' }
     case OP_BORROW:
-      return { title: 'Borrowing disabled', message: 'The vault risk manager has disabled borrowing. New borrows will fail.' }
+      return { title: 'Borrowing disabled', message: 'The vault\'s curator has disabled borrowing. New borrows will fail.' }
     case OP_REPAY:
-      return { title: 'Repayments disabled', message: 'The vault risk manager has disabled repayments. Repayments will fail.' }
+      return { title: 'Repayments disabled', message: 'The vault\'s curator has disabled repayments. Repayments will fail.' }
     case OP_REPAY_WITH_SHARES:
-      return { title: 'Repay with shares disabled', message: 'The vault risk manager has disabled repaying debt with vault shares. Same-asset and savings repay flows will fail.' }
+      return { title: 'Repay with shares disabled', message: 'The vault\'s curator has disabled repaying debt with vault shares. Same-asset and savings repay flows will fail.' }
     // OP_PULL_DEBT, OP_LIQUIDATE, and OP_FLASHLOAN are intentionally omitted:
     // they are not triggered by any euler-lite user flow.
     default:
@@ -230,7 +230,7 @@ export const getHookDisabledWarning = (vault: EVault, op: VaultOperation): Vault
   // When vaultStatusCheck is hooked the entire vault is effectively
   // paused — show a generic "paused" message instead of op-specific copy.
   if (isOpHooked(vault, OP_VAULT_STATUS_CHECK)) {
-    return { level: 'critical', title: 'Vault paused', message: 'All operations on this vault are currently disabled because the vault-status check has been paused by the risk manager.' }
+    return { level: 'critical', title: 'Vault paused', message: 'All operations on this vault are currently disabled because the vault-status check has been paused by the curator.' }
   }
   const copy = hookDisabledCopy(op) ?? { title: 'Operation disabled', message: 'This operation is currently disabled on the vault.' }
   return { level: 'critical', ...copy }
