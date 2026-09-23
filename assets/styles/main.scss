@@ -69,3 +69,19 @@ body {
 .auto-link strong {
   font-weight: 600;
 }
+
+// The Freshdesk support widget is injected asynchronously after window load
+// (see the freshdesk-widget head script in nuxt.config.ts), so per-route
+// visibility is driven by this root class (toggled in app.vue) instead of
+// the element.
+html.support-widget-hidden #fd_frame {
+  display: none;
+}
+
+// The page declares color-scheme: dark while the Freshdesk iframe's document
+// declares none, and browsers paint an opaque white canvas behind cross-origin
+// iframes on a color-scheme mismatch. Declaring the iframe light restores its
+// transparency, removing the white box around the launcher.
+#fd_frame iframe {
+  color-scheme: light;
+}
