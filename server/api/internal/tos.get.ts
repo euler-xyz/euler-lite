@@ -1,4 +1,4 @@
-import { createError } from 'h3'
+import { createError, setResponseHeaders } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
@@ -19,6 +19,12 @@ function getUpstreamUrl(): string {
 }
 
 export default defineEventHandler(async (event) => {
+  setResponseHeaders(event, {
+    'Content-Type': 'text/plain; charset=utf-8',
+    'Content-Security-Policy': 'default-src \'none\'; sandbox',
+    'X-Content-Type-Options': 'nosniff',
+  })
+
   rateLimiter.consume(event)
 
   const upstreamUrl = getUpstreamUrl()
