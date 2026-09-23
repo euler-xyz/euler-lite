@@ -34,6 +34,8 @@ const rateLimiter = createRateLimiter({
 
 const cache = createTtlCache<unknown>({ ttlMs: CACHE_TTL_MS })
 const inFlight = createInFlightDedup<string, unknown>()
+/** Keys whose cached value is the persisted empty shape of a 403/404 upstream. */
+const absentKeys = new Set<string>()
 
 /** Fields whose values are rendered as HTML via autoLink() — check for markdown link injection. */
 const LINK_TEXT_KEYS = new Set(['description', 'deprecationReason', 'deprecateReason', 'portfolioNotice'])
@@ -141,13 +143,18 @@ function getUpstreamUrl(scope: LabelScope, file: string): string {
 export function refreshLabelFile(scope: LabelScope, file: LabelFile): Promise<unknown> {
   const key = `${scope}:${file}`
 
+  const persistAbsent = (): unknown => {
+    const empty = EMPTY_SHAPES[file]
+    cache.set(key, empty)
+    absentKeys.add(key)
+    return empty
+  }
+
   const fallback = (persist: boolean): unknown => {
     const stale = cache.getStale(key)
     if (stale) return stale
-    const empty = EMPTY_SHAPES[file]
     if (!persist) throw createError({ statusCode: 503, statusMessage: 'Vault labels are temporarily unavailable' })
-    cache.set(key, empty)
-    return empty
+    return persistAbsent()
   }
 
   return inFlight.run(key, async (): Promise<unknown> => {
@@ -164,7 +171,10 @@ export function refreshLabelFile(scope: LabelScope, file: LabelFile): Promise<un
         // so the first occurrence surfaces but repeats do not.
         if (resp.status === 404 || resp.status === 403) {
           reportStatus('labels', statusKey, `absent-${resp.status}`)
-          return fallback(true)
+          // A confirmed-absent entry is re-stamped so it stays fresh across
+          // warm cycles; a previously published file still falls back to its
+          // stale payload as before.
+          return absentKeys.has(key) ? persistAbsent() : fallback(true)
         }
         throw new Error(`${file} upstream returned ${resp.status} for scope ${scope}`)
       }
@@ -172,6 +182,7 @@ export function refreshLabelFile(scope: LabelScope, file: LabelFile): Promise<un
       const data: unknown = await resp.json()
       validateNode(data, file)
       cache.set(key, data)
+      absentKeys.delete(key)
       reportStatus('labels', statusKey, 'ok')
       return data
     }
@@ -181,6 +192,19 @@ export function refreshLabelFile(scope: LabelScope, file: LabelFile): Promise<un
       return fallback(false)
     }
   })
+}
+
+/**
+ * Returns the persisted empty payload while a 403/404 "not published" result
+ * for `scope:file` is still within TTL, otherwise `undefined`. Lets the
+ * force-refresh path-shape route skip the (slow) upstream miss for files that
+ * do not exist; warm-cache `refreshLabelFile` calls keep re-probing upstream,
+ * so a newly published file is picked up on the next cycle.
+ */
+export function getFreshAbsentLabelFile(scope: LabelScope, file: LabelFile): unknown {
+  const key = `${scope}:${file}`
+  if (!absentKeys.has(key)) return undefined
+  return cache.get(key)
 }
 
 // Read-through helper: cache hit → return synchronously; otherwise refresh.

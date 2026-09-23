@@ -15,12 +15,15 @@
  * Unlike the query-shape handler, this route does not short-circuit on a
  * fresh cache entry: every request force-refreshes (joining any in-flight
  * fetch for the same `scope:file`), and the shared cache is used for writes
- * and stale fallback only.
+ * and stale fallback only. The one exception is a file upstream reports as
+ * not published (403/404): while that result is fresh it is served from the
+ * cache instead of repeating the upstream miss.
  */
 import { createError, getRouterParam, setResponseHeader } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import {
   LABEL_FILES,
+  getFreshAbsentLabelFile,
   refreshLabelFile,
   type LabelFile,
   type LabelScope,
@@ -60,5 +63,5 @@ export default defineEventHandler(async (event) => {
   // global file via a separate `getEulerLabelsGlobalAssetsUrl()` and
   // composes the result itself.
   setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
-  return await refreshLabelFile(scope, file)
+  return getFreshAbsentLabelFile(scope, file) ?? await refreshLabelFile(scope, file)
 })
