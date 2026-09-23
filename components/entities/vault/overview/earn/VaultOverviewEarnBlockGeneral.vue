@@ -4,7 +4,6 @@ import { getAddress } from 'viem'
 
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerEntitiesOfEarnVault, useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { isEarnVaultDeprecated, getEarnVaultDeprecationReason, getEarnVaultDescription } from '~/utils/eulerLabelsUtils'
 import { autoLink } from '~/utils/autoLink'
@@ -103,21 +102,7 @@ const feeDisplay = computed(() => {
             :key="idx"
             class="flex items-center gap-8"
           >
-            <BaseAvatar
-              :label="entity.name"
-              :src="getEulerLabelEntityLogo(entity.logo)"
-            />
-            <a
-              v-if="entity.url"
-              :href="entity.url"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="text-p2 text-neutral-800 hover:text-accent-600 underline transition-colors"
-            >{{ entity.name }}</a>
-            <span
-              v-else
-              class="text-p2 text-neutral-800"
-            >{{ entity.name }}</span>
+            <ManagerEntityLink :entities="[entity]" />
           </div>
         </div>
         <VaultTypeChip

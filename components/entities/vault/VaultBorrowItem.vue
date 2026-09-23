@@ -6,7 +6,6 @@ import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo }
 import { getVaultAvailableLiquidity, getVaultUtilization } from '~/utils/vault-display'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isVaultGovernanceLimited, isVaultRecentlyAdded, isVaultKeyring, isVaultCyclicalNote, getUniqueEntitiesByVaults } from '~/utils/eulerLabelsUtils'
-import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { VaultApyModal, VaultMaxRoeModal, VaultNetApyPairModal, UiModalPreviewTrigger } from '#components'
 import { isSecuritizeBorrowPair, type AnyBorrowVaultPair } from '~/types/borrow-pair'
@@ -31,7 +30,7 @@ const isAnyGovernorUnverified = computed(() => {
 
 const entityDisplay = computed(() => {
   const all = getUniqueEntitiesByVaults([pair.collateral, pair.borrow])
-  if (all.length === 0) return { name: '', logos: [] }
+  if (all.length === 0) return { name: '', entities: [] }
   const name = all.length === 1
     ? all[0].name
     : all.length === 2
@@ -39,7 +38,7 @@ const entityDisplay = computed(() => {
       : `${all[0].name} & others`
   return {
     name,
-    logos: all.map(e => getEulerLabelEntityLogo(e.logo)),
+    entities: all,
   }
 })
 
@@ -465,18 +464,14 @@ const linkPath = computed(() => ({
           class="flex items-center gap-6"
           :class="{ 'opacity-20': isAnyGovernanceLimited }"
         >
-          <BaseAvatar
-            class="icon--20"
+          <ManagerEntityLink
+            :entities="entityDisplay.entities"
             :label="entityDisplay.name"
-            :src="entityDisplay.logos"
-          />
-          <span
-            class="text-p2 text-content-primary truncate"
-            data-id="data-point"
+            span-link
+            text-class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors truncate"
             :data-key="pairKey"
             data-field="risk-manager"
-            :data-value="entityDisplay.name"
-          >{{ entityDisplay.name }}</span>
+          />
         </div>
         <div
           v-else
@@ -666,12 +661,12 @@ const linkPath = computed(() => ({
             class="flex items-center gap-8"
             :class="{ 'opacity-20': isAnyGovernanceLimited }"
           >
-            <BaseAvatar
-              class="icon--20"
+            <ManagerEntityLink
+              :entities="entityDisplay.entities"
               :label="entityDisplay.name"
-              :src="entityDisplay.logos"
+              span-link
+              text-class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors truncate"
             />
-            <span class="text-p2 text-content-primary truncate">{{ entityDisplay.name }}</span>
           </div>
           <div
             v-else
