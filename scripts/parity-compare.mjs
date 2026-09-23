@@ -1685,6 +1685,7 @@ async function openAndCapture({
       captureSelector: scenario.captureSelector || scenario.defaults?.captureSelector || null,
       captureTarget,
       compareOptions: scenarioCompareOptions(scenario),
+      renames: PARITY_RENAMES,
     }
     const createScrapeFailureSnapshot = error => createFailedSnapshot({
       pageId,
@@ -1695,6 +1696,7 @@ async function openAndCapture({
       pathName,
       error: 'Scrape failed: ' + (error?.message || error),
       compareOptions: scenarioCompareOptions(scenario),
+      renames: PARITY_RENAMES,
     })
 
     let snapshot = await scrapeCurrentPage(page, scrapeMeta, createScrapeFailureSnapshot)
@@ -2405,6 +2407,7 @@ async function captureModalPlansOnPage({
           label,
           appName,
           compareOptions: scenarioCompareOptions(scenario),
+          renames: PARITY_RENAMES,
         })
         snapshot.requestedPath = pathName
         snapshot.waitFor = parentWaitFor || scenario.waitFor || []
@@ -2543,6 +2546,9 @@ function normalizeFollowCaptures(follow = {}) {
 }
 
 function scrapePage(meta) {
+  const renames = meta.renames || { fields: {}, labels: {} }
+  const renameField = field => (field && renames.fields[field]) || field
+  const renameLabel = text => renames.labels[text] || text
   const normalize = value => String(value || '').replace(/\\s+/g, ' ').trim()
   const normalizeComparableText = (element, value) => {
     const text = String(value || '')
@@ -2604,6 +2610,7 @@ function scrapePage(meta) {
         attrs[attr.name.slice(5)] = attr.value
       }
     }
+    if (attrs.field) attrs.field = renameField(attrs.field)
     return attrs
   }
   const isVisible = (element) => {
@@ -2772,7 +2779,7 @@ function scrapePage(meta) {
       const baseKey = baseKeyFor(attrs)
       const occurrence = occurrenceByBaseKey.get(baseKey) || 0
       occurrenceByBaseKey.set(baseKey, occurrence + 1)
-      const text = comparableText(element)
+      const text = renameLabel(comparableText(element))
       const rect = element.getBoundingClientRect()
       const dataValue = normalizedDataValue(attrs)
       const hasDataValue = dataValue !== null
@@ -3380,6 +3387,20 @@ function elementsForComparison(elements = [], routeContextKey = '') {
   })
 }
 
+// The curator wording (PR 888) renamed the field markers and labels the
+// comparison keys on; production still carries the old ones, so both sides
+// are read under the new names until production has the change.
+const PARITY_FIELD_RENAMES = Object.freeze({ 'capital-allocator': 'curator', 'risk-manager': 'curator' })
+const PARITY_LABEL_RENAMES = Object.freeze({
+  'Capital allocator': 'Curator',
+  'Risk manager': 'Curator',
+  'Search allocator': 'Search curator',
+  'Search risk manager': 'Search curator',
+})
+const PARITY_RENAMES = Object.freeze({ fields: PARITY_FIELD_RENAMES, labels: PARITY_LABEL_RENAMES })
+const renameParityField = field => PARITY_FIELD_RENAMES[field] || field
+const renameParityLabel = label => PARITY_LABEL_RENAMES[label] || label
+
 const ROUTE_VAULT_CONTEXT_FIELDS = new Set([
   'Available liquidity',
   'Adjustment speed',
@@ -3412,7 +3433,6 @@ const ROUTE_VAULT_CONTEXT_FIELDS = new Set([
   'Rate at kink',
   'Repayment APY',
   'Repayment window',
-  'Risk manager',
   'Share token exchange rate',
   'Supply APY',
   'Supply cap',
@@ -3487,17 +3507,17 @@ function nearestPrecedingVaultHeader(element, headers) {
 }
 
 function contextualDataPointField(element) {
-  if (element.field) return element.field
+  if (element.field) return renameParityField(element.field)
 
   const text = String(element.text || '')
   const firstLine = text
     .split(/\n+/)
     .map(item => item.trim())
     .find(Boolean)
-  if (firstLine) return firstLine
+  if (firstLine) return renameParityLabel(firstLine)
 
   const compact = text.replace(/\s+/g, ' ').trim()
-  return compact.split(/\s{2,}/)[0] || ''
+  return renameParityLabel(compact.split(/\s{2,}/)[0] || '')
 }
 
 function compareElementPosition(a, b) {

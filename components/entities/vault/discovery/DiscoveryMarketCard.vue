@@ -147,7 +147,7 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
           <UiHoverPreviewTooltip
             v-if="getUnknownCollateralCount(market) > 0"
             title="Unknown collateral"
-            text="Collateral vaults whose risk manager isn't part of any declared product entity (or whose vault isn't loaded into the registry)."
+            text="Collateral vaults whose curator isn't part of any declared product entity (or whose vault isn't loaded into the registry)."
             placement="top-start"
           >
             <span class="text-error-500 text-p5 mt-4">

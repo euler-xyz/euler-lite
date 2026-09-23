@@ -147,7 +147,7 @@ const augmentWithCollateralGraph = (
         if (externalVault) {
           externalCollateral.push(externalVault)
           seenExternal.add(normalized)
-          // Mirror the per-pair "Unknown" risk-manager pill (see
+          // Mirror the per-pair "Unknown" curator pill (see
           // VaultBorrowItem). An external collateral whose governor isn't part
           // of any declared product entity is the curator wiring in a vault
           // they don't actually run — surface it in the market graph too so
