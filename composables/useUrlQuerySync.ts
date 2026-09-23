@@ -17,7 +17,7 @@ export function useUrlQuerySync(params: UrlSyncParam[]): void {
   const managedKeys = new Set(params.flatMap(p => [p.queryKey, ...(p.legacyKeys ?? [])]))
   let isSyncing = false
   const isActive = ref(true)
-  let readFromLegacyKey = false
+  let legacyKeyInUrl = false
 
   onActivated(() => {
     isActive.value = true
@@ -28,9 +28,9 @@ export function useUrlQuerySync(params: UrlSyncParam[]): void {
 
   // Read URL → refs on init
   for (const param of params) {
-    const { fromLegacy, value: queryValue } = resolveUrlQueryValue(route.query, param.queryKey, param.legacyKeys)
+    const { legacyPresent, value: queryValue } = resolveUrlQueryValue(route.query, param.queryKey, param.legacyKeys)
+    if (legacyPresent) legacyKeyInUrl = true
     if (queryValue === undefined) continue
-    if (fromLegacy) readFromLegacyKey = true
 
     if (Array.isArray(param.default)) {
       const arr = Array.isArray(queryValue) ? queryValue : [queryValue]
@@ -77,8 +77,8 @@ export function useUrlQuerySync(params: UrlSyncParam[]): void {
     }
   }
 
-  // A link that arrived under a former parameter name is rewritten under the current one.
-  if (readFromLegacyKey) nextTick(syncRefsToUrl)
+  // A link that carries a former parameter name is rewritten without it.
+  if (legacyKeyInUrl) nextTick(syncRefsToUrl)
 
   // Watch refs → update URL
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -109,8 +109,8 @@ export function useUrlQuerySync(params: UrlSyncParam[]): void {
 
       // Check if any managed param in the URL doesn't match its ref
       const needsSync = params.some((param) => {
-        const { fromLegacy, value: queryValue } = resolveUrlQueryValue(route.query, param.queryKey, param.legacyKeys)
-        if (fromLegacy) return true
+        const { legacyPresent, value: queryValue } = resolveUrlQueryValue(route.query, param.queryKey, param.legacyKeys)
+        if (legacyPresent) return true
         const refValue = param.ref.value
 
         if (Array.isArray(param.default)) {

@@ -282,9 +282,9 @@ const clearEarnFilters = () => {
           :key="`curators-${chainId}`"
           v-model="selectedCurators"
           :options="curatorOptions"
-          placeholder="Capital allocator"
-          title="Capital allocator"
-          modal-input-placeholder="Search allocator"
+          placeholder="Curator"
+          title="Curator"
+          modal-input-placeholder="Search curator"
           icon="search-user"
         />
         <UiSelect
