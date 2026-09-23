@@ -38,15 +38,19 @@ const DEFAULT_WORK_DIR = path.join('/tmp', 'euler-lite-parity', sanitizeFilePart
 
 const args = parseArgs(process.argv.slice(2))
 
-if (args.flags.help || args.flags.h) {
-  printHelp()
-  process.exit(0)
+if (import.meta.main) {
+  if (args.flags.help || args.flags.h) {
+    printHelp()
+    process.exit(0)
+  }
+
+  void main().catch((error) => {
+    console.error('[parity-compare] ' + (error?.stack || error?.message || error))
+    process.exit(1)
+  })
 }
 
-void main().catch((error) => {
-  console.error('[parity-compare] ' + (error?.stack || error?.message || error))
-  process.exit(1)
-})
+export { scrapePage, compareSnapshots, PARITY_RENAMES }
 
 async function main() {
   const envFiles = await loadLocalEnvFiles()
@@ -2595,7 +2599,7 @@ function scrapePage(meta) {
     })
 
     try {
-      return normalizeComparableText(element, element.innerText || element.textContent || '')
+      return element.innerText || element.textContent || ''
     }
     finally {
       ignoredNodes.forEach(({ node, display }) => {
@@ -2764,7 +2768,7 @@ function scrapePage(meta) {
       .split(/\n+/)
       .map(item => item.trim())
       .filter(Boolean)
-    if (lines[0] !== attrs.field || lines.length < 2) return text
+    if (lines.length < 2 || renameLabel(lines[0]).toLowerCase() !== renameLabel(attrs.field).toLowerCase()) return text
     return lines.slice(1).join('\n')
   }
   const occurrenceByBaseKey = new Map()
@@ -2779,18 +2783,20 @@ function scrapePage(meta) {
       const baseKey = baseKeyFor(attrs)
       const occurrence = occurrenceByBaseKey.get(baseKey) || 0
       occurrenceByBaseKey.set(baseKey, occurrence + 1)
-      const text = renameLabel(comparableText(element))
+      const rawText = comparableText(element)
+      // Match the mapped heading while line boundaries still distinguish it from the value.
+      const visibleValue = visibleDataPointValue(attrs, rawText)
+      const text = renameLabel(normalizeComparableText(element, visibleValue))
       const rect = element.getBoundingClientRect()
       const dataValue = normalizedDataValue(attrs)
       const hasDataValue = dataValue !== null
-      const fallbackCompareValue = visibleDataPointValue(attrs, text)
-      const hasDerivedCompareValue = !hasDataValue && fallbackCompareValue !== text
+      const hasDerivedCompareValue = !hasDataValue && visibleValue !== rawText
       if (hasDerivedCompareValue) attrs['parity-derived-value'] = 'true'
       const compareValue = hasDataValue
         ? dataValue
         : isStructuralContainer(attrs)
           ? ''
-          : fallbackCompareValue
+          : text
 
       return {
         key: baseKey + '#' + occurrence,
