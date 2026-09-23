@@ -1124,7 +1124,7 @@ describe('activity display helpers', () => {
       collateralAssetsUsd: 0.8525394439635485,
       bonusUsd: 0.12800961496434857,
       unitOfAccountValuation: null,
-      valuation: { status: 'available' as const },
+      valuation: { status: 'available' as const, source: 'historical-price-snapshots' as const },
       blockNumber: '25562800',
       txHash: `0x${'ab'.repeat(32)}` as `0x${string}`,
       timestamp: '2026-07-18T23:13:35.000Z',
@@ -1265,7 +1265,7 @@ describe('activity display helpers', () => {
       collateralAssetsUsd: undefined,
       bonusUsd: undefined,
       unitOfAccountValuation: null,
-      valuation: { status: 'unavailable' as const },
+      valuation: { status: 'unavailable' as const, source: 'historical-price-snapshots' as const },
     })
     expect(sparse).toEqual({})
   })
