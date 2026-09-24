@@ -30,10 +30,14 @@ import {
   type EulerEarn,
 } from '@eulerxyz/euler-v2-sdk'
 import { eulerLabelProductEmpty, type EulerLabelEarnVaultEntry, type EulerLabelProduct, type EulerLabelEntity, type EulerLabelPointReward } from '~/entities/euler/labels'
-import { getCurrentEulerLabelsData, getEulerLabelWrapPairs } from '~/composables/useEulerLabels'
+import { getCurrentEulerLabelsData, getEulerLabelsSourceData, getEulerLabelWrapPairs } from '~/composables/useEulerLabels'
 import { normalizeAddress } from '~/utils/normalizeAddress'
+import { matchesDeploymentVaultTag } from '~/utils/public-labels'
 
 const labels = () => getCurrentEulerLabelsData()
+
+export const isVaultSelectedByTag = (address: string): boolean =>
+  matchesDeploymentVaultTag(getEulerLabelsSourceData(), address)
 
 const MAX_REGEX_INPUT_LEN = 128
 

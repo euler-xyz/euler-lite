@@ -14,7 +14,7 @@ defineProps<{ notice: string }>()
       name="info-circle"
       class="!w-20 !h-20 text-accent-600 shrink-0"
     />
-    <!-- eslint-disable vue/no-v-html -- trusted label content -->
+    <!-- eslint-disable vue/no-v-html -- autoLink escapes label text before adding links -->
     <span
       class="text-accent-700 text-p4 auto-link"
       @click="stopLinkPropagation"

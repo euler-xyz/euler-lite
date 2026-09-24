@@ -6,7 +6,7 @@ import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 
 import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
-import { getProductByVault, applyVaultOverrides, getEntitiesByEarnVault, isVaultRecentlyAdded, isVaultDeprecated, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, applyVaultOverrides, getEntitiesByEarnVault, isVaultRecentlyAdded, isVaultDeprecated, isEarnVaultNotExplorable, isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
@@ -28,7 +28,7 @@ const { getEarnVaults, isVerifiedVault } = useVaultRegistry()
 const { chainId } = useEulerAddresses()
 const showAllLabelEntries = useShowAllLabelEntries()
 const list = computed(() => getEarnVaults().filter(v =>
-  isVerifiedVault(v.address) && (showAllLabelEntries.value || !isEarnVaultNotExplorable(v.address)),
+  isVerifiedVault(v.address) && isVaultSelectedByTag(v.address) && (showAllLabelEntries.value || !isEarnVaultNotExplorable(v.address)),
 ))
 
 const { enableEntityBranding } = useDeployConfig()
@@ -164,7 +164,7 @@ const curatorOptions = computed(() => {
   return buildTvlSortedOptions(list.value.flatMap((vault) => {
     const tvl = vaultTotalSupplyUsd.value.get(vault.address) ?? 0
     return getEntitiesByEarnVault(vault).map(entity => ({
-      key: entity.name, label: entity.name, tvl, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined,
+      key: entity.name, label: entity.name, tvl, icon: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined,
     }))
   }))
 })

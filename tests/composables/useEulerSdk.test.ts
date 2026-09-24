@@ -14,7 +14,6 @@ type BuildEulerSDKOptions = {
     v3ApiUrl?: string
     tokenlistApiBaseUrl?: string
     deploymentsUrl?: string
-    eulerLabelsBaseUrl?: string
     rewardsMerklApiUrl?: string
     rewardsBrevisApiUrl?: string
     rewardsBrevisProofsApiUrl?: string
@@ -151,7 +150,6 @@ describe('useEulerSdk', () => {
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
         configEulerChainsUrl: 'https://example.test/EulerChains.json',
-        configLabelsBaseUrl: 'https://labels.example.test/',
       },
     }))
 
@@ -167,7 +165,6 @@ describe('useEulerSdk', () => {
       v3ApiUrl: '/api/internal',
       tokenlistApiBaseUrl: '/api/internal',
       deploymentsUrl: '/api/internal/euler-chains',
-      eulerLabelsBaseUrl: '/api/internal/labels',
     })
     expect(options.rpcUrls).toBeUndefined()
     expect(options.deploymentServiceConfig).toBeUndefined()
@@ -182,7 +179,6 @@ describe('useEulerSdk', () => {
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
         configEulerChainsUrl: '',
-        configLabelsBaseUrl: '',
       },
     }))
 
@@ -199,7 +195,6 @@ describe('useEulerSdk', () => {
       intrinsicApyV3ApiUrl: '/api/internal',
       eulerInterfacesBranch: 'account-lens-update',
       deploymentsUrl: '/api/internal/euler-chains',
-      eulerLabelsBaseUrl: '/api/internal/labels',
       rewardsMerklApiUrl: '/api/internal/proxy/merkl',
       rewardsBrevisApiUrl: '/api/internal/proxy/incentra/sdk/v1/eulerCampaigns',
       rewardsBrevisProofsApiUrl: '/api/internal/proxy/incentra/v1/getMerkleProofsBatch',
@@ -258,7 +253,6 @@ describe('useEulerSdk', () => {
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
         configEulerChainsUrl: '',
-        configLabelsBaseUrl: '',
       },
     }))
 
@@ -291,7 +285,6 @@ describe('useEulerSdk', () => {
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
         configEulerChainsUrl: '',
-        configLabelsBaseUrl: '',
       },
     }))
 
@@ -317,7 +310,6 @@ describe('useEulerSdk', () => {
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
         configEulerChainsUrl: '',
-        configLabelsBaseUrl: '',
       },
     }))
 

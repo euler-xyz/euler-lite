@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createEmptyEulerLabelsData } from '@eulerxyz/euler-v2-sdk'
 import { buildLabelsView, buildProductDescriptors, buildTokenLogoMap, fetchTokenList } from '~/server/utils/labels-view'
 import { getServerSdk } from '~/server/utils/sdk-server'
 import { refreshVerifiedAddressSet } from '~/server/utils/verified-vaults'
 import { refreshChainVaultMetadata } from '~/server/utils/vault-metadata'
 import { getInternalFetchHeaders } from '~/server/utils/internal-headers'
+import { getPublicEulerLabelsData } from '~/server/utils/public-labels-source'
 
 vi.mock('~/server/utils/sdk-server', () => ({ getServerSdk: vi.fn() }))
+vi.mock('~/server/utils/public-labels-source', () => ({ getPublicEulerLabelsData: vi.fn() }))
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -76,18 +79,20 @@ describe('buildProductDescriptors', () => {
 })
 
 describe('SDK escrow classification in public views', () => {
-  it('uses flags for presentation while retaining full perspective trust coverage', async () => {
+  it('keeps public metadata and perspective trust independent of classification and deployment tags', async () => {
     const flagged = '0x0000000000000000000000000000000000000001'
     const standard = '0x0000000000000000000000000000000000000002'
     const unknown = '0x0000000000000000000000000000000000000003'
     const unloaded = '0x0000000000000000000000000000000000000004'
     const flags: Record<string, boolean | null> = { [flagged]: true, [standard]: false, [unknown]: null }
     vi.stubGlobal('$fetch', vi.fn(async () => ({ tokens: [] })))
+    vi.mocked(getPublicEulerLabelsData).mockResolvedValue({
+      ...createEmptyEulerLabelsData(),
+      verifiedVaultAddresses: [flagged, standard, unknown],
+      rawGeoPolicies: [],
+      vaultTagAddresses: new Set(),
+    })
     vi.mocked(getServerSdk).mockResolvedValue({
-      eulerLabelsService: { fetchEulerLabelsData: async () => ({
-        verifiedVaultAddresses: [flagged, standard, unknown], earnVaults: [],
-        products: {}, entities: {}, earnVaultEntries: {}, deprecatedEarnVaults: {},
-      }) },
       vaultMetaService: { fetchVaultTypes: async () => ({}) },
       eVaultService: {
         fetchVerifiedVaultAddresses: async () => [standard, unknown, unloaded],
