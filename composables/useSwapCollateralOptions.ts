@@ -29,7 +29,8 @@ export const useSwapCollateralOptions = ({
     const unique = new Map<string, EVault>()
     candidates.forEach((vault) => {
       const address = getAddress(vault.address)
-      if (!isVaultSelectedByTag(address)) return
+      // Existing repayment collateral remains selectable regardless of deployment tags.
+      if (tagContext !== 'supply-source' && !isVaultSelectedByTag(address)) return
       if (currentAddress && address === currentAddress) {
         return
       }
