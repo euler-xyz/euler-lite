@@ -27,6 +27,7 @@ import { isSdkErrorDiagnostic } from './sdk-diagnostics'
 import { getPublicEulerLabelsData } from './public-labels-source'
 import { getHostedEntityKeys, type VerificationLabels } from '~/utils/vault/governor-verification'
 import { resolveEulerRouterGovernors } from '~/utils/vault/euler-router-governance'
+import { resolveEVaultCategory } from '~/utils/vault/escrow-category'
 import { governableGovernorAbi } from '~/abis/oracle'
 
 export interface ChainVaultsSnapshot {
@@ -301,7 +302,7 @@ async function buildSnapshot(
   const evkVaults = fetchedEVaults.map(vault =>
     withVaultMetadata(vault, {
       verified: true,
-      vaultCategory: escrowAddresses.has(vault.address) ? 'escrow' : 'standard',
+      vaultCategory: resolveEVaultCategory(vault),
     }),
   )
   const securitizeVaults = (securitize.result.filter(Boolean) as SecuritizeCollateralVault[])
@@ -322,15 +323,15 @@ async function buildSnapshot(
     }
   }
 
-  const escrowVaults = [
-    ...evkVaults.filter(vault => escrowAddresses.has(vault.address)),
-    ...(fetchedEscrow.result.filter(Boolean) as EVault[]),
-  ].map(vault =>
+  const referencedVaults = (fetchedEscrow.result.filter(Boolean) as EVault[]).map(vault =>
     withVaultMetadata(vault, {
       verified: true,
-      vaultCategory: 'escrow',
+      vaultCategory: resolveEVaultCategory(vault),
     }),
   )
+  const existingEVaults = new Set(evkVaults.map(vault => vault.address))
+  evkVaults.push(...referencedVaults.filter(vault => !existingEVaults.has(vault.address)))
+  const escrowVaults = evkVaults.filter(vault => vault.isEscrow === true)
 
   return {
     escrowAddresses,

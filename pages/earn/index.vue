@@ -6,7 +6,7 @@ import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 
 import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
-import { getProductByVault, applyVaultOverrides, getEntitiesByEarnVault, isVaultRecentlyAdded, isVaultDeprecated, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, applyVaultOverrides, getEntitiesByEarnVault, isVaultRecentlyAdded, isVaultDeprecated, isEarnVaultNotExplorable, isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
@@ -28,7 +28,7 @@ const { getEarnVaults, isVerifiedVault } = useVaultRegistry()
 const { chainId } = useEulerAddresses()
 const showAllLabelEntries = useShowAllLabelEntries()
 const list = computed(() => getEarnVaults().filter(v =>
-  isVerifiedVault(v.address) && (showAllLabelEntries.value || !isEarnVaultNotExplorable(v.address)),
+  isVerifiedVault(v.address) && isVaultSelectedByTag(v.address) && (showAllLabelEntries.value || !isEarnVaultNotExplorable(v.address)),
 ))
 
 const { enableEntityBranding } = useDeployConfig()
@@ -62,7 +62,7 @@ useUrlQuerySync([
   { ref: sortBy, default: 'Total Supply', queryKey: 'sort' },
   { ref: sortDir, default: 'desc', queryKey: 'dir' },
   { ref: selectedCollateral, default: [], queryKey: 'vault' },
-  { ref: selectedCurators, default: [], queryKey: 'allocator' },
+  { ref: selectedCurators, default: [], queryKey: 'curator', legacyKeys: ['allocator'] },
 ])
 
 // Cache for USD values used in sorting (keyed by vault address)
@@ -282,9 +282,9 @@ const clearEarnFilters = () => {
           :key="`curators-${chainId}`"
           v-model="selectedCurators"
           :options="curatorOptions"
-          placeholder="Capital allocator"
-          title="Capital allocator"
-          modal-input-placeholder="Search allocator"
+          placeholder="Curator"
+          title="Curator"
+          modal-input-placeholder="Search curator"
           icon="search-user"
         />
         <UiSelect

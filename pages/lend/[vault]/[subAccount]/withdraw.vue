@@ -601,7 +601,7 @@ const addToBatch = async () => {
         intent: createWithdrawIntent(quote, false),
         preparedIntent: quoteIntents?.[0],
         subAccount: ownerAddr,
-        review: { type: 'swap-withdraw', asset: asset.value, amount: amountLabel, swapToAsset: outputAsset, swapToAmount: outputAmount, quoteFetchedAt: swapEffectiveQuoteFetchedAt.value },
+        review: { type: 'swap-withdraw', asset: asset.value, amount: amountLabel, swapToAsset: outputAsset, swapToAmount: outputAmount, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: swapEffectiveQuoteFetchedAt.value },
       })
     }
     else {

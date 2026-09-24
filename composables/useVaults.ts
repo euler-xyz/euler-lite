@@ -18,7 +18,7 @@ import {
 import { extractUnresolvedCollateralAddresses } from '~/utils/vault/collateral-discovery'
 import { isLiveCollateralEdge } from '~/utils/vault/ltv'
 import { fetchChainVaultCategories, fetchVaultCategory, isSecuritizeVault, resetVaultCategoryCache } from '~/utils/vault/categories'
-import { getProductByVault, getProductKeyByVault, isVaultNotExplorable, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, getProductKeyByVault, isVaultNotExplorable, isEarnVaultNotExplorable, isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { getAddress, type Address } from 'viem'
 import { useVaultRegistry } from './useVaultRegistry'
@@ -229,6 +229,7 @@ const borrowList = computed((): AnyBorrowVaultPair[] => {
 
       const collateralVault = registryGetVault(ltv.address)
       if (!collateralVault) return
+      if (!isVaultSelectedByTag(collateralVault.address)) return
       if (!showAllLabelEntries.value && isVaultNotExplorable(collateralVault.address)) return
 
       const key = `${borrowVault.address.toLowerCase()}:${ltv.address.toLowerCase()}`
@@ -333,14 +334,12 @@ const updateEVaults = async (vaultAddresses: string[], generation?: number, sile
 
     registrySetMany(fetchedVaults.map((vault) => {
       const existing = registryGet(vault.address)
-      const vaultCategory = existing?.vaultCategory ?? (isKnownEscrowAddress(vault.address) ? 'escrow' : undefined)
-      const verified = vaultCategory === 'escrow' || existing?.verified === true || options.verifiedAddresses?.has(vault.address.toLowerCase()) === true
+      const verified = isKnownEscrowAddress(vault.address) || existing?.verified === true || options.verifiedAddresses?.has(vault.address.toLowerCase()) === true
       return {
         address: vault.address,
         vault,
         type: 'evk' as const,
         verified,
-        vaultCategory,
       }
     }), targetChainId)
 
@@ -473,7 +472,6 @@ const fetchNeededEscrowVaults = async (addresses: string[], generation: number, 
       vault,
       type: 'evk' as const,
       verified: true,
-      vaultCategory: 'escrow' as const,
     }))
   registrySetMany(entries, targetChainId)
 }
@@ -771,7 +769,6 @@ const hydrateFromServer = async (targetChainId: number, generation: number): Pro
         vault: h.vault,
         type: 'evk' as const,
         verified: true,
-        vaultCategory: 'escrow' as const,
       })),
       ...earn.map(h => ({ address: h.vault.address, vault: h.vault, type: 'earn' as const, verified: true })),
       ...securitize.map(h => ({ address: h.vault.address, vault: h.vault, type: 'securitize' as const, verified: true })),
@@ -1031,7 +1028,7 @@ const updateVault = async (vaultAddress: string): Promise<EVault | SecuritizeCol
 
   const vault = await fetchVaultByType(address, 'evk', targetChainId) as EVault
 
-  registrySet(address, vault, 'evk', isKnownEscrowAddress(address) ? { verified: true, vaultCategory: 'escrow' } : undefined, targetChainId)
+  registrySet(address, vault, 'evk', isKnownEscrowAddress(address) ? { verified: true } : undefined, targetChainId)
   return vault
 }
 /**
@@ -1101,7 +1098,7 @@ const getEscrowVault = async (address: string): Promise<EVault> => {
   // fetch on-demand
   if (isKnownEscrowAddress(normalizedAddress)) {
     const vault = await useVaultRegistry().fetchVaultByType(normalizedAddress, 'evk', targetChainId) as EVault
-    registrySet(normalizedAddress, vault, 'evk', { verified: true, vaultCategory: 'escrow' }, targetChainId)
+    registrySet(normalizedAddress, vault, 'evk', { verified: true }, targetChainId)
     return vault
   }
 
@@ -1112,11 +1109,11 @@ const getEscrowVault = async (address: string): Promise<EVault> => {
 }
 
 const updateEscrowVault = async (vaultAddress: string): Promise<EVault> => {
-  const { set: registrySet } = useVaultRegistry()
+  const { set: registrySet, isKnownEscrowAddress } = useVaultRegistry()
   const address = getAddress(vaultAddress)
   const targetChainId = resolveTargetChainId()
   const vault = await useVaultRegistry().fetchVaultByType(address, 'evk', targetChainId) as EVault
-  registrySet(address, vault, 'evk', { verified: true, vaultCategory: 'escrow' }, targetChainId)
+  registrySet(address, vault, 'evk', isKnownEscrowAddress(address) ? { verified: true } : undefined, targetChainId)
   return vault
 }
 
@@ -1266,11 +1263,12 @@ export const useVaults = () => {
 
   // Check if vault's on-chain governorAdmin matches any of the product's declared entities
   const isVaultGovernorVerified = (vault: EVault): boolean => {
-    const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
+    const { getVaultCategory, isVerifiedVault, isKnownEscrowAddress } = useVaultRegistry()
     const vaultCategory = getVaultCategory(vault.address)
     return verifyVaultGovernor(
       Object.assign(vault, {
-        verified: vaultCategory === 'escrow' || isVerifiedVault(vault.address),
+        verified: isVerifiedVault(vault.address),
+        escrowVerified: isKnownEscrowAddress(vault.address),
         vaultCategory,
       }),
       buildVerificationLabels(),

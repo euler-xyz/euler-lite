@@ -103,11 +103,17 @@ const makeMalformedRouterOracle = () => ({
 })
 
 describe('isVaultGovernorVerified', () => {
-  it('returns true for escrow vaults regardless of governor', () => {
+  it('returns true for perspective-verified escrow vaults regardless of governor', () => {
     const vault = makeVault({ verified: false } as Partial<Vault>)
-    Object.assign(vault, { vaultCategory: 'escrow' })
+    Object.assign(vault, { vaultCategory: 'escrow', escrowVerified: true })
     const labels = buildLabels()
     expect(isVaultGovernorVerified(vault, labels)).toBe(true)
+  })
+
+  it('does not grant trust from SDK escrow classification alone', () => {
+    const vault = makeVault({ verified: true })
+    Object.assign(vault, { vaultCategory: 'escrow', isEscrow: true })
+    expect(isVaultGovernorVerified(vault, buildLabels())).toBe(false)
   })
 
   it('returns false when vault is not verified', () => {

@@ -993,9 +993,9 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       const reviewAsset = isNativeRepay
         ? (resolveWrappedNativeAsset(capturedChainId) || snapshot.selectedAsset!)
         : snapshot.selectedAsset!
-      const minimumOutput = BigInt(quote.amountOutMin || 0)
-      const estimatedOutput = minimumOutput > 0n
-        ? formatUnits(minimumOutput, Number(snapshot.borrowVault!.asset.decimals))
+      const expectedOutput = BigInt(quote.amountOut || 0)
+      const estimatedOutput = expectedOutput > 0n
+        ? formatUnits(expectedOutput, Number(snapshot.borrowVault!.asset.decimals))
         : ''
       const reviewLaunch = captureReviewState(currentIntents, {
         presentationKind: 'repay',

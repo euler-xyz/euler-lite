@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { buildProductDescriptors, buildTokenLogoMap, fetchTokenList } from '~/server/utils/labels-view'
+import { createEmptyEulerLabelsData } from '@eulerxyz/euler-v2-sdk'
+import { buildLabelsView, buildProductDescriptors, buildTokenLogoMap, fetchTokenList } from '~/server/utils/labels-view'
+import { getServerSdk } from '~/server/utils/sdk-server'
+import { refreshVerifiedAddressSet } from '~/server/utils/verified-vaults'
+import { refreshChainVaultMetadata } from '~/server/utils/vault-metadata'
 import { getInternalFetchHeaders } from '~/server/utils/internal-headers'
+import { getPublicEulerLabelsData } from '~/server/utils/public-labels-source'
+
+vi.mock('~/server/utils/sdk-server', () => ({ getServerSdk: vi.fn() }))
+vi.mock('~/server/utils/public-labels-source', () => ({ getPublicEulerLabelsData: vi.fn() }))
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -67,5 +75,46 @@ describe('buildProductDescriptors', () => {
 
     expect(productByVault.get(limitedVault)?.governanceLimited).toBe(true)
     expect(productByVault.get(standardVault)?.governanceLimited).toBe(false)
+  })
+})
+
+describe('SDK escrow classification in public views', () => {
+  it('keeps public metadata and perspective trust independent of classification and deployment tags', async () => {
+    const flagged = '0x0000000000000000000000000000000000000001'
+    const standard = '0x0000000000000000000000000000000000000002'
+    const unknown = '0x0000000000000000000000000000000000000003'
+    const unloaded = '0x0000000000000000000000000000000000000004'
+    const flags: Record<string, boolean | null> = { [flagged]: true, [standard]: false, [unknown]: null }
+    vi.stubGlobal('$fetch', vi.fn(async () => ({ tokens: [] })))
+    vi.mocked(getPublicEulerLabelsData).mockResolvedValue({
+      ...createEmptyEulerLabelsData(),
+      verifiedVaultAddresses: [flagged, standard, unknown],
+      rawGeoPolicies: [],
+      vaultTagAddresses: new Set(),
+    })
+    vi.mocked(getServerSdk).mockResolvedValue({
+      vaultMetaService: { fetchVaultTypes: async () => ({}) },
+      eVaultService: {
+        fetchVerifiedVaultAddresses: async () => [standard, unknown, unloaded],
+        fetchVaults: async (_chain: number, addresses: string[]) => ({ errors: [], result: addresses.map(address => ({
+          address, isEscrow: flags[address], collaterals: [], shares: { name: 'Normal vault' },
+        })) }),
+      },
+    } as never)
+    const view = await buildLabelsView(991)
+    expect(view.snapshot.escrowVaults.map(vault => vault.address)).toEqual([flagged])
+    expect(view.snapshot.evkVaults.find(vault => vault.address === standard)).toMatchObject({ vaultCategory: 'standard' })
+    expect(view.snapshot.evkVaults.find(vault => vault.address === unknown)).toMatchObject({ isEscrow: null, vaultCategory: undefined })
+    expect(view.escrowAddresses).toEqual(new Set([standard, unknown, unloaded]))
+
+    const verified = await refreshVerifiedAddressSet(991)
+    expect(verified).toEqual(new Set([standard, unknown, unloaded]))
+    expect(verified.has(flagged)).toBe(false)
+
+    const metadata = await refreshChainVaultMetadata(991)
+    expect(metadata.get(standard)?.name).toBe('Normal vault')
+    expect(metadata.get(unknown)?.name).toBe('Normal vault')
+    expect(metadata.get(flagged)?.name).not.toBe('Normal vault')
+    expect(metadata.has(unloaded)).toBe(true)
   })
 })

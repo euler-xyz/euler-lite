@@ -55,6 +55,7 @@ describe('public labels server source', () => {
     vi.stubEnv('DEPRECATED_CHAINS', '')
     vi.stubEnv('LABELS_V3_SET', '')
     vi.stubEnv('LABELS_V3_VERSION', '')
+    vi.stubEnv('LABELS_VAULT_TAG', '')
     vi.stubEnv('V3_API_URL', 'https://v3.example.test')
     mocks.fetchWithTimeout.mockReset().mockImplementation(async (url: string) =>
       new URL(url).pathname.endsWith('/versions')
@@ -113,6 +114,31 @@ describe('public labels server source', () => {
     expect(mocks.fetchWithTimeout.mock.calls.slice(2, 5).every(([url]) =>
       new URL(url).searchParams.get('version') === 'v20260804151305236',
     )).toBe(true)
+  })
+
+  it('attaches the deployment tag to cached and refreshed responses without filtering the upstream request', async () => {
+    const { getPublicLabelsBundle, refreshPublicLabelsBundle, getPublicEulerLabelsData } = await import('~/server/utils/public-labels-source')
+    const unfiltered = await getPublicLabelsBundle(1)
+    vi.stubEnv('LABELS_VAULT_TAG', ' governance limited ')
+    expect(await getPublicLabelsBundle(1)).toMatchObject({ ...unfiltered, vaultTag: 'governance limited' })
+    expect((await getPublicEulerLabelsData(1)).vaultTagAddresses?.size).toBe(0)
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(7)
+    expect(await refreshPublicLabelsBundle(1)).toHaveProperty('vaultTag', 'governance limited')
+    expect(mocks.fetchWithTimeout.mock.calls.every(([url]) => !new URL(url).searchParams.has('tags'))).toBe(true)
+    vi.stubEnv('LABELS_VAULT_TAG', '')
+    expect(await getPublicLabelsBundle(1)).not.toHaveProperty('vaultTag')
+  })
+
+  it('includes the deployment selection with static snapshots', async () => {
+    vi.stubEnv('LABELS_SOURCE', 'static')
+    vi.stubEnv('STATIC_LABELS_BASE_URL', 'https://fork.test')
+    vi.stubEnv('LABELS_VAULT_TAG', 'base')
+    mocks.fetchWithTimeout.mockImplementation(async () => new Response('', { status: 404 }))
+    const { getPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
+    const bundle = await getPublicLabelsBundle(1)
+    expect(bundle).toMatchObject({ source: 'static', vaultTag: 'base' })
+    vi.stubEnv('LABELS_VAULT_TAG', '')
+    expect(await getPublicLabelsBundle(1)).not.toHaveProperty('vaultTag')
   })
 
   it('loads missing inventory verdicts through the SDK and retains them on refresh failure', async () => {

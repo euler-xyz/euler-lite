@@ -457,7 +457,7 @@ describe('attribute stats matrix', () => {
 })
 
 describe('getMarketEntities', () => {
-  it('includes Securitize product members when deriving market risk managers', () => {
+  it('includes Securitize product members when deriving market curators', () => {
     const borrowVault = makeVault('0xBorrow', [])
     const securitizeVault = makeSecuritizeVault('0xSecuritize')
     const market = makeMarket([borrowVault, securitizeVault])

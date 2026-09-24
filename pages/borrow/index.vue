@@ -157,7 +157,7 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<AnyBorrowVaul
 const selectedCollateral = ref<string[]>([])
 const selectedDebt = ref<string[]>([])
 const selectedMarkets = ref<string[]>([])
-const selectedRiskManagers = ref<string[]>([])
+const selectedCurators = ref<string[]>([])
 const sortBy = ref<string>('Active')
 const sortDir = ref<'desc' | 'asc'>('desc')
 const MIN_BORROW_LIQUIDITY_USD = 1000
@@ -178,7 +178,7 @@ useUrlQuerySync([
   { ref: selectedCollateral, default: [], queryKey: 'collateral' },
   { ref: selectedDebt, default: [], queryKey: 'debt' },
   { ref: selectedMarkets, default: [], queryKey: 'market' },
-  { ref: selectedRiskManagers, default: [], queryKey: 'riskManager' },
+  { ref: selectedCurators, default: [], queryKey: 'curator', legacyKeys: ['riskManager'] },
 ])
 
 watch(sortBy, (newSortBy) => {
@@ -355,7 +355,7 @@ watch(chainId, (newChainId, oldChainId) => {
     selectedCollateral.value = []
     selectedDebt.value = []
     selectedMarkets.value = []
-    selectedRiskManagers.value = []
+    selectedCurators.value = []
     clearCustomFilters()
   }
 })
@@ -429,7 +429,7 @@ const marketOptions = computed(() => {
   }))
 })
 
-const riskManagerOptions = computed(() => {
+const curatorOptions = computed(() => {
   const counted = new Set<string>()
   return buildTvlSortedOptions(activeBorrowList.value.flatMap((pair) => {
     const pairKey = getPairKey(pair)
@@ -453,8 +453,8 @@ const filteredBorrowList = computed(() => {
         : true,
     )
     .filter(pair => selectedMarkets.value.length ? selectedMarkets.value.includes(getProductByVault(pair.collateral.address).name) : true)
-    .filter(pair => selectedRiskManagers.value.length
-      ? getUniqueEntitiesByVaults([pair.collateral, pair.borrow]).some(e => selectedRiskManagers.value.includes(e.name))
+    .filter(pair => selectedCurators.value.length
+      ? getUniqueEntitiesByVaults([pair.collateral, pair.borrow]).some(e => selectedCurators.value.includes(e.name))
       : true)
     .filter(matchesCustomFilters)
 })
@@ -579,7 +579,7 @@ const hasClearableFilters = computed(() =>
   || selectedCollateral.value.length > 0
   || selectedDebt.value.length > 0
   || selectedMarkets.value.length > 0
-  || selectedRiskManagers.value.length > 0
+  || selectedCurators.value.length > 0
   || customFilters.value.some(filter => filter.id !== defaultBorrowLiquidityFilter.id),
 )
 const hasBorrowMarkets = computed(() => activeBorrowList.value.length > 0)
@@ -595,7 +595,7 @@ const clearBorrowFilters = () => {
   selectedCollateral.value = []
   selectedDebt.value = []
   selectedMarkets.value = []
-  selectedRiskManagers.value = []
+  selectedCurators.value = []
   clearCustomFilters()
 }
 </script>
@@ -638,13 +638,13 @@ const clearBorrowFilters = () => {
         />
         <UiSelect
           v-if="enableEntityBranding"
-          :key="`risk-managers-${chainId}`"
-          v-model="selectedRiskManagers"
+          :key="`curators-${chainId}`"
+          v-model="selectedCurators"
           class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
-          :options="riskManagerOptions"
-          placeholder="Risk manager"
-          title="Risk manager"
-          modal-input-placeholder="Search risk manager"
+          :options="curatorOptions"
+          placeholder="Curator"
+          title="Curator"
+          modal-input-placeholder="Search curator"
           icon="shield"
         />
         <UiSelect

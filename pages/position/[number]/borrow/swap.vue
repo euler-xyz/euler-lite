@@ -49,7 +49,7 @@ import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { areProjectedRatesComplete, getPositionMultiplier, getProjectedRatesBatch, type ProjectedRates } from '~/utils/vault/apy'
 import { createRaceGuard } from '~/utils/race-guard'
 import { ltvToPercent, nanoToValue } from '~/utils/crypto-utils'
-import { getVaultProductName, isEarnVaultNotExplorable, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
+import { getVaultProductName, isEarnVaultNotExplorable, isVaultNotExplorableLend, isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
 import { buildCollateralOption, computeBorrowApy, computeSupplyApy } from '~/utils/collateralOptions'
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
@@ -578,7 +578,7 @@ const externalSupplyOnlyTargetVaults = computed<SupplyTargetVault[]>(() => {
   // Earn vaults have no hook-based op gating; geo/deprecation restrictions are
   // applied per option via getVaultTags in buildCollateralOption.
   const earnVaults = getEarnVaults().filter(vault =>
-    showAllLabelEntries.value || !isEarnVaultNotExplorable(vault.address),
+    isVaultSelectedByTag(vault.address) && (showAllLabelEntries.value || !isEarnVaultNotExplorable(vault.address)),
   )
   return [...lendVaults, ...earnVaults]
 })

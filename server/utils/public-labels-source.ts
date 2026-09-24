@@ -2,7 +2,7 @@ import { createGeoPolicySource } from './geo-policy-source'
 import { createTtlCache } from './cache'
 import { fetchWithTimeout, withWallClock } from './fetchWithTimeout'
 import { createInFlightDedup } from './in-flight'
-import { readLabelsSource, readV3LabelsSelection, readLabelsOnchainVerificationChains } from './labels-base-url'
+import { readLabelsSource, readV3LabelsSelection, readLabelsOnchainVerificationChains, readLabelsVaultTag } from './labels-base-url'
 import { getStaticLabelsBundle } from './static-labels-source'
 import { logger } from './logger'
 import { PublicLabelsV3Adapter, PublicLabelsV3MetadataAdapter } from '@eulerxyz/euler-v2-sdk/public-labels'
@@ -59,11 +59,17 @@ const buildRequest = (): PublicLabelsRequest => async <T>(
   return await response.json() as PublicLabelsResponse<T>
 }
 
+// Cached source data is complete; deployment selection is attached on every read.
+const withVaultTag = (bundle: PublicLabelsBundle): PublicLabelsBundle => {
+  const vaultTag = readLabelsVaultTag()
+  return vaultTag ? { ...bundle, vaultTag } : bundle
+}
+
 export function refreshPublicLabelsBundle(
   chainId: number,
   version?: string,
 ): Promise<PublicLabelsBundle> {
-  if (readLabelsSource() === 'static') return getStaticLabelsBundle(chainId, true)
+  if (readLabelsSource() === 'static') return getStaticLabelsBundle(chainId, true).then(withVaultTag)
   const selection = readV3LabelsSelection()
   const selectedVersion = version ?? selection.version
   const key = cacheKey(chainId, selection.labelSet, selectedVersion)
@@ -99,18 +105,18 @@ export function refreshPublicLabelsBundle(
       if (stale) return stale
       throw err
     }
-  })
+  }).then(withVaultTag)
 }
 
 export function getPublicLabelsBundle(
   chainId: number,
   version?: string,
 ): Promise<PublicLabelsBundle> {
-  if (readLabelsSource() === 'static') return getStaticLabelsBundle(chainId)
+  if (readLabelsSource() === 'static') return getStaticLabelsBundle(chainId).then(withVaultTag)
   const selection = readV3LabelsSelection()
   const selectedVersion = version ?? selection.version
   const hit = cache.get(cacheKey(chainId, selection.labelSet, selectedVersion))
-  return hit ? Promise.resolve(hit) : refreshPublicLabelsBundle(chainId, selectedVersion)
+  return hit ? Promise.resolve(withVaultTag(hit)) : refreshPublicLabelsBundle(chainId, selectedVersion)
 }
 
 export async function getPublicEulerLabelsData(

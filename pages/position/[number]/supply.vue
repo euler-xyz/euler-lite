@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { captureSwapReview } from '~/utils/swapReview'
 import type { VaultAsset } from '~/types/asset'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
 import { getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatio, getTokenUsdPrice } from '~/utils/sdk-prices'
@@ -275,7 +276,7 @@ const addToBatch = async () => {
         intent,
         preparedIntent: quoteIntents?.[0],
         subAccount: pos.subAccount as Address,
-        review: { type: 'swap-supply', asset: sel, amount: form.amount.value, swapToAsset: a, quoteFetchedAt: form.swapEffectiveQuoteFetchedAt.value },
+        review: { type: 'swap-supply', asset: sel, amount: form.amount.value, ...captureSwapReview(quote, SwapperMode.EXACT_IN), quoteFetchedAt: form.swapEffectiveQuoteFetchedAt.value },
       })
     }
     else {

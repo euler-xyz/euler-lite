@@ -1,6 +1,9 @@
 import { getEnabledChainIds } from '~/utils/chain-env'
 import { parseChainIds } from '~/utils/parseChainIds'
 
+export const readLabelsVaultTag = (): string | undefined =>
+  process.env.LABELS_VAULT_TAG?.trim() || undefined
+
 export const readLabelsSource = (): 'v3' | 'static' => {
   const source = process.env.LABELS_SOURCE?.trim() || 'v3'
   if (source !== 'v3' && source !== 'static') throw new Error('LABELS_SOURCE must be v3 or static')

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { captureSwapReview } from '~/utils/swapReview'
 import { isEVault, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { maxUint256, type Address } from 'viem'
 import type { VaultAsset } from '~/types/asset'
@@ -262,7 +263,7 @@ const addToBatchWithoutWarnings = async () => {
         subAccount: position.value.subAccount as Address,
         affectedSubAccounts: getFullRepayAffectedSubAccounts(isClosing),
         nameOverride: `Repay ${borrowSymbol}`,
-        review: { type: 'repay', asset: swapAsset, amount: swapAmount, swapToAsset: borrowVault.value.asset, quoteFetchedAt: walletSwap.quotes.effectiveQuoteFetchedAt.value },
+        review: { type: 'repay', asset: swapAsset, amount: swapAmount, ...captureSwapReview(quote, swapDirection, walletSwap.debtAmount.value), quoteFetchedAt: walletSwap.quotes.effectiveQuoteFetchedAt.value },
       })
       walletSwap.amount.value = ''
       redirectAfterRepayAdd(isClosing)
@@ -322,7 +323,7 @@ const addToBatchWithoutWarnings = async () => {
       affectedSubAccounts: collateral.isCrossPositionSource.value
         ? getAffectedSubAccounts(position.value.subAccount, sourceAccount)
         : getFullRepayAffectedSubAccounts(isClosing),
-      review: { type: 'repay', asset: sourceVault.asset, amount: sourceAmount, swapToAsset: borrowVault.value.asset, quoteFetchedAt: isSameAsset ? null : collateral.quotes.effectiveQuoteFetchedAt.value },
+      review: { type: 'repay', asset: sourceVault.asset, amount: sourceAmount, ...captureSwapReview(quote, sourceDirection, sourceDebtAmount), quoteFetchedAt: isSameAsset ? null : collateral.quotes.effectiveQuoteFetchedAt.value },
     })
     collateral.amount.value = ''
     collateral.debtAmount.value = ''
@@ -359,7 +360,7 @@ const addToBatchWithoutWarnings = async () => {
       subAccount: position.value.subAccount as Address,
       sourceSubAccount: sourceSubAccount as Address | undefined,
       affectedSubAccounts: getFullRepayAffectedSubAccounts(isClosing, sourceSubAccount),
-      review: { type: 'repay', asset: sourceVault.asset, amount: sourceAmount, swapToAsset: borrowVault.value.asset, quoteFetchedAt: isSameAsset ? null : savings.quotes.effectiveQuoteFetchedAt.value },
+      review: { type: 'repay', asset: sourceVault.asset, amount: sourceAmount, ...captureSwapReview(quote, sourceDirection, sourceDebtAmount), quoteFetchedAt: isSameAsset ? null : savings.quotes.effectiveQuoteFetchedAt.value },
     })
     savings.amount.value = ''
     savings.debtAmount.value = ''

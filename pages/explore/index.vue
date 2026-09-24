@@ -46,7 +46,7 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<MarketGroup>(
 
 const selectedMarkets = ref<string[]>([])
 const selectedAssets = ref<string[]>([])
-const selectedRiskManagers = ref<string[]>([])
+const selectedCurators = ref<string[]>([])
 const sortBy = ref<string>('Active')
 const sortDir = ref<'desc' | 'asc'>('desc')
 
@@ -56,7 +56,7 @@ useUrlQuerySync([
   { ref: sortDir, default: 'desc', queryKey: 'dir' },
   { ref: selectedMarkets, default: [], queryKey: 'market' },
   { ref: selectedAssets, default: [], queryKey: 'asset' },
-  { ref: selectedRiskManagers, default: [], queryKey: 'riskManager' },
+  { ref: selectedCurators, default: [], queryKey: 'curator', legacyKeys: ['riskManager'] },
 ])
 
 const {
@@ -93,7 +93,7 @@ watch(chainId, (newChainId, oldChainId) => {
     clearSearch()
     selectedMarkets.value = []
     selectedAssets.value = []
-    selectedRiskManagers.value = []
+    selectedCurators.value = []
     clearCustomFilters()
   }
 })
@@ -136,7 +136,7 @@ const assetOptions = computed(() => {
   return result
 })
 
-const riskManagerOptions = computed(() => {
+const curatorOptions = computed(() => {
   const entries: FilterOptionEntry[] = []
   for (const group of marketGroups.value) {
     if (group.source !== 'product') continue
@@ -163,9 +163,9 @@ const matchesAssetFilter = (group: MarketGroup): boolean => {
   )
 }
 
-const matchesRiskManagerFilter = (group: MarketGroup): boolean => {
-  if (!selectedRiskManagers.value.length) return true
-  return getUniqueEntitiesByVaults(group.vaults).some(e => selectedRiskManagers.value.includes(e.name))
+const matchesCuratorFilter = (group: MarketGroup): boolean => {
+  if (!selectedCurators.value.length) return true
+  return getUniqueEntitiesByVaults(group.vaults).some(e => selectedCurators.value.includes(e.name))
 }
 
 const filteredMarkets = computed(() => {
@@ -174,7 +174,7 @@ const filteredMarkets = computed(() => {
     .filter(matchesSearch)
     .filter(matchesMarketFilter)
     .filter(matchesAssetFilter)
-    .filter(matchesRiskManagerFilter)
+    .filter(matchesCuratorFilter)
     .filter(matchesCustomFilters)
 })
 
@@ -294,7 +294,7 @@ const hasActiveFilters = computed(() =>
   searchQuery.value.trim().length > 0
   || selectedMarkets.value.length > 0
   || selectedAssets.value.length > 0
-  || selectedRiskManagers.value.length > 0
+  || selectedCurators.value.length > 0
   || customFilters.value.length > 0,
 )
 const hasExploreMarkets = computed(() => marketGroups.value.some(group => group.source === 'product'))
@@ -310,7 +310,7 @@ const clearExploreFilters = () => {
   clearSearch()
   selectedMarkets.value = []
   selectedAssets.value = []
-  selectedRiskManagers.value = []
+  selectedCurators.value = []
   clearCustomFilters()
 }
 </script>
@@ -319,7 +319,7 @@ const clearExploreFilters = () => {
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
     <BasePageHeader
       title="Explore"
-      description="Discover lending markets across Euler. Filter by asset, risk manager, or market type."
+      description="Discover lending markets across Euler. Filter by asset, curator, or market type."
       class="mb-16"
       icon="nodes"
     />
@@ -349,12 +349,12 @@ const clearExploreFilters = () => {
         />
         <UiSelect
           v-if="enableEntityBranding"
-          :key="`risk-managers-${chainId}`"
-          v-model="selectedRiskManagers"
-          :options="riskManagerOptions"
-          placeholder="Risk manager"
-          title="Risk manager"
-          modal-input-placeholder="Search risk manager"
+          :key="`curators-${chainId}`"
+          v-model="selectedCurators"
+          :options="curatorOptions"
+          placeholder="Curator"
+          title="Curator"
+          modal-input-placeholder="Search curator"
           icon="shield"
         />
         <UiSelect

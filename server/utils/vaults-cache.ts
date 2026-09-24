@@ -252,6 +252,8 @@ export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot>
       },
     )
 
+    // These buckets retain discovery provenance. The serialized SDK isEscrow flag
+    // determines the loaded category in the browser, including explicit false.
     const payload: SerialisedSnapshot = encodeBigints({
       chainId,
       fetchedAt: Date.now(),

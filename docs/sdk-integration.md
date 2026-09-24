@@ -29,6 +29,22 @@ The reviewed execution depends only on public SDK APIs and deliberately does not
 
 Lite's migration compiler, plugin-data collector, and finalizer fail closed when these capabilities are unavailable instead of emulating them. During sealing, Lite invokes the SDK materializer with pinned Permit2 nonce/deadline/expiration values and the reviewed EVC address, then independently rejects any request-byte, signature-slot, or insertion-coordinate disagreement with its richer effect projection. For an EOA with static prerequisites before its single Pyth-bearing request, Lite gives the reviewed static prefix to `executeMaterialized`, refreshes and finalizes Pyth only after the SDK receipts that prefix, then gives the finalized suffix to `executeMaterialized`; the SDK owns receipt sequencing within both segments. Other EOA executions use one already-finalized vector. Awaited pre-prompt hooks verify the wallet binding and exact request. Safe transport seals its atomic EIP-5792 envelope while retaining the calls-ID status adapter and current-session detachment behavior.
 
+### Installing a new SDK release
+
+`.npmrc` sets `min-release-age=7`: a supply-chain cooldown that refuses to
+*resolve* a version published less than seven days ago. It applies to
+`npm install`, which fails with `ETARGET` — "No matching version found ... with
+a date before <date>". It does **not** apply to `npm ci`, which installs the
+lockfile as written, so CI and the Docker build are unaffected either way.
+
+`@eulerxyz/euler-v2-sdk` is listed in `min-release-age-exclude` because it is
+published from this org's own reviewed monorepo and does not carry the
+third-party risk the cooldown absorbs. Without that entry, nobody can run
+`npm install` to write a same-day SDK release into the lockfile in the first
+place — the one-week wait lands on whoever does the bump, not on CI. The
+cooldown still applies to every third-party dependency, and Dependabot keeps its
+own separate seven-day `cooldown` in `.github/dependabot.yml`.
+
 ## SDK Entry Points
 
 The app exposes three SDK entry points, all produced by the same factory in `composables/useEulerSdk.ts`:
@@ -66,7 +82,7 @@ On a cache miss, `buildInstance({ backend, buildQuery })` does:
 
 1. Resolves `rpcUrls` from `useEulerAddresses()`. RPC routes through `/api/internal/rpc/<chainId>`, absolute on the server and relative on the client.
 2. Builds the static config (see below). For `backend === 'fast'` it picks one of `fallbackAdapterConfig` / `onchainAdapterConfig` / `v3AdapterConfig` from `browserVaultSource`; for `backend === 'onchain'` it forces `onchainAdapterConfig`.
-3. Calls `buildEulerSDK({ config, buildQuery, plugins: [createPythPlugin(...), createKeyringPlugin(...), createLiteTosPlugin()] })`.
+3. Calls `buildEulerSDK({ config, buildQuery, plugins: [createPythPlugin(...), createKeyringPlugin(...), createLiteTosPlugin()], servicesOverrides: { intrinsicApyService } })`. The override wraps V3 intrinsic APY with Lite rows from `/api/internal/proxy/intrinsic-apy-overrides` — see [Intrinsic APY](./intrinsic-apy.md#lite-override-proxy). The server snapshot SDK does not install this wrapper.
 4. Wires app-side proxy callbacks via `configureAppProxies` for SDK services that do not natively use the shared V3 base, currently the ABI service. Oracle assessment and router queries use the SDK's native V3 methods and `/api/internal/v3/...` allowlist.
 
 If `buildEulerSDK` rejects, the map entry is cleared so the next caller retries instead of being stuck on a poisoned promise.
@@ -113,13 +129,44 @@ The server-side snapshot builder has its own independent `SERVER_VAULT_CACHE_SOU
 | `rewardsFuulApiUrl` | `/api/internal/proxy/fuul` | Fuul proxy |
 | `rewardsBrevisApiUrl` | `/api/internal/proxy/incentra/sdk/v1/eulerCampaigns` | Incentra/Brevis proxy |
 | `rewardsBrevisProofsApiUrl` | `/api/internal/proxy/incentra/v1/getMerkleProofsBatch` | Incentra/Brevis proxy |
+| `rewardsTurtleApiUrl` | `/api/internal/proxy/turtle` | Turtle Earn proxy; only reward proofs pass its allowlist, so the browser fetches proofs here while stream discovery runs in the server-side SDK (see below) |
 | `accountVaultsSubgraphUrls[chainId]` | `/api/internal/proxy/subgraph/{chainId}` | Goldsky subgraph proxy |
 | `vaultTypeSubgraphUrls[chainId]` | `/api/internal/proxy/subgraph/{chainId}` | Goldsky subgraph proxy |
 | `rpcUrls[chainId]` | `/api/internal/rpc/{chainId}` | JSON-RPC proxy |
 | Adapter block | `fallbackAdapterConfig` / `onchainAdapterConfig` / `v3AdapterConfig` per `browserVaultSource` (default browsing), `onchainAdapterConfig` (`ONCHAIN_SDK_CHAINS` browsing and plan-time) | — |
 | `disableV3` | `true` only when the resolved fast source is `fallback` and `!enableV3Backend` | — |
 
-Reward provider toggles (`rewardsEnableMerkl`, `rewardsEnableBrevis`, `rewardsEnableFuul`) are emitted as `false` only when `useDeployConfig()` disables them.
+Reward provider toggles (`rewardsEnableMerkl`, `rewardsEnableBrevis`, `rewardsEnableFuul`, `rewardsEnableTurtle`) are emitted as `false` only when `useDeployConfig()` disables them.
+
+The server-side SDK (`server/utils/sdk-server.ts`) differs for Turtle: its rewards adapters call `earn.turtle.xyz` directly, so it receives the server-only `TURTLE_EARN_API_KEY` as `rewardsTurtleApiKey` pinned to the fixed Turtle upstream, and is built with `rewardsEnableTurtle: false` when no usable key is configured. That flag disables the direct adapter's Turtle discovery only; Turtle campaigns sourced from euler-data-v3 may still be returned in fallback mode. The key never enters the browser config. See [server-side caching](./server-side-caching.md#server-side-sdk-builder).
+
+### Reward token decimals
+
+`UserRewardToken.decimals` is optional. The SDK omits it when no source — the
+breakdown row, the campaign entry in `/v3/apys/rewards`, or the per-row
+`rewardTokenMetadata` the V3 backend resolves independently of campaign
+availability — could resolve the token; it no longer falls back to 18, which
+used to mis-scale every reward token that is not 18 decimals (a USDC reward of
+603375 raw units read as ~6.03e-13 instead of 0.603375).
+
+`entities/reward-campaign.ts` owns the scaling: `rewardUnclaimedAmount()` and
+`rewardUnclaimedUsdValue()` return `undefined` for an unresolved token rather
+than guessing. `PortfolioSdkRewardItem.vue` then shows "Amount unavailable"
+with an em dash in place of the USD value, and disables both Claim and Add to batch, because
+signing a claim whose amount cannot be stated is worse than not offering it.
+The raw balance and proof are untouched, so the row becomes claimable again as
+soon as the token resolves upstream. Unresolved rows sort last in
+`pages/portfolio/rewards.vue` instead of being treated as worth zero.
+
+Claiming freezes the clicked reward first. `rewardClaimSnapshot()` in
+`features/reviewed-execution/domain/rewards.ts` returns the reward together with
+the decimals and amount the review will state, or `undefined` when the token is
+unresolved. The claim then awaits a wallet network switch, during which the
+portfolio list can refresh and replace the row, so everything after that await —
+the intent, the plan and the review payload — is built from the snapshot, and
+`hasRewardDrifted()` aborts with a toast when the live row no longer matches it.
+Without that guard the review can show one reward's amount beside another
+reward's claim intent.
 
 The full object is serialized into `staticCacheKey`, so any change produces a new instance.
 
@@ -277,5 +324,5 @@ How fresh that snapshot actually is depends on the path taken:
 | A new SDK config field | `buildSdkStaticConfig` in `composables/useEulerSdk.ts` (it folds into the existing cache key automatically) |
 | A new stale-time policy for an existing query | One row in `SDK_QUERY_POLICY` (`utils/sdk-query-policy.ts`). Derived exports re-compute automatically. |
 | A new plan-critical query | Same row, add a shorter `formStaleTimeMs` (`0` to bypass the plan-time cache entirely) and/or `invalidateAfterTx: true`. |
-| A new app-side proxy that SDK calls through | Add a same-origin proxy under `server/api/internal/proxy/...`, point the corresponding SDK config field at it in `buildSdkStaticConfig`. See [server-side caching](./server-side-caching.md) for the shared `external-proxy.ts` helper. |
+| A new app-side proxy that SDK calls through | Add a same-origin proxy under `server/api/internal/proxy/...`, point the corresponding SDK config field at it in `buildSdkStaticConfig`. Build it with `createProviderProxy` — the pipeline, rules and checklist are in [Server-Side Caching → Adding a provider](./server-side-caching.md#adding-a-provider). |
 | A new planner | Add the wrapper in `composables/useEulerTx.ts` using `freshPlanContext()` to get a fresh SDK + `Account` |

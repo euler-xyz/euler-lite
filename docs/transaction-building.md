@@ -169,6 +169,10 @@ Operation review components receive only their existing display inputs plus an o
 
 Every direct form constructs its fresh intent set and handcrafted presentation from one immutable review-action snapshot before subsequent price-impact checks, planning, preparation, or simulation can yield. A flow that must first resolve an authoritative prerequisite, such as a new sub-account or refreshed migration position, snapshots all user-editable inputs before that await and combines only those captured inputs with the resolved prerequisite. A warmed intent set and its prepared work are reused only when their transaction semantics exactly match the action snapshot; a mismatch compiles the captured intent instead. Batch adds apply the same rule centrally: each caller supplies a fresh add-time intent and may separately offer a warmed intent candidate.
 
+Swap presentation is captured separately from execution constraints. Spread `captureSwapReview(quote, mode, targetDebtAmount?)` (`utils/swapReview.ts`) into the review payload at add-to-batch / open-review time. The helper copies token objects and formats amounts; later quote mutation or a form reset during async preparation must not change the Swap row. `getSwapInputAmount` uses `amountIn` for `EXACT_IN` and `amountInMax` (fallback `amountIn`) otherwise. `TARGET_DEBT` displays the requested repayment as `swapToAmount` when that argument is passed. Same-asset operations pass a null/undefined quote and get `{}`. Verifier `amountOutMin` / minimum-output constraints stay on the intent — do not read live quote fields for review labels after the form may have cleared.
+
+Batch row titles follow `BatchOperationLabel`. `review.type === 'swap-borrow'` would otherwise render as `Swap <collateral>` because the verb map uses `Swap` and the symbol comes from `review.asset`. Swap-and-borrow callers pass `nameOverride: \`Borrow ${borrowAsset.symbol}\`` so the cart keeps the borrow identity. Verbatim `nameOverride` also covers refinance labels.
+
 Position-funded operations show the distinct supplying Euler account as `From Position N` or `From Deposits`, alongside the target position context. Both account labels are captured presentation inputs bound to the reviewed intent set.
 
 Do not synthesize generic rows or expose internal targets, selectors, plugin calls, request digests, simulation classifications, cleanup metadata, or authorization machinery. Existing approval and signature presentation remains operation-specific. Unknown or undecodable production calls fail internal sealing instead of creating a fallback review row.
@@ -252,7 +256,11 @@ After selection, a healthy sim must yield exactly `entries + 1` layers (`getCurr
 
 ### Reviewed batch execution
 
-Every cart entry stores a serializable intent and revision. `lastSimulatedPlan` and the layered simulated accounts remain non-authoritative projections for responsive forms. Review preparation recompiles or deeply validates the current generation, seals one complete request vector, and binds the existing batch display to it. Tenderly and calldata-copy actions derive from that sealed vector. Submission captures exact revisions and external-migration refresh requirements before wallet handoff. Confirmed completion applies those captured effects regardless of Safe detachment; modal closing, navigation, and visible success toasts remain context-scoped. A Safe submits the vector atomically; an EOA follows its explicit request phases. Details and CoW/signature gates: [Safe Wallet Compatibility](./safe-wallets.md).
+Each cart row captures an immutable digest of its executable preview, bound to its intent ID and revision. Migration rows capture the executable plan separately from their simulation-only plan. Preview compilation uses the simulated account state left by earlier rows; whole-cart preparation uses one fresh account snapshot. Those inputs can make an SDK planner produce different calls, such as omitting a collateral enablement that the row preview included.
+
+Batch preparation requires `expectedIntentPlans` for every row and compares the recompiled plans in order, including the number of rows, intent IDs, revisions, and plan digests. This check runs before plugins and cached-review adoption. The expectations also form part of the cart preparation cache identity. A mismatch throws `ReviewedPlanDivergenceError`; the modal asks the user to remove and re-add the affected operations. Missing previews block preparation with `BatchPreviewNotReadyError` and a message to wait for preparation to finish. Background warm-up skips while any row is still compiling.
+
+Every cart entry stores a serializable intent and revision. `lastSimulatedPlan` and the layered simulated accounts remain non-authoritative projections for responsive forms. Review preparation recompiles or deeply validates the current generation, seals one complete request vector, and binds the existing batch display to it. Tenderly and calldata-copy actions derive from that sealed vector. Closing `BatchReviewModal` calls `discardBatchExecutionReview(reviewId)` only when a prepared execution exists and execution is inactive: when the cached preparation's `reviewId` matches, the module-scope `batchExecutionPreparation` is cleared and `executionService.discard` runs. After that discard, reopening an unchanged cart must prepare a new execution. Closing during an active Safe execution detaches the UI without discarding the execution. Discarding an older `reviewId` must not clear a newer in-flight preparation. Submission captures exact revisions and external-migration refresh requirements before wallet handoff. Confirmed completion applies those captured effects regardless of Safe detachment; modal closing, navigation, and visible success toasts remain context-scoped. A Safe submits the vector atomically; an EOA follows its explicit request phases. Details and CoW/signature gates: [Safe Wallet Compatibility](./safe-wallets.md).
 
 ## Swap Quotes
 
@@ -263,6 +271,13 @@ Quote orchestration and UI selection remain in Lite:
 - `useSwapQuotesParallel()` fans out provider requests and ranks quotes.
 - `useSwapPageLogic()` coordinates generic swap pages.
 - Repay, borrow, collateral, multiply, supply, and withdraw composables provide workflow-specific request parameters and review text.
+- `useSwapPriceImpact({ quote, fromVault?, toVault? })` watches the **live** selected quote. It converts in/out to USD via `getTokenUsdValue` and sets `priceImpact` to `(outUsd / inUsd - 1) * 100`. Missing quote, zero amounts, or missing USD values yield `null`. The watcher is race-guarded: a stale USD lookup cannot restore an old impact after the quote is replaced or cleared. Pass the selected-quote ref, not a copied amount — multiply must refresh when the same input produces a better/worse `amountOut`.
+
+### CoW multiply review
+
+`useMultiplyCowSwap.submitCowSwapMultiply` is outside reviewed execution. Capture deposit, quote `amountOut`, and derived review amounts **before** the sub-account and allowance awaits. Edits during those lookups must not change Supply / Swap / approval rows.
+
+Before preparing a CoW order (which skips transaction simulation), the composable checks the long vault supply cap as `totalAssets + deposit + quote.amountOut`. Unlimited caps (`0n` or `maxUint256`) skip the check. Amounts use the collateral asset's decimals via `valueToNano`.
 
 ## Pyth Prices
 
@@ -282,10 +297,14 @@ Lite still uses `utils/pyth.ts` for read-path lens simulations and visible vault
 | `composables/useTransactionPlanSimulation.ts` | Simulation state and error formatting for forms |
 | `composables/useStateOverrideOptions.ts` | `SimulationStateOverrideOptions` builder + per-token slot-hint priming |
 | `composables/batchPrefetchState.ts` | Form → batch handoff for pre-overlay accounts and chain-scoped slot hints |
-| `composables/useTxBatch.ts` | Intent draft cart, non-authoritative merged preview, resimulation, plugin-layer map, and slot-hint reuse |
+| `composables/useTxBatch.ts` | Intent draft cart, non-authoritative merged preview, resimulation, plugin-layer map, slot-hint reuse, and `discardBatchExecutionReview` |
+| `composables/useSwapPriceImpact.ts` | USD price-impact from the live selected quote; race-guarded |
+| `composables/borrow/useMultiplyCowSwap.ts` | CoW multiply submit: captured review amounts and combined supply-cap check |
 | `composables/useSafeWallet.ts` | Reactive Safe detection (`isSafeWallet` / `isSafeWalletResolved`) |
 | `composables/useSafeExecutionDetachment.ts` | Close-review-while-cosigning; toasts until confirm or 5-min poll timeout |
 | `components/entities/operation/OperationReviewModal.vue` | Presentation-only prepared-plan review, calldata copy, and Tenderly simulation |
+| `components/BatchOperationLabel.vue` | Shared batch/review operation title; `nameOverride` preserves borrow/refinance identity |
+| `utils/swapReview.ts` | `captureSwapReview` — add-time swap presentation, independent of verifier amounts |
 | `utils/stepDecoding.ts` | SDK plan item decoding for review display |
 | `utils/operationGuardRegistry.ts` | Submit blocker and operation metadata registry |
 | `utils/sdk-keyring.ts` | Credential store and hook-target config for the SDK keyring plugin |

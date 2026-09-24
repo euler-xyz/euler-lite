@@ -41,11 +41,11 @@ const isNodeCyclicalNote = (address: string): boolean => {
 
 const { isVaultGovernorVerified, isSecuritizeGovernorVerified, isEarnVaultOwnerVerified } = useVaults()
 
-// Same signal as the per-pair "Unknown" risk-manager pill: the vault resolved,
+// Same signal as the per-pair "Unknown" curator pill: the vault resolved,
 // but its governor/owner isn't part of any declared product entity. Applies to
 // group members too — the curator's label attests membership, not that the
 // declared entity actually holds the governor keys.
-const isNodeRiskManagerUnknown = (address: string): boolean => {
+const isNodeCuratorUnknown = (address: string): boolean => {
   const vault = findVault(props.market, address)
   if (!vault) return false
   if (isEulerEarn(vault)) return !isEarnVaultOwnerVerified(vault)
@@ -258,10 +258,10 @@ const isNodeRiskManagerUnknown = (address: string): boolean => {
           >
             {{ node.assetSymbol.slice(0, 2) }}
           </text>
-          <!-- Unknown risk-manager badge: governor/owner not in any declared
+          <!-- Unknown curator badge: governor/owner not in any declared
                product entity (members and externals alike — same signal as the
                per-pair "Unknown" pill), or vault truly missing -->
-          <g v-if="node.isUnknown || isNodeRiskManagerUnknown(node.address)">
+          <g v-if="node.isUnknown || isNodeCuratorUnknown(node.address)">
             <circle
               :cx="node.x + 9"
               :cy="node.y - 9"

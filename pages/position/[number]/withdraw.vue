@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { captureSwapReview } from '~/utils/swapReview'
 import type { VaultAsset } from '~/types/asset'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
@@ -237,7 +238,7 @@ const addToBatch = async () => {
         intent,
         preparedIntent: quoteIntents?.[0],
         subAccount: pos.subAccount as Address,
-        review: { type: 'swap-withdraw', asset: a, amount: form.amount.value, swapToAsset: selectedOutputAsset.value, quoteFetchedAt: form.swapEffectiveQuoteFetchedAt.value },
+        review: { type: 'swap-withdraw', asset: a, amount: form.amount.value, ...captureSwapReview(quote, SwapperMode.EXACT_IN), quoteFetchedAt: form.swapEffectiveQuoteFetchedAt.value },
       })
     }
     else if (isFullCollateralWithdraw(assets)) {

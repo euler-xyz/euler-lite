@@ -52,7 +52,7 @@ cp .env.example .env
 | `SWAP_API_URL` or `NUXT_PUBLIC_SWAP_API_URL` | —           | Euler swap API                        |
 | `PYTH_API_KEY` | — | Server-side API key sent to `https://hermes.pyth.network` as Bearer authentication by `/api/internal/pyth/updates` |
 
-> **Doppler compatibility:** If your secret manager injects prefixed URL names, the server also accepts `EULER_SDK_V3_API_URL` and `NUXT_PUBLIC_V3_API_URL`. API keys use server-side names such as `EULER_SDK_V3_API_KEY` and `PYTH_API_KEY`.
+> **Doppler compatibility:** If your secret manager injects prefixed URL names, the server also accepts `EULER_SDK_V3_API_URL` and `NUXT_PUBLIC_V3_API_URL`. API keys use server-side names such as `EULER_SDK_V3_API_KEY`, `PYTH_API_KEY`, and `TURTLE_EARN_API_KEY`.
 
 #### SDK Data Source Controls
 
@@ -84,8 +84,9 @@ Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for 
 | `FUUL_API_URL` or `NUXT_PUBLIC_FUUL_API_URL` | Optional Fuul API upstream override. |
 | `INCENTRA_API_URL` or `NUXT_PUBLIC_INCENTRA_API_URL` | Optional Incentra/Brevis API upstream override. |
 | `LABELS_SOURCE` | `v3` (default) or `static`; selects the shared label snapshot producer. |
+| `LABELS_VAULT_TAG` | Optional exact, case-sensitive tag for discovery and new-target suggestions, e.g. `base` or `governance limited`. Blank disables tag filtering. |
 | `STATIC_LABELS_BASE_URL` | Required directory URL for static authoring files; unused by hosted V3 mode. |
-| `TURTLE_EARN_API_URL` or `NUXT_PUBLIC_TURTLE_EARN_API_URL` | Optional Turtle reward-proof upstream override; defaults to `https://earn.turtle.xyz/v1`. |
+| `TURTLE_EARN_API_KEY` | **Required when `NUXT_PUBLIC_CONFIG_ENABLE_TURTLE` is on.** Server-only Turtle Earn API key sent as `X-API-Key` by `/api/internal/proxy/turtle` and by the server-side SDK's rewards adapters (`server/utils/sdk-server.ts`), which call Turtle directly for stream discovery. Turtle rejects unauthenticated requests with 401; without this variable the proxy answers 503 and never calls upstream, and the server SDK disables direct Turtle discovery (`rewardsEnableTurtle: false`) instead of issuing unauthenticated calls, so reward proofs and claims are unavailable. Turtle campaigns sourced from euler-data-v3 may still appear in snapshots and APYs, because the flag only gates the SDK's direct adapter. Configure the secret before rolling out. Never exposed to the browser. |
 
 #### Branding & Feature Flags
 
@@ -373,6 +374,7 @@ Before deploying:
 - [ ] Copied `.env.example` to `.env` and filled in values
 - [ ] Set `APPKIT_PROJECT_ID` and `NUXT_PUBLIC_APP_URL`
 - [ ] Set `V3_API_URL`, optional `EULER_SDK_V3_API_KEY`, and `SWAP_API_URL`
+- [ ] Set `TURTLE_EARN_API_KEY` if Turtle rewards stay enabled (`NUXT_PUBLIC_CONFIG_ENABLE_TURTLE`), otherwise Turtle reward proofs return 503 and the server SDK skips Turtle stream discovery
 - [ ] Added at least one `RPC_URL_<chainId>` with matching `SUBGRAPH_URL_<chainId>` or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`
 - [ ] Configured branding via `NUXT_PUBLIC_CONFIG_*` env vars (title, description, logo, social links, social share image)
 - [ ] Customized theme colors in `assets/styles/variables.scss` (THEME CONFIGURATION section)
@@ -385,6 +387,13 @@ Before deploying:
 
 - Verify `V3_API_URL` is set correctly. If the V3 deployment requires authentication, verify `EULER_SDK_V3_API_KEY` is set. If using Doppler, ensure the URL env var name matches (`V3_API_URL`, `EULER_SDK_V3_API_URL`, or `NUXT_PUBLIC_V3_API_URL`).
 - Token data is fetched server-side via `/api/internal/token-list` which aggregates Euler V3, DefiLlama, Uniswap, and Merkl sources with fallback. Check server logs for upstream failures.
+
+### Turtle rewards missing or claims failing
+
+- The Turtle Earn API requires an API key. Confirm `TURTLE_EARN_API_KEY` is set on the server; the `/api/internal/proxy/turtle` route logs `reason: missing-api-key` and answers 503 when it is not.
+- A 502 with `upstream failed` and `status: 401` in the logs means Turtle rejected the configured key (revoked or wrong environment).
+- Without the key the server SDK is built with `rewardsEnableTurtle: false`, which disables the SDK's direct Turtle discovery only. The server SDK runs in fallback mode (euler-data-v3 primary), so Turtle campaigns sourced from V3 can remain visible in vault snapshots (`/api/internal/vaults`) and APYs while proof requests through the proxy fail with 503. Visible campaigns therefore do not prove the key is set; check the proxy logs.
+- Turtle campaigns missing from snapshots is not by itself a missing-key symptom. It also happens when euler-data-v3 is failing or has no active Turtle streams. If the key was the cause, fix the env and restart; each chain's SDK is cached on first use (normally during startup warm-up).
 
 ### Build Errors
 

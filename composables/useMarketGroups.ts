@@ -6,7 +6,7 @@ import type { EulerLabelEntity, EulerLabelProduct } from '~/entities/euler/label
 import type { MarketGroup, MarketGroupMetrics, CuratorGroup } from '~/entities/lend-discovery'
 import type { AnyVault } from '~/composables/useVaultRegistry'
 import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
-import { isVaultNotExplorable, isVaultRecentlyAdded, isVaultDeprecated, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
+import { isVaultNotExplorable, isVaultRecentlyAdded, isVaultDeprecated, getProductKeyByVault, isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
 import { isLiveCollateralEdge } from '~/utils/vault/ltv'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import { hasResolvedGovernorAdmin } from '~/utils/vault/governor-verification'
@@ -150,7 +150,7 @@ const augmentWithCollateralGraph = (
         if (externalVault) {
           externalCollateral.push(externalVault)
           seenExternal.add(normalized)
-          // Mirror the per-pair "Unknown" risk-manager pill (see
+          // Mirror the per-pair "Unknown" curator pill (see
           // VaultBorrowItem). An external collateral whose governor isn't part
           // of any declared product entity is the curator wiring in a vault
           // they don't actually run — surface it in the market graph too so
@@ -391,7 +391,7 @@ export const useMarketGroups = () => {
   const allVaults = computed((): AnyVault[] => {
     return registryVaults.value.filter((vault) => {
       const address = getVaultAddress(vault)
-      return address ? showAllLabelEntries.value || !isVaultNotExplorable(address) : true
+      return address ? isVaultSelectedByTag(address) && (showAllLabelEntries.value || !isVaultNotExplorable(address)) : false
     })
   })
 

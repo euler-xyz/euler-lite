@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { isCampaignEligibleForAddress, rewardCampaignDisplay, rewardCampaignEligibilityLabel } from '~/entities/reward-campaign'
-import type { RewardCampaign } from '~/entities/reward-campaign'
+import { isCampaignEligibleForAddress, rewardCampaignDisplay, rewardCampaignEligibilityLabel, rewardUnclaimedAmount, rewardUnclaimedUsdValue } from '~/entities/reward-campaign'
+import type { RewardCampaign, UserReward } from '~/entities/reward-campaign'
 
 const USER = '0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa'
 const OTHER = '0xBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBb'
@@ -144,5 +144,41 @@ describe('rewardCampaignDisplay', () => {
       eligibilityRequirementsStatus: 'none',
       eligibilityRequirements: [{ type: 'provider-defined' }],
     })).toBeUndefined()
+  })
+})
+
+describe('rewardUnclaimedAmount', () => {
+  const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
+
+  const buildReward = (token: Partial<UserReward['token']>, unclaimed = '603375'): UserReward => ({
+    chainId: 1,
+    token: {
+      address: USDC as UserReward['token']['address'],
+      chainId: 1,
+      symbol: USDC,
+      name: USDC,
+      ...token,
+    },
+    tokenPrice: 1,
+    provider: 'turtle',
+    accumulated: unclaimed,
+    unclaimed,
+  })
+
+  it('scales the raw amount by the resolved decimals', () => {
+    const reward = buildReward({ symbol: 'USDC', name: 'USD Coin', decimals: 6 })
+    expect(rewardUnclaimedAmount(reward)).toBe(0.603375)
+    expect(rewardUnclaimedUsdValue(reward)).toBe(0.603375)
+  })
+
+  it('treats 0 decimals as resolved rather than missing', () => {
+    expect(rewardUnclaimedAmount(buildReward({ decimals: 0 }))).toBe(603375)
+  })
+
+  it('returns undefined when decimals are unresolved instead of guessing 18', () => {
+    const reward = buildReward({})
+    expect(reward.token.decimals).toBeUndefined()
+    expect(rewardUnclaimedAmount(reward)).toBeUndefined()
+    expect(rewardUnclaimedUsdValue(reward)).toBeUndefined()
   })
 })

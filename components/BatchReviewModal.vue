@@ -16,6 +16,7 @@ import type { TrackedExecutionHandle } from '~/composables/useSafeExecutionDetac
 import { formatNumber } from '~/utils/string-utils'
 import type { PreparedExecutionReview } from '~/composables/useReviewedExecution'
 import { submissionResultMessage } from '~/features/reviewed-execution/coordinator/coordinator'
+import { BatchPreviewNotReadyError, ReviewedPlanDivergenceError } from '~/features/reviewed-execution/planning/errors'
 import { finalizeSuccessfulSubmission } from '~/features/reviewed-execution/review/submission-completion'
 import { useToast } from '~/components/ui/composables/useToast'
 import { getPositionTag, getSourcePositionTag } from '~/utils/positionTag'
@@ -391,7 +392,9 @@ onMounted(async () => {
   }
   catch (error) {
     logWarn('BatchReviewModal/prepare', error)
-    prepareError.value = 'Unable to prepare this batch. Resolve the preparation error before copying calldata or executing.'
+    prepareError.value = error instanceof ReviewedPlanDivergenceError || error instanceof BatchPreviewNotReadyError
+      ? error.message
+      : 'Unable to prepare this batch. Resolve the preparation error before copying calldata or executing.'
   }
   finally {
     isPreparing.value = false

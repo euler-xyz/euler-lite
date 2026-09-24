@@ -208,7 +208,7 @@ watchEffect(() => {
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue
         v-if="enableEntityBrandingDisplay"
-        label="Risk manager"
+        label="Curator"
       >
         <VaultTypeChip
           v-if="!isGovernorVerified"

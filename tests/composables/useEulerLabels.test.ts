@@ -10,6 +10,7 @@ import {
   useEulerLabels,
 } from '~/composables/useEulerLabels'
 import type { PublicLabelsBundle } from '~/utils/public-labels'
+import { isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
 
 type Deferred<T> = {
   promise: Promise<T>
@@ -122,6 +123,26 @@ describe('useEulerLabels chain-scoped loading', () => {
 
   afterAll(() => {
     vi.unstubAllGlobals()
+  })
+
+  it('updates tag selection on a live labels refresh without reloading unchanged vault data', async () => {
+    vi.useFakeTimers()
+    try {
+      const address = '0x0000000000000000000000000000000000000001'
+      const base = { ...getCurrentEulerLabelsData(), vaultTagAddresses: new Set([address]) }
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(base))
+      const labels = useEulerLabels()
+      await labels.loadLabels()
+      const selected = computed(() => isVaultSelectedByTag(address))
+      expect(selected.value).toBe(true)
+      const refreshed = { ...base, vaultTagAddresses: new Set<string>() }
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(refreshed))
+      await vi.advanceTimersByTimeAsync(5 * 60_000)
+      await labels.refreshLabelsIfStale()
+      expect(selected.value).toBe(false)
+      expect(mocks.loadVaults).not.toHaveBeenCalled()
+    }
+    finally { vi.useRealTimers() }
   })
 
   it('loads newly eligible vaults after a live refresh but leaves unchanged data alone', async () => {

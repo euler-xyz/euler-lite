@@ -1,6 +1,6 @@
 import { computed, ref, shallowRef, watch, watchEffect, type Ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Account, EVault, IHasVaultAddress, PortfolioBorrowPosition, SwapQuote, TransactionPlan, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { SwapperMode, type Account, type EVault, type IHasVaultAddress, type PortfolioBorrowPosition, type SwapQuote, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { useWalletSwapRepay } from '~/composables/repay/useWalletSwapRepay'
 
 const { USER, borrowVault, collateralVault, walletAsset, planAccount, mocks } = vi.hoisted(() => {
@@ -63,6 +63,7 @@ const { USER, borrowVault, collateralVault, walletAsset, planAccount, mocks } = 
         selectedQuote: Ref<SwapQuote | null>
         effectiveQuote: Ref<SwapQuote | null>
       }>,
+      captureReview: vi.fn(),
       planSwapAndRepay: vi.fn(),
       runSimulation: vi.fn(),
       getCollateralApySnapshot: vi.fn(),
@@ -140,6 +141,7 @@ vi.mock('~/composables/useSwapQuotesParallel', () => ({
     mocks.swapQuoteOptions.push(options)
     const state = {
       sortedQuoteCards: ref([]),
+      selectedQuoteCard: ref(null),
       selectedProvider: ref(null),
       selectedQuote: ref<SwapQuote | null>(null),
       effectiveQuote: ref<SwapQuote | null>(null),
@@ -196,7 +198,8 @@ describe('useWalletSwapRepay', () => {
   beforeEach(() => {
     vi.stubGlobal('useOperationIntentFactory', () => ({ create: vi.fn() }))
     vi.stubGlobal('useExecutionReview', () => ({
-      capture: (currentIntents: unknown[], _options: unknown, preparedIntents?: unknown[]) => ({
+      capture: (currentIntents: unknown[], options: unknown, preparedIntents?: unknown[]) => ({
+        captured: mocks.captureReview(options),
         intents: preparedIntents ?? currentIntents,
         usesPreparedIntents: !!preparedIntents,
         open: vi.fn(),
@@ -314,6 +317,30 @@ describe('useWalletSwapRepay', () => {
     }))
     expect(mocks.swapQuoteOptions[0]?.getPlanAccount?.()).toBe(planAccount)
     expect(plan).toEqual({ type: 'wallet-swap-repay-plan' })
+  })
+
+  it('reviews expected wallet-swap output rather than the slippage minimum', async () => {
+    const repay = useWalletSwapRepay({
+      position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position),
+      borrowVault: computed(() => borrowVault),
+      collateralVault: computed(() => collateralVault),
+      formTab: ref('wallet'), plan: ref(null), isSubmitting: ref(false), isPreparing: ref(false),
+      slippage: ref(0.5), clearSimulationError: vi.fn(), runSimulation: mocks.runSimulation,
+      netAPY: ref(0), collateralSupplyApy: computed(() => 0), borrowApy: computed(() => 0),
+      collateralSupplyRewardApy: computed(() => 0), borrowRewardApy: computed(() => 0),
+      oraclePriceRatio: computed(() => 1),
+    })
+    repay.selectedAsset.value = walletAsset
+    repay.amount.value = '100'
+    repay.direction.value = SwapperMode.EXACT_IN
+    mocks.quoteStates[0]!.selectedQuote.value = {
+      amountIn: '100', amountOut: '99', amountOutMin: '98',
+      receiver: borrowVault.address, accountOut: USER,
+    } as SwapQuote
+    await repay.submit()
+    expect(mocks.captureReview).toHaveBeenCalledWith(expect.objectContaining({
+      review: expect.objectContaining({ swapToAmount: '99', swapMode: SwapperMode.EXACT_IN }),
+    }))
   })
 
   it('clears an earlier Net APY estimate when the next projection rejects', async () => {

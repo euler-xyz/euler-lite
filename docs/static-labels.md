@@ -8,6 +8,8 @@ These settings select published metadata, not an isolated staging system: visibi
 
 Forks select `LABELS_SOURCE=static` and set `STATIC_LABELS_BASE_URL` to their own HTTP(S) directory. The server and browser consume the same normalized snapshot as hosted mode. Authored membership determines discovery; hosted curation/visibility is never consulted. The SDK provides the shared file derivation function, while Lite owns atomic fetching, validation, caching and logo policy.
 
+`LABELS_VAULT_TAG` optionally narrows discovery and new-target suggestions to an exact tag. Static product tags apply to all members; vault overrides and Earn entries can add tags. Blank leaves authored discovery unchanged. Full labels, geo rules and direct access remain available regardless of tag selection. See [deployment tag filtering](./vault-labels-and-verification.md#discovery-page-filtering).
+
 ## Directory contract
 
 For each enabled chain, the loader reads these JSON documents:

@@ -48,7 +48,13 @@ There is no dedicated `/api/internal/oracle-adapters` route. Catalogue and per-a
 | Title | Curated `meta.label`, split at the first `(` into `primary` + `suffix`. If there is no recognized label, the title falls back to the route-step `base/quote` symbols. |
 | Route | Always the decoded route-step `base/quote`. Never the assessment config pair. |
 
-Health and label apply only when the assessed config pair matches the routed pair (either direction). A recognized adapter whose config pair is a different market still shows the routed Route column, with `assessmentPairMatchesRoute === false` and no health verdict.
+For recognized assessments, label and health applicability use `assessmentApplies = pairMatches !== false`:
+
+- A config pair matching the routed pair in either direction returns `true`; the label and health apply.
+- Missing assessment base or quote metadata returns `null`; the recognized assessment label and health still apply.
+- An explicit pair mismatch returns `false`; the label, health findings, and health verdict are suppressed. The Route column still shows the decoded routed pair.
+
+Pair matching controls label and health applicability independently of adapter identity recognition. A recognized adapter retains its curated name and provider even when the assessed pair explicitly mismatches the route.
 
 ## Identity — never trust `name()`
 
@@ -66,7 +72,7 @@ Health and label apply only when the assessed config pair matches the routed pai
 
 | State | Meaning | Checks cell |
 | --- | --- | --- |
-| `recognized` | V3 identified the adapter | Health verdict + pass/fail/unknown counts (when the pair matches the route) |
+| `recognized` | V3 identified the adapter | Health verdict + pass/fail/unknown counts unless the assessed pair explicitly mismatches the route |
 | `unrecognized` | V3 assessed the address but refused identity | **Unrecognized**, plus `reason` (retitled rule key) and **identity findings only** |
 | `unassessed` | No row | **Not assessed** for custom adapters; **N/A** for structural steps |
 
@@ -125,8 +131,8 @@ Failed quotes render **Unknown**, not `0`.
 ## Troubleshooting
 
 - **Explore oracle metric stuck on "Oracle information not available":** V3 proxy/backoff or `useV3ChainGate` off for the chain. Status is chain-scoped; switching networks does not reuse another chain's `available`.
-- **Vault page shows Unknown for a well-known adapter:** assessment `recognized` is false, missing, or the config pair does not match the route. Do not "fix" it by reading `name()`.
-- **Health checks missing on a recognized adapter:** `assessmentPairMatchesRoute === false` — the V3 config pair is a different market than the decoded route.
+- **Vault page shows Unknown for a well-known adapter:** the assessment is missing or `recognized` is false. Pair mismatch does not make a recognized adapter Unknown. Do not "fix" it by reading `name()`.
+- **Assessment label and health suppressed on a recognized adapter:** `assessmentPairMatchesRoute === false` — the V3 config pair explicitly mismatches the decoded route. Missing base or quote metadata yields `null` and does not suppress these fields.
 - **Fallback-oracle adapter missing after catalogue refresh:** per-address load should have tagged it in `oracleAdapterPerAddressKeys`; a catalogue-only merge would drop it.
 - **Unrecognized-router chip with an empty dataset:** `getRouterRecognition` should have returned `null`. Check that the recognized set actually loaded.
 

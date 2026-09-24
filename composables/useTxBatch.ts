@@ -34,8 +34,10 @@ import { formatSimulationFailure } from '~/utils/tx-errors'
 import { logWarn } from '~/utils/errorHandling'
 import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
 import type { BatchDraftEntry, OperationIntent } from '~/features/reviewed-execution/domain/intents'
-import { deepFreezeSerializable } from '~/features/reviewed-execution/domain/canonical'
+import { canonicalDigest, deepFreezeSerializable, toCanonicalValue } from '~/features/reviewed-execution/domain/canonical'
 import { GenerationPublisher } from '~/features/reviewed-execution/planning/cache'
+import { captureIntentPlanExpectation, type IntentPlanExpectation } from '~/features/reviewed-execution/planning/compiler'
+import { BatchPreviewNotReadyError } from '~/features/reviewed-execution/planning/errors'
 import { intentSetDigest, selectMatchingPreparedIntents } from '~/features/reviewed-execution/planning/requirements'
 
 export interface BatchWalletChange {
@@ -167,6 +169,7 @@ export interface WalletShortfall {
 const draftEntries: Ref<BatchDraftEntry[]> = ref([])
 const entryPresentationById = shallowRef<Record<string, Omit<BatchEntry, 'id' | 'intent' | 'plan' | 'preparing' | 'preparationError'>>>({})
 const entryPlanById = shallowRef<Record<string, TransactionPlan>>({})
+const entryPlanExpectationsById = shallowRef<Record<string, IntentPlanExpectation>>({})
 const entryPreparationById = shallowRef<Record<string, { preparing: boolean, preparationError?: string }>>({})
 const entries = computed<BatchEntry[]>(() => draftEntries.value.map((draft) => {
   const presentation = entryPresentationById.value[draft.intentId]
@@ -184,6 +187,7 @@ const removeEntryStorage = (id: string) => {
   draftEntries.value = draftEntries.value.filter(entry => entry.intentId !== id)
   entryPresentationById.value = Object.fromEntries(Object.entries(entryPresentationById.value).filter(([key]) => key !== id))
   entryPlanById.value = Object.fromEntries(Object.entries(entryPlanById.value).filter(([key]) => key !== id))
+  entryPlanExpectationsById.value = Object.fromEntries(Object.entries(entryPlanExpectationsById.value).filter(([key]) => key !== id))
   entryPreparationById.value = Object.fromEntries(Object.entries(entryPreparationById.value).filter(([key]) => key !== id))
 }
 const layers = shallowRef<BatchLayer[]>([])
@@ -266,6 +270,7 @@ let batchExecutionPreparation: {
   generation: number
   intentSetHash: `0x${string}`
   presentationDigest: `0x${string}`
+  expectedPlansDigest: Hash
   readOnly: boolean
   promise: Promise<PreparedExecutionReview>
   reviewId?: Hash
@@ -2106,6 +2111,7 @@ export const useTxBatch = () => {
         draftEntries.value = []
         entryPresentationById.value = {}
         entryPlanById.value = {}
+        entryPlanExpectationsById.value = {}
         entryPreparationById.value = {}
         layers.value = []
         activeLayer.value = 0
@@ -2251,6 +2257,9 @@ export const useTxBatch = () => {
         }
       }
       const preview = await compilePreviewForSimulation([intent], await getEntryPlanningAccount())
+      // Migrations can have a distinct simulation-only plan. Bind the executable
+      // preview, before simulation or approval resolution can mutate either plan.
+      const expectation = captureIntentPlanExpectation(intent, preview.reviewedPlan)
       const plan = preview.plan
       const cid = chainId.value
       if (cid) {
@@ -2266,6 +2275,7 @@ export const useTxBatch = () => {
       // Clear/account/chain changes and row removal invalidate this late result.
       if (owner.value !== capturedOwner || chainId.value !== capturedChainId || !draftEntries.value.some(candidate => candidate.intentId === entryId && candidate.revision === intent.revision)) return
       entryPlanById.value = { ...entryPlanById.value, [entryId]: plan }
+      entryPlanExpectationsById.value = { ...entryPlanExpectationsById.value, [entryId]: expectation }
       if (preview.migrationStateOverrides) {
         const currentPresentation = entryPresentationById.value[entryId]
         if (currentPresentation) {
@@ -2334,6 +2344,7 @@ export const useTxBatch = () => {
     draftEntries.value = []
     entryPresentationById.value = {}
     entryPlanById.value = {}
+    entryPlanExpectationsById.value = {}
     entryPreparationById.value = {}
     layers.value = []
     activeLayer.value = 0
@@ -2376,6 +2387,14 @@ export const useTxBatch = () => {
   const startBatchExecutionPreparation = (cartGeneration: number): Promise<PreparedExecutionReview> => {
     batchGenerationPublisher.assertCurrent(cartGeneration)
     const intents = [...getBatchIntents()]
+    const expectedIntentPlans = intents.map((intent) => {
+      const expected = entryPlanExpectationsById.value[intent.intentId]
+      if (!expected || expected.intentRevision !== intent.revision) {
+        throw new BatchPreviewNotReadyError()
+      }
+      return expected
+    })
+    const expectedPlansDigest = canonicalDigest('batch-intent-plan-expectations-v1', toCanonicalValue(expectedIntentPlans))
     const presentationInputs = batchPresentationInputs()
     const intentSetHash = intentSetDigest(intents)
     const presentationDigest = reviewPresentationCacheDigest('batch', presentationInputs)
@@ -2384,6 +2403,7 @@ export const useTxBatch = () => {
       && batchExecutionPreparation.generation === cartGeneration
       && batchExecutionPreparation.intentSetHash === intentSetHash
       && batchExecutionPreparation.presentationDigest === presentationDigest
+      && batchExecutionPreparation.expectedPlansDigest === expectedPlansDigest
       && batchExecutionPreparation.readOnly === readOnly) {
       return batchExecutionPreparation.promise
     }
@@ -2391,6 +2411,7 @@ export const useTxBatch = () => {
     const promise = prepare(intents, {
       presentationKind: 'batch',
       presentationInputs,
+      expectedIntentPlans,
       generation: batchGenerationPublisher,
       cartGeneration,
     }).then((prepared) => {
@@ -2399,7 +2420,7 @@ export const useTxBatch = () => {
       }
       return prepared
     })
-    batchExecutionPreparation = { generation: cartGeneration, intentSetHash, presentationDigest, readOnly, promise }
+    batchExecutionPreparation = { generation: cartGeneration, intentSetHash, presentationDigest, expectedPlansDigest, readOnly, promise }
     void promise.catch(() => {
       if (batchExecutionPreparation?.promise === promise) batchExecutionPreparation = undefined
     })
@@ -2414,7 +2435,7 @@ export const useTxBatch = () => {
   }
 
   const warmBatchExecutionReview = async (cartGeneration: number) => {
-    if (!draftEntries.value.length) return
+    if (!draftEntries.value.length || entries.value.some(entry => entry.preparing)) return
     try {
       await startBatchExecutionPreparation(cartGeneration)
     }
@@ -2435,6 +2456,7 @@ export const useTxBatch = () => {
     draftEntries.value = nextEntries
     entryPresentationById.value = Object.fromEntries(Object.entries(entryPresentationById.value).filter(([id]) => remainingIds.has(id)))
     entryPlanById.value = Object.fromEntries(Object.entries(entryPlanById.value).filter(([id]) => remainingIds.has(id)))
+    entryPlanExpectationsById.value = Object.fromEntries(Object.entries(entryPlanExpectationsById.value).filter(([id]) => remainingIds.has(id)))
     entryPreparationById.value = Object.fromEntries(Object.entries(entryPreparationById.value).filter(([id]) => remainingIds.has(id)))
     execError.value = undefined
     if (nextEntries.length === 0) {

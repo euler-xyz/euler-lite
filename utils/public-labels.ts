@@ -31,7 +31,7 @@ export type {
 
 export type PublicEulerLabelsData = Omit<SdkPublicEulerLabelsData, 'visibility' | 'managingEntityByVault'>
   & Partial<Pick<SdkPublicEulerLabelsData, 'visibility' | 'managingEntityByVault'>>
-  & { geoContext?: HostedGeoContext, source?: 'v3' | 'v3-metadata' | 'static', logoBaseUrl?: string, candidateVaultAddresses?: string[], candidateEarnVaultAddresses?: string[] }
+  & { geoContext?: HostedGeoContext, source?: 'v3' | 'v3-metadata' | 'static', logoBaseUrl?: string, candidateVaultAddresses?: string[], candidateEarnVaultAddresses?: string[], vaultTagAddresses?: Set<string> }
 
 export const PUBLIC_LABELS_FIXTURE_VERSION = 'v20260804151305236'
 
@@ -53,7 +53,7 @@ export interface StaticLabelsBundle {
 
 export type V3MetadataLabelsBundle = PublicLabelsMetadataSnapshot & { geoFetchedAt?: number }
 export type HostedLabelsBundle = V3LabelsBundle | V3MetadataLabelsBundle
-export type PublicLabelsBundle = HostedLabelsBundle | StaticLabelsBundle
+export type PublicLabelsBundle = (HostedLabelsBundle | StaticLabelsBundle) & { vaultTag?: string }
 
 /** V3 owns hosted membership, published content and per-side visibility. */
 export const normalizePublicLabelsData = (chainId: number, source: PublicLabelsSource): PublicEulerLabelsData => {
@@ -83,7 +83,7 @@ export const normalizePublicLabelsData = (chainId: number, source: PublicLabelsS
   }
 }
 
-export const normalizeLabelsBundle = (chainId: number, bundle: PublicLabelsBundle): PublicEulerLabelsData => {
+const normalizeLabelsSource = (chainId: number, bundle: PublicLabelsBundle): PublicEulerLabelsData => {
   if (bundle.source === 'v3-metadata') {
     const data = normalizePublicLabelsMetadata(chainId, bundle.publicLabels)
     return { ...data, source: 'v3-metadata', geoContext: {
@@ -102,6 +102,38 @@ export const normalizeLabelsBundle = (chainId: number, bundle: PublicLabelsBundl
   for (const points of Object.values(data.points)) for (const point of points) point.logo = logo(point.logo)
   return { ...data, source: 'static', logoBaseUrl: bundle.logoBaseUrl, rawGeoPolicies: [] }
 }
+
+/** The optional deployment selection is independent of verification and listing flags. */
+export const normalizeLabelsBundle = (chainId: number, bundle: PublicLabelsBundle): PublicEulerLabelsData => {
+  const data = normalizeLabelsSource(chainId, bundle)
+  const tag = bundle.vaultTag?.trim()
+  if (!tag) return data
+
+  const addresses = new Set<string>()
+  if (bundle.source !== 'static') {
+    // Raw rows retain tags for every vault type, including standalone escrow.
+    for (const vault of bundle.publicLabels.vaults) {
+      if (vault.chainId === chainId && vault.tags.includes(tag)) addresses.add(vault.address.toLowerCase())
+    }
+  }
+  else {
+    for (const product of Object.values(data.products)) {
+      for (const address of [...product.vaults, ...(product.deprecatedVaults ?? [])]) {
+        if (product.tags?.includes(tag) || product.vaultOverrides?.[address]?.tags?.includes(tag)) {
+          addresses.add(address.toLowerCase())
+        }
+      }
+    }
+    for (const [address, entry] of Object.entries(data.earnVaultEntries)) {
+      if (entry.tags?.includes(tag)) addresses.add(address.toLowerCase())
+    }
+  }
+  return { ...data, vaultTagAddresses: addresses }
+}
+
+/** Undefined selects every vault; a configured tag with no matches selects none. */
+export const matchesDeploymentVaultTag = (labels: Pick<PublicEulerLabelsData, 'vaultTagAddresses'>, address: string): boolean =>
+  labels.vaultTagAddresses?.has(address.toLowerCase()) ?? true
 
 /** Fetch candidates are not a governance verdict. */
 export const getLabelVaultCandidates = (labels: Pick<PublicEulerLabelsData,

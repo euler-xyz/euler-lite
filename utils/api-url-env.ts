@@ -18,6 +18,10 @@ const MERKL_API_KEY_ENV_KEYS = [
   'MERKL_API_KEY',
 ] as const
 
+const TURTLE_EARN_API_KEY_ENV_KEYS = [
+  'TURTLE_EARN_API_KEY',
+] as const
+
 const SERVER_VAULT_CACHE_SOURCE_ENV_KEYS = [
   'SERVER_VAULT_CACHE_SOURCE',
 ] as const
@@ -91,6 +95,15 @@ export function readV3ApiKey(env: NodeJS.ProcessEnv = process.env): string {
  */
 export function readMerklApiKey(env: NodeJS.ProcessEnv = process.env): string {
   return firstEnv(env, MERKL_API_KEY_ENV_KEYS)
+}
+
+/**
+ * Server-only Turtle Earn API key. Turtle requires it on every request, so the
+ * `/api/internal/proxy/turtle` route refuses to call upstream without it. Never
+ * read from a public/`NUXT_PUBLIC_` variable — the key must not reach the browser.
+ */
+export function readTurtleEarnApiKey(env: NodeJS.ProcessEnv = process.env): string {
+  return firstEnv(env, TURTLE_EARN_API_KEY_ENV_KEYS)
 }
 
 export function readResolvedV3ApiUrl(env: NodeJS.ProcessEnv = process.env): string {

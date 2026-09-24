@@ -2,11 +2,12 @@ import { getEulerLabelsSourceData } from '~/composables/useEulerLabels'
 import { getLabelVaultCandidates } from '~/utils/public-labels'
 import { getHostedEntityKeys, isVaultGovernorVerified, isEarnVaultOwnerVerified } from '~/utils/vault/governor-verification'
 import type { EulerEarn, SecuritizeCollateralVault, EVault, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { resolveEVaultCategory } from '~/utils/vault/escrow-category'
 import { fetchVaultCategory } from '~/utils/vault/categories'
 import { getAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { normalizeAddress } from '~/utils/normalizeAddress'
-import { isVaultNotExplorable } from '~/utils/eulerLabelsUtils'
+import { isVaultNotExplorable, isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
 import { liteSecuritizeVaultFetchOptions, liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
 import { resolveEulerRouterGovernors } from '~/utils/vault/euler-router-governance'
 import { governableGovernorAbi } from '~/abis/oracle'
@@ -30,6 +31,7 @@ export interface AnyVault {
   asset: RegistryToken
   totalShares: bigint
   totalAssets: bigint
+  isEscrow?: boolean | null
 }
 
 // Registry entry containing vault and its type
@@ -42,7 +44,6 @@ export interface VaultEntry {
 
 interface VaultEntryMetadata {
   verified?: boolean
-  vaultCategory?: 'standard' | 'escrow'
 }
 
 // Registry state
@@ -115,11 +116,6 @@ const getType = (address: string): VaultType | undefined => {
 }
 
 // Register a vault
-const inferEntryMetadata = (_vault: AnyVault, _type: VaultType, metadata?: VaultEntryMetadata): VaultEntryMetadata => ({
-  verified: metadata?.verified,
-  vaultCategory: metadata?.vaultCategory,
-})
-
 const set = (
   address: string,
   vault: AnyVault,
@@ -129,14 +125,13 @@ const set = (
 ): void => {
   if (!targetChainId) throw new Error('Cannot register a vault without a chain')
   const key = registryKey(targetChainId, address)
-  // Preserve existing verification/category when the caller doesn't supply it.
+  // Preserve verification when refresh callers omit it; classification always comes from the SDK.
   // Refresh paths (updateVault, getBorrowVaultPair fallbacks) re-set a vault
   // with no metadata; without this they'd downgrade an already-verified vault
   // to verified:false, dropping it from getVerifiedEVaults() and the lists.
   const existing = registry.value.get(key)
-  const entryMetadata = inferEntryMetadata(vault, type, metadata)
-  const verified = entryMetadata.verified ?? existing?.verified ?? false
-  const vaultCategory = entryMetadata.vaultCategory ?? existing?.vaultCategory
+  const verified = metadata?.verified ?? existing?.verified ?? false
+  const vaultCategory = type === 'evk' ? resolveEVaultCategory(vault) : undefined
   registry.value.set(key, {
     vault,
     type,
@@ -153,13 +148,13 @@ const setMany = (
   targetChainId = getActiveChainId(),
 ): void => {
   if (!targetChainId) throw new Error('Cannot register vaults without a chain')
-  entries.forEach(({ address, vault, type, verified, vaultCategory }) => {
-    const entryMetadata = inferEntryMetadata(vault, type, { verified, vaultCategory })
+  entries.forEach(({ address, vault, type, verified }) => {
+    const vaultCategory = type === 'evk' ? resolveEVaultCategory(vault) : undefined
     registry.value.set(registryKey(targetChainId, address), {
       vault,
       type,
-      verified: entryMetadata.verified ?? false,
-      ...(entryMetadata.vaultCategory ? { vaultCategory: entryMetadata.vaultCategory } : {}),
+      verified: verified ?? false,
+      ...(vaultCategory ? { vaultCategory } : {}),
     })
   })
   registry.value = new Map(registry.value) // Trigger reactivity
@@ -238,7 +233,7 @@ const getEscrowVaults = (): EVault[] => {
 // Standard EVaults (non-escrow)
 const getStandardEVaults = (): EVault[] => {
   return activeEntries()
-    .filter(entry => entry.type === 'evk' && entry.vaultCategory !== 'escrow')
+    .filter(entry => entry.type === 'evk' && entry.vaultCategory === 'standard')
     .map(entry => entry.vault) as EVault[]
 }
 
@@ -248,6 +243,7 @@ const getVerifiedEVaults = (includeNotExplorable = false): EVault[] => {
     .filter(entry =>
       entry.type === 'evk'
       && isVerifiedVault(entry.vault.address)
+      && isVaultSelectedByTag(entry.vault.address)
       && (includeNotExplorable || !isVaultNotExplorable(entry.vault.address)),
     )
     .map(entry => entry.vault) as EVault[]
@@ -272,7 +268,7 @@ const isVerifiedVault = (address: string): boolean => {
   const normalized = normalizeAddress(address)
   const labels = getEulerLabelsSourceData()
   if (labels.source === 'v3-metadata') {
-    if (isEscrowVault(normalized)) return true
+    if (isKnownEscrowAddress(normalized)) return true
     const entry = get(normalized)
     const candidates = getLabelVaultCandidates(labels)
     if (!entry || ![...candidates.vaults, ...candidates.earn].some(addr => normalizeAddress(addr) === normalized)) return false
@@ -288,13 +284,14 @@ const isVerifiedVault = (address: string): boolean => {
   }
   // Registry metadata describes the fetch that created the entry. Current
   // labels must be able to revoke that earlier positive verification.
-  return isEscrowVault(normalized)
+  return isKnownEscrowAddress(normalized)
     || (visibility?.value === undefined && get(normalized)?.verified === true)
     || verifiedVaultAddresses.value.some(vault => normalizeAddress(vault) === normalized)
     || earnVaults.value.some(vault => normalizeAddress(vault) === normalized)
 }
 const getVaultCategory = (address: string): 'standard' | 'escrow' | undefined => {
-  return get(address)?.vaultCategory ?? (isKnownEscrowAddress(address) ? 'escrow' : undefined)
+  const entry = get(address)
+  return entry ? entry.vaultCategory : (isKnownEscrowAddress(address) ? 'escrow' : undefined)
 }
 
 // Reactive size for watchers
@@ -347,8 +344,8 @@ const fetchVaultByType = async (
 
 /**
  * Resolve an unknown vault using SDK vault metadata, fetch with the appropriate
- * SDK service, and cache in the registry. Escrow category comes from the SDK
- * verified-array read, so no separate local perspective probe is needed.
+ * SDK service, and cache in the registry. The fetched SDK escrow flag takes
+ * precedence over the category discovered through the verified-array read.
  */
 const resolveUnknown = async (
   address: string,
@@ -389,7 +386,7 @@ const resolveUnknown = async (
   if (type === 'evk' && category === 'escrow') {
     const vault = await fetchVaultByType(normalized, 'evk', targetChainId)
     if (!isCurrentResolution(targetChainId, generation)) return undefined
-    set(normalized, vault, 'evk', { verified: true, vaultCategory: 'escrow' }, targetChainId)
+    set(normalized, vault, 'evk', { verified: true }, targetChainId)
     return getForChain(targetChainId, normalized)
   }
 

@@ -106,7 +106,7 @@ The Earn deposit page opens its automatic disclaimer only for a resolved unverif
 
 ### Governance hydration guard (SDK 2.0)
 
-SDK 2.0 `EVault` instances always **own** the `governorAdmin` property (the constructor assigns it even when governance was never fetched). An `in`-operator or "property exists" check therefore passes on every real instance and can misread a lazily-hydrated vault as "governance resolved to nothing", producing false **Unknown risk manager** badges in discovery / market graph UI.
+SDK 2.0 `EVault` instances always **own** the `governorAdmin` property (the constructor assigns it even when governance was never fetched). An `in`-operator or "property exists" check therefore passes on every real instance and can misread a lazily-hydrated vault as "governance resolved to nothing", producing false **Unknown curator** badges in discovery / market graph UI.
 
 Use the value-based guard shared across badge sites:
 
@@ -132,11 +132,13 @@ This keeps the bridge endpoint verification aligned with the UI: label/entity ma
 | **Securitize vaults** | Address appears in `verifiedVaultAddresses` from labels |
 | **Unknown vaults** | Resolved via subgraph; verified only if in labels |
 
+Registry presence is not Earn verification. `updateEarnVaults` / `refreshVaults` builds `verified` as `curatedAddresses.has(vault.address)` from `useEulerLabels().earnVaults`. On-demand unlisted Earn vaults stay unverified after a refresh that still fetches them. Removing an address from `earn-vaults.json` clears stale verification on the next Earn update — do not copy the prior `verified: true`. Server snapshot hydration can mark snapshot Earn rows verified because that snapshot only includes labeled earn addresses.
+
 ### On-Chain Perspectives
 
 One on-chain perspective contract provides additional verification:
 
-- **`escrowedCollateralPerspective`**: Lists all verified escrow collateral vaults. Vaults from this perspective are marked `verified: true` and `vaultCategory: 'escrow'`.
+- **`escrowedCollateralPerspective`**: Lists all verified escrow collateral vaults. Vaults from this perspective are marked `verified: true`. Membership is used for discovery and verification; loaded classification comes from the SDK.
 
 ## Vault Categories and Types
 
@@ -174,11 +176,23 @@ The client keeps an in-session categorization cache with this shape:
 }
 ```
 
+Loaded EVaults use the SDK's `isEscrow` flag: `true` means `escrow`, `false` means `standard`, and `null`/missing remains unknown, clearing any previous category. Lite does not recover classification from cached categories, snapshot buckets, or perspective membership. This applies to registry inserts, refreshes, server-snapshot hydration, and the server labels view. Classification does not grant verification: labels and on-chain perspective membership retain their existing trust rules. Snapshot buckets retain discovery provenance; the flag determines the loaded category. Before details load, perspective membership can identify discovery entries.
+
+The selected SDK adapter supplies the flag: V3 first with on-chain fallback for normal browsing, and on-chain reads for `ONCHAIN_SDK_CHAINS`. A successful V3 entity with an unknown flag does not trigger automatic SDK fallback. Full escrow address discovery remains an on-chain perspective read on every chain.
+
 For per-address lookups during direct navigation to a not-yet-cached vault, `fetchVaultCategory(address)` checks the SDK escrow verified array first, then asks `vaultMetaService.fetchVaultType` for the vault type.
 
 **Important: labels remain authoritative for which vaults are _shown_.** SDK categorization says "what category each vault is"; normalized Public Labels products and earn-vault entries say "which vaults to include in lists". The two are composed in `useVaults.loadVaults`: labels select the set, categorization picks the right lens per address.
 
 ## Discovery Page Filtering
+
+`LABELS_VAULT_TAG` optionally selects vaults whose tags contain that exact, case-sensitive string. Leading/trailing env whitespace is trimmed; an unset or blank value applies no tag filter. Any tag is supported, including `base` and `governance limited`. A configured tag with no matches produces empty discovery. Set the env before server startup and restart after changing it.
+
+Both Main and Base can use `LABELS_V3_SET=public`; Base additionally sets `LABELS_VAULT_TAG=base`. Populate the desired tags in V3 before enabling the filter. Hosted mode matches each vault row independently, including Earn, Securitize and escrow rows; metadata-only chains use the same tags without requiring V3 indexing. Static mode matches product tags, vault-override tags and Earn-entry tags using its authored inheritance rules.
+
+The filter applies to Explore group members and metrics, Lend/Borrow/Earn lists, both sides of borrow pairs, and new-target suggestions in swap/migration forms. The `showAll` query does not bypass it. Existing visibility, verification, listing and geo rules still apply. Label refreshes update the selection while preserving loaded vaults used by open forms.
+
+Full labels and vault snapshots remain available for positions, direct URLs, collateral relationships and Earn strategy details. Tag selection does not change verification, geo policies, `/api/public/is-known` or `/api/public/metadata`; it is a discovery setting, not an access restriction.
 
 Labels control which vaults appear on each discovery page:
 
