@@ -286,6 +286,30 @@ The listing pages (Lend, Borrow, Earn, Explore) support user-defined metric filt
 - `UiCustomFilterModal` — Modal for creating filters with metric, operator (gt/lt), and value
 - `UiCustomFilterChips` — Displays active filters as removable chips
 - Filters are applied client-side using `matchesCustomFilters(item)`
+- Custom filters are **not** written to the URL. Shareable links only carry the `useUrlQuerySync` keys below.
+
+### Shareable list query parameters
+
+Listing pages persist search, sort, and chip filters in the query string through `useUrlQuerySync` (`composables/useUrlQuerySync.ts`) and `resolveUrlQueryValue` (`utils/url-query-alias.ts`).
+
+Rules:
+
+1. Each filter has one **current** key (`queryKey`). That is the only name written.
+2. Former names (`legacyKeys`) are still **read** from saved links. After the first paint the URL is rewritten without them.
+3. If both the current and a legacy name are present, the current value wins. The legacy key is still stripped.
+4. Default values are omitted from the URL (empty chip arrays, default sort).
+5. Keys that this helper does not own (notably `network`) are preserved.
+
+| Page | Current keys | Legacy aliases |
+| ---- | ------------ | -------------- |
+| Explore | `search`, `sort`, `dir`, `market`, `asset`, `curator` | `riskManager` → `curator` |
+| Lend | `search`, `sort`, `dir`, `vault`, `market`, `curator` | `riskManager` → `curator` |
+| Borrow | `search`, `sort`, `dir`, `collateral`, `debt`, `market`, `curator` | `riskManager` → `curator` |
+| Earn | `search`, `sort`, `dir`, `vault`, `curator` | `allocator` → `curator` |
+
+Example: `/explore?network=1&curator=Gauntlet` is the canonical curator filter. `/explore?riskManager=Gauntlet` still applies that filter, then replaces the URL with `?curator=Gauntlet`. Do not mint new `riskManager` or Earn `allocator` links.
+
+Chain selection is separate: `middleware/01.network.global.ts` normalizes `?network=` (or legacy `?chainId=`) to a numeric chain id and rewrites pre-lite paths (`/vault` → `/lend`, `/positions` → `/borrow`, `/account` → `/position`, `/market` → `/explore` and drops `tab`).
 
 ## 🚀 Performance Architecture
 
