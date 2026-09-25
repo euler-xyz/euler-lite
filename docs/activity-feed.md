@@ -130,7 +130,25 @@ Pairing re-runs on the merged raw event list, so a shadow transfer on page 1 can
 - Join key: `chainId:txHash:vault:violator:collateral:repayAssets` (lowercased). Event payload falls back to account / collateral asset / assets amountRaw.
 - Fetch failures roll back the covered-window claim; rows stay unenriched with no feed-level error.
 
-Display prefers `repayAssetsUsd`, converted collateral (+ symbol), `collateralAssetsUsd`, and signed `bonusUsd` (with unit-of-account valuation fallback).
+`getActivityLiquidationDisplayDetails` maps a joined record into optional display fields. Every field is independent: a missing piece leaves that part of the event row as-is.
+
+| Display field | Source | When it is absent |
+| ------------- | ------ | ----------------- |
+| `repayUsd` | `record.repayAssetsUsd` | Event-row USD (`formatActivityAssetUsd`) if the event carried `amountUsd` |
+| `collateralUsd` | `record.collateralAssetsUsd` | Same event-row USD fallback |
+| `collateralAmount` | `collateralAssets` + `collateralAssetDecimals` (symbol from token metadata) | Keep the event's share quantity; do **not** hide USD |
+| `bonus` / `bonusTone` | Signed `bonusUsd` first; else `unitOfAccountValuation.bonusValue` | No bonus row |
+
+`getActivityAssetDisplayValues` in `activityEventRowDetails.ts` applies those fields:
+
+- **USD and native conversion are independent.** Oracle-enriched USD (`repayUsd` / `collateralUsd`) is preferred even when share decimals are missing or native collateral metadata is `null`. Converted underlying units do not require a USD leg, and a USD leg does not imply conversion.
+- Collateral label becomes **"Collateral seized"** only after a successful native conversion. Otherwise it stays **"Collateral shares seized"** (or the generic event label).
+- A dedicated liquidation USD of `$0.00` is kept; it is not treated as missing.
+- Bonus title is event-time USD when `bonusUsd` is present, otherwise "quoted by the protocol oracle at the liquidation" for the unit-of-account fallback. Lite does **not** recompute the bonus from rounded USD legs.
+
+The pinned `@eulerxyz/euler-v2-sdk` **3.4.1** parser accepts `valuation.source` of `historical-price-snapshots` or `historical-protocol-oracle` (required on typed records). Lite display does not branch on that source. A row may mix a snapshot debt USD with oracle-valued collateral.
+
+Regression fixtures live in `tests/fixtures/liquidation-oracle-usd.ts` (Unichain mixed oracle USD with null native collateral).
 
 ### Grouping
 
@@ -166,8 +184,9 @@ Anything else 404s at the edge. Proxy logs keep chain / vault / categories / eve
 2. Portfolio chip row ≠ query set — All still fetches lending + borrowing + liquidations.
 3. Event-type filtering is both a request `eventTypes` list and a client allowlist.
 4. Liquidation USD/bonus comes from a separate endpoint; absence is expected and silent.
-5. Account feed groups by transaction; vault feed does not.
-6. `ActivityAddress` supports `linkKind: 'spy'`, but current display helpers only emit `explorer` / `vault` links.
+5. Do not gate liquidation USD on native collateral conversion (or the reverse). A share-quantity "Amount unavailable" can still show `$8.15`.
+6. Account feed groups by transaction; vault feed does not.
+7. `ActivityAddress` supports `linkKind: 'spy'`, but current display helpers only emit `explorer` / `vault` links.
 
 ## Files
 
@@ -178,7 +197,8 @@ Anything else 404s at the edge. Proxy logs keep chain / vault / categories / eve
 | `composables/useActivityLiquidationDetails.ts` | Fail-soft `/v3/liquidations` enrichment |
 | `composables/useActivityNowMs.ts` | Shared 60s clock for relative timestamps |
 | `composables/usePortfolioActivityRuntimeSupport.ts` | Portfolio tab visibility coordination |
-| `utils/activity-display.ts` | Filters, allowlists, labels, grouping, liquidation display |
+| `utils/activity-display.ts` | Filters, allowlists, labels, grouping, `getActivityLiquidationDisplayDetails` |
+| `components/entities/activity/activityEventRowDetails.ts` | Independent USD vs native liquidation display helpers |
 | `components/entities/activity/ActivityFeed.vue` | Orchestrator |
 | `components/entities/activity/ActivityEventRow.vue` | Row / expand / registry metadata |
 | `components/entities/activity/ActivityCategoryFilters.vue` | All + multi-select chips |
