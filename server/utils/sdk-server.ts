@@ -29,6 +29,7 @@
  */
 import {
   buildEulerSDK,
+  ProviderService,
   type EulerSDK,
   type EulerSDKConfig,
 } from '@eulerxyz/euler-v2-sdk'
@@ -44,6 +45,7 @@ import { parseChainIds } from '~/utils/parseChainIds'
 import { resolveRpcUrl } from './rpc'
 import { resolveLabelsBaseUrl } from './labels-base-url'
 import { TURTLE_EARN_API_URL } from './turtle-proxy'
+import { createServerProviderService } from './server-provider-service'
 
 const sdkByChain = new Map<number, Promise<EulerSDK>>()
 
@@ -93,7 +95,7 @@ export const resolveServerTurtleRewardsConfig = (
 const isOnchainSdkChain = (chainId: number): boolean =>
   parseChainIds(process.env.ONCHAIN_SDK_CHAINS, new Set([chainId])).includes(chainId)
 
-const buildServerSdkConfig = (chainId: number): EulerSDKConfig => {
+const buildServerSdkConfig = (chainId: number): EulerSDKConfig & { rpcUrls: Record<number, string> } => {
   const rpcUrl = resolveRpcUrl(chainId)
   if (!rpcUrl) throw new Error(`No RPC URL configured for chain ${chainId}`)
 
@@ -119,7 +121,12 @@ const buildServerSdkConfig = (chainId: number): EulerSDKConfig => {
 export const getServerSdk = (chainId: number): Promise<EulerSDK> => {
   const existing = sdkByChain.get(chainId)
   if (existing) return existing
-  const promise = buildEulerSDK({ config: buildServerSdkConfig(chainId) }).catch((err) => {
+  const config = buildServerSdkConfig(chainId)
+  const providerService = createServerProviderService(config.rpcUrls, new ProviderService(config.rpcUrls))
+  const promise = buildEulerSDK({
+    config,
+    servicesOverrides: { providerService },
+  }).catch((err) => {
     if (sdkByChain.get(chainId) === promise) sdkByChain.delete(chainId)
     throw err
   })
