@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CuratorNetworkIndex } from '~/utils/curator-profile'
+import type { CuratorNetworkIndex, CuratorProfileData } from '~/utils/curator-profile'
 import { autoLink } from '~/utils/autoLink'
 import { getEulerLabelEntityLogo, type EulerLabelEntity } from '~/entities/euler/labels'
 import { getChainById } from '~/entities/chainRegistry'
@@ -16,25 +16,50 @@ const route = useRoute()
 const entityId = computed(() => route.params.slug as string)
 const { chainId } = useEulerAddresses()
 const {
-  entity,
+  entity: chainEntity,
   managedMarkets,
   earnVaults,
   isUnavailable,
   isLoading,
 } = useEulerCuratorProfile(entityId)
 
-// Chain-specific labels are cleared while the next network loads. Keep the
-// shared curator identity visible during that interval.
-const visibleProfile = shallowRef<{ id: string, entity: EulerLabelEntity, logo: string } | null>(null)
-watch([entityId, entity], ([id, current]) => {
+const {
+  data: profileData,
+  status: profileStatus,
+  error: profileError,
+  refresh: refreshProfile,
+} = useFetch<CuratorProfileData>(
+  () => `/api/internal/curator-profiles/${encodeURIComponent(entityId.value)}`,
+  { server: false, timeout: 20_000 },
+)
+
+// Static labels remain chain-scoped; retain their last profile during a network switch.
+const staticProfile = shallowRef<{ id: string, entity: EulerLabelEntity } | null>(null)
+watch([entityId, chainEntity], ([id, current]) => {
   if (current) {
-    visibleProfile.value = { id, entity: current, logo: getEulerLabelEntityLogo(current.logo) }
+    staticProfile.value = { id, entity: current }
   }
-  else if (visibleProfile.value?.id !== id) {
-    visibleProfile.value = null
+  else if (staticProfile.value?.id !== id) {
+    staticProfile.value = null
   }
 }, { immediate: true, flush: 'sync' })
-const profileEntity = computed(() => visibleProfile.value?.entity ?? null)
+const profileEntity = computed(() => {
+  if (profileData.value?.source === 'v3') {
+    return profileData.value.entity?.id === entityId.value ? profileData.value.entity : null
+  }
+  if (profileData.value?.source === 'static') {
+    return staticProfile.value?.id === entityId.value ? staticProfile.value.entity : null
+  }
+  if (profileError.value) {
+    return staticProfile.value?.id === entityId.value ? staticProfile.value.entity : null
+  }
+  return null
+})
+const profileLogo = computed(() => profileEntity.value ? getEulerLabelEntityLogo(profileEntity.value.logo) : '')
+const isProfileLoading = computed(() => profileStatus.value === 'idle' || profileStatus.value === 'pending'
+  || (profileData.value?.source === 'static' && isLoading.value && !profileEntity.value))
+const isProfileUnavailable = computed(() => Boolean(profileError.value)
+  || (profileData.value?.source === 'static' && isUnavailable.value))
 
 const {
   data: networkIndex,
@@ -76,20 +101,38 @@ const profileDetails = computed(() => {
 <template>
   <section class="flex flex-col gap-24">
     <div
-      v-if="isLoading && !profileEntity"
+      v-if="isProfileLoading && !profileEntity"
       class="flex min-h-[calc(100dvh-178px)] items-center justify-center"
     >
       <UiLoader />
     </div>
 
     <div
-      v-else-if="isUnavailable && !profileEntity"
+      v-else-if="isProfileUnavailable && !profileEntity"
       class="flex min-h-[calc(100dvh-178px)] items-center justify-center"
     >
       <LabelsUnavailableState
+        v-if="profileData?.source === 'static'"
         title="Curator profile unavailable"
         description="Published curator details and market ownership could not be loaded. Try again when vault verification is available."
       />
+      <UiEmptyState
+        v-else
+        title="Curator profile unavailable"
+        description="Published curator details could not be loaded. Try again to view this curator's profile."
+        icon="warning-circle"
+      >
+        <template #action>
+          <UiButton
+            variant="primary-stroke"
+            size="small"
+            :disabled="profileStatus === 'pending'"
+            @click="refreshProfile()"
+          >
+            {{ profileStatus === 'pending' ? 'Retrying…' : 'Try again' }}
+          </UiButton>
+        </template>
+      </UiEmptyState>
     </div>
 
     <div
@@ -124,13 +167,19 @@ const profileDetails = computed(() => {
           />
           <BaseAvatar
             :label="profileEntity.name"
-            :src="visibleProfile?.logo"
+            :src="profileLogo"
             class="!h-72 !w-72 shrink-0"
           />
           <div class="min-w-0 flex-1">
             <h1 class="text-h2 text-content-primary mobile:text-h3">
               {{ profileEntity.name }}
             </h1>
+            <p
+              v-if="profileError && !profileData"
+              class="mt-8 text-p3 text-content-tertiary"
+            >
+              Showing curator details from network labels while the profile request is unavailable.
+            </p>
             <!-- eslint-disable vue/no-v-html -- autoLink escapes label text before adding links -->
             <p
               v-if="profileEntity.description"
@@ -273,7 +322,9 @@ const profileDetails = computed(() => {
         >
           <LabelsUnavailableState
             title="Network listings unavailable"
-            description="Published labels for this network could not be loaded. The curator details above may be from your previous network; try again to see current markets and Earn vaults."
+            :description="profileData?.source === 'static'
+              ? 'Published labels for this network could not be loaded. The curator details above may be from your previous network; try again to see current markets and Earn vaults.'
+              : 'Published labels for this network could not be loaded. The curator profile remains available; try again to see current markets and Earn vaults.'"
           />
         </section>
 

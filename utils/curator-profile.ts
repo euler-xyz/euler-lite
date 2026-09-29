@@ -1,4 +1,10 @@
+import type { PublicEntityLabel } from '@eulerxyz/euler-v2-sdk/public-labels'
 import type { EulerLabelEntity, EulerLabelProduct } from '~/entities/euler/labels'
+
+export type CuratorProfileData = {
+  source: 'v3' | 'static'
+  entity: EulerLabelEntity | null
+}
 
 export type CuratorProfileExternalLink = {
   label: string
@@ -29,6 +35,32 @@ const asHttpsUrl = (value: string): string => {
     return ''
   }
 }
+
+const asAbsoluteHttpsUrl = (value: string | null): string =>
+  value?.startsWith('https://') ? asHttpsUrl(value) : ''
+
+export const toCuratorProfileEntity = (profile: PublicEntityLabel): EulerLabelEntity => ({
+  id: profile.id,
+  name: profile.name,
+  logo: asAbsoluteHttpsUrl(profile.logo),
+  description: profile.description ?? '',
+  url: asAbsoluteHttpsUrl(profile.url),
+  legalEntityName: profile.legalEntityName ?? undefined,
+  riskMethodology: profile.riskMethodology ?? undefined,
+  security: profile.security ?? undefined,
+  termsOfService: profile.termsOfService ?? undefined,
+  licenses: profile.licenses ?? undefined,
+  disclaimers: profile.disclaimers ?? undefined,
+  addresses: {},
+  social: {
+    twitter: asAbsoluteHttpsUrl(profile.socialTwitter),
+    youtube: asAbsoluteHttpsUrl(profile.socialYoutube),
+    discord: asAbsoluteHttpsUrl(profile.socialDiscord),
+    telegram: asAbsoluteHttpsUrl(profile.socialTelegram),
+    github: asAbsoluteHttpsUrl(profile.socialGithub),
+    defillama: asAbsoluteHttpsUrl(profile.socialDefillama),
+  },
+})
 
 const SOCIAL_LINK_LABELS: Record<string, string> = {
   twitter: 'X',

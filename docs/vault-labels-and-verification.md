@@ -15,12 +15,15 @@ Not all vaults on-chain are equal. Public Labels maps chain-scoped vault address
 | Vault inventory and labels | `GET /labels/vaults?view=resolved&version=...&chainId=...` |
 | Products | `GET /labels/products?view=resolved&version=...&chainId=...` |
 | Entities | `GET /labels/entities?version=...` |
+| Curator profile | `GET /labels/entities/{entityId}?version=...` |
 | Entity governance addresses | `GET /labels/entities/{entityId}/addresses` |
 | Geo policy records | `GET /geo-policies` |
 
 The adapter also reads `/evk/vaults` and `/earn/vaults` with explicit `visibility=visible,warning,hidden,pending_review`. Trusted label membership requires a visible or warning verdict and a managing entity. Hidden and pending metadata remain available without granting trusted membership. Per-side V3 explorability flags control hosted listing. On-chain governor checks still determine the stronger verification badge.
 
 Entity profiles supply hosted logo URLs. A product's `entityId` is its managing entity; `coBrandEntityIds` supplies additional display branding only. Co-brands do not participate in curator ownership, governor verification, or curator-profile market assignment. Neutral escrow inventory rows are not assigned to a product/entity and are not added to the labels-derived verified set.
+
+Curator pages load one V3 entity profile by ID through `/api/internal/curator-profiles/{entityId}`, independently of the selected chain. The network cards select chain-scoped markets and Earn vaults, which still come from `useEulerLabels`. The profile request has a five-minute server cache with bounded stale fallback. If it fails while a chain labels bundle is available, the page shows entity details from that bundle; if no profile data is available, it offers a retry. With `LABELS_SOURCE=static`, the page uses the selected chain's authored entity profile.
 
 Lite evaluates live V3 geo policies using `countriesResolved` and cumulative global/chain/product/vault/asset rules. The server embeds a validated geo collection with each snapshot and retains a disk checkpoint for stale-on-error recovery. Mount `GEO_POLICY_CACHE_DIR` on persistent storage for redeploy durability. Hosted snapshots have no GitHub-label dependency. `LABELS_SOURCE=static` supplies the same snapshot from operator-owned files; see [Static labels](./static-labels.md). Production bake/canary remain rollout work. See [Geo-Blocking](./geo-blocking.md).
 

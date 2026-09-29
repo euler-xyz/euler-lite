@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { PublicEntityLabel } from '@eulerxyz/euler-v2-sdk/public-labels'
 import type { EulerLabelEntity, EulerLabelProduct } from '~/entities/euler/labels'
 import {
   getEulerLabelEntityDisplayName,
@@ -9,6 +10,7 @@ import {
   getCuratorProfileSocialLinks,
   getCuratorProfileSocialUrl,
   isEulerLabelProductManagedBy,
+  toCuratorProfileEntity,
 } from '~/utils/curator-profile'
 
 const entity = (name: string, logo = `${name}.svg`): EulerLabelEntity => ({
@@ -27,6 +29,32 @@ const entity = (name: string, logo = `${name}.svg`): EulerLabelEntity => ({
 })
 
 describe('curator profile helpers', () => {
+  it('converts one V3 entity record into profile details without a chain', () => {
+    const profile = toCuratorProfileEntity({
+      id: 'k3-capital',
+      name: 'K3 Capital',
+      logo: 'https://token-images.euler.finance/labels/k3-capital',
+      description: 'Curator description',
+      url: 'https://k3.capital',
+      socialTwitter: 'https://x.com/k3_capital',
+      socialGithub: 'javascript:alert(1)',
+      riskMethodology: 'Published methodology',
+    } as PublicEntityLabel)
+
+    expect(profile).toMatchObject({
+      id: 'k3-capital',
+      name: 'K3 Capital',
+      description: 'Curator description',
+      riskMethodology: 'Published methodology',
+      addresses: {},
+      social: { twitter: 'https://x.com/k3_capital', github: '' },
+    })
+    expect(getCuratorProfileSocialLinks(profile)).toEqual([
+      { label: 'Website', url: 'https://k3.capital/' },
+      { label: 'X', url: 'https://x.com/k3_capital' },
+    ])
+  })
+
   it('normalizes product entity keys', () => {
     expect(getEulerLabelEntityKeys({ entity: 'k3' } as EulerLabelProduct)).toEqual(['k3'])
     expect(getEulerLabelEntityKeys({ entity: ['k3', 're7'] } as EulerLabelProduct)).toEqual(['k3', 're7'])

@@ -54,9 +54,15 @@ export const createPublicLabelsRequest = (): PublicLabelsRequest => async <T>(
 
   const response = await fetchWithTimeout(base.toString(), undefined, { headers })
   if (!response.ok) {
-    throw new Error(`Public Labels V3 returned ${response.status} for ${path}`)
+    throw new PublicLabelsRequestError(response.status, path)
   }
   return await response.json() as PublicLabelsResponse<T>
+}
+
+export class PublicLabelsRequestError extends Error {
+  constructor(public readonly statusCode: number, path: string) {
+    super(`Public Labels V3 returned ${statusCode} for ${path}`)
+  }
 }
 
 // Cached source data is complete; deployment selection is attached on every read.
