@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ManagerNetworkIndex } from '~/utils/manager-profile'
 import { autoLink } from '~/utils/autoLink'
-import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
+import { getEulerLabelEntityLogo, type EulerLabelEntity } from '~/entities/euler/labels'
 import { getChainById } from '~/entities/chainRegistry'
 import { getChainLogoUrl } from '~/utils/chain-logo'
 import {
@@ -24,6 +24,19 @@ const {
   retryLabels,
 } = useEulerManagerProfile(entityId)
 
+// Chain-specific labels are cleared while the next network loads. Keep the
+// shared manager identity visible during that interval.
+const visibleProfile = shallowRef<{ id: string, entity: EulerLabelEntity, logo: string } | null>(null)
+watch([entityId, entity], ([id, current]) => {
+  if (current) {
+    visibleProfile.value = { id, entity: current, logo: getEulerLabelEntityLogo(current.logo) }
+  }
+  else if (visibleProfile.value?.id !== id) {
+    visibleProfile.value = null
+  }
+}, { immediate: true, flush: 'sync' })
+const profileEntity = computed(() => visibleProfile.value?.entity ?? null)
+
 const {
   data: networkIndex,
   status: networksStatus,
@@ -41,13 +54,13 @@ const networkRows = computed(() =>
       name: getChainById(network.chainId)?.name ?? `Chain ${network.chainId}`,
       logo: getChainLogoUrl(network.chainId),
     }))
-    .sort((a, b) => Number(b.chainId === chainId.value) - Number(a.chainId === chainId.value)
+    .sort((a, b) => Number(b.chainId === 1) - Number(a.chainId === 1)
       || a.name.localeCompare(b.name)),
 )
 
-const socialLinks = computed(() => entity.value ? getManagerProfileSocialLinks(entity.value) : [])
+const socialLinks = computed(() => profileEntity.value ? getManagerProfileSocialLinks(profileEntity.value) : [])
 const profileDetails = computed(() => {
-  const current = entity.value
+  const current = profileEntity.value
   if (!current) return []
   return [
     { label: 'Legal entity', value: current.legalEntityName },
@@ -63,14 +76,14 @@ const profileDetails = computed(() => {
 <template>
   <section class="flex flex-col gap-24">
     <div
-      v-if="isLoading"
+      v-if="isLoading && !profileEntity"
       class="flex min-h-[calc(100dvh-178px)] items-center justify-center"
     >
       <UiLoader />
     </div>
 
     <div
-      v-else-if="isUnavailable"
+      v-else-if="isUnavailable && !profileEntity"
       class="flex min-h-[calc(100dvh-178px)] flex-col items-center justify-center gap-12 text-content-tertiary"
     >
       <p class="text-center max-w-[320px]">
@@ -86,7 +99,7 @@ const profileDetails = computed(() => {
     </div>
 
     <div
-      v-else-if="!entity"
+      v-else-if="!profileEntity"
       class="flex min-h-[calc(100dvh-178px)] flex-col items-center justify-center gap-12 text-content-tertiary"
     >
       <UiIcon
@@ -116,19 +129,19 @@ const profileDetails = computed(() => {
             fallback="/explore"
           />
           <BaseAvatar
-            :label="entity.name"
-            :src="getEulerLabelEntityLogo(entity.logo)"
+            :label="profileEntity.name"
+            :src="visibleProfile?.logo"
             class="!h-72 !w-72 shrink-0"
           />
           <div class="min-w-0 flex-1">
             <h1 class="text-h2 text-content-primary mobile:text-h3">
-              {{ entity.name }}
+              {{ profileEntity.name }}
             </h1>
             <!-- eslint-disable vue/no-v-html -- autoLink escapes label text before adding links -->
             <p
-              v-if="entity.description"
+              v-if="profileEntity.description"
               class="mt-8 max-w-[760px] text-p2 text-content-secondary auto-link"
-              v-html="autoLink(entity.description)"
+              v-html="autoLink(profileEntity.description)"
             />
             <!-- eslint-enable vue/no-v-html -->
             <p
@@ -248,44 +261,77 @@ const profileDetails = computed(() => {
         </div>
       </section>
 
-      <section
-        v-if="managedMarkets.length"
-        class="flex flex-col gap-12"
-      >
-        <div class="flex items-center justify-between gap-12">
-          <h2 class="flex items-center gap-8 text-h3 text-content-primary">
-            Markets
-            <span class="inline-flex min-w-24 items-center justify-center rounded-full bg-surface-secondary px-8 py-2 text-p4 text-content-tertiary">
-              {{ managedMarkets.length }}
-            </span>
-          </h2>
+      <Transition name="instant-fade">
+        <section
+          v-if="isLoading"
+          key="loading"
+          class="flex min-h-96 items-center gap-10 rounded-12 border border-line-subtle bg-surface-elevated p-16 text-p3 text-content-tertiary"
+          role="status"
+        >
+          <UiLoader class="!h-20 !w-20 shrink-0" />
+          Loading markets and Earn vaults for {{ getChainById(chainId)?.name ?? 'this network' }}…
+        </section>
+
+        <section
+          v-else-if="isUnavailable"
+          key="error"
+          class="flex flex-col gap-8 rounded-12 border border-line-subtle bg-surface-elevated p-16 text-p3 text-content-tertiary"
+        >
+          <p>Markets and Earn vaults are temporarily unavailable on this network.</p>
+          <button
+            type="button"
+            class="self-start text-accent-600 underline"
+            @click="retryLabels"
+          >
+            Try again
+          </button>
+        </section>
+
+        <div
+          v-else
+          :key="`ready-${chainId}`"
+          class="flex flex-col gap-24"
+        >
+          <section
+            v-if="managedMarkets.length"
+            class="flex flex-col gap-12"
+          >
+            <div class="flex items-center justify-between gap-12">
+              <h2 class="flex items-center gap-8 text-h3 text-content-primary">
+                Markets
+                <span class="inline-flex min-w-24 items-center justify-center rounded-full bg-surface-secondary px-8 py-2 text-p4 text-content-tertiary">
+                  {{ managedMarkets.length }}
+                </span>
+              </h2>
+            </div>
+            <DiscoveryMarketAccordion :markets="managedMarkets" />
+          </section>
+
+          <section
+            v-if="earnVaults.length"
+            class="flex flex-col gap-12"
+          >
+            <h2 class="flex items-center gap-8 text-h3 text-content-primary">
+              Earn vaults
+              <span class="inline-flex min-w-24 items-center justify-center rounded-full bg-surface-secondary px-8 py-2 text-p4 text-content-tertiary">
+                {{ earnVaults.length }}
+              </span>
+            </h2>
+            <VaultEarnItem
+              v-for="vault in earnVaults"
+              :key="vault.address"
+              :vault="vault"
+            />
+          </section>
+
+          <p
+            v-if="!managedMarkets.length && !earnVaults.length"
+            class="rounded-12 border border-line-subtle p-16 text-p2 text-content-tertiary"
+          >
+            No markets or Earn vaults are available on this network.
+          </p>
         </div>
-        <DiscoveryMarketAccordion :markets="managedMarkets" />
-      </section>
-
-      <section
-        v-if="earnVaults.length"
-        class="flex flex-col gap-12"
-      >
-        <h2 class="flex items-center gap-8 text-h3 text-content-primary">
-          Earn vaults
-          <span class="inline-flex min-w-24 items-center justify-center rounded-full bg-surface-secondary px-8 py-2 text-p4 text-content-tertiary">
-            {{ earnVaults.length }}
-          </span>
-        </h2>
-        <VaultEarnItem
-          v-for="vault in earnVaults"
-          :key="vault.address"
-          :vault="vault"
-        />
-      </section>
-
-      <p
-        v-if="!managedMarkets.length && !earnVaults.length"
-        class="rounded-12 border border-line-subtle p-16 text-p2 text-content-tertiary"
-      >
-        No markets or Earn vaults are available on this network.
-      </p>
+      </Transition>
     </template>
   </section>
 </template>
