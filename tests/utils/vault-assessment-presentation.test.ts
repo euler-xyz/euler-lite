@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { VaultAssessment, VaultAssessmentFinding } from '@eulerxyz/euler-v2-sdk'
 import {
   getCriticalAssessmentWarning,
+  getKnownUnlistedActionNotice,
   getNotListedLine,
   getUpcomingVaultChanges,
   getVaultCheckFindings,
@@ -104,5 +105,11 @@ describe('vault checks presentation', () => {
   it('uses distinct non-phishing copy for hidden and pending review', () => {
     expect(getNotListedLine('hidden', 'The check failed')).toBe('This vault is not listed: The check failed.')
     expect(getNotListedLine('pending_review')).toBe('This vault has not been checked yet, so it is not listed.')
+    const address = '0x0000000000000000000000000000000000000001'
+    const visibility = { [address]: { status: 'hidden', reason: 'The check failed' } }
+    expect(getKnownUnlistedActionNotice([address], 'v3', visibility)).toBe('This vault is not listed: The check failed.')
+    expect(getKnownUnlistedActionNotice([address], 'v3', { [address]: { status: 'pending_review' } })).toBe('This vault has not been checked yet, so it is not listed.')
+    expect(getKnownUnlistedActionNotice([address], 'static', visibility)).toBeNull()
+    expect(getKnownUnlistedActionNotice([address, '0x0000000000000000000000000000000000000002'], 'v3', visibility)).toBeNull()
   })
 })

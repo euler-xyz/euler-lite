@@ -131,6 +131,22 @@ export const getNotListedLine = (status: string | undefined, reason?: string | n
   return null
 }
 
+export const getKnownUnlistedActionNotice = (
+  addresses: readonly string[],
+  source: string | undefined,
+  visibility: Record<string, { status: string, reason?: string | null }> | undefined,
+): string | null => {
+  if (source !== 'v3' || !addresses.length) return null
+  const lines = addresses.map((address) => {
+    const verdict = visibility?.[address.toLowerCase()]
+    return getNotListedLine(verdict?.status, verdict?.reason)
+  })
+  if (lines.some(line => line === null)) return null
+  return lines.length === 1
+    ? lines[0]!
+    : 'These vaults are not listed. Review their vault checks before continuing.'
+}
+
 export const getCriticalAssessmentWarning = (assessment?: VaultAssessment): VaultWarning | null => {
   if (!assessment?.assessed) return null
   const finding = [

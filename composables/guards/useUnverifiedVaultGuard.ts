@@ -3,9 +3,11 @@ import type { EulerEarn, EVault, SecuritizeCollateralVault } from '@eulerxyz/eul
 import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
 import { registerOperationBlocker, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
 import { recordUnverifiedVaultAcknowledgement, unverifiedVaultAcknowledgementKey } from '~/features/reviewed-execution/policy/acknowledgements'
+import { getKnownUnlistedActionNotice } from '~/utils/vault-assessment/presentation'
 
 export interface UnverifiedVaultGuardState {
   isAcknowledgmentRequired: boolean
+  unlistedNotice: string | null
   isVerificationLoading: boolean
   verificationError: string | undefined
   retryVerification: () => Promise<void>
@@ -32,7 +34,7 @@ export const useUnverifiedVaultGuard = (
     isEarnVaultOwnerVerified,
   } = useVaults()
 
-  const { isReady: labelsReady, loadError: labelsError, retryLabels } = useEulerLabels()
+  const { isReady: labelsReady, loadError: labelsError, retryLabels, source, visibility } = useEulerLabels()
   const isResolvingVaults = ref(false)
   const acknowledgedContextKey = ref('')
   const blockerKey = `unverified-vault:${++unverifiedVaultGuardSequence}`
@@ -99,6 +101,11 @@ export const useUnverifiedVaultGuard = (
       : []
   })
   const hasUnverifiedVault = computed(() => unverifiedVaultAddresses.value.length > 0)
+  const unlistedNotice = computed(() => getKnownUnlistedActionNotice(
+    unverifiedVaultAddresses.value,
+    source.value,
+    visibility.value,
+  ))
 
   const acknowledgementContext = computed(() => ({
     chainId: context.chainId.value ?? 0,
@@ -144,6 +151,7 @@ export const useUnverifiedVaultGuard = (
 
   const guardState = reactive({
     isAcknowledgmentRequired,
+    unlistedNotice,
     isVerificationLoading,
     verificationError,
     retryVerification,

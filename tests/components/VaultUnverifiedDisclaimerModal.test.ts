@@ -1,0 +1,30 @@
+import { createSSRApp, defineComponent, h } from 'vue'
+import { renderToString } from '@vue/server-renderer'
+import { describe, expect, it } from 'vitest'
+import VaultUnverifiedDisclaimerModal from '~/components/entities/vault/VaultUnverifiedDisclaimerModal.vue'
+
+const renderModal = (unlistedNotice?: string) => {
+  const app = createSSRApp({
+    render: () => h(VaultUnverifiedDisclaimerModal, { unlistedNotice }),
+  })
+  app.component('BaseModalWrapper', defineComponent({
+    setup: (_, { slots }) => () => h('div', slots.default?.()),
+  }))
+  app.component('UiButton', defineComponent({
+    setup: (_, { slots }) => () => h('button', slots.default?.()),
+  }))
+  return renderToString(app)
+}
+
+describe('unverified vault acknowledgement copy', () => {
+  it('uses the V3 status without phishing copy for a known unlisted vault', async () => {
+    const html = await renderModal('This vault has not been checked yet, so it is not listed.')
+    expect(html).toContain('Vault not listed')
+    expect(html).toContain('This vault has not been checked yet')
+    expect(html).not.toContain('phishing')
+  })
+
+  it('keeps the caution for an unknown vault', async () => {
+    expect(await renderModal()).toContain('phishing attempts')
+  })
+})

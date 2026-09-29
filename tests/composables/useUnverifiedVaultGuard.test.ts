@@ -11,6 +11,8 @@ const entries = new Map<string, { type: 'evk', vault: { chainId: number, address
 const verifyEVault = vi.fn()
 const labelsReady = ref(true)
 const labelsError = ref<string | undefined>()
+const labelsSource = ref<'v3' | 'static'>('static')
+const visibility = ref<Record<string, { status: string, reason?: string }>>({})
 const retryLabels = vi.fn()
 
 vi.mock('~/composables/useEulerLabels', () => ({
@@ -61,8 +63,10 @@ describe('useUnverifiedVaultGuard canonical context', () => {
     entries.clear()
     labelsReady.value = true
     labelsError.value = undefined
+    labelsSource.value = 'static'
+    visibility.value = {}
     retryLabels.mockReset()
-    vi.stubGlobal('useEulerLabels', () => ({ isReady: labelsReady, loadError: labelsError, retryLabels }))
+    vi.stubGlobal('useEulerLabels', () => ({ isReady: labelsReady, loadError: labelsError, retryLabels, source: labelsSource, visibility }))
     registryVersion.value = 0
     verifyEVault.mockReset()
     vi.stubGlobal('useVaultRegistry', () => ({
@@ -98,6 +102,21 @@ describe('useUnverifiedVaultGuard canonical context', () => {
     mounted.operation.value = 'position-number-supply'
     await nextTick()
     expect(mounted.state.isAcknowledgmentRequired).toBe(true)
+    mounted.app.unmount()
+  })
+
+  it('keeps the acknowledgement but uses the known hidden-vault notice', async () => {
+    entries.set(VAULT.toLowerCase(), { type: 'evk', vault: { chainId: 1, address: VAULT } })
+    verifyEVault.mockReturnValue(false)
+    labelsSource.value = 'v3'
+    visibility.value = { [VAULT.toLowerCase()]: { status: 'hidden', reason: 'A required check failed' } }
+    const mounted = mountGuard()
+    await nextTick()
+
+    expect(mounted.state.isAcknowledgmentRequired).toBe(true)
+    expect(mounted.state.unlistedNotice).toBe('This vault is not listed: A required check failed.')
+    mounted.state.acknowledgeRisk()
+    expect(mounted.state.isAcknowledgmentRequired).toBe(false)
     mounted.app.unmount()
   })
 

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 const emits = defineEmits(['close'])
-const { cancelAction, acceptAction } = defineProps<{
+const { cancelAction, acceptAction, unlistedNotice } = defineProps<{
   cancelAction?: () => void
   acceptAction?: () => void
+  unlistedNotice?: string | null
 }>()
 
 const handleAccept = () => {
@@ -24,12 +25,21 @@ const handleCancel = () => {
   >
     <div class="flex flex-col gap-12 text-content-primary mb-24">
       <h4 class="text-white text-h4">
-        Are you sure you want to interact with the unverified vault?
+        {{ unlistedNotice ? 'Vault not listed' : 'Are you sure you want to interact with the unverified vault?' }}
       </h4>
-      <p class="pb-8">
+      <p
+        v-if="unlistedNotice"
+        class="pb-8"
+      >
+        {{ unlistedNotice }} Review the vault checks before continuing.
+      </p>
+      <p
+        v-else
+        class="pb-8"
+      >
         Proceeding with this unknown and unverified vault may pose security risks. Such vaults could potentially be used for phishing attempts.
       </p>
-      <p>
+      <p v-if="!unlistedNotice">
         Please ensure you trust the source before continuing.
       </p>
     </div>

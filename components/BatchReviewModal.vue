@@ -20,6 +20,8 @@ import { BatchPreviewNotReadyError, ReviewedPlanDivergenceError } from '~/featur
 import { finalizeSuccessfulSubmission } from '~/features/reviewed-execution/review/submission-completion'
 import { useToast } from '~/components/ui/composables/useToast'
 import { getPositionTag, getSourcePositionTag } from '~/utils/positionTag'
+import { getKnownUnlistedActionNotice } from '~/utils/vault-assessment/presentation'
+import { useEulerLabels } from '~/composables/useEulerLabels'
 
 // Whole-batch review: required approvals, then the operations as rows that roll
 // down to their details, the net wallet changes, a Tenderly simulation link,
@@ -221,8 +223,8 @@ const restorationSummaryGroups = computed(() => {
 // Unverified vaults the batch touches — surfaced as a warning. A vault is the
 // target of an op's core action; we read targets off each op's contextual plan
 // and check the registry's verification flag (same source the forms use).
-const unverifiedVaultNames = computed<string[]>(() => {
-  const names = new Set<string>()
+const unverifiedVaults = computed(() => {
+  const vaults = new Map<string, string>()
   for (const entry of entries.value) {
     const plan = entryPlans.value[entry.id]
     if (!plan) continue
@@ -234,16 +236,23 @@ const unverifiedVaultNames = computed<string[]>(() => {
           const vault = getVault(addr) as { shares?: { name?: string }, asset?: { symbol?: string } } | undefined
           if (vault && !isVerifiedVault(addr)) {
             const name = vault.shares?.name || vault.asset?.symbol || ''
-            if (name) names.add(name)
+            if (name) vaults.set(addr.toLowerCase(), name)
           }
         }
         catch { /* skip malformed address */ }
       }
     }
   }
-  return [...names]
+  return [...vaults].map(([address, name]) => ({ address, name }))
 })
+const unverifiedVaultNames = computed(() => [...new Set(unverifiedVaults.value.map(vault => vault.name))])
 const hasUnverified = computed(() => unverifiedVaultNames.value.length > 0)
+const { source: labelsSource, visibility: vaultVisibility } = useEulerLabels()
+const unlistedNotice = computed(() => getKnownUnlistedActionNotice(
+  unverifiedVaults.value.map(vault => vault.address),
+  labelsSource.value,
+  vaultVisibility.value,
+))
 
 interface REULUnlockInfo {
   unlockableAmount: number
@@ -794,8 +803,8 @@ const onCloseRequested = () => {
         v-if="hasUnverified"
         variant="warning"
         size="compact"
-        title="Interacting with an unverified vault"
-        :description="`This batch interacts with an unverified vault (${unverifiedVaultNames.join(', ')}). Proceeding with an unknown and unverified vault may pose security risks — such vaults could potentially be used for phishing attempts.`"
+        :title="unlistedNotice ? 'Vault not listed' : 'Interacting with an unverified vault'"
+        :description="unlistedNotice || `This batch interacts with an unverified vault (${unverifiedVaultNames.join(', ')}). Proceeding with an unknown and unverified vault may pose security risks — such vaults could potentially be used for phishing attempts.`"
       />
 
       <!-- Top-level batch error (revert / status-check / wallet shortfall) -->
