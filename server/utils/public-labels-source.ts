@@ -37,7 +37,7 @@ const getGeoSource = () => {
 const cacheKey = (chainId: number, labelSet: string, version: string): string =>
   JSON.stringify([readResolvedV3ApiUrl(), labelSet, chainId, version, readLabelsOnchainVerificationChains().includes(chainId)])
 
-const buildRequest = (): PublicLabelsRequest => async <T>(
+export const createPublicLabelsRequest = (): PublicLabelsRequest => async <T>(
   path: string,
   query: PublicLabelsQuery,
 ): Promise<PublicLabelsResponse<T>> => {
@@ -77,7 +77,7 @@ export function refreshPublicLabelsBundle(
     try {
       const bundle = await withWallClock(
         async () => {
-          const request = buildRequest()
+          const request = createPublicLabelsRequest()
           const Adapter = readLabelsOnchainVerificationChains().includes(chainId) ? PublicLabelsV3MetadataAdapter : PublicLabelsV3Adapter
           const adapter = new Adapter({
             endpoint: readResolvedV3ApiUrl(),

@@ -5,6 +5,17 @@ export type ManagerProfileExternalLink = {
   url: string
 }
 
+export type ManagerNetworkSummary = {
+  chainId: number
+  productCount: number
+  earnVaultCount: number
+}
+
+export type ManagerNetworkIndex = {
+  source: 'v3' | 'static'
+  networks: ManagerNetworkSummary[]
+}
+
 const asHttpsUrl = (value: string): string => {
   const trimmed = value.trim()
   if (!trimmed) return ''

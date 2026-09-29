@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import type { ManagerNetworkIndex } from '~/utils/manager-profile'
 import { autoLink } from '~/utils/autoLink'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
+import { getChainById } from '~/entities/chainRegistry'
+import { getChainLogoUrl } from '~/utils/chain-logo'
 import {
   getManagerProfileSocialLinks,
 } from '~/utils/manager-profile'
@@ -11,6 +14,7 @@ defineOptions({
 
 const route = useRoute()
 const entityId = computed(() => route.params.slug as string)
+const { chainId } = useEulerAddresses()
 const {
   entity,
   managedMarkets,
@@ -19,6 +23,27 @@ const {
   isLoading,
   retryLabels,
 } = useEulerManagerProfile(entityId)
+
+const {
+  data: networkIndex,
+  status: networksStatus,
+  error: networksError,
+  refresh: refreshNetworks,
+} = useFetch<ManagerNetworkIndex>(
+  () => `/api/internal/manager-networks/${encodeURIComponent(entityId.value)}`,
+  { server: false, timeout: 30_000 },
+)
+
+const networkRows = computed(() =>
+  (networkIndex.value?.networks ?? [])
+    .map(network => ({
+      ...network,
+      name: getChainById(network.chainId)?.name ?? `Chain ${network.chainId}`,
+      logo: getChainLogoUrl(network.chainId),
+    }))
+    .sort((a, b) => Number(b.chainId === chainId.value) - Number(a.chainId === chainId.value)
+      || a.name.localeCompare(b.name)),
+)
 
 const socialLinks = computed(() => entity.value ? getManagerProfileSocialLinks(entity.value) : [])
 const profileDetails = computed(() => {
@@ -133,6 +158,73 @@ const profileDetails = computed(() => {
             </div>
           </div>
         </div>
+      </section>
+
+      <section
+        v-if="networkRows.length || networksStatus === 'pending' || networksError"
+        class="flex flex-col gap-12"
+      >
+        <h2 class="flex items-center gap-8 text-h3 text-content-primary">
+          Networks
+          <span
+            v-if="networkRows.length"
+            class="inline-flex min-w-24 items-center justify-center rounded-full bg-surface-secondary px-8 py-2 text-p4 text-content-tertiary"
+          >
+            {{ networkRows.length }}
+          </span>
+        </h2>
+        <p class="text-p3 text-content-tertiary">
+          Published labels by network. Select one to see its available markets and Earn vaults; visible counts may differ.
+        </p>
+        <div
+          v-if="networkRows.length"
+          class="grid grid-cols-3 gap-12 mobile:grid-cols-1 tablet:grid-cols-2"
+        >
+          <NuxtLink
+            v-for="network in networkRows"
+            :key="network.chainId"
+            :to="{ path: route.path, query: { ...route.query, network: network.chainId } }"
+            :aria-current="network.chainId === chainId ? 'page' : undefined"
+            class="flex min-w-0 items-center gap-10 rounded-12 border p-12 transition-colors"
+            :class="network.chainId === chainId
+              ? 'border-accent-600 bg-surface-secondary'
+              : 'border-line-subtle bg-surface-elevated hover:border-line-emphasis'"
+          >
+            <BaseAvatar
+              :label="network.name"
+              :src="network.logo"
+              class="!w-32 !h-32 shrink-0"
+            />
+            <span class="min-w-0 flex-1">
+              <span class="block truncate text-p2 text-content-primary">{{ network.name }}</span>
+              <span class="block text-p4 text-content-tertiary">
+                {{ network.productCount }} {{ network.productCount === 1 ? 'product' : 'products' }}
+                <template v-if="network.earnVaultCount">
+                  · {{ network.earnVaultCount }} Earn {{ network.earnVaultCount === 1 ? 'label' : 'labels' }}
+                </template>
+              </span>
+            </span>
+            <UiIcon
+              v-if="network.chainId !== chainId"
+              name="arrow-right"
+              class="!w-16 !h-16 shrink-0 text-content-tertiary"
+            />
+          </NuxtLink>
+        </div>
+        <p
+          v-else-if="networksStatus === 'pending'"
+          class="text-p3 text-content-tertiary"
+        >
+          Loading networks…
+        </p>
+        <button
+          v-else-if="networksError"
+          type="button"
+          class="self-start text-p3 text-accent-600 underline"
+          @click="refreshNetworks()"
+        >
+          Could not load networks. Try again
+        </button>
       </section>
 
       <section
