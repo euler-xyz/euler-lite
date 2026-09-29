@@ -445,15 +445,15 @@ describe('hasResolvedGovernorAdmin', () => {
 })
 
 describe('hosted standalone Earn authority', () => {
-  it('requires the V3 manager and a matching on-chain owner even without a product', () => {
+  it('requires the V3 curator and a matching on-chain owner even without a product', () => {
     const vault = { address: VAULT_ADDR, verified: true, governance: { owner: GOV_A } } as EarnVault
     const make = (entity?: string): VerificationLabels => ({
       getDeclaredEntityKeys: address => getHostedEntityKeys({ source: 'v3', managingEntityByVault: entity ? { [VAULT_ADDR.toLowerCase()]: entity } : {} }, address),
-      hasEntityAddress: (key, address) => key === 'manager' && address === GOV_A,
+      hasEntityAddress: (key, address) => key === 'curator' && address === GOV_A,
     })
     expect(isEarnVaultOwnerVerified(vault, make())).toBe(false)
     expect(isEarnVaultOwnerVerified(vault, make('co-brand'))).toBe(false)
-    expect(isEarnVaultOwnerVerified(vault, make('manager'))).toBe(true)
-    expect(isEarnVaultOwnerVerified({ ...vault, governance: { ...vault.governance, owner: GOV_B } } as EarnVault, make('manager'))).toBe(false)
+    expect(isEarnVaultOwnerVerified(vault, make('curator'))).toBe(true)
+    expect(isEarnVaultOwnerVerified({ ...vault, governance: { ...vault.governance, owner: GOV_B } } as EarnVault, make('curator'))).toBe(false)
   })
 })

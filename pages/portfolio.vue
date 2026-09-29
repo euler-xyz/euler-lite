@@ -27,6 +27,8 @@ const { locks, refreshLocks } = useREULLocks()
 const { isConnected, address, spyAddress, effectiveAddress, isSpyMode } = useEffectiveAddress()
 const { isLoaded: isBalancesLoaded, updateBalances } = useWallets()
 const { chainId, eulerLensAddresses } = useEulerAddresses()
+const { isReady: labelsReady, loadError: labelsError } = useEulerLabels()
+const labelsUnavailable = computed(() => !labelsReady.value && Boolean(labelsError.value))
 const { portfolioRefreshCounter } = usePortfolioRefresh()
 const showAllLabelEntries = useShowAllLabelEntries()
 const {
@@ -226,7 +228,19 @@ watch(showAllLabelEntries, (showAll) => {
 </script>
 
 <template>
-  <section class="flex flex-col gap-16 min-h-[calc(100dvh-178px)] mobile:-mx-16">
+  <section
+    v-if="labelsUnavailable"
+    class="flex min-h-[calc(100dvh-178px)] items-center justify-center"
+  >
+    <LabelsUnavailableState
+      title="Portfolio unavailable"
+      description="Vault verification could not be loaded, so positions cannot be shown reliably. Try again to load your portfolio."
+    />
+  </section>
+  <section
+    v-else
+    class="flex flex-col gap-16 min-h-[calc(100dvh-178px)] mobile:-mx-16"
+  >
     <div class="flex items-center justify-between px-16">
       <h2 class="text-h2 text-content-primary">
         Your Portfolio
