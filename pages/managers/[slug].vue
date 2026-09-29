@@ -21,7 +21,6 @@ const {
   earnVaults,
   isUnavailable,
   isLoading,
-  retryLabels,
 } = useEulerManagerProfile(entityId)
 
 // Chain-specific labels are cleared while the next network loads. Keep the
@@ -85,18 +84,12 @@ const profileDetails = computed(() => {
 
     <div
       v-else-if="isUnavailable && !profileEntity"
-      class="flex min-h-[calc(100dvh-178px)] flex-col items-center justify-center gap-12 text-content-tertiary"
+      class="flex min-h-[calc(100dvh-178px)] items-center justify-center"
     >
-      <p class="text-center max-w-[320px]">
-        Manager profiles are temporarily unavailable.
-      </p>
-      <button
-        type="button"
-        class="text-p3 text-accent-600 underline"
-        @click="retryLabels"
-      >
-        Try again
-      </button>
+      <LabelsUnavailableState
+        title="Manager profile unavailable"
+        description="Published manager details and market ownership could not be loaded. Try again when vault verification is available."
+      />
     </div>
 
     <div
@@ -276,16 +269,12 @@ const profileDetails = computed(() => {
         <section
           v-else-if="isUnavailable"
           key="error"
-          class="flex flex-col gap-8 rounded-12 border border-line-subtle bg-surface-elevated p-16 text-p3 text-content-tertiary"
+          class="rounded-12 border border-line-subtle bg-surface-elevated"
         >
-          <p>Markets and Earn vaults are temporarily unavailable on this network.</p>
-          <button
-            type="button"
-            class="self-start text-accent-600 underline"
-            @click="retryLabels"
-          >
-            Try again
-          </button>
+          <LabelsUnavailableState
+            title="Network listings unavailable"
+            description="Published labels for this network could not be loaded. The manager details above may be from your previous network; try again to see current markets and Earn vaults."
+          />
         </section>
 
         <div
