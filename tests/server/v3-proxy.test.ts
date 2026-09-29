@@ -37,10 +37,12 @@ describe('v3 proxy utilities', () => {
     expect(isV3ProxyPathAllowed('/v3/apys/intrinsic')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/apys/rewards')).toBe(true)
     expect(isV3ProxyPathAllowed(`/v3/earn/vaults/1/${VAULT}`)).toBe(true)
+    expect(isV3ProxyPathAllowed(`/v3/earn/vaults/1/${VAULT}/assessment`)).toBe(true)
     expect(isV3ProxyPathAllowed(`/v3/earn/vaults/1/${VAULT}/totals`)).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/bad-debt')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/batch')).toBe(true)
     expect(isV3ProxyPathAllowed(`/v3/evk/vaults/1/${VAULT}/totals`)).toBe(true)
+    expect(isV3ProxyPathAllowed(`/v3/evk/vaults/1/${VAULT}/assessment`)).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/open-interest')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/open-interest/by-collateral')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/liquidations')).toBe(true)
@@ -70,6 +72,9 @@ describe('v3 proxy utilities', () => {
     expect(isV3ProxyPathAllowed(`/v3/activity/vaults/0/${VAULT}/events`)).toBe(false)
     expect(isV3ProxyPathAllowed(`/v3/activity/vaults/${'1'.repeat(17)}/${VAULT}/events`)).toBe(false)
     expect(isV3ProxyPathAllowed(`/v3/activity/vaults/1/not-an-address/events`)).toBe(false)
+    expect(isV3ProxyPathAllowed(`/v3/evk/vaults/1/not-an-address/assessment`)).toBe(false)
+    expect(isV3ProxyPathAllowed(`/v3/evk/vaults/1/${VAULT}/assessment/admin`)).toBe(false)
+    expect(isV3ProxyPathAllowed(`/v3/evk/vaults/0/${VAULT}/assessment`)).toBe(false)
   })
 
   it('rejects percent-encoded path bytes before attaching the upstream API key', () => {

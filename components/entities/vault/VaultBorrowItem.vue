@@ -5,7 +5,7 @@ import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { getVaultAvailableLiquidity, getVaultUtilization } from '~/utils/vault-display'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { isVaultGovernanceLimited, isVaultRecentlyAdded, isVaultKeyring, isVaultCyclicalNote, getUniqueEntitiesByVaults } from '~/utils/eulerLabelsUtils'
+import { isVaultGovernanceLimited, isVaultRecentlyAdded, isVaultKeyring, isVaultCyclicalNote, getUniqueEntitiesByVaults, getVaultDeprecation } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { VaultApyModal, VaultMaxRoeModal, VaultNetApyPairModal, UiModalPreviewTrigger } from '#components'
@@ -84,13 +84,8 @@ const isRecentlyAdded = computed(() => isVaultRecentlyAdded(pair.collateral.addr
 const isKeyring = computed(() => isVaultKeyring(pair.collateral.address) || isVaultKeyring(pair.borrow.address))
 const isCyclicalNote = computed(() => isVaultCyclicalNote(pair.borrow.address))
 
-const isAnyDeprecated = computed(() => {
-  const collateralAddr = getAddress(pair.collateral.address)
-  const borrowAddr = getAddress(pair.borrow.address)
-  const collateralDeprecated = collateralProduct.deprecatedVaults?.includes(collateralAddr) ?? false
-  const borrowDeprecated = borrowProduct.deprecatedVaults?.includes(borrowAddr) ?? false
-  return collateralDeprecated || borrowDeprecated
-})
+const isAnyDeprecated = computed(() => getVaultDeprecation(pair.collateral.address).deprecated
+  || getVaultDeprecation(pair.borrow.address).deprecated)
 
 const pairName = computed(() => {
   // Handle escrow collateral specially
@@ -306,16 +301,17 @@ const linkPath = computed(() => ({
               v-else-if="isGeoRestricted"
               variant="restricted"
             />
-            <span
-              v-if="isAnyDeprecated"
-              class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-            >
-              <SvgIcon
-                name="warning"
-                class="!w-14 !h-14"
-              />
-              Deprecated
-            </span>
+            <VaultDeprecatedBadge :addresses="[pair.collateral.address, pair.borrow.address]" />
+            <VaultAssessmentWarning
+              :address="pair.collateral.address"
+              :hide-deprecated="isAnyDeprecated"
+              badge-label="Collateral warning"
+            />
+            <VaultAssessmentWarning
+              :address="pair.borrow.address"
+              :hide-deprecated="isAnyDeprecated"
+              badge-label="Borrow warning"
+            />
           </div>
           <div
             class="text-h5 text-content-primary flex flex-wrap items-center gap-8 min-w-0"

@@ -35,11 +35,6 @@ const isGovernorVerified = computed(() => isVaultGovernorVerified(vault as unkno
 const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
 const marketProductKey = computed(() => getProductKeyByVault(vault.address))
 const marketProductName = computed(() => getProductByVault(vault.address).name)
-
-const isDeprecated = computed(() => {
-  return product.deprecatedVaults?.includes(vaultAddress.value) ?? false
-})
-const deprecationReason = computed(() => isDeprecated.value ? product.deprecationReason || '' : '')
 const isRestricted = computed(() => isVaultBlockedByCountry(vault.address))
 
 // Count markets where this can be borrowed (securitize vaults cannot be borrow destinations)
@@ -128,10 +123,7 @@ const supplyCapPercentageDisplay = computed(() => {
       :default-open="true"
       content-class="flex flex-col items-start gap-24"
     >
-      <VaultDeprecationBanner
-        v-if="isDeprecated"
-        :reason="deprecationReason"
-      />
+      <VaultDeprecationBanner :addresses="[vault.address]" />
       <div
         v-if="isRestricted"
         class="w-full rounded-12 p-16 bg-warning-100 text-warning-500"

@@ -10,7 +10,7 @@ import {
   useEulerLabels,
 } from '~/composables/useEulerLabels'
 import type { PublicLabelsBundle } from '~/utils/public-labels'
-import { isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
+import { getVaultDeprecation, isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
 
 type Deferred<T> = {
   promise: Promise<T>
@@ -61,7 +61,7 @@ vi.mock('~/composables/useEulerOracleAdapters', () => ({
 }))
 
 vi.mock('~/composables/useVaults', () => ({
-  useVaults: () => ({ isReady: { value: true } }),
+  useVaults: () => ({ isReady: { value: true }, loadVaults: mocks.loadVaults }),
 }))
 
 vi.mock('~/composables/useVaultRegistry', () => ({
@@ -123,6 +123,24 @@ describe('useEulerLabels chain-scoped loading', () => {
 
   afterAll(() => {
     vi.unstubAllGlobals()
+  })
+
+  it('resolves EVK and Earn deprecation with their bundle reasons', () => {
+    const evk = '0x0000000000000000000000000000000000000001'
+    const earn = '0x0000000000000000000000000000000000000002'
+    __setEulerLabelsDataForTest({
+      products: {
+        product: {
+          vaults: [evk],
+          deprecatedVaults: [evk],
+          deprecationReason: 'The EVK is deprecated.',
+        },
+      } as unknown as EulerLabelsData['products'],
+      deprecatedEarnVaults: { [earn.toLowerCase()]: 'The Earn vault is deprecated.' },
+    })
+    expect(getVaultDeprecation(evk)).toEqual({ deprecated: true, reason: 'The EVK is deprecated.' })
+    expect(getVaultDeprecation(earn)).toEqual({ deprecated: true, reason: 'The Earn vault is deprecated.' })
+    expect(getVaultDeprecation('0x0000000000000000000000000000000000000003')).toEqual({ deprecated: false, reason: '' })
   })
 
   it('updates tag selection on a live labels refresh without reloading unchanged vault data', async () => {

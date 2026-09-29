@@ -40,6 +40,12 @@ const isNodeCyclicalNote = (address: string): boolean => {
 }
 
 const { isVaultGovernorVerified, isSecuritizeGovernorVerified, isEarnVaultOwnerVerified } = useVaults()
+const { isReady, loadError, source, visibility } = useEulerLabels()
+const getNodeWarning = (address: string) => {
+  if (!isReady.value || loadError.value || source.value !== 'v3') return null
+  const verdict = visibility.value?.[address.toLowerCase()]
+  return verdict?.status === 'warning' || verdict?.status === 'hidden' ? verdict : null
+}
 
 // Same signal as the per-pair "Unknown" curator pill: the vault resolved,
 // but its governor/owner isn't part of any declared product entity. Applies to
@@ -267,6 +273,25 @@ const isNodeCuratorUnknown = (address: string): boolean => {
               :cy="node.y - 9"
               r="6"
               style="fill: var(--error-500)"
+            />
+            <text
+              :x="node.x + 9"
+              :y="node.y - 5.5"
+              text-anchor="middle"
+              fill="white"
+              font-size="9"
+              font-weight="700"
+            >
+              !
+            </text>
+          </g>
+          <g v-else-if="getNodeWarning(node.address)">
+            <title>{{ getNodeWarning(node.address)?.reason || 'Vault checks need review' }}</title>
+            <circle
+              :cx="node.x + 9"
+              :cy="node.y - 9"
+              r="6"
+              style="fill: var(--warning-500)"
             />
             <text
               :x="node.x + 9"

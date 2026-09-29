@@ -15,7 +15,9 @@ import { logWarn } from '~/utils/errorHandling'
 import type { EulerLabelEntity, EulerLabelProduct, EulerLabelPointReward } from '~/entities/euler/labels'
 import { eulerLabelProductEmpty } from '~/entities/euler/labels'
 import { getEulerSdk } from '~/composables/useEulerSdk'
+import { useVaults } from '~/composables/useVaults'
 import { useEulerOracleAdapters } from '~/composables/useEulerOracleAdapters'
+import { useEulerVaultAssessments } from '~/composables/useEulerVaultAssessments'
 import { erc4626AssetAbi } from '~/abis/erc4626'
 import { buildBatchItem, evcBatchCall } from '~/utils/multicall'
 import { normalizeAddress } from '~/utils/normalizeAddress'
@@ -301,6 +303,7 @@ const probeWrapPairs = async (startChainId: number, loadGeneration: number, prob
 
 export const useEulerLabels = () => {
   const oracleAdapters = useEulerOracleAdapters()
+  const vaultAssessments = useEulerVaultAssessments()
 
   return {
     isLoading,
@@ -315,9 +318,16 @@ export const useEulerLabels = () => {
     oracleAdapters: oracleAdapters.oracleAdapters,
     oracleAssessmentsStatus: oracleAdapters.oracleAssessmentsStatus,
     oracleAssessmentsAvailable: oracleAdapters.oracleAssessmentsAvailable,
+    vaultAssessments: vaultAssessments.entries,
+    vaultAssessmentsChainId: vaultAssessments.activeChainId,
+    loadVaultAssessment: vaultAssessments.loadVaultAssessment,
+    getVaultAssessmentEntry: vaultAssessments.getEntry,
+    isVaultAssessmentAvailableForChain: vaultAssessments.isAvailableForChain,
+    refreshVaultAssessmentAfterOwnTransaction: vaultAssessments.refreshAfterOwnTransaction,
     earnVaults,
     geoPolicies,
     visibility,
+    source: computed(() => labelsData.value.source),
     loadLabels,
     refreshLabelsIfStale,
     retryLabels,

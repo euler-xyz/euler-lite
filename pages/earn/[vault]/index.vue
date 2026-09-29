@@ -40,6 +40,10 @@ const shareLinkQuery = computed(() => {
 const { getBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const vaultAddress = route.params.vault as string
+const { warning: assessmentWarning } = useVaultAssessmentWarning(vaultAddress, 'earn')
+const { visibility: vaultVisibility, source: labelsSource } = useEulerLabels()
+const isKnownUnlisted = computed(() => labelsSource.value === 'v3'
+  && ['hidden', 'pending_review'].includes(vaultVisibility.value?.[vaultAddress.toLowerCase()]?.status ?? ''))
 const { unverifiedVaultGuard } = useOperationGuard([vaultAddress])
 const { name } = useEulerProductOfVault(vaultAddress)
 const { settings } = useUserSettings()
@@ -109,7 +113,7 @@ const refreshEarnVault = async (address: string, silent = false) => {
 let warningModalId: number | undefined
 watch(
   () => !!vault.value && isConnected.value && walletChainId.value === chainId.value
-    && unverifiedVaultGuard.isAcknowledgmentRequired,
+    && unverifiedVaultGuard.isAcknowledgmentRequired && !isKnownUnlisted.value,
   (required) => {
     if (required && warningModalId === undefined) {
       warningModalId = modal.open(VaultUnverifiedDisclaimerModal, {
@@ -391,6 +395,8 @@ watch(amount, () => {
               :description="simulationError"
               size="compact"
             />
+
+            <VaultWarningBanner :warnings="[assessmentWarning]" />
 
             <VaultFormInfoBlock
               v-if="vault && asset"
