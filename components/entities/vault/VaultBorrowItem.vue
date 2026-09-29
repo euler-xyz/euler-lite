@@ -469,7 +469,7 @@ const linkPath = computed(() => ({
           class="flex items-center gap-6"
           :class="{ 'opacity-20': isAnyGovernanceLimited }"
         >
-          <ManagerEntityLink
+          <CuratorEntityLink
             :entities="entityDisplay.entities"
             :label="entityDisplay.name"
             span-link
@@ -666,7 +666,7 @@ const linkPath = computed(() => ({
             class="flex items-center gap-8"
             :class="{ 'opacity-20': isAnyGovernanceLimited }"
           >
-            <ManagerEntityLink
+            <CuratorEntityLink
               :entities="entityDisplay.entities"
               :label="entityDisplay.name"
               span-link

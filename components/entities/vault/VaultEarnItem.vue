@@ -322,7 +322,7 @@ const supplyApyModalData = computed(() => ({
           v-else-if="entityName"
           class="flex items-center gap-6"
         >
-          <ManagerEntityLink
+          <CuratorEntityLink
             :entities="entities"
             :label="entityName"
             span-link
@@ -423,7 +423,7 @@ const supplyApyModalData = computed(() => ({
             />
             Unknown
           </div>
-          <ManagerEntityLink
+          <CuratorEntityLink
             v-else-if="entityName"
             :entities="entities"
             :label="entityName"

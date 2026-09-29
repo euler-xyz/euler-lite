@@ -70,7 +70,7 @@ const hookTargetLabel = computed(() => {
 // an on-chain allowlist (access-control hook target).
 const hookTargetNote = computed(() =>
   isVaultAccessControlled(vault.address)
-    ? 'This vault is permissioned: the operations below can only be performed by addresses that the vault manager has added to an on-chain allowlist. If your address is not whitelisted, those operations will revert. Access is granted by the manager — there is no self-service verification.'
+    ? 'This vault is permissioned: the operations below can only be performed by addresses that the vault curator has added to an on-chain allowlist. If your address is not whitelisted, those operations will revert. Access is granted by the curator — there is no self-service verification.'
     : '',
 )
 

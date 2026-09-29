@@ -12,19 +12,19 @@ import { createPublicLabelsRequest } from './public-labels-source'
 import { readResolvedV3ApiUrl } from '~/utils/api-url-env'
 import { getEnabledChainIds } from '~/utils/chain-env'
 import { getKnownChainIds } from '~/entities/chainRegistry'
-import type { ManagerNetworkIndex, ManagerNetworkSummary } from '~/utils/manager-profile'
+import type { CuratorNetworkIndex, CuratorNetworkSummary } from '~/utils/curator-profile'
 
-const cache = createTtlCache<ManagerNetworkIndex>({ ttlMs: 5 * 60_000, maxEntries: 128 })
-const inFlight = createInFlightDedup<string, ManagerNetworkIndex>()
+const cache = createTtlCache<CuratorNetworkIndex>({ ttlMs: 5 * 60_000, maxEntries: 128 })
+const inFlight = createInFlightDedup<string, CuratorNetworkIndex>()
 
-export const summarizeManagerNetworks = (
+export const summarizeCuratorNetworks = (
   entityId: string,
   enabledChainIds: readonly number[],
   products: readonly PublicProductLabel[],
   vaults: readonly PublicVaultLabel[],
-): ManagerNetworkSummary[] => {
+): CuratorNetworkSummary[] => {
   const enabled = new Set(enabledChainIds)
-  const byChain = new Map<number, ManagerNetworkSummary>()
+  const byChain = new Map<number, CuratorNetworkSummary>()
   const entryFor = (chainId: number) => {
     let entry = byChain.get(chainId)
     if (!entry) {
@@ -47,7 +47,7 @@ export const summarizeManagerNetworks = (
   return [...byChain.values()].sort((a, b) => a.chainId - b.chainId)
 }
 
-export const getManagerNetworkIndex = async (entityId: string): Promise<ManagerNetworkIndex> => {
+export const getCuratorNetworkIndex = async (entityId: string): Promise<CuratorNetworkIndex> => {
   if (readLabelsSource() === 'static') return { source: 'static', networks: [] }
 
   const selection = readV3LabelsSelection()
@@ -70,9 +70,9 @@ export const getManagerNetworkIndex = async (entityId: string): Promise<ManagerN
         ])
         return {
           source: 'v3' as const,
-          networks: summarizeManagerNetworks(entityId, enabledChainIds, products, vaults),
+          networks: summarizeCuratorNetworks(entityId, enabledChainIds, products, vaults),
         }
-      }, 25_000, `manager networks entity=${entityId}`)
+      }, 25_000, `curator networks entity=${entityId}`)
       cache.set(key, result)
       return result
     }

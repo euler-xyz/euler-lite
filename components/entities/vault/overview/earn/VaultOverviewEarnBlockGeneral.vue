@@ -102,7 +102,7 @@ const feeDisplay = computed(() => {
             :key="idx"
             class="flex items-center gap-8"
           >
-            <ManagerEntityLink :entities="[entity]" />
+            <CuratorEntityLink :entities="[entity]" />
           </div>
         </div>
         <VaultTypeChip

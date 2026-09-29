@@ -1,19 +1,19 @@
 import type { EulerLabelEntity, EulerLabelProduct } from '~/entities/euler/labels'
 
-export type ManagerProfileExternalLink = {
+export type CuratorProfileExternalLink = {
   label: string
   url: string
 }
 
-export type ManagerNetworkSummary = {
+export type CuratorNetworkSummary = {
   chainId: number
   productCount: number
   earnVaultCount: number
 }
 
-export type ManagerNetworkIndex = {
+export type CuratorNetworkIndex = {
   source: 'v3' | 'static'
-  networks: ManagerNetworkSummary[]
+  networks: CuratorNetworkSummary[]
 }
 
 const asHttpsUrl = (value: string): string => {
@@ -54,9 +54,9 @@ const getSocialLinkLabel = (platform: string): string =>
     .map(part => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ')
 
-export const getManagerProfileExternalUrl = asHttpsUrl
+export const getCuratorProfileExternalUrl = asHttpsUrl
 
-export const getManagerProfileSocialUrl = (platform: string, value: string): string => {
+export const getCuratorProfileSocialUrl = (platform: string, value: string): string => {
   const trimmed = value.trim()
   if (!trimmed) return ''
   if (/^h?https?:\/\//i.test(trimmed)) return asHttpsUrl(trimmed)
@@ -66,13 +66,13 @@ export const getManagerProfileSocialUrl = (platform: string, value: string): str
   return handle ? asHttpsUrl(`${base}${handle}`) : ''
 }
 
-export const getManagerProfileSocialLinks = (entity: EulerLabelEntity): ManagerProfileExternalLink[] => {
+export const getCuratorProfileSocialLinks = (entity: EulerLabelEntity): CuratorProfileExternalLink[] => {
   const links = [
     entity.url ? { label: 'Website', url: asHttpsUrl(entity.url) } : null,
     ...Object.entries(entity.social ?? {}).map(([platform, value]) => value
-      ? { label: getSocialLinkLabel(platform), url: getManagerProfileSocialUrl(platform, value) }
+      ? { label: getSocialLinkLabel(platform), url: getCuratorProfileSocialUrl(platform, value) }
       : null),
-  ].filter((link): link is ManagerProfileExternalLink => Boolean(link?.url))
+  ].filter((link): link is CuratorProfileExternalLink => Boolean(link?.url))
 
   const seen = new Set<string>()
   return links.filter((link) => {
@@ -104,4 +104,4 @@ export const getEulerLabelEntityDisplayName = (entities: EulerLabelEntity[]): st
   return `${entities[0].name} & others`
 }
 
-export const getManagerProfilePath = (entityId: string): string => `/managers/${encodeURIComponent(entityId)}`
+export const getCuratorProfilePath = (entityId: string): string => `/curators/${encodeURIComponent(entityId)}`

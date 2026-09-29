@@ -3,14 +3,14 @@ import type { MarketGroup } from '~/entities/lend-discovery'
 import type { EulerLabelProduct } from '~/entities/euler/labels'
 import { getEntitiesByEarnVault, isEarnVaultNotExplorable, isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelsSourceData } from '~/composables/useEulerLabels'
-import { getEulerLabelEntityId, isEulerLabelProductManagedBy } from '~/utils/manager-profile'
+import { getEulerLabelEntityId, isEulerLabelProductManagedBy } from '~/utils/curator-profile'
 
-export type ManagerProductEntry = {
+export type CuratorProductEntry = {
   key: string
   product: EulerLabelProduct
 }
 
-export const useEulerManagerProfile = (entityId: Ref<string>) => {
+export const useEulerCuratorProfile = (entityId: Ref<string>) => {
   const { entities, products, isReady: labelsReady, loadError: labelsError, retryLabels } = useEulerLabels()
   const { isEarnUpdating, isEarnVaultOwnerVerified } = useVaults()
   const { getEarnVaults, isVerifiedVault } = useVaultRegistry()
@@ -23,7 +23,7 @@ export const useEulerManagerProfile = (entityId: Ref<string>) => {
 
   const entity = computed(() => entities[entityId.value] ?? null)
 
-  const productEntries = computed<ManagerProductEntry[]>(() =>
+  const productEntries = computed<CuratorProductEntry[]>(() =>
     Object.entries(products)
       .filter(([, product]) => isEulerLabelProductManagedBy(product, entityId.value))
       .map(([key, product]) => ({ key, product }))
@@ -43,8 +43,8 @@ export const useEulerManagerProfile = (entityId: Ref<string>) => {
     if (labels.source === 'v3' || labels.source === 'v3-metadata') {
       return labels.managingEntityByVault?.[candidate.address.toLowerCase()] === entityId.value
     }
-    return getEntitiesByEarnVault(candidate).some(manager =>
-      getEulerLabelEntityId(entities, manager) === entityId.value,
+    return getEntitiesByEarnVault(candidate).some(curator =>
+      getEulerLabelEntityId(entities, curator) === entityId.value,
     )
   }
 

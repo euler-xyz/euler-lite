@@ -226,7 +226,7 @@ watchEffect(() => {
             class="flex items-center gap-8"
             :class="{ 'opacity-20': isGovernanceLimited }"
           >
-            <ManagerEntityLink
+            <CuratorEntityLink
               :entities="[entity]"
               avatar-class="!w-28 !h-28"
             />

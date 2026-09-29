@@ -18,7 +18,7 @@ const { loadLabels, refreshLabelsIfStale, retryLabels, isReady: isLabelsReady, i
 const hasPageLabelsErrorState = computed(() =>
   ['/explore', '/lend', '/borrow', '/earn'].includes(route.path)
   || route.path.startsWith('/portfolio')
-  || route.path.startsWith('/managers/'),
+  || route.path.startsWith('/curators/'),
 )
 const { loadCountry } = useGeoBlock()
 const { updateBalances, resetBalances } = useWallets()

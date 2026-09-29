@@ -193,7 +193,7 @@ watchEffect(async () => {
           class="flex items-center gap-6"
           :class="{ 'opacity-20': isGovernanceLimited }"
         >
-          <ManagerEntityLink
+          <CuratorEntityLink
             :entities="entities"
             :label="entityName"
             span-link
@@ -266,7 +266,7 @@ watchEffect(async () => {
             class="flex items-center gap-8"
             :class="{ 'opacity-20': isGovernanceLimited }"
           >
-            <ManagerEntityLink
+            <CuratorEntityLink
               :entities="entities"
               :label="entityName"
               span-link

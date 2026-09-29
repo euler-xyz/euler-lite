@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import type { EulerLabelEntity, EulerLabelProduct } from '~/entities/euler/labels'
 import type { MarketGroup } from '~/entities/lend-discovery'
-import { useEulerManagerProfile } from '~/composables/useEulerManagerProfile'
+import { useEulerCuratorProfile } from '~/composables/useEulerCuratorProfile'
 
 const state = vi.hoisted(() => ({
   source: 'v3' as 'v3' | 'static',
@@ -48,7 +48,7 @@ const market = (id: string): MarketGroup => ({
   metrics: { totalTVL: 100 },
 }) as MarketGroup
 
-describe('useEulerManagerProfile', () => {
+describe('useEulerCuratorProfile', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     state.source = 'v3'
@@ -96,7 +96,7 @@ describe('useEulerManagerProfile', () => {
       isReady: ref(true), isResolvingTVL: ref(false),
     }))
 
-    const profile = useEulerManagerProfile(ref('k3'))
+    const profile = useEulerCuratorProfile(ref('k3'))
     expect(profile.managedMarkets.value.map(group => group.id)).toEqual(['owned'])
     expect(profile.earnVaults.value.map(vault => vault.address)).toEqual([good.address])
 
@@ -121,7 +121,7 @@ describe('useEulerManagerProfile', () => {
     vi.stubGlobal('useShowAllLabelEntries', () => ref(false))
     vi.stubGlobal('useMarketGroups', () => ({ marketGroups: ref([]), isReady: ref(true), isResolvingTVL: ref(false) }))
 
-    const profile = useEulerManagerProfile(ref('k3'))
+    const profile = useEulerCuratorProfile(ref('k3'))
     expect(profile.earnVaults.value.map(vault => vault.address)).toEqual([good.address])
     labelsReady.value = false
     loadError.value = 'Unable to load labels'

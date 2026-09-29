@@ -153,8 +153,7 @@ export const getUnknownCollateralCount = (market: MarketGroup): number =>
 export const getMarketEntities = (market: MarketGroup): { name: string, logos: string[], labels: string[] } => {
   if (market.source === 'product' && market.brandEntities?.length) {
     return {
-      // Co-brands contribute visual identity only; the visible manager name
-      // and manager-profile ownership remain attached to the product curator.
+      // Co-brands add visual identity; the product curator remains the profile owner.
       name: market.curator?.name ?? market.brandEntities[0].name,
       logos: market.brandEntities.map(entity => getEulerLabelEntityLogo(entity.logo)),
       labels: market.brandEntities.map(entity => entity.name),

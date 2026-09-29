@@ -4,12 +4,12 @@ import {
   getEulerLabelEntityDisplayName,
   getEulerLabelEntityKeys,
   getEulerLabelEntityId,
-  getManagerProfileExternalUrl,
-  getManagerProfilePath,
-  getManagerProfileSocialLinks,
-  getManagerProfileSocialUrl,
+  getCuratorProfileExternalUrl,
+  getCuratorProfilePath,
+  getCuratorProfileSocialLinks,
+  getCuratorProfileSocialUrl,
   isEulerLabelProductManagedBy,
-} from '~/utils/manager-profile'
+} from '~/utils/curator-profile'
 
 const entity = (name: string, logo = `${name}.svg`): EulerLabelEntity => ({
   name,
@@ -26,7 +26,7 @@ const entity = (name: string, logo = `${name}.svg`): EulerLabelEntity => ({
   },
 })
 
-describe('manager profile helpers', () => {
+describe('curator profile helpers', () => {
   it('normalizes product entity keys', () => {
     expect(getEulerLabelEntityKeys({ entity: 'k3' } as EulerLabelProduct)).toEqual(['k3'])
     expect(getEulerLabelEntityKeys({ entity: ['k3', 're7'] } as EulerLabelProduct)).toEqual(['k3', 're7'])
@@ -59,30 +59,30 @@ describe('manager profile helpers', () => {
     expect(getEulerLabelEntityId(entities, { ...k3, id: 'unknown' })).toBe('')
   })
 
-  it('formats compact manager labels', () => {
+  it('formats compact curator labels', () => {
     expect(getEulerLabelEntityDisplayName([])).toBe('')
     expect(getEulerLabelEntityDisplayName([entity('K3')])).toBe('K3')
     expect(getEulerLabelEntityDisplayName([entity('K3'), entity('Re7')])).toBe('K3 & Re7')
     expect(getEulerLabelEntityDisplayName([entity('K3'), entity('Re7'), entity('MEV Capital')])).toBe('K3 & others')
   })
 
-  it('builds manager profile paths', () => {
-    expect(getManagerProfilePath('mev-capital')).toBe('/managers/mev-capital')
-    expect(getManagerProfilePath('a/b')).toBe('/managers/a%2Fb')
+  it('builds curator profile paths', () => {
+    expect(getCuratorProfilePath('mev-capital')).toBe('/curators/mev-capital')
+    expect(getCuratorProfilePath('a/b')).toBe('/curators/a%2Fb')
   })
 
-  it('normalizes manager social handles into external URLs', () => {
-    expect(getManagerProfileSocialUrl('twitter', '@k3_capital')).toBe('https://x.com/k3_capital')
-    expect(getManagerProfileSocialUrl('github', 'euler-xyz')).toBe('https://github.com/euler-xyz')
-    expect(getManagerProfileSocialUrl('telegram', 'https://t.me/UsualCommunity')).toBe('https://t.me/UsualCommunity')
-    expect(getManagerProfileSocialUrl('discord', 'hhttps://discord.usual.money/')).toBe('https://discord.usual.money/')
-    expect(getManagerProfileExternalUrl('example.com')).toBe('https://example.com/')
-    expect(getManagerProfileExternalUrl('http://example.com')).toBe('')
-    expect(getManagerProfileExternalUrl('javascript:alert(1)')).toBe('')
+  it('normalizes curator social handles into external URLs', () => {
+    expect(getCuratorProfileSocialUrl('twitter', '@k3_capital')).toBe('https://x.com/k3_capital')
+    expect(getCuratorProfileSocialUrl('github', 'euler-xyz')).toBe('https://github.com/euler-xyz')
+    expect(getCuratorProfileSocialUrl('telegram', 'https://t.me/UsualCommunity')).toBe('https://t.me/UsualCommunity')
+    expect(getCuratorProfileSocialUrl('discord', 'hhttps://discord.usual.money/')).toBe('https://discord.usual.money/')
+    expect(getCuratorProfileExternalUrl('example.com')).toBe('https://example.com/')
+    expect(getCuratorProfileExternalUrl('http://example.com')).toBe('')
+    expect(getCuratorProfileExternalUrl('javascript:alert(1)')).toBe('')
   })
 
   it('builds social links from entity metadata', () => {
-    expect(getManagerProfileSocialLinks({
+    expect(getCuratorProfileSocialLinks({
       ...entity('K3'),
       url: 'k3.capital',
       social: {

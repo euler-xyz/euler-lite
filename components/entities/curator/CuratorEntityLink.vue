@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { EulerLabelEntity } from '~/entities/euler/labels'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
-import { getEulerLabelEntityDisplayName, getEulerLabelEntityId, getManagerProfilePath } from '~/utils/manager-profile'
+import { getEulerLabelEntityDisplayName, getEulerLabelEntityId, getCuratorProfilePath } from '~/utils/curator-profile'
 
 const props = withDefaults(defineProps<{
   entities: EulerLabelEntity[]
@@ -34,7 +34,7 @@ const primaryEntityId = computed(() => {
   return first ? getEulerLabelEntityId(entityMap, first) : ''
 })
 const to = computed(() => ({
-  path: getManagerProfilePath(primaryEntityId.value),
+  path: getCuratorProfilePath(primaryEntityId.value),
   query: { network: route.query.network },
 }))
 const isLinked = computed(() => Boolean(primaryEntityId.value) && props.entities.length === 1 && !props.disabled)
@@ -42,7 +42,7 @@ const fallbackTextClass = computed(() =>
   props.textClass.replace('hover:text-accent-600 underline transition-colors', ''),
 )
 
-const goToManager = () => {
+const goToCurator = () => {
   if (!isLinked.value) return
   void navigateTo(to.value)
 }
@@ -51,7 +51,7 @@ const onSpanKeydown = (event: KeyboardEvent) => {
   if (event.key !== 'Enter' && event.key !== ' ') return
   event.preventDefault()
   event.stopPropagation()
-  goToManager()
+  goToCurator()
 }
 </script>
 
@@ -72,7 +72,7 @@ const onSpanKeydown = (event: KeyboardEvent) => {
       :data-key="dataKey || undefined"
       :data-field="dataField || undefined"
       :data-value="displayName"
-      @click.stop.prevent="goToManager"
+      @click.stop.prevent="goToCurator"
       @keydown="onSpanKeydown"
     >{{ displayName }}</span>
     <NuxtLink

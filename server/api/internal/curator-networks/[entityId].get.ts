@@ -1,12 +1,12 @@
 import { createError, getRouterParam, setResponseHeader } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
-import { getManagerNetworkIndex } from '~/server/utils/manager-network-index'
+import { getCuratorNetworkIndex } from '~/server/utils/curator-network-index'
 import { logger } from '~/server/utils/logger'
 
 const rateLimiter = createRateLimiter({
   max: 120,
   windowMs: 60_000,
-  label: 'manager-networks',
+  label: 'curator-networks',
 })
 
 export default defineEventHandler(async (event) => {
@@ -17,12 +17,12 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
-    const index = await getManagerNetworkIndex(entityId)
+    const index = await getCuratorNetworkIndex(entityId)
     setResponseHeader(event, 'Cache-Control', 'public, max-age=60, stale-while-revalidate=60')
     return index
   }
   catch (error) {
-    logger.warn({ ctx: 'manager-networks', entityId, err: error }, 'index unavailable')
-    throw createError({ statusCode: 502, statusMessage: 'Manager networks unavailable' })
+    logger.warn({ ctx: 'curator-networks', entityId, err: error }, 'index unavailable')
+    throw createError({ statusCode: 502, statusMessage: 'Curator networks unavailable' })
   }
 })
