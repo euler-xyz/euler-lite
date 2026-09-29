@@ -69,4 +69,15 @@ describe('vault form verification prerequisites', () => {
     expect(html).toContain('Retry verification')
     expect(html).not.toContain('Acknowledge Unverified Vault Risk')
   })
+
+  it('uses the listed-status acknowledgement label for a known hidden vault', async () => {
+    connected.value = true
+    walletChain.value = 143
+    const html = await renderSubmit({
+      isAcknowledgmentRequired: true,
+      unlistedNotice: 'This vault is not listed: A required check failed.',
+    })
+    expect(html).toContain('Acknowledge Vault Status')
+    expect(html).not.toContain('Acknowledge Unverified Vault Risk')
+  })
 })

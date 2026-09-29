@@ -152,10 +152,12 @@ export const getVaultDeprecation = (vaultAddress: string): { deprecated: boolean
   const earnDeprecated = isEulerLabelEarnVaultDeprecated(labels(), normalized)
   const deprecated = earnDeprecated || isEulerLabelVaultDeprecated(labels(), normalized)
   if (!deprecated) return { deprecated: false, reason: '' }
-  const product = getEulerLabelProductByVault(labels(), normalized) as EulerLabelProduct | undefined
+  const product = Object.values(labels().products).find(item => item.deprecatedVaults?.includes(normalized))
+    ?? getEulerLabelProductByVault(labels(), normalized) as EulerLabelProduct | undefined
   return {
     deprecated: true,
     reason: (earnDeprecated ? getEulerLabelEarnVaultDeprecationReason(labels(), normalized) : '')
+      || product?.vaultOverrides?.[normalized]?.deprecationReason
       || product?.deprecationReason
       || 'This vault has been deprecated.',
   }
