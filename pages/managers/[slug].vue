@@ -57,6 +57,7 @@ const networkRows = computed(() =>
     .sort((a, b) => Number(b.chainId === 1) - Number(a.chainId === 1)
       || a.name.localeCompare(b.name)),
 )
+const selectedNetwork = computed(() => networkRows.value.find(network => network.chainId === chainId.value))
 
 const socialLinks = computed(() => profileEntity.value ? getManagerProfileSocialLinks(profileEntity.value) : [])
 const profileDetails = computed(() => {
@@ -187,7 +188,7 @@ const profileDetails = computed(() => {
           </span>
         </h2>
         <p class="text-p3 text-content-tertiary">
-          Published labels by network. Select one to see its available markets and Earn vaults; visible counts may differ.
+          Published label counts include vaults that may be hidden or deprecated. Select a network to see what is currently listed in Lite.
         </p>
         <div
           v-if="networkRows.length"
@@ -211,9 +212,9 @@ const profileDetails = computed(() => {
             <span class="min-w-0 flex-1">
               <span class="block truncate text-p2 text-content-primary">{{ network.name }}</span>
               <span class="block text-p4 text-content-tertiary">
-                {{ network.productCount }} {{ network.productCount === 1 ? 'product' : 'products' }}
+                {{ network.productCount }} product {{ network.productCount === 1 ? 'label' : 'labels' }}
                 <template v-if="network.earnVaultCount">
-                  · {{ network.earnVaultCount }} Earn {{ network.earnVaultCount === 1 ? 'label' : 'labels' }}
+                  · {{ network.earnVaultCount }} Earn vault {{ network.earnVaultCount === 1 ? 'label' : 'labels' }}
                 </template>
               </span>
             </span>
@@ -328,7 +329,12 @@ const profileDetails = computed(() => {
             v-if="!managedMarkets.length && !earnVaults.length"
             class="rounded-12 border border-line-subtle p-16 text-p2 text-content-tertiary"
           >
-            No markets or Earn vaults are available on this network.
+            <template v-if="selectedNetwork">
+              {{ profileEntity.name }} has published labels on {{ selectedNetwork.name }}, but no markets or Earn vaults are currently listed here. Published labels can include hidden or deprecated vaults.
+            </template>
+            <template v-else>
+              No markets or Earn vaults are currently listed on {{ getChainById(chainId)?.name ?? 'this network' }}.
+            </template>
           </p>
         </div>
       </Transition>
