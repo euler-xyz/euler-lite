@@ -110,8 +110,7 @@ const buildV3ProxyApiPath = () => buildAppApiPath(INTERNAL_API_BASE)
 // one server-side TTL cache across browser tabs, (2) take the cold-TLS
 // hit once at proxy startup rather than on every user, and (3) keep
 // upstream URLs (and any auth) server-only. See
-// `server/api/internal/proxy/{merkl,fuul,incentra,subgraph}/[...path].ts` and
-// `server/api/internal/labels/[chainId]/[file].get.ts`.
+// `server/api/internal/proxy/{merkl,fuul,incentra,subgraph}/[...path].ts`.
 const buildMerklProxyApiPath = () => buildAppApiPath('/api/internal/proxy/merkl')
 const buildFuulProxyApiPath = (path = '') =>
   buildAppApiPath(`/api/internal/proxy/fuul${path ? `/${path.replace(/^\/+/, '')}` : ''}`)
@@ -124,7 +123,6 @@ const buildTurtleProxyApiPath = () => buildAppApiPath('/api/internal/proxy/turtl
 // the one actually serving queryAccountVaults.
 export const buildSubgraphProxyApiPath = (chainId: number) =>
   buildAppApiPath(`/api/internal/proxy/subgraph/${chainId}`)
-const buildLabelsProxyApiPath = () => buildAppApiPath('/api/internal/labels')
 const buildMorphoProxyApiPath = () => buildAppApiPath('/api/internal/proxy/morpho')
 const buildAaveProxyApiPath = () => buildAppApiPath('/api/internal/proxy/aave')
 
@@ -180,7 +178,6 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
   const { enableMerkl, enableIncentra, enableFuul, enableTurtle } = useDeployConfig()
   const swapApiUrl = cleanUrl(rc.swapApiUrl)
   const v3ApiUrl = buildV3ProxyApiPath()
-  const labelsProxyUrl = buildLabelsProxyApiPath()
   const subgraphUrls = buildSubgraphUrlMap()
   const { enableV3Backend, browserVaultSource, eulerInterfacesBranch } = useEnvConfig()
   // 'fast' resolves to whatever NUXT_PUBLIC_BROWSER_VAULT_SOURCE pins.
@@ -196,11 +193,6 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
     ...(v3ApiUrl ? { v3ApiUrl, tokenlistApiBaseUrl: v3ApiUrl, intrinsicApyV3ApiUrl: v3ApiUrl } : {}),
     eulerInterfacesBranch,
     deploymentsUrl: buildAppApiPath('/api/internal/euler-chains'),
-    // Labels always go through the local /api/internal/labels proxy. Server-side env
-    // (`NUXT_PUBLIC_CONFIG_LABELS_BASE_URL`/`*_REPO`) controls where the proxy
-    // fetches upstream, so callers see a single internal hostname. Same
-    // pattern as `tokenlistApiBaseUrl` above.
-    eulerLabelsBaseUrl: labelsProxyUrl,
     ...(swapApiUrl ? { swapApiUrl } : {}),
     ...(enableMerkl ? { rewardsMerklApiUrl: buildMerklProxyApiPath() } : { rewardsEnableMerkl: false }),
     // Incentra/Brevis: SDK takes the full URL for each endpoint, so map both

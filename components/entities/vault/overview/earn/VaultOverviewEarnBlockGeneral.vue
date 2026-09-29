@@ -69,7 +69,7 @@ const feeDisplay = computed(() => {
         </p>
       </div>
     </div>
-    <!-- eslint-disable vue/no-v-html -- trusted label content -->
+    <!-- eslint-disable vue/no-v-html -- autoLink escapes label text before adding links -->
     <p
       v-if="earnDescription"
       class="text-p2 text-content-secondary auto-link"

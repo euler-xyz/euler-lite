@@ -11,7 +11,8 @@ import {
   patternRuleMatches,
   isWrapPair,
 } from '~/utils/eulerLabelsUtils'
-import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
+import { matchesHostedGeo } from '~/utils/geo-policies'
+import { getEulerGeoContext, getEulerLabelsVersion } from '~/composables/useEulerLabels'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { SANCTIONED_COUNTRIES, COUNTRY_GROUPS } from '~/entities/constants'
 
@@ -35,7 +36,11 @@ export const useGeoBlock = () => {
     }
   }
 
-  return { country, loadCountry }
+  const isPolicyAvailable = computed(() => {
+    const hosted = getEulerGeoContext()
+    return !hosted || hosted.policies !== undefined
+  })
+  return { country, loadCountry, isPolicyAvailable }
 }
 
 const isCountryInList = (codes: readonly string[]): boolean => {
@@ -133,6 +138,9 @@ export const isAssetBlockedByCountry = (asset: AssetLike): boolean => {
   // Sanctioned countries are always blocked
   if (isCountryInList(SANCTIONED_COUNTRIES)) return cacheSet(assetBlockCache, cacheKey, true)
 
+  const hosted = getEulerGeoContext()
+  if (hosted) return cacheSet(assetBlockCache, cacheKey, matchesHostedGeo(hosted, country.value, 'block', fields))
+
   if (fields.address) {
     const assetBlock = getAssetBlock(fields.address)
     if (assetBlock?.length && isCountryInList(expandBlockList(assetBlock))) {
@@ -162,10 +170,15 @@ export const isAssetRestrictedByCountry = (
   asset: AssetLike,
   opts?: { counterpart?: AssetLike },
 ): boolean => {
+  const hosted = getEulerGeoContext()
+  if (hosted && hosted.policies === undefined) return true
   const fields = toAssetFields(asset)
   if (!fields) return false
   if (country.value === undefined) return true // unresolved policy must fail closed
   if (country.value === null) return true // loaded, country unknown
+
+  // Global/chain rules cannot be exempted by a wrap or same-asset transfer.
+  if (hosted && matchesHostedGeo(hosted, country.value, 'restrict', fields, undefined, 'non-asset')) return true
 
   const cacheKey = makeAssetCacheKey(fields)
   const cached = assetRestrictedCache.get(cacheKey)
@@ -188,6 +201,9 @@ const computeAssetRestricted = (
   fields: { address?: string, symbol?: string, name?: string },
   cacheKey: string,
 ): boolean => {
+  const hosted = getEulerGeoContext()
+  if (hosted) return cacheSet(assetRestrictedCache, cacheKey, matchesHostedGeo(hosted, country.value!, 'restrict', fields, undefined, 'asset'))
+
   if (fields.address) {
     const assetRestricted = getAssetRestricted(fields.address)
     if (assetRestricted?.length && isCountryInList(expandBlockList(assetRestricted))) {
@@ -221,6 +237,14 @@ export const isVaultBlockedByCountry = (
   if (isCountryInList(SANCTIONED_COUNTRIES)) return true
   if (!vaultAddress) return false
 
+  const hosted = getEulerGeoContext()
+  if (hosted) {
+    if (hosted.policies === undefined) return false // No new exposure; exits are not hard blocked.
+    const asset = toAssetFields(opts?.asset ?? getVaultUnderlyingAsset(vaultAddress))
+    return matchesHostedGeo(hosted, country.value, 'block', asset, vaultAddress)
+      || !asset
+  }
+
   const productBlock = getVaultBlock(vaultAddress)
   if (productBlock?.length && isCountryInList(expandBlockList(productBlock))) return true
 
@@ -245,6 +269,18 @@ export const isVaultRestrictedByCountry = (
   if (country.value === undefined) return true // unresolved policy must fail closed
   if (country.value === null) return true // loaded, country unknown
   if (!vaultAddress) return false
+
+  const hosted = getEulerGeoContext()
+  if (hosted) {
+    if (hosted.policies === undefined) return true
+    const asset = toAssetFields(opts?.asset ?? getVaultUnderlyingAsset(vaultAddress))
+    if (matchesHostedGeo(hosted, country.value, 'restrict', asset, vaultAddress, 'non-asset')) return true
+    if (!asset) return true
+    if (!matchesHostedGeo(hosted, country.value, 'restrict', asset, vaultAddress, 'asset')) return false
+    const counterpart = toAssetFields(opts?.counterpart)
+    return !(asset.address && counterpart?.address
+      && (asset.address.toLowerCase() === counterpart.address.toLowerCase() || isWrapPair(asset.address, counterpart.address)))
+  }
 
   const vaultRestricted = getVaultRestricted(vaultAddress)
   if (vaultRestricted?.length && isCountryInList(expandBlockList(vaultRestricted))) return true

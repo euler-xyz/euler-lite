@@ -4,238 +4,51 @@ This document explains how euler-lite discovers, categorizes, verifies, and disp
 
 ## Overview
 
-Not all vaults on-chain are equal. Some are curated by the Euler UI listing process, while others may be unknown or even malicious. The labels system provides a trust layer that maps on-chain vault addresses to off-chain metadata (names, logos, descriptions, deprecation status) and determines whether a vault is **verified** or **unknown**.
+Not all vaults on-chain are equal. Public Labels maps chain-scoped vault addresses to published products, managing entities, display-only co-brands, campaigns, descriptions, tags, and deprecation metadata. Lite combines that published content with on-chain governor checks and its effective visibility data when deciding how a vault is presented.
 
 ## Label Data Sources
 
-Labels originate from the [euler-labels](https://github.com/euler-xyz/euler-labels) GitHub repository by default. The client never fetches label JSON files directly from GitHub/CDN — all label data is served through **server-side proxy endpoints** that add in-memory caching and stale-fallback. Entity logos are still resolved directly from the labels base URL via `<img>` tags (benefiting from browser HTTP caching). Each supported chain has a directory containing JSON files:
+`useEulerLabels` reads one chain-scoped bundle from `/api/internal/public-labels`. The server resolves `version=latest` once through the published-versions endpoint, pins resolved metadata pages and entity profiles to that publication. Geo policies, global entity addresses, platform tags and visibility remain live even for a concrete version. Tests use captured fixtures for those live overlays. List reads follow `meta.total` with `limit=100` and increasing `offset`, because V3 caps each page at 100 records.
 
-| File | Server endpoint | Empty shape |
-|------|-----------------|-------------|
-| `products.json` | `GET /api/internal/labels/products.json?chainId=X` | `{}` |
-| `entities.json` | `GET /api/internal/labels/entities.json?chainId=X` | `{}` |
-| `points.json` | `GET /api/internal/labels/points.json?chainId=X` | `[]` |
-| `earn-vaults.json` | `GET /api/internal/labels/earn-vaults.json?chainId=X` | `[]` |
+| Public data | V3 path |
+|---|---|
+| Vault inventory and labels | `GET /labels/vaults?view=resolved&version=...&chainId=...` |
+| Products | `GET /labels/products?view=resolved&version=...&chainId=...` |
+| Entities | `GET /labels/entities?version=...` |
+| Entity governance addresses | `GET /labels/entities/{entityId}/addresses` |
+| Geo policy records | `GET /geo-policies` |
 
-All label files are optional — any chain may legitimately ship without a given file. When upstream reports the file absent (HTTP 404 or 403), the proxy returns the type-appropriate empty payload (`{}` for object-shaped files, `[]` for array-shaped files) with HTTP 200 and caches it for 5 minutes. Transient upstream failures (5xx, timeouts, invalid responses) serve stale cached data when available and return HTTP 503 otherwise. They do not return or cache a successful empty shape. Non-404 upstream statuses are reported through `reportStatus`, which logs on *transitions* rather than once per refresh: the first observation of a given status warns, an unchanged status stays silent on later refreshes, and a return to `ok` logs a recovery. A persistent outage therefore surfaces once and then goes quiet until it changes.
+The adapter also reads `/evk/vaults` and `/earn/vaults` with explicit `visibility=visible,warning,hidden,pending_review`. Trusted label membership requires a visible or warning verdict and a managing entity. Hidden and pending metadata remain available without granting trusted membership. Per-side V3 explorability flags control hosted listing. On-chain governor checks still determine the stronger verification badge.
+
+Entity profiles supply hosted logo URLs. A product's `entityId` is its managing entity; `coBrandEntityIds` supplies additional display branding only. Co-brands do not participate in manager ownership, governor verification, or manager-profile market assignment. Neutral escrow inventory rows are not assigned to a product/entity and are not added to the labels-derived verified set.
+
+Lite evaluates live V3 geo policies using `countriesResolved` and cumulative global/chain/product/vault/asset rules. The server embeds a validated geo collection with each snapshot and retains a disk checkpoint for stale-on-error recovery. Mount `GEO_POLICY_CACHE_DIR` on persistent storage for redeploy durability. Hosted snapshots have no GitHub-label dependency. `LABELS_SOURCE=static` supplies the same snapshot from operator-owned files; see [Static labels](./static-labels.md). Production bake/canary remain rollout work. See [Geo-Blocking](./geo-blocking.md).
 
 Oracle adapter identity and health assessments come from Data V3 through the SDK and Lite's same-origin V3 proxy. Detail views load an assessment per adapter; discovery loads the paginated chain catalogue. The UI uses V3's explicit `recognized` identity verdict and server-computed `checksStatus`, preserving `unknown` and `not_applicable` finding outcomes.
 
-**Custom sources**: The server resolves upstream URLs from environment variables. `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` overrides the GitHub URL for labels (when set, `NUXT_PUBLIC_CONFIG_LABELS_REPO` and `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH` are ignored). Oracle assessments use the configured V3 API URL and optional server-side V3 API key.
+**Caching and fallback**: The server bundle has a 5-minute chain/version cache, concurrent cold loads share one in-flight fetch, and failures can return a bounded stale bundle. The browser deduplicates chain-scoped loads and rejects superseded responses. Visible tabs check freshness every minute and on focus/visibility changes, requesting a fresh server bundle after five minutes. Same-chain refreshes retain display data; verification becomes unavailable after fifteen minutes without a successful response. Requests time out after 35 seconds. Current hosted membership overrides cached positive registry flags, so refreshed revocations also update verification guards and verified EVault lists. Escrow perspective trust remains independent. An initial failure leaves labels unavailable with a retry action. Retry requests a fresh bundle and reloads vault discovery after labels recover.
 
-**Server caching**: The server keeps one 5-minute TTL cache keyed by `chainId:file`, plus an in-flight map so concurrent callers collapse onto a single upstream fetch per key. On upstream failure, stale cached data is served. `server/plugins/warm-cache.ts` pre-populates the cache at Nitro startup (fire-and-forget) and re-warms every 5 minutes.
-
-Two handlers front that one cache, and **they do not read from it the same way**:
-
-| Handler | Used by | Cache behavior |
-|---|---|---|
-| `/api/internal/labels/{file}?chainId=N` (query-shape) | server-side callers via `labels-helpers.ts` | Reads through. A fresh entry short-circuits and no upstream fetch happens. |
-| `/api/internal/labels/{chainId}/{file}` (path-shape) | the SDK — `eulerLabelsBaseUrl` is `/api/internal/labels`, so its default template lands here | Calls `refreshLabelFile` directly, which **bypasses the fresh-entry check**. Every request fetches upstream unless one is already in flight for the same key. |
-
-So the 5-minute TTL is not what bounds upstream traffic on the SDK's path. On that route the cache is used for writes and stale fallback, and the in-flight map is the only thing collapsing duplicate work. Warm callers (`server/plugins/warm-cache.ts` and the vault snapshot builder) call `refreshLabelFile` for the same reason — each cycle rewrites the entry instead of cache-hitting a nearly-expired value. The path handler's file header states this directly, so the two shapes' behavior is documented where it is implemented. See [server-side caching](./server-side-caching.md) for the endpoint-level view.
-
-**Client loading and chain changes**: `useEulerLabels().loadLabels()` loads a snapshot for the current chain. A ready snapshot is reused only while that chain remains selected. On a chain change, the composable publishes an empty snapshot while the new labels load, deduplicates concurrent fetches per `chainId`, and uses a monotonic load generation to prevent a late response from a previous chain or superseded refresh from overwriting current data. ERC-4626 wrap-pair probes use the same chain and generation checks.
-
-The browsing SDK applies a separate 5-minute stale window to its five label queries, so revisiting a chain may reuse SDK-cached data without an upstream request. This cache does not bypass the composable's current-chain publication guard. Call `loadLabels(true)` when an explicit refresh is required; it starts a new composable-level fetch (it does not join `pendingLabelsFetches`) and invalidates all five SDK label queries before calling the SDK. At the transport layer that invalidation does not cancel an already-running `fetchQuery` for the same key — TanStack joins the pending promise — so a force refresh can still receive the older in-flight SDK result. The monotonic load generation still decides which response may publish.
-
-Verification requires successful entity, product, and Earn label requests before the SDK normalizes the snapshot. Optional point-reward failures do not block verification. An initial failure leaves labels unavailable with a retry action; a failed same-chain refresh retains the last successful snapshot. The retry invalidates SDK label queries and reloads vault discovery after labels recover.
+**Inventory gaps**: The SDK reads direct V3 visibility for labelled vaults absent from the EVK/Earn inventories, with at most eight requests in flight. This covers Securitize labels without inventing a verdict. Effective lend/borrow listing decisions are preserved, so a visible collateral wrapper may remain hidden from lend discovery. Direct-verdict failures fail the aggregate refresh and use the same bounded stale-snapshot behavior described above. Hosted governor/owner verification still applies separately.
 
 **Address normalization**: All addresses from labels are checksummed via `getAddress()` before storage, ensuring consistent lookups regardless of input casing.
 
 ---
 
-## JSON File Schemas
+## Published Content Contract
 
-### products.json
+Products provide `entityId`, optional `coBrandEntityIds`, display name, description, URL, portfolio notice, and direct product deprecation metadata. Vault inventory rows provide vault type, product/entity assignment, display metadata, tags, campaigns, and resolved vault deprecation metadata. V3 resolves the display cascade; Lite preserves empty resolved overrides instead of re-inheriting product notices.
 
-Structure: `Record<string, Product>` — keys are product identifiers (e.g. `"euler-flagship"`).
+Entity rows provide profile text, hosted logos, website/social links, and optional organization details. Lite separately fetches each relevant entity's global governance addresses and checksums them before comparison with on-chain governor addresses.
 
-```jsonc
-{
-  "euler-flagship": {
-    // Required fields
-    "name": "Euler Flagship",                    // Display name shown in UI
-    "description": "The flagship Euler market.",  // Shown on vault overview pages
-    "portfolioNotice": "Strategy rebalancing in progress", // Operational notice on portfolio cards (optional)
-    "entity": ["euler-foundation"],              // Entity key(s) from entities.json (string or string[])
-    "url": "https://euler.finance",              // External link (shown on vault overview)
-    "vaults": [                                  // Active vault addresses
-      "0x1234...abcd",
-      "0x5678...ef01"
-    ],
+Vault campaigns have a `name`, hosted `logo`, and `type` of `deposit` or `borrow`. Deposit campaigns render beside supply APY and borrow campaigns render beside borrow APY. Campaign badges are informational and do not change reward APR calculations.
 
-    // Optional fields
-    "deprecatedVaults": ["0xold1..."],           // Phased-out vault addresses (still verified, shown as deprecated)
-    "deprecationReason": "Migrated to v2",       // Why deprecated — shown in warning banner. Supports URLs.
-    "tags": ["keyring", "governance limited"],   // Product classification tags
-    "notExplorable": true,                       // If true, hides ALL product vaults from lend/borrow/explore pages
-    "block": ["US", "EU"],                       // Country codes/groups to hard-block (see geo-blocking.md)
-    "vaultOverrides": {                          // Per-vault customizations (see below)
-      "0x5678...ef01": {
-        "description": "Custom description for this vault",
-        "portfolioNotice": "Vault-specific operational notice",
-        "deprecationReason": "This specific vault is being phased out",
-        "block": ["US", "EU", "CH"],
-        "restricted": ["JP"],
-        "notExplorableLend": true,
-        "notExplorableBorrow": true,
-        "tags": ["recently added"]
-      }
-    }
-  }
-}
-```
+Classification markers use vault `tags`. Current UI-recognized tags include `keyring`, `access control`, `governance limited`, `recently added`, `suppress high utilisation warning`, and `cyclical note`.
 
-#### Product Fields Reference
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | `string` | Yes | Display name in UI (discovery tables, vault overview, search) |
-| `description` | `string` | Yes | Product description shown on vault overview pages. Supports auto-linked URLs. |
-| `portfolioNotice` | `string` | No | Operational notice shown on portfolio position cards. Supports auto-linked URLs and **bold** formatting. |
-| `entity` | `string \| string[]` | Yes | Key(s) referencing entries in `entities.json`. Used for entity logo display, governor verification, and curator identification. |
-| `url` | `string` | Yes | External URL linked from entity logos on vault overview pages |
-| `vaults` | `string[]` | Yes | Active vault addresses (checksummed). These become "verified" vaults in the app. |
-| `deprecatedVaults` | `string[]` | No | Phased-out vault addresses. Still verified and viewable in portfolio, but hidden from discovery tables and shown with a deprecation warning. |
-| `deprecationReason` | `string` | No | Explanation for deprecation. Shown in a warning banner on vault overview. URLs are auto-linked. Also accepts legacy key `deprecateReason`. |
-| `tags` | `string[]` | No | Product classification tags. `keyring` marks all product vaults as requiring Keyring identity verification; `access control` marks vaults gated by an allowlist hook; `governance limited` shows "Limited risk management" and fades the curator entity display; `suppress high utilisation warning` hides the high-utilisation warning while leaving critical utilisation warnings visible; `cyclical note` shows cyclical-note badges, target-utilisation copy, and the cyclical IRM overview. |
-| `notExplorable` | `boolean` | No | If `true`, hides **all** vaults in this product from lend, borrow, and explore discovery pages. Takes precedence over per-vault `notExplorableLend`/`notExplorableBorrow`. Vaults remain accessible via direct URL. |
-| `block` | `string[]` | No | Country codes or group aliases (`EU`, `EEA`, `EFTA`) for hard geo-blocking. See [geo-blocking.md](./geo-blocking.md). |
-| `vaultOverrides` | `Record<string, VaultOverride>` | No | Per-vault customizations keyed by checksummed address. See next section. |
-
-Classification markers use `tags`. Product `isGovernanceLimited`, product `recentlyAddedVaults`, and earn-vault `recentlyAdded` are not supported by the current labels contract.
-
-#### Vault Override Fields
-
-Per-vault overrides allow customizing behavior for individual vaults within a product:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `description` | `string` | Overrides the product `description` for this specific vault on the overview page |
-| `portfolioNotice` | `string` | Overrides the product `portfolioNotice` for this specific vault on portfolio cards |
-| `deprecationReason` | `string` | Overrides the product `deprecationReason` for this specific vault |
-| `block` | `string[]` | **Replaces** (not merges with) the product-level `block` list for this vault |
-| `restricted` | `string[]` | Soft geo-restriction for this vault only. No product-level fallback. See [geo-blocking.md](./geo-blocking.md). |
-| `notExplorableLend` | `boolean` | If `true`, hides this vault from the **lend** discovery page. Product-level `notExplorable` takes precedence. |
-| `notExplorableBorrow` | `boolean` | If `true`, hides this vault from the **borrow** discovery page — both as a borrow vault and as collateral. Product-level `notExplorable` takes precedence. |
-| `tags` | `string[]` | Vault classification tags. `keyring`, `access control`, `recently added`, `suppress high utilisation warning`, and `cyclical note` apply to this specific vault. See [keyring-hooks.md](./keyring-hooks.md). |
-
-**Precedence rules**:
-- `block`: vault override replaces product-level (not additive)
-- `restricted`: vault-level only (no product-level equivalent)
-- `notExplorable` (product) > `notExplorableLend` / `notExplorableBorrow` (vault override)
-- `description` / `portfolioNotice` / `deprecationReason`: vault override replaces product-level
+Vault tags stay scoped to their vault override. A product-level tag is emitted only when every assigned vault carries that tag, so one vault's classification cannot leak to sibling vaults.
 
 ---
 
-### entities.json
-
-Structure: `Record<string, Entity>` — keys are entity identifiers (e.g. `"euler-foundation"`).
-
-```jsonc
-{
-  "euler-foundation": {
-    "name": "Euler Foundation",                    // Organization name
-    "logo": "euler.svg",                           // Logo filename (served from euler-labels repo)
-    "description": "The Euler Foundation...",       // Organization description (not currently displayed)
-    "url": "https://euler.finance",                // Organization website (linked from vault overview)
-    "addresses": {                                 // Map of governance addresses to labels
-      "0xGovAddr...": "Governor",
-      "0xMultisig...": "Multisig"
-    },
-    "social": {                                    // Social media links (stored but not currently displayed)
-      "twitter": "https://twitter.com/eulerfinance",
-      "youtube": "",
-      "discord": "https://discord.euler.finance/",
-      "telegram": "",
-      "github": "https://github.com/euler-xyz"
-    }
-  }
-}
-```
-
-#### Entity Fields Reference
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | `string` | Yes | Organization name. Shown in the Curator section on vault overview and as filter labels on discovery pages. |
-| `logo` | `string` | Yes | Logo filename. Resolved to a URL from the euler-labels repo. Displayed as avatar on vault overview and discovery filters. |
-| `description` | `string` | Yes | Organization description. *Currently stored but not displayed in the UI.* |
-| `url` | `string` | Yes | Organization website. Linked from entity name/logo on vault overview pages. |
-| `addresses` | `Record<string, string>` | Yes | Map of checksummed governance addresses to labels. Used to match `vault.governorAdmin` for entity identification and governor verification. |
-| `social` | `object` | Yes | Social media links (twitter, youtube, discord, telegram, github). *Currently stored but not displayed in the UI.* |
-
-**Entity matching**: A vault's `governorAdmin` address is compared against all `addresses` keys in entities declared by the product's `entity` field. If matched, the entity is displayed as the vault's curator.
-
----
-
-### points.json
-
-**Optional** — if this file is missing, the app functions normally without points/campaign badges.
-
-Structure: `EulerLabelPoint[]` (array of point campaign objects).
-
-```jsonc
-[
-  {
-    "name": "Turtle Club",                        // Campaign name (supports markdown links)
-    "logo": "turtle-club.svg",                    // Campaign logo filename
-    "collateralVaults": [                         // Vault addresses eligible for this campaign
-      "0xVault1...",
-      "0xVault2..."
-    ]
-  }
-]
-```
-
-#### Points Fields Reference
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | `string` | Yes | Campaign name. Displayed as badge on vault items. Supports markdown link syntax in modals. |
-| `logo` | `string` | Yes | Campaign logo filename. Served locally from `/entities/` path with CDN fallback. Displayed as rounded avatar badge. |
-| `collateralVaults` | `string[]` | No | Vault addresses eligible for points. Each vault gets a points badge in the UI. |
-
----
-
-### earn-vaults.json
-
-Structure: `Array<string | EarnVaultEntry>` — each entry is either a plain address string or an object with metadata.
-
-```jsonc
-[
-  "0xSimpleEarnVault...",                         // Plain address — no special metadata
-  {
-    "address": "0xDetailedEarnVault...",          // Vault address (required)
-    "block": ["US", "EU"],                        // Hard geo-blocking (country codes/groups)
-    "restricted": ["JP"],                         // Soft geo-restriction
-    "tags": ["recently added"],                   // Sort to top in earn discovery table
-    "deprecated": true,                           // Mark as deprecated
-    "deprecationReason": "Migrated to new vault", // Deprecation explanation
-    "description": "Custom description",          // Vault description
-    "portfolioNotice": "Strategy rebalancing in progress"  // Operational notice on portfolio cards
-  }
-]
-```
-
-#### Earn Vault Entry Fields Reference
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `address` | `string` | Yes | Checksummed vault address |
-| `block` | `string[]` | No | Country codes/groups for hard geo-blocking (same syntax as products.json `block`) |
-| `restricted` | `string[]` | No | Country codes/groups for soft geo-restriction |
-| `tags` | `string[]` | No | Earn-vault classification tags. `recently added` sorts the vault to the top in earn discovery. |
-| `deprecated` | `boolean` | No | If `true`, marks vault as deprecated (hidden from discovery, warning banner shown) |
-| `deprecationReason` | `string` | No | Explanation shown in deprecation warning banner |
-| `description` | `string` | No | Custom description displayed on earn vault items and overview pages |
-| `portfolioNotice` | `string` | No | Operational notice shown on portfolio position cards. Supports auto-linked URLs and **bold** formatting. |
-
-Classification markers use a clean-cut tags schema. Earn-vault `recentlyAdded` is not supported by the current labels contract.
-
----
-
-### Oracle Adapter Assessments (Data V3)
+## Oracle Adapter Assessments (Data V3)
 
 How Lite joins these assessments to decoded routes, when it loads the active-route catalogue vs a per-address fallback, and the label/Route/quote rules are in [Oracle Adapter Display](./oracle-adapter-display.md).
 
@@ -305,7 +118,7 @@ Only a **defined** `governorAdmin` means governance actually resolved. Until the
 
 ### Ungoverned vaults
 
-Vaults with `governorAdmin = address(0)` are supported via an **artificial entity** convention: declare an `ungoverned` entity in `entities.json` whose `addresses` map contains the zero address, then list ungoverned vaults under a product that declares `entity: ["ungoverned"]`. The shared governor rule then matches the vault's zero `governorAdmin` against the artificial entity, no special-case code path needed. The UI shows the "Ungoverned" governance type chip independently of entity matching (driven by `governorAdmin === zeroAddress` directly).
+Vaults with `governorAdmin = address(0)` use the `ungoverned` entity whose governance-address set contains the zero address. A product managed by that entity follows the same governor matching rule as any other product. The UI shows the "Ungoverned" governance type chip independently from entity matching, based directly on `governorAdmin === zeroAddress`.
 
 This keeps the bridge endpoint verification aligned with the UI: label/entity matching proves the vault is governed by the declared entity, while the "Ungoverned" presentation signal comes directly from the on-chain `governorAdmin` value.
 
@@ -314,7 +127,7 @@ This keeps the bridge endpoint verification aligned with the UI: label/entity ma
 | Vault Source | Verification Method |
 |-------------|---------------------|
 | **EVaults** | Address appears in `verifiedVaultAddresses` from labels |
-| **Earn vaults** | Address is in the **current** `earnVaults` labels (`earn-vaults.json`). Refresh recomputes this from labels, not from the previous registry flag. |
+| **Earn vaults** | Verified if present in the normalized Public Labels `earnVaults` set |
 | **Escrow vaults** | Loaded from `escrowedCollateralPerspective` on-chain (always verified) |
 | **Securitize vaults** | Address appears in `verifiedVaultAddresses` from labels |
 | **Unknown vaults** | Resolved via subgraph; verified only if in labels |
@@ -369,9 +182,17 @@ The selected SDK adapter supplies the flag: V3 first with on-chain fallback for 
 
 For per-address lookups during direct navigation to a not-yet-cached vault, `fetchVaultCategory(address)` checks the SDK escrow verified array first, then asks `vaultMetaService.fetchVaultType` for the vault type.
 
-**Important: labels remain authoritative for which vaults are _shown_.** SDK categorization says "what category each vault is"; `products.json` / `earn-vaults.json` still say "which vaults to include in lists". The two are composed in `useVaults.loadVaults`: labels select the set, categorization picks the right lens per address.
+**Important: labels remain authoritative for which vaults are _shown_.** SDK categorization says "what category each vault is"; normalized Public Labels products and earn-vault entries say "which vaults to include in lists". The two are composed in `useVaults.loadVaults`: labels select the set, categorization picks the right lens per address.
 
 ## Discovery Page Filtering
+
+`LABELS_VAULT_TAG` optionally selects vaults whose tags contain that exact, case-sensitive string. Leading/trailing env whitespace is trimmed; an unset or blank value applies no tag filter. Any tag is supported, including `base` and `governance limited`. A configured tag with no matches produces empty discovery. Set the env before server startup and restart after changing it.
+
+Both Main and Base can use `LABELS_V3_SET=public`; Base additionally sets `LABELS_VAULT_TAG=base`. Populate the desired tags in V3 before enabling the filter. Hosted mode matches each vault row independently, including Earn, Securitize and escrow rows; metadata-only chains use the same tags without requiring V3 indexing. Static mode matches product tags, vault-override tags and Earn-entry tags using its authored inheritance rules.
+
+The filter applies to Explore group members and metrics, Lend/Borrow/Earn lists, both sides of borrow pairs, and new-target suggestions in swap/migration forms. The `showAll` query does not bypass it. Existing visibility, verification, listing and geo rules still apply. Label refreshes update the selection while preserving loaded vaults used by open forms.
+
+Full labels and vault snapshots remain available for positions, direct URLs, collateral relationships and Earn strategy details. Tag selection does not change verification, geo policies, `/api/public/is-known` or `/api/public/metadata`; it is a discovery setting, not an access restriction.
 
 Labels control which vaults appear on each discovery page:
 
@@ -419,7 +240,7 @@ The `getOrFetch()` method on the vault registry handles this flow. It first chec
 
 Entities are matched to vaults through two mechanisms:
 
-1. **Labels**: `product.entity` names the owning entity key(s), which are looked up in `entities.json`
+1. **Labels**: `product.entity` contains the Public Labels managing entity ID, which is looked up in the normalized entity map
 2. **Governor admin**: `vault.governorAdmin` is compared against entity `addresses` keys to identify the governing entity
 
 The governor admin must match an address in one of the product's declared entities for the vault to be considered "governor verified". If the product has the `governance limited` tag, the vault shows "Limited risk management" text and the entity display is faded to 20% opacity across all UI surfaces (list items, overview pages, explore cards).
@@ -442,13 +263,31 @@ These labels appear in address fields across all vault overview types (EVK, Earn
 | File | Purpose |
 |------|---------|
 | `entities/euler/labels.ts` | TypeScript type definitions for all label types |
-| `utils/eulerLabelsUtils.ts` | Lookup and helper functions backed by the current SDK label snapshot |
-| `composables/useEulerLabels.ts` | SDK-backed label loading and reactive composables |
+| `utils/public-labels.ts` | Public V3 pagination, normalization, and effective-visibility composition |
+| `utils/eulerLabelsUtils.ts` | Lookup and helper functions backed by the normalized label snapshot |
+| `server/utils/public-labels-source.ts` | Shared V3 aggregate cache used by browser, public APIs, and vault snapshots |
+| `server/utils/static-labels-source.ts` | Atomic authoring-file source and durable checkpoint for forks |
+| `composables/useEulerLabels.ts` | Chain-scoped aggregate loading and normalized label publication |
 | `composables/useVaultRegistry.ts` | Vault registry with type detection and unknown resolution |
-| `composables/useGeoBlock.ts` | Geo-blocking logic using label block/restricted fields |
+| `composables/useGeoBlock.ts` | V3 country evaluation and independent sanctions gate |
 
 ## Programmatic verification lookup
 
-External consumers that only need a yes/no answer for a vault address can call the public [`GET /api/public/is-known`](./public-api.md#get-apipublicis-known) endpoint instead of loading the full label set. The endpoint merges `products.json` (active and deprecated entries), `earn-vaults.json` (active and deprecated entries), and the on-chain `escrowedCollateralPerspective` into a single per-chain verified set, applies the same governor / router-governor / owner verification that the client UI uses (an EVK or Securitize vault must have `governorAdmin` — and a non-zero oracle-router governor, if present — match one of its product's declared entity addresses; an Earn vault listed under a product must have `owner` match), and answers batches of up to 100 addresses per request. The same governor check applies to deprecated and active vaults — deprecation does not change the verification rule. Escrow vaults from the on-chain perspective and earn entries with no product entry are trusted unconditionally.
+External consumers that only need a yes/no answer for a vault address can call the public [`GET /api/public/is-known`](./public-api.md#get-apipublicis-known) endpoint instead of loading the full label set. This server endpoint uses the same normalized Public Labels bundle as the UI plus the on-chain `escrowedCollateralPerspective`, applies governor / router-governor / owner verification, and answers batches of up to 100 addresses per request. The same governor check applies to deprecated and active vaults. Escrow vaults from the on-chain perspective and standalone Earn entries are trusted unconditionally.
 
 Consumers that need display metadata (resolved name, description, governing entity, asset) on top of the verification verdict can call [`GET /api/public/metadata`](./public-api.md#get-apipublicmetadata), which applies the same labels / override / verification rules the client UI uses and returns a uniform shape across EVK, Securitize, and Earn vaults.
+
+
+Hosted full verification resolves the managing entity from the V3 vault row, including standalone Earn vaults. Missing manager data yields an empty authority set, so a visible/warning inventory entry alone cannot grant an owner-verification badge. Both client and public APIs apply this rule. Static Earn labels preserve their authored membership semantics. Hosted on-chain governor/owner checks remain in place until the verification bake justifies delegation to V3.
+
+## Archived chains: V3 metadata with on-chain verification
+
+Enabled `DEPRECATED_CHAINS` select the SDK's `PublicLabelsV3MetadataAdapter`. Each must also be in `ONCHAIN_SDK_CHAINS`; a missing entry is a configuration error. Chains without a configured RPC are ignored, and other enabled chains keep V3 assessments even if they use on-chain SDK reads. No separate labels chain variable is required. The archived-chain configuration is `DEPRECATED_CHAINS=146,239,60808,80094`; restart after configuration changes. Swellchain is not selected unless enabled and added to the deprecated/on-chain lists.
+
+The SDK shares metadata fetching and display mapping between its adapters. Metadata-only bundles carry `source: 'v3-metadata'` and contain no visibility verdicts. They use the same label set/publication selection, live entity addresses and live geo policies as the assessed path. Candidate addresses are separate from verified membership.
+
+Lite selects the adapter once in its shared server labels loader. The browser, vault snapshots and public APIs use that selection. The metadata-only path applies the existing governor/router/owner checks against the vault's explicit managing entity; an absent manager cannot inherit static Earn trust. Registry verification uses current candidates and entity addresses rather than a cached positive flag. Independent escrow-perspective verification remains applicable.
+
+Metadata-only discovery follows published product `notExplorable` and per-vault `notExplorableLend` / `notExplorableBorrow` flags and normal market filters. Explore product cards are label/market driven; governance checks separately control verified vault lists and verification badges. Deprecation alone does not hide a vault; Earn uses its lend-side flag and product hiding. Published deprecation and display information remains available to direct pages and existing positions. V3 assessment-based platform listing controls are not synthesized for these chains. Errors on normally assessed chains never switch them to metadata-only handling. Static fork mode remains independent.
+
+Live labels refreshes reload vault data when membership or discovery eligibility changes; text-only updates use the reactive labels store. This brings newly eligible vaults into the registry without requiring a page reload. Same-chain label refreshes retain already loaded vaults, including unlisted vaults used by open forms; current hosted membership still controls verification. Ordinary loads and chain changes clear the registry. Batch-review account reads request quantitative data explicitly and do not invoke the SDK's default file-based labels service through `populateAll`.

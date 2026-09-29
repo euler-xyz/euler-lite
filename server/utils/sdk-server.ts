@@ -43,7 +43,6 @@ import {
 } from '~/utils/api-url-env'
 import { parseChainIds } from '~/utils/parseChainIds'
 import { resolveRpcUrl } from './rpc'
-import { resolveLabelsBaseUrl } from './labels-base-url'
 import { TURTLE_EARN_API_URL } from './turtle-proxy'
 import { createServerProviderService } from './server-provider-service'
 
@@ -107,7 +106,6 @@ const buildServerSdkConfig = (chainId: number): EulerSDKConfig & { rpcUrls: Reco
   return {
     rpcUrls: { [chainId]: rpcUrl },
     v3ApiUrl,
-    eulerLabelsBaseUrl: resolveLabelsBaseUrl(),
     tokenlistApiBaseUrl: v3ApiUrl,
     ...(v3ApiKey ? { v3ApiKey } : {}),
     ...resolveServerTurtleRewardsConfig(),

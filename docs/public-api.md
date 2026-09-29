@@ -16,12 +16,12 @@ A vault is **verified** through one of two paths:
 
 - **Escrow path**: the address appears in the on-chain set returned by `escrowedCollateralPerspective.verifiedArray()` for the chain. Escrow vaults are trusted unconditionally; no product, entity, or governor check applies.
 - **Label + authority path**:
-  - EVK / Securitize vaults must appear under a product's `vaults[]` or `deprecatedVaults[]` in `products.json`.
+  - EVK / Securitize vaults must be assigned to a Public Labels V3 product.
   - The product must declare at least one `entity` key.
   - The vault's `governorAdmin` must be in the `addresses` map of one of the product's declared entities. If the vault's oracle router has a non-zero governor, that governor must also match.
   - A product whose `entity` field is empty or omitted is treated as having no on-chain authority to claim the vault — every vault under such a product is unverified, regardless of its `governorAdmin`.
 
-Earn vaults listed only in `earn-vaults.json` are trusted on the strength of the Earn label entry. If an Earn vault also appears under a product, the current verifier applies an owner/entity match against that product; current labels do not use that shape.
+Standalone Earn vaults published in the V3 inventory are trusted on the strength of that label. If an Earn vault is assigned to a product, the verifier applies an owner/entity match against that product.
 
 For EVK / Securitize vaults, the same governor check applies to active and deprecated vaults — deprecation does not change the verification rule. The `notExplorable` flag does **not** change verification either: vaults hidden from Explore are still verified.
 
@@ -74,15 +74,15 @@ Addresses are validated via viem's `isAddress` (strict EIP-55 checks) and normal
 |--------|--------------------------------------------------------------------------|
 | `400`  | Missing/invalid `chainId`, `chainId` not supported by this deployment, >100 addresses, or a malformed address. |
 | `429`  | Rate limit exceeded for this client IP.                                  |
-| `502`  | All upstream sources (labels endpoint, chains config, RPC proxy) failed and no stale cache is available. |
+| `502`  | Public Labels V3, chains config, or RPC failed and no bounded stale cache is available. |
 
 ### Caching and propagation
 
 - **Response header**: `Cache-Control: public, max-age=30, stale-while-revalidate=30`. CDNs and browsers can cache for 30 s and serve stale for another 30 s while revalidating.
 - **Server-side cache**: per-chain in-memory verified set with a 5-minute TTL. A warm-cache process rebuilds every cache entry every 5 minutes on its own schedule (force-refresh, ignores fresh entries), so the cache is always continuously fresh in steady state.
 - **In-flight dedup**: concurrent cold requests for the same chain collapse onto a single upstream pass.
-- **Propagation**: on-chain governor changes and `products.json` / `entities.json` edits typically propagate within **~5 minutes**. The labels / vault snapshot and the verified-set cache are warmed on the same 5-minute cycle, so a label edit picked up by the labels cache flows into the next bridge rebuild within the same cycle.
-- **Stale fallback**: during prolonged upstream outages (labels endpoint, vault snapshot, or RPC failing), the bridge serves the last-known-good verified set for up to 10 minutes past TTL before returning a hard error.
+- **Propagation**: on-chain governor changes and `version=latest` Public Labels updates typically propagate within **~5 minutes**. Public Labels, the vault snapshot, and the verified-set cache are warmed on the same cycle.
+- **Stale fallback**: during upstream outages, the bridge serves only the last-known-good data within each cache's configured stale ceiling before returning a hard error.
 
 ### Rate limit
 
@@ -141,13 +141,13 @@ This endpoint answers "what is this vault?" — the trust verdict (`is-known`) i
 |-------------|----------|----------|-----------------------------------------------------------------------------|
 | `chainId`   | integer  | yes      | EVM chain ID (e.g. `1` for mainnet).                                        |
 | `addresses` | string   | no       | Comma-separated list of vault addresses. Max 100. Same casing rules as `/is-known`. Omit to return every known vault on the chain ("list mode"). |
-| `productId` | string   | no       | Product slug from `products.json` (e.g. `euler-prime`). When set, only entries whose `productId` equals this value are returned. Combines with `addresses`: an address that resolves but belongs to a different product returns `null`. `[a-zA-Z0-9_-]+`, max 100 chars. |
+| `productId` | string   | no       | Public Labels V3 product ID (e.g. `euler-prime`). When set, only entries whose `productId` equals this value are returned. Combines with `addresses`: an address that resolves but belongs to a different product returns `null`. `[a-zA-Z0-9_-]+`, max 100 chars. |
 
 ### Response
 
 Status `200`, JSON object keyed by EIP-55 checksum addresses.
 
-**Lookup mode** (`addresses` provided): one entry per input address. Unknown addresses (not in any labels file and not in the on-chain escrow perspective) resolve to `null`.
+**Lookup mode** (`addresses` provided): one entry per input address. Unknown addresses (not in Public Labels and not in the on-chain escrow perspective) resolve to `null`.
 
 **List mode** (`addresses` omitted): every known vault on the chain. No `null` values.
 
@@ -164,7 +164,7 @@ interface VaultMetadata {
   deprecationReason: string | null
   deprecated: boolean                        // true if listed under any product's deprecatedVaults or earn entry has deprecated: true
   governanceLimited: boolean                 // true when the owning product has the "governance limited" tag. False for vaults without a product.
-  productId: string | null                   // product slug from products.json that owns this vault; null for escrow and for vaults with no product entry
+  productId: string | null                   // Public Labels product ID; null for escrow and standalone vaults
   asset: {
     address: string                          // checksummed
     symbol: string
@@ -174,7 +174,7 @@ interface VaultMetadata {
   } | null
   entities: Array<{
     name: string
-    logo: string                             // full URL composed from the labels CDN config
+    logo: string                             // hosted URL from the Public Labels entity profile
     description: string | null
     url: string | null                       // entity website; only set when http(s) URL
   }>                                         // empty array when no entity matches (escrow, unverified, or no product); usually 0 or 1 entry, but can be N when a product declares multiple entities that all match the on-chain governor
@@ -183,18 +183,18 @@ interface VaultMetadata {
 
 ### Resolution rules
 
-Label-derived display fields (`name`, `description`, `portfolioNotice`, `deprecationReason`, `productId`) are sourced from labels regardless of verification state — they are authoritative content set by the team that listed the vault. For product-owned EVK / Securitize vaults, per-vault `vaultOverrides` take precedence over product-level values. Earn vault metadata comes from the `earn-vaults.json` entry, with product fallback fields only if an Earn address is also present in `products.json`. The on-chain ERC-20 `name` is only a fallback when no label name is defined.
+Label-derived display fields (`name`, `description`, `portfolioNotice`, `deprecationReason`, `productId`) are sourced from Public Labels V3 regardless of verification state. Vault fields take precedence over product fields. Standalone Earn metadata comes from its V3 inventory row. The on-chain ERC-20 `name` is only a fallback when no published label name is defined.
 
 `entities` identifies every declared product entity whose `addresses` contain the vault's `governorAdmin` (or `owner` for an Earn vault that also appears under a product). A product can declare multiple entity keys, and more than one of those can match — the array preserves the declared-key order. Resolution depends on the vault's verification state:
 
-- **Verified non-escrow vault** (governor match against at least one declared entity): `entities` contains every matching entity from `entities.json`, with `logo` composed as a full URL. Usually 1 entry, but can be N.
+- **Verified non-escrow vault** (governor match against at least one declared entity): `entities` contains every matching Public Labels entity profile, including its hosted `logo` URL. Usually 1 entry, but can be N.
 - **Unverified vault** (in labels but governor mismatch, or in a product that declares no entity): `entities` is `[]`. Other label fields (`name`, `description`, `portfolioNotice`, `deprecationReason`, `productId`, `deprecated`) are still populated. `asset` and `type` are also populated.
-- **Earn vault without a product entry** (`earn-vaults.json` only): `entities` is `[]`.
+- **Standalone Earn vault**: `entities` is `[]`.
 - **Escrow vault** (`escrowedCollateralPerspective.verifiedArray()`): `name` is the constant `"Escrowed collateral"`; all label-derived fields and `productId` are `null`; `entities` is `[]`; `deprecated: false`; `asset` comes from the snapshot when the address is in the referenced subset, otherwise `null`.
 
 The `deprecated` boolean distinguishes deprecated-but-otherwise-fine vaults from genuinely unverified ones. For EVK / Securitize vaults, the same governor check applies to deprecated and active vaults — deprecation only sets the `deprecated` flag and (typically) populates `deprecationReason`.
 
-Earn vaults resolve with `description` / `portfolioNotice` / `deprecationReason` from the earn entry. Current labels do not place Earn vaults in `products.json`, so they resolve with `productId: null` and `entities: []`.
+Standalone Earn vaults resolve with `description`, `portfolioNotice`, and `deprecationReason` from the V3 inventory row and return `productId: null`, `entities: []`.
 
 #### `entities` is not equivalent to `is-known`
 
@@ -208,7 +208,7 @@ Use `/api/public/is-known` for the verification verdict. Use the non-`null` / `n
 |--------|--------------------------------------------------------------------------|
 | `400`  | Missing/invalid `chainId`, `chainId` not supported, >100 addresses, or a malformed address. |
 | `429`  | Rate limit exceeded for this client IP.                                  |
-| `502`  | Required upstream sources (`products.json`, `entities.json`, vault snapshot) failed and no stale cache is available. |
+| `502`  | Required Public Labels V3, effective-policy, or vault-snapshot data failed and no stale cache is available. |
 
 ### Caching and propagation
 
@@ -260,7 +260,7 @@ curl 'https://<host>/api/public/metadata?chainId=1&addresses=0xD8b27CF359b7D1571
     "entities": [
       {
         "name": "Euler DAO",
-        "logo": "https://raw.githubusercontent.com/euler-xyz/euler-labels/refs/heads/master/logo/euler.svg",
+        "logo": "https://token-images.euler.finance/labels/euler",
         "description": "Euler DAO is responsible for the governance of the Euler protocol.",
         "url": "https://euler.finance"
       }
@@ -284,4 +284,4 @@ curl 'https://<host>/api/public/metadata?chainId=1'
 - Metadata builder + cache: `server/utils/vault-metadata.ts`
 - Shared verification rule (also used by the client UI): `utils/vault/governor-verification.ts`
 - CORS bypass for the `/api/public/` prefix lives in `server/middleware/cors.ts`.
-- Escrow vaults are read via an `eth_call` to `escrowedCollateralPerspective.verifiedArray()`. The perspective address is looked up from `EulerChains.json` (served by `/api/internal/euler-chains`), and the RPC endpoint is taken from `RPC_URL_<chainId>`. Products and earn-vault label files are fetched via internal self-calls to `/api/internal/labels/<file>` to reuse the labels endpoint's own cache and validation. Entity logo URLs are composed from `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` (or the `REPO`/`REPO_BRANCH` fallback) so they match the URL the app itself renders.
+- Escrow vaults are read via an `eth_call` to `escrowedCollateralPerspective.verifiedArray()`. The perspective address is looked up from `EulerChains.json` (served by `/api/internal/euler-chains`), and the RPC endpoint is taken from `RPC_URL_<chainId>`. Public endpoints use the same cached `getPublicEulerLabelsData()` source as the browser and vault snapshot; there are no internal self-HTTP label calls. Entity logo URLs come directly from Public Labels profiles.

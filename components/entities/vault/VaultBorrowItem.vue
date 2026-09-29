@@ -367,6 +367,11 @@ const linkPath = computed(() => ({
             data-field="borrow-apy"
             :data-value="borrowApyWithRewards"
           >
+            <VaultPoints
+              class="mr-4"
+              :vault="pair.borrow"
+              campaign-type="borrow"
+            />
             <UiModalPreviewTrigger
               v-if="hasBorrowApyRewards"
               :component="VaultApyModal"

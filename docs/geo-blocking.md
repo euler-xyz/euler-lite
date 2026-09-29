@@ -7,7 +7,7 @@ This document explains how Euler Lite restricts vault access based on the user's
 Certain jurisdictions are prohibited from interacting with specific vaults (or all vaults) due to regulatory requirements. The geo-blocking system:
 
 1. Detects the user's country from an HTTP response header.
-2. Evaluates blocking rules at four levels: global sanctions, product-level blocks, per-vault overrides, and **asset-level blocks** keyed by the vault's underlying ERC-20.
+2. Evaluates blocking rules at four levels: global sanctions, V3 global/chain rules, product/vault rules, and **asset-level blocks** keyed by the vault's underlying ERC-20.
 3. Evaluates soft restriction rules that prevent users from acquiring more exposure to a restricted asset.
 4. Extends those rules to the arbitrary-asset selectors used by pay-with (repay), withdraw-to, borrow swap-in, and swap-deposit flows, so a user can't route around a vault block by picking the blocked underlying asset as a swap leg.
 5. Prevents blocked users from submitting transactions while still showing blocked vaults in the UI (dimmed, with a "Restricted" chip).
@@ -93,234 +93,32 @@ Request → cors.ts (strip client x-country-code, set response x-country-code fr
 
 When the gate blocks a request or flags VPN/proxy usage it logs the request path. VPN evidence is audit-only here — it does not fail the request, and it does not replace [address screening](./address-screening.md) at wallet connect. Because some `/api/*` routes embed a wallet address in the path (e.g. `/api/internal/proxy/merkl/users/0x.../rewards`), the path is first run through `safePathTemplate` (`server/utils/observability.ts`), which replaces address and numeric segments with `:address`/`:number` placeholders. This keeps wallet addresses (PII) out of the log sink while preserving the route shape for observability. Routing and matching still operate on the real path.
 
-## Blocking Rules
+## Hosted policy evaluation
 
-**File**: `composables/useGeoBlock.ts`
+The SDK paginates live `GET /v3/geo-policies` without a metadata version or chain filter and validates the complete collection. Lite embeds it with the published metadata snapshot. `utils/geo-policies.ts` evaluates `countriesResolved` directly; country groups such as EEA are expanded by V3, including Norway.
 
-The function `isVaultBlockedByCountry(vaultAddress)` evaluates three layers in order:
+Rules accumulate across global, chain, product, vault and asset scopes. A vault rule cannot remove a product restriction. Product matching uses the resolved vault's current `productId`, including vaults outside the discovery allowlist. Non-null chain/product/vault selectors constrain matching; asset address, symbol, name and regex selectors are alternatives. Address and asset text matching is case-insensitive. Standalone asset selectors apply global/chain/asset rules and cannot resolve product or vault scopes.
 
-### 1. Sanctioned Countries (Global Block)
+Regex expressions are compile-checked and limited to 512 characters by the SDK. Lite treats token metadata longer than 128 characters as a match without running its regex. Missing vault asset metadata remains fail-closed. Same-asset and known wrap-pair exemptions apply only to soft asset restrictions, never global/product/vault restrictions, hard blocks, or unavailable policy data.
 
-Defined in `entities/constants.ts` as `SANCTIONED_COUNTRIES`. Users from these countries are blocked from **all** vaults unconditionally:
+Sanctions remain in `SANCTIONED_COUNTRIES`, enforced independently at the server edge and in client helpers. The compatibility evaluator and `COUNTRY_GROUPS` remain available for static label data; hosted snapshots always use V3 rules. `LABELS_SOURCE=static` selects the authored-file engine.
 
-```text
-AF, CF, CU, KP, CD, ET, IR, IQ, LB, LY, ML, MM, NI, RU, SO, SS, SD, SY, VE, YE, ZW
-```
+## Availability and durable fallback
 
-This list is checked first. If the user's country matches, the function returns `true` immediately without checking product or vault-level blocks.
+`server/utils/geo-policy-source.ts` refreshes the full live collection every five minutes, deduplicates concurrent reads, and writes an atomic, upstream-specific checkpoint containing `policies` and `fetchedAt`. A failed or malformed fetch retains last-known-good policies without an age limit and logs their age. A successful empty collection clears previous rules. Partial pagination never replaces the checkpoint.
 
-### 2. Product-Level Blocks
+Set `GEO_POLICY_CACHE_DIR` to a mounted persistent directory to survive container replacement. The default `.data/geo-policies` survives process restarts on the same filesystem. Failed checkpoint writes are logged; current validated live rules remain in use, but that write is not durable. Log monitoring must alert on stale-policy age and checkpoint failures; this code does not provision production alerting.
 
-Each product in `products.json` (from the euler-labels repo) can have a `block` array of country codes or group aliases:
+A cold start with no valid policy snapshot fails the entire labels response. The client distinguishes unavailable policies from an authored empty collection. `useOperationGuard` registers “Compliance data unavailable. Please retry.” for acquisition forms, including direct wallet deposits. Repay and withdrawal forms opt out of this availability blocker. Simple withdrawals/redemptions and repayment without swaps can acknowledge unverified-vault risk when labels are unavailable, in both the form and final reviewed-execution policy. Missing/wrong-chain vault metadata still blocks; swaps, borrowing and mixed acquisition batches still require labels. Country, sanctions and operation-specific checks still apply. Soft restriction helpers also deny acquisition while policies are unavailable, including wrap exemptions.
 
-```json
-{
-  "name": "Example Vault",
-  "vaults": ["0x1234..."],
-  "block": ["US", "EU"]
-}
-```
+## Helper functions
 
-All vaults listed under that product inherit the block list. The function `getVaultBlock(address)` in `useEulerLabels.ts` resolves this.
-
-### 3. Per-Vault Overrides
-
-A product can override blocking rules for individual vaults via `vaultOverrides`:
-
-```json
-{
-  "name": "Example Product",
-  "vaults": ["0xAAA...", "0xBBB..."],
-  "block": ["US"],
-  "vaultOverrides": {
-    "0xBBB...": {
-      "block": ["US", "EU", "CH"]
-    }
-  }
-}
-```
-
-When a vault has an override with a `block` field, the override **replaces** (not merges with) the product-level block list. In the example above, `0xAAA` is blocked for `US` only, while `0xBBB` is blocked for `US`, `EU`, and `CH`.
-
-### 4. Earn Vault Blocks
-
-Earn vaults have a separate blocking mechanism in `earn-vaults.json`. Entries can be a plain address string (no blocking) or an object with a `block` array:
-
-```json
-[
-  "0x1111...",
-  { "address": "0x2222...", "block": ["EU", "CH"] }
-]
-```
-
-These are stored in a dedicated `earnVaultBlocks` map (keyed by lowercase address) and checked by `getEarnVaultBlock(address)`.
-
-### 5. Asset-Level Blocks
-
-A vault's **underlying ERC-20 asset** can carry its own block rules in `assets.json` (from the euler-labels repo). When the user's country matches a rule for a vault's underlying asset, the vault is treated as blocked — in addition to any product-level or earn-level rules. This is the primary mechanism for compliance-driven blocks that apply to a token regardless of which vault wraps it.
-
-The same rules also drive the `SwapTokenSelector`, so users cannot route around a vault block by picking the blocked underlying as a pay-with, withdraw-to, borrow swap-in, or swap-deposit source.
-
-#### Address-based entries
-
-```json
-[
-  { "address": "0xf6b1117ec07684D3958caD8BEb1b302bfD21103f", "block": ["CA", "US"] },
-  { "address": "0xFeDC5f4a6c38211c1338aa411018DFAf26612c08", "restricted": ["EU", "EFTA"] }
-]
-```
-
-Stored in the `assetBlocks` and `assetRestrictions` maps (keyed by lowercase address), accessed via `getAssetBlock(address)` and `getAssetRestricted(address)`.
-
-#### Pattern-based entries
-
-External token lists (Uniswap, DefiLlama, Merkl) surface addresses the labels repo hasn't enumerated. When a given issuer publishes many tokens with a shared naming convention (e.g. Ondo's USDY, OUSG, OMPL), pattern rules match by symbol or name instead of address:
-
-```json
-[
-  { "symbols": ["USDY", "OUSG", "OMPL"], "block": ["CA", "US"] },
-  { "symbolRegex": "^(USDY|OUSG|OMPL)$", "restricted": ["EU"] },
-  { "names": ["Ondo Short-Term US Govt"], "block": ["CA", "US"] },
-  { "nameRegex": "^Ondo\\s", "block": ["CA", "US"] }
-]
-```
-
-- All string comparisons are **case-insensitive**. Regex fields are compiled with the `i` flag at load time.
-- An entry may combine multiple match fields (`symbols` + `nameRegex`, etc.); they are **OR-composed** — the entry matches if any populated match field matches.
-- Invalid regex strings are rejected at the proxy layer (compile check + 512-char cap) and dropped with a warning at load time.
-- Pattern entries compile into `assetPatternRules`, an ordered list iterated on each asset lookup. Exact-match symbols/names are kept in pre-lowercased `Set`s for O(1) membership; regexes stay as `RegExp` objects.
-
-#### Cross-chain rules: `all/assets.json`
-
-Per-chain `assets.json` files (e.g. `1/assets.json`, `8453/assets.json`) are the right home for address-based rules because addresses are chain-specific. Pattern rules usually apply identically across every chain (USDY is USDY wherever it's deployed), so the labels repo hosts them in a special cross-chain directory:
-
-```text
-euler-labels/
-├── 1/assets.json
-├── 8453/assets.json
-└── all/assets.json        ← cross-chain rules (usually patterns)
-```
-
-The `/api/internal/labels/assets.json?chainId=N` proxy transparently **unions** the per-chain file with `all/assets.json` before returning — the client sees a single merged list. If either file is absent upstream the proxy serves only the present side (empty-shape fallback on 404, matching every other label file). Both files accept both shapes; conventionally addresses live per-chain and patterns live in `all/`, but nothing enforces that split.
-
-The global file is warmed once on server boot in `warm-cache.ts` alongside the per-chain entries.
-
-#### Resolution via the vault registry
-
-`isVaultBlockedByCountry(address)` resolves the vault's underlying asset via `useVaultRegistry().getVault(address).asset` and calls `isAssetBlockedByCountry(asset)`, passing the full asset object (address + symbol + name) so pattern rules also fire. Before the registry is warm the lookup returns `undefined` and the asset-level branch is a no-op — product/earn-level rules still apply as before.
-
-## Restriction Rules (Soft Block)
-
-**File**: `composables/useGeoBlock.ts`
-
-The function `isVaultRestrictedByCountry(vaultAddress)` checks for soft restrictions:
-
-### Per-Vault Override Restrictions
-
-A product can specify `restricted` in vault overrides (vault-level only, no product-level fallback):
-
-```json
-{
-  "name": "Example Product",
-  "vaults": ["0xAAA...", "0xBBB..."],
-  "vaultOverrides": {
-    "0xBBB...": {
-      "restricted": ["US", "EU"]
-    }
-  }
-}
-```
-
-### Earn Vault Restrictions
-
-Earn vault entries in `earn-vaults.json` can also have a `restricted` array:
-
-```json
-[
-  "0x1111...",
-  { "address": "0x2222...", "restricted": ["US"], "block": ["IR"] }
-]
-```
-
-A vault can have both `block` and `restricted`. The `block` check takes precedence — if a vault is blocked, the restricted check is not evaluated (blocked is stricter).
-
-### Asset-Level Restrictions
-
-`assets.json` entries (per-chain and `all/`) accept the same `restricted` field with the same semantics as vault-level restrictions. Both address entries and pattern entries support it:
-
-```json
-[
-  { "address": "0xFeDC...", "restricted": ["EU"] },
-  { "symbols": ["USDY"], "restricted": ["EU"] }
-]
-```
-
-Because asset-level rules propagate to `isVaultRestrictedByCountry(address)` via the vault's underlying, a soft-restriction on asset X automatically restricts every vault that uses X — including Earn and Securitize variants — and every swap flow that would acquire X.
-
-#### Soft-restrict semantics by flow context
-
-The picker / flow behavior is preserved by context:
-
-| Flow context | Hard-block | Soft-restrict |
-|---|---|---|
-| Swap target / receive-as / borrow-into / multiply (acquire) | Disabled | Disabled |
-| Swap source / pay-with / swap-deposit input (reduce) | Disabled | Allowed |
-
-## Country Groups
-
-**File**: `entities/constants.ts`
-
-Block and restriction lists can reference group aliases instead of individual country codes. The `expandBlockList()` function in `useGeoBlock.ts` resolves these before matching:
-
-| Alias | Expansion | Count |
-|-------|-----------|-------|
-| `EU` | All 27 EU member states (AT, BE, BG, HR, CY, CZ, DK, EE, FI, FR, DE, GR, HU, IE, IT, LV, LT, LU, MT, NL, PL, PT, RO, SK, SI, ES, SE) | 27 |
-| `EEA` | EU + IS, LI, NO | 30 |
-| `EFTA` | IS, LI, NO, CH | 4 |
-
-Group aliases can be mixed with individual codes: `["EU", "CH", "US"]` blocks all EU countries plus Switzerland and the US.
-
-## Helper Functions
-
-### `isVaultBlockedByCountry(address): boolean`
-
-The core hard-block check. Returns `true` if the vault is blocked for the detected country or its underlying asset cannot be resolved. Callers that already hold a chain-scoped vault can pass its asset through `opts.asset`.
-
-### `isAnyVaultBlockedByCountry(...addresses): boolean`
-
-Returns `true` if **any** of the provided vault addresses are blocked. Used on action pages that involve multiple vaults (e.g. a borrow position has both a collateral vault and a borrow vault).
-
-### `isVaultRestrictedByCountry(address): boolean`
-
-The soft-restriction check. Returns `true` if the vault has a `restricted` entry matching the user's country or its underlying asset cannot be resolved. Only checks vault-level overrides and earn vault restrictions (no product-level fallback).
-
-### `isAnyVaultRestrictedByCountry(...addresses): boolean`
-
-Returns `true` if **any** of the provided vault addresses are restricted. Used for multi-vault restriction checks (e.g. multiply requires checking both long and short vaults).
-
-### `isAssetBlockedByCountry(asset: AssetLike): boolean`
-
-Asset-level hard-block check. Accepts either a bare address string (backward compat) or an asset-like object `{ address?, symbol?, name? }` — `VaultAsset` satisfies the latter. The object form is required for pattern rules to fire; string-only callers skip the pattern path.
-
-Lookup order: sanctioned-country check → address-map lookup (via `getAssetBlock`) → iterate `assetPatternRules` and test each rule's `symbolsLower` / `symbolRegex` / `namesLower` / `nameRegex` against the lowercased asset symbol/name.
-
-### `isAssetRestrictedByCountry(asset: AssetLike): boolean`
-
-Asset-level soft-restriction check. Same signature and lookup order as the block variant, but consults `getAssetRestricted` and rule `restricted` lists.
-
-Both helpers are called from form-level sites (pay-with, withdraw-to, swap-deposit source, borrow swap-in) where the full asset object is in hand, and also from the `SwapTokenSelector` per visible row. The vault-level helpers (`isVaultBlockedByCountry` / `isVaultRestrictedByCountry`) use them internally by resolving `vault.asset` via the registry.
-
-### `getVaultTags(address, context?): { tags: string[], disabled: boolean }`
-
-Combines geo-blocking, soft-restriction, and deprecation status into a single result for UI consumption. Returns tags like `["Restricted"]`, `["Deprecated"]`, or `["Restricted", "Deprecated"]`.
-
-The `context` parameter controls when the "Restricted" chip appears for soft-restricted vaults:
-
-| Context | When Used | Shows Restricted Chip? |
-|---------|-----------|----------------------|
-| `'browse'` (default) | Browse pages, general display | Only for hard-blocked vaults |
-| `'swap-target'` | Vault selection modals for swap/borrow TO targets | Yes (prevents acquiring exposure) |
-| `'supply-source'` | Vault selection modals for supply FROM sources, multiply collateral | No (user is spending, not acquiring) |
+- `isVaultBlockedByCountry(address, { asset? })` combines sanctions and matching V3 block policies.
+- `isVaultRestrictedByCountry(address, { asset?, counterpart? })` evaluates soft restrictions.
+- `isAnyVaultBlockedByCountry` / `isAnyVaultRestrictedByCountry` combine decisions across vaults.
+- `isAssetBlockedByCountry` / `isAssetRestrictedByCountry` evaluate standalone asset choices.
+- `getVaultTags(address, context)` presents restrictions and deprecation. `swap-target` disables soft-restricted destinations; `supply-source` permits existing exposure to be used for repayment.
+- `useGeoBlock().isPolicyAvailable` distinguishes successful empty data from unavailable data.
 
 ## UI Enforcement
 
@@ -407,125 +205,10 @@ Uses `useSwapCollateralOptions` with `tagContext: 'supply-source'` so collateral
 
 Existing positions in blocked vaults show the "Restricted" chip. No chip for soft-restricted vaults (positions are already open).
 
-## Data Flow
+## Data flow and validation
 
-```text
-App Startup
-  │
-  ├─ loadCountry() ─► HEAD / ─► cors.ts sets x-country-code from the edge context
-  │                  ◄─────────── x-country-code: DE ──────────────────────────
-  │                  country ref: "DE" (5-min cache)
-  │                  undefined → null (fail-closed) on unknown/error (geo-capable edge, prod)
-  │                  undefined → "--" (non-null sentinel, fail-open) on unknown in dev or under the `none` preset
-  │
-  └─ loadLabels() ──► euler-labels data source (GitHub or S3/CDN) ─► products.json ─► product.block
-                                                                    product.vaultOverrides[addr].block
-                                                                    product.vaultOverrides[addr].restricted
-                                                 ► earn-vaults.json ─► earnVaultBlocks map
-                                                                       earnVaultRestrictions map
-                                                 ► assets.json ─────► union of {chainId}/assets.json
-                                                                       + all/assets.json
-                                                                     → assetBlocks / assetRestrictions maps
-                                                                       (address entries)
-                                                                     → assetPatternRules list
-                                                                       (compiled symbols/regex)
-                                                   (5-min cache)
+V3 live policies → SDK pagination/validation → Lite disk checkpoint → atomic labels bundle → current vault assignments + country → Lite eligibility helpers and operation guards.
 
-Server-Side (every API request):
-  geo-gate.ts reads the country from the edge context (EDGE_PROVIDER preset)
-  ├─ unknown/XX/T1 + geo-capable edge + prod → HTTP 451 (fail-closed)
-  ├─ unknown + dev, or `none` preset → allow
-  └─ known country → check SANCTIONED_COUNTRIES → block or allow
+The server bundle cache is five minutes; open tabs refresh labels after five minutes, checked once a minute and on focus. Policy updates do not depend on a metadata publication. The labels snapshot revision invalidates asset decision caches.
 
-Runtime Check: isVaultBlockedByCountry("0x1234...")
-  │
-  ├─ country === undefined (loading) → true (policy pending, fail-closed)
-  ├─ country === null (unknown, fail-closed) → true (blocked)
-  │
-  ├─ 1. SANCTIONED_COUNTRIES includes "DE"?  ─► yes → blocked
-  │
-  ├─ 2. getVaultBlock("0x1234...")
-  │     └─ product.vaultOverrides["0x1234..."]?.block ?? product.block
-  │     └─ expandBlockList(codes) → includes "DE"?  ─► yes → blocked
-  │
-  ├─ 3. getEarnVaultBlock("0x1234...")
-  │     └─ earnVaultBlocks[lowercase addr]
-  │     └─ expandBlockList(codes) → includes "DE"?  ─► yes → blocked
-  │
-  ├─ 4. Asset-level: resolve vault.asset via vault registry
-  │     ├─ unresolved asset → blocked
-  │     └─ isAssetBlockedByCountry({ address, symbol, name })
-  │           ├─ assetBlocks[asset.address.toLowerCase()] includes "DE"? ─► blocked
-  │           └─ iterate assetPatternRules (with block list):
-  │                 symbolsLower.has(symbol.toLowerCase()) ||
-  │                 symbolRegex.test(symbol.toLowerCase()) ||
-  │                 namesLower.has(name.toLowerCase())     ||
-  │                 nameRegex.test(name.toLowerCase())       ─► blocked
-  │
-  └─ 5. Not blocked → return false
-
-Runtime Check: isVaultRestrictedByCountry("0x1234...")
-  │
-  ├─ country === undefined (loading) → true (policy pending, fail-closed)
-  ├─ country === null (unknown, fail-closed) → true (restricted)
-  │
-  ├─ 1. getVaultRestricted("0x1234...")
-  │     └─ product.vaultOverrides["0x1234..."]?.restricted (no product fallback)
-  │     └─ expandBlockList(codes) → includes "DE"?  ─► yes → restricted
-  │
-  ├─ 2. getEarnVaultRestricted("0x1234...")
-  │     └─ earnVaultRestrictions[lowercase addr]
-  │     └─ expandBlockList(codes) → includes "DE"?  ─► yes → restricted
-  │
-  ├─ 3. Asset-level: resolve vault.asset via vault registry
-  │     ├─ unresolved asset → restricted
-  │     └─ isAssetRestrictedByCountry({ address, symbol, name })
-  │           ├─ assetRestrictions[asset.address.toLowerCase()] → restricted
-  │           └─ iterate assetPatternRules (with restricted list):
-  │                 symbol/name match as above ─► restricted
-  │
-  └─ 4. Not restricted → return false
-```
-
-## Configuration
-
-All blocking and restriction configuration lives outside the app codebase:
-
-| What | Where | Effect |
-|------|-------|--------|
-| Global sanctions list | `entities/constants.ts` — `SANCTIONED_COUNTRIES` | Blocks all vaults for listed countries |
-| Country group definitions | `entities/constants.ts` — `COUNTRY_GROUPS` | Defines EU, EEA, EFTA aliases |
-| Product-level blocks | `euler-labels` repo — `products.json` `block` field | Blocks all vaults in a product |
-| Per-vault block overrides | `euler-labels` repo — `products.json` `vaultOverrides[addr].block` | Overrides product block for one vault |
-| Per-vault restrictions | `euler-labels` repo — `products.json` `vaultOverrides[addr].restricted` | Soft-restricts one vault (no product fallback) |
-| Earn vault blocks | `euler-labels` repo — `earn-vaults.json` `block` field | Hard-blocks specific earn vaults |
-| Earn vault restrictions | `euler-labels` repo — `earn-vaults.json` `restricted` field | Soft-restricts specific earn vaults |
-| Asset-level blocks/restrictions (per-chain) | `euler-labels` repo — `{chainId}/assets.json` | Blocks/restricts any vault whose underlying is listed + the token in the swap picker |
-| Asset-level blocks/restrictions (cross-chain) | `euler-labels` repo — `all/assets.json` | Same as per-chain, usually pattern rules (`symbols`/`symbolRegex`/`names`/`nameRegex`) that apply on every chain |
-| Edge provider preset | `.env` — `EDGE_PROVIDER` | Selects the trusted-header mapping (geo, client IP, VPN evidence); required in production |
-| Dev country simulation | `.env` — `DEV_GEO_COUNTRY=GB` | Simulates a country when the edge provides none (dev, previews); production refuses to boot with it set |
-
-Changes to `products.json`, `earn-vaults.json`, `{chainId}/assets.json`, or `all/assets.json` in the euler-labels data source (GitHub repo or S3/CDN) take effect within 5 minutes (the label cache TTL) without any app deployment.
-
-## Key Files
-
-| File | Role |
-|------|------|
-| `services/country.ts` | Client-side country detection via HEAD request and `x-country-code` response header |
-| `server/middleware/cors.ts` | Strips client `x-country-code`, derives authoritative value from the edge context, emits as response header |
-| `server/utils/edge.ts` + `utils/edge-presets.ts` | Normalized edge context (`getEdgeContext`) and the per-provider trusted-header mapping (`EDGE_PROVIDER` presets) |
-| `server/middleware/geo-gate.ts` | Server-side sanctioned-country block; fail-closed on unknown country in prod |
-| `composables/useGeoBlock.ts` | Core blocking logic, `isVaultBlockedByCountry`, `isVaultRestrictedByCountry`, `isAssetBlockedByCountry`, `isAssetRestrictedByCountry`, `getVaultTags`; `AssetLike` type |
-| `composables/useEulerLabels.ts` | SDK-backed label loading and current label snapshot |
-| `utils/eulerLabelsUtils.ts` | Getter helpers `getVaultBlock`, `getEarnVaultBlock`, `getVaultRestricted`, `getEarnVaultRestricted`, `getAssetBlock`, `getAssetRestricted`, `getAssetPatternRules` |
-| `server/api/internal/labels/[file].get.ts` | Labels proxy. Unions `{chainId}/assets.json` with `all/assets.json`. Validates `symbolRegex` / `nameRegex` (compile check + 512-char cap). `refreshLabelFile(scope, file)` where `scope: number \| 'all'` |
-| `server/plugins/warm-cache.ts` | Warms `all/assets.json` once globally plus per-chain label files |
-| `entities/constants.ts` | `SANCTIONED_COUNTRIES`, `COUNTRY_GROUPS` (EU/EEA/EFTA) |
-| `entities/euler/labels.ts` | TypeScript types (`EulerLabelProduct`, `EulerLabelVaultOverride`, `EulerLabelAssetEntry` union with address + pattern fields) |
-| `components/entities/asset/SwapTokenSelector.vue` | Arbitrary-asset selector. Disables blocked/restricted rows (mode-aware) via `getAssetGeoState(asset, mode)` |
-| `components/entities/vault/VaultItem.vue` | Browse page "Restricted" chip (hard-block only) |
-| `components/entities/vault/VaultBorrowItem.vue` | Borrow browse page "Restricted" chip (hard-block + soft-restricted) |
-| `components/entities/vault/ChooseCollateralModal.vue` | Selection modal disabled state and warning chips |
-| `composables/useSwapCollateralOptions.ts` | Collateral selection with `tagContext` parameter |
-| `composables/useSwapDebtOptions.ts` | Debt selection with `'swap-target'` context |
-| `composables/useMultiplyCollateralOptions.ts` | Multiply collateral selection with `'supply-source'` context |
+Tests cover resolved Norway membership, cumulative scopes, product reassignment, chain isolation, case-insensitive asset patterns, input bounds, unavailable versus empty data, acquisition guards, disk restart recovery and malformed/partial fetches. Production canary deployment and alert wiring are separate operational work.

@@ -12,7 +12,6 @@ import { toReactive, until } from '@vueuse/core'
 import { decodeFunctionResult, encodeFunctionData, type Hex, type PublicClient } from 'viem'
 import { computed, ref, shallowReactive, shallowRef, unref, type Ref } from 'vue'
 import { logWarn } from '~/utils/errorHandling'
-import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import type { EulerLabelEntity, EulerLabelProduct, EulerLabelPointReward } from '~/entities/euler/labels'
 import { eulerLabelProductEmpty } from '~/entities/euler/labels'
 import { getEulerSdk } from '~/composables/useEulerSdk'
@@ -20,17 +19,15 @@ import { useEulerOracleAdapters } from '~/composables/useEulerOracleAdapters'
 import { erc4626AssetAbi } from '~/abis/erc4626'
 import { buildBatchItem, evcBatchCall } from '~/utils/multicall'
 import { normalizeAddress } from '~/utils/normalizeAddress'
-import { fetchEulerLabelsDataStrict } from '~/utils/euler-labels-fetch'
+import {
+  normalizeLabelsBundle,
+  getLabelVaultCandidates,
+  getLabelsVaultLoadKey,
+  type PublicEulerLabelsData,
+  type PublicLabelsBundle,
+} from '~/utils/public-labels'
 
-const LABEL_QUERY_NAMES = [
-  'queryEulerLabelsEntities',
-  'queryEulerLabelsProducts',
-  'queryEulerLabelsPoints',
-  'queryEulerLabelsEarnVaults',
-  'queryEulerLabelsAssets',
-] as const
-
-const createEmptyEulerLabelsData = (): EulerLabelsData => ({
+const createEmptyEulerLabelsData = (): PublicEulerLabelsData => ({
   products: {},
   entities: {},
   points: {},
@@ -46,21 +43,26 @@ const createEmptyEulerLabelsData = (): EulerLabelsData => ({
   assetBlocks: {},
   assetRestrictions: {},
   assetPatternRules: [],
-} as unknown as EulerLabelsData)
+  rawGeoPolicies: [],
+  geoContext: { policies: undefined, chainId: null, productByVault: {} },
+} as unknown as PublicEulerLabelsData)
 
-const labelsData = shallowRef<EulerLabelsData>(createEmptyEulerLabelsData())
+const labelsData = shallowRef<PublicEulerLabelsData>(createEmptyEulerLabelsData())
 const labelsChainId = ref<number | null>(null)
 const labelsVersion = ref(0)
 const isLoading = ref(false)
 const isReady = ref(false)
 const loadError = ref<string | undefined>()
+const LABELS_REFRESH_INTERVAL_MS = 5 * 60_000
+const LABELS_MAX_AGE_MS = 15 * 60_000
+let lastSuccessfulLoadAt = 0
 let hasSuccessfulSnapshot = false
-const pendingLabelsFetches = new Map<number, Promise<EulerLabelsData>>()
+const pendingLabelsFetches = new Map<number, Promise<PublicEulerLabelsData>>()
 let labelsLoadGeneration = 0
 let wrapPairProbeGeneration = 0
 const wrapPairs = shallowReactive<Record<string, string>>({})
 
-const setLabelsData = (data: EulerLabelsData, chainId: number | null) => {
+const setLabelsData = (data: PublicEulerLabelsData, chainId: number | null) => {
   labelsData.value = data
   labelsChainId.value = chainId
   labelsVersion.value += 1
@@ -68,21 +70,28 @@ const setLabelsData = (data: EulerLabelsData, chainId: number | null) => {
 
 export const getCurrentEulerLabelsData = (): EulerLabelsData => labelsData.value
 
+export const getEulerLabelsSourceData = () => labelsData.value
+
+export const getEulerGeoContext = () => labelsData.value.geoContext
+
 export const getEulerLabelsVersion = (): number => labelsVersion.value
 
 export const getEulerLabelWrapPairs = (): Record<string, string> => wrapPairs
 
-export const __setEulerLabelsDataForTest = (data: Partial<EulerLabelsData> = {}) => {
+export const __setEulerLabelsDataForTest = (data: Partial<PublicEulerLabelsData> = {}) => {
   labelsLoadGeneration += 1
   wrapPairProbeGeneration += 1
   pendingLabelsFetches.clear()
+  lastSuccessfulLoadAt = 0
   Object.keys(wrapPairs).forEach(key => Reflect.deleteProperty(wrapPairs, key))
   setLabelsData({
     ...createEmptyEulerLabelsData(),
     ...data,
+    geoContext: data.geoContext, // Explicit static fixtures use the compatibility evaluator.
     notExplorableEarnVaults: data.notExplorableEarnVaults ?? new Set(),
     assetPatternRules: data.assetPatternRules ?? [],
-  } as unknown as EulerLabelsData, null)
+    rawGeoPolicies: (data as Partial<PublicEulerLabelsData>).rawGeoPolicies ?? [],
+  } as unknown as PublicEulerLabelsData, null)
   isReady.value = true
   hasSuccessfulSnapshot = true
   loadError.value = undefined
@@ -105,6 +114,10 @@ const entities = toReactive(computed(() => labelsData.value.entities as Record<s
 const points = toReactive(computed(() => labelsData.value.points as Record<string, EulerLabelPointReward[]>))
 const verifiedVaultAddresses = computed(() => labelsData.value.verifiedVaultAddresses)
 const earnVaults = computed(() => labelsData.value.earnVaults)
+const vaultCandidates = computed(() => getLabelVaultCandidates(labelsData.value).vaults)
+const earnCandidates = computed(() => getLabelVaultCandidates(labelsData.value).earn)
+const visibility = computed(() => labelsData.value.visibility)
+const geoPolicies = computed(() => labelsData.value.rawGeoPolicies)
 
 const isCurrentLabelsLoad = (chainId: number, generation: number) => {
   const { getCurrentChainConfig } = useEulerAddresses()
@@ -116,12 +129,18 @@ const getLabelsFetch = (chainId: number, forceRefresh: boolean) => {
   if (pendingFetch && !forceRefresh) return pendingFetch
 
   const fetchPromise = (async () => {
-    if (forceRefresh) {
-      await invalidateSdkQueries([...LABEL_QUERY_NAMES])
+    try {
+      const bundle = await $fetch<PublicLabelsBundle>('/api/internal/public-labels', {
+        query: { chainId },
+        timeout: 35_000,
+        ...(forceRefresh && { headers: { 'cache-control': 'no-cache' } }),
+      })
+      return normalizeLabelsBundle(chainId, bundle)
     }
-
-    const sdk = await getEulerSdk()
-    return fetchEulerLabelsDataStrict(sdk.eulerLabelsService, chainId)
+    catch (error) {
+      logWarn('labels/public-v3', error)
+      throw error
+    }
   })()
 
   pendingLabelsFetches.set(chainId, fetchPromise)
@@ -133,13 +152,15 @@ const loadLabels = async (forceRefresh = false): Promise<void> => {
 
   const { getCurrentChainConfig } = useEulerAddresses()
   if (getCurrentChainConfig.value?.chainId !== chainId) return
-  if (!forceRefresh && labelsChainId.value === chainId && isReady.value) return
+  const hasCurrentSnapshot = labelsChainId.value === chainId && hasSuccessfulSnapshot
+  if (!forceRefresh && hasCurrentSnapshot && isReady.value
+    && Date.now() - lastSuccessfulLoadAt < LABELS_REFRESH_INTERVAL_MS) return
 
   const generation = ++labelsLoadGeneration
   const isCurrentLoad = () => isCurrentLabelsLoad(chainId, generation)
   if (!isCurrentLoad()) return
 
-  isReady.value = false
+  isReady.value = hasCurrentSnapshot && Date.now() - lastSuccessfulLoadAt < LABELS_MAX_AGE_MS
   isLoading.value = true
   loadError.value = undefined
   const probeGeneration = ++wrapPairProbeGeneration
@@ -150,13 +171,16 @@ const loadLabels = async (forceRefresh = false): Promise<void> => {
     setLabelsData(createEmptyEulerLabelsData(), chainId)
   }
 
-  const fetchPromise = getLabelsFetch(chainId, forceRefresh)
+  // A scheduled refresh requests current server data; concurrent ordinary
+  // callers still join the existing fetch instead of restarting it.
+  const fetchPromise = getLabelsFetch(chainId, forceRefresh || (hasCurrentSnapshot && !pendingLabelsFetches.has(chainId)))
 
   try {
     const data = await fetchPromise
     if (isCurrentLoad()) {
       setLabelsData(data, chainId)
       hasSuccessfulSnapshot = true
+      lastSuccessfulLoadAt = Date.now()
     }
     if (isCurrentLoad()) {
       void probeWrapPairs(chainId, generation, probeGeneration)
@@ -172,8 +196,24 @@ const loadLabels = async (forceRefresh = false): Promise<void> => {
     }
     if (isCurrentLoad()) {
       isLoading.value = false
-      isReady.value = hasSuccessfulSnapshot
+      isReady.value = hasSuccessfulSnapshot && Date.now() - lastSuccessfulLoadAt < LABELS_MAX_AGE_MS
     }
+  }
+}
+
+const refreshLabelsIfStale = async () => {
+  if (hasSuccessfulSnapshot && Date.now() - lastSuccessfulLoadAt >= LABELS_MAX_AGE_MS) {
+    isReady.value = false
+  }
+  if (isLoading.value) return
+  const previous = labelsData.value
+  const previousChain = labelsChainId.value
+  const previousKey = getLabelsVaultLoadKey(previous)
+  await loadLabels()
+  if (isReady.value && previousChain === labelsChainId.value && previous !== labelsData.value
+    && previousKey !== getLabelsVaultLoadKey(labelsData.value)) {
+    // Open forms may hold unlisted vaults which discovery does not reload.
+    await useVaults().loadVaults({ preserveRegistry: true })
   }
 }
 
@@ -267,6 +307,8 @@ export const useEulerLabels = () => {
     isReady,
     loadError,
     verifiedVaultAddresses,
+    vaultCandidates,
+    earnCandidates,
     products,
     entities,
     points,
@@ -274,7 +316,10 @@ export const useEulerLabels = () => {
     oracleAssessmentsStatus: oracleAdapters.oracleAssessmentsStatus,
     oracleAssessmentsAvailable: oracleAdapters.oracleAssessmentsAvailable,
     earnVaults,
+    geoPolicies,
+    visibility,
     loadLabels,
+    refreshLabelsIfStale,
     retryLabels,
     loadOracleAdapter: oracleAdapters.loadOracleAdapter,
     loadOracleAdapters: oracleAdapters.loadOracleAdapters,

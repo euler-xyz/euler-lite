@@ -17,7 +17,7 @@ vi.mock('~/composables/useEulerLabels', () => ({
   getEulerLabelsVersion: () => 1,
 }))
 
-const mountGuard = (options?: { chainId?: Ref<number | undefined>, account?: Ref<string | undefined>, operation?: Ref<string> }) => {
+const mountGuard = (options?: { allowUnavailableLabels?: boolean, chainId?: Ref<number | undefined>, account?: Ref<string | undefined>, operation?: Ref<string> }) => {
   let state: UnverifiedVaultGuardState | undefined
   const chainId = options?.chainId ?? ref<number | undefined>(1)
   const account = options?.account ?? ref<string | undefined>(ACCOUNT)
@@ -39,6 +39,7 @@ const mountGuard = (options?: { chainId?: Ref<number | undefined>, account?: Ref
     setup() {
       useUnverifiedVaultGuard(computed(() => [VAULT]), {
         chainId,
+        allowUnavailableLabels: options?.allowUnavailableLabels,
         account,
         operation: computed(() => operation.value),
       })
@@ -130,6 +131,23 @@ describe('useUnverifiedVaultGuard canonical context', () => {
     verifyEVault.mockReturnValue(false)
     await mounted.state.retryVerification()
     expect(mounted.state.isAcknowledgmentRequired).toBe(true)
+    mounted.app.unmount()
+  })
+
+  it('allows a simple exit to acknowledge unavailable labels without granting verification', async () => {
+    entries.set(VAULT.toLowerCase(), { type: 'evk', vault: { chainId: 1, address: VAULT } })
+    labelsReady.value = false
+    labelsError.value = 'Unavailable'
+    verifyEVault.mockReturnValue(true)
+    const mounted = mountGuard({ allowUnavailableLabels: true })
+    await nextTick()
+    expect(mounted.state.verificationError).toBeUndefined()
+    expect(mounted.state.isVerificationLoading).toBe(false)
+    expect(mounted.state.isAcknowledgmentRequired).toBe(true)
+    expect(verifyEVault).not.toHaveBeenCalled()
+    mounted.state.acknowledgeRisk()
+    await nextTick()
+    expect(operationBlockerEntries.value).toEqual([])
     mounted.app.unmount()
   })
 

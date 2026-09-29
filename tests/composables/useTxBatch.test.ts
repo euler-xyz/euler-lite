@@ -1,3 +1,4 @@
+import { liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import { Account, Portfolio, SwapperMode, type EVCBatchItem, type IAccountPosition, type IHasVaultAddress, type IAccountLiquidity, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
@@ -716,7 +717,7 @@ describe('stitchAccount', () => {
 })
 
 describe('fetchBaseAccountSnapshot', () => {
-  it('uses the same full population path as the normal portfolio read', async () => {
+  it('populates review data explicitly without invoking SDK legacy labels', async () => {
     const expected = accountWithPosition(subAccount, subAccount, 1n)
     const fetchAccount = vi.fn(async () => ({ result: expected, errors: [] }))
     const sdk = {
@@ -726,7 +727,7 @@ describe('fetchBaseAccountSnapshot', () => {
     const result = await fetchBaseAccountSnapshot(sdk, 1, owner)
 
     expect(result).toBe(expected)
-    expect(fetchAccount).toHaveBeenCalledWith(1, owner, { populateAll: true })
+    expect(fetchAccount).toHaveBeenCalledWith(1, owner, { populateVaults: true, populateMarketPrices: true, populateUserRewards: true, vaultFetchOptions: liteVaultFetchOptions })
   })
 })
 
@@ -988,7 +989,10 @@ describe('useTxBatch execution errors', () => {
     })
 
     expect(sdk.accountService.fetchAccount).toHaveBeenCalledWith(1, owner, {
-      populateAll: true,
+      populateVaults: true,
+      populateMarketPrices: true,
+      populateUserRewards: true,
+      vaultFetchOptions: liteVaultFetchOptions,
     })
     expect(executionMocks.compilePreview).toHaveBeenCalledWith(expect.any(Array), expect.not.objectContaining({ chainId: 8453 }))
   })
@@ -1010,7 +1014,10 @@ describe('useTxBatch execution errors', () => {
     })
 
     expect(sdk.accountService.fetchAccount).toHaveBeenCalledWith(1, owner, {
-      populateAll: true,
+      populateVaults: true,
+      populateMarketPrices: true,
+      populateUserRewards: true,
+      vaultFetchOptions: liteVaultFetchOptions,
     })
     expect(executionMocks.compilePreview).toHaveBeenCalledWith(expect.any(Array), expect.objectContaining({ owner }))
   })

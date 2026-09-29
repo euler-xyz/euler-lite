@@ -69,7 +69,7 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
           class="icon--40 shrink-0"
           :class="{ 'opacity-20': isGovernanceLimited }"
           :src="marketEntities.logos"
-          :label="marketEntities.name"
+          :label="marketEntities.labels"
         />
         <div
           class="flex-grow min-w-0"

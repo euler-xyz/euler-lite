@@ -6,6 +6,7 @@ import type { VaultTagContext } from '~/composables/useGeoBlock'
 import { buildCollateralOption, computeSupplyApy } from '~/utils/collateralOptions'
 import { useReactiveMap } from '~/composables/useReactiveMap'
 import { isOpDisabled, OP_SKIM } from '~/utils/vault-hooks'
+import { isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
 
 export const useSwapCollateralOptions = ({
   currentVault,
@@ -28,6 +29,8 @@ export const useSwapCollateralOptions = ({
     const unique = new Map<string, EVault>()
     candidates.forEach((vault) => {
       const address = getAddress(vault.address)
+      // Existing repayment collateral remains selectable regardless of deployment tags.
+      if (tagContext !== 'supply-source' && !isVaultSelectedByTag(address)) return
       if (currentAddress && address === currentAddress) {
         return
       }

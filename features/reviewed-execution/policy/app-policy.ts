@@ -32,6 +32,8 @@ export const resolveAppPolicy = async (
   now = Date.now(),
   intents?: readonly OperationIntent[],
 ): Promise<Readonly<ReviewedPolicy>> => {
+  const exitsWithoutAcquisition = new Set(['withdraw', 'redeem', 'repay-from-wallet', 'repay-from-deposit', 'cleanup', 'reward-claim', 'reul-unlock'])
+  const onlyExits = Boolean(intents?.length && intents.every(intent => exitsWithoutAcquisition.has(intent.planner.name)))
   const expiresAt = now + 5 * 60_000
   const { get, getOrFetch, getVault, isVerifiedVault } = useVaultRegistry()
   const { getTokenByAddress } = useTokenList()
@@ -71,7 +73,7 @@ export const resolveAppPolicy = async (
       exactVaults.push({ address, vault: entry.vault as EVault | EulerEarn | SecuritizeCollateralVault, type: entry.type })
     }
 
-    if (requirements.vaults.length && !useEulerLabels().isReady.value) {
+    if (requirements.vaults.length && !useEulerLabels().isReady.value && !onlyExits) {
       throw new Error('Vault verification is unavailable')
     }
 
@@ -100,6 +102,7 @@ export const resolveAppPolicy = async (
   }
 
   const canonicallyVerified = (entry: NonNullable<typeof exactVaults>[number]) => {
+    if (!useEulerLabels().isReady.value) return false
     const { isVaultGovernorVerified, isSecuritizeGovernorVerified, isEarnVaultOwnerVerified } = useVaults()
     if (entry.type === 'earn') return isEarnVaultOwnerVerified(entry.vault as EulerEarn)
     if (entry.type === 'securitize') return isSecuritizeGovernorVerified(entry.vault as SecuritizeCollateralVault)
@@ -147,13 +150,13 @@ export const resolveAppPolicy = async (
       const address = addressOfSubject(requirement.subject)
       if (!address) throw new Error('Vault/contract policy subject is malformed')
       const vault = getVault(address)
-      if ((vault || vaultLabelSubjects.has(address)) && !useEulerLabels().isReady.value) {
+      if ((vault || vaultLabelSubjects.has(address)) && !useEulerLabels().isReady.value && !onlyExits) {
         throw new Error('Vault verification is unavailable')
       }
       if (vault) {
         if (!vault.asset?.address || !vault.type) throw new Error(`Vault metadata is incomplete for ${address}`)
-        if (!labelsVersion) throw new Error('Euler labels policy metadata is unavailable')
-        version = `vault:${vault.type}:${vault.asset.address}:${labelsVersion}`
+        if (!labelsVersion && !onlyExits) throw new Error('Euler labels policy metadata is unavailable')
+        version = `vault:${vault.type}:${vault.asset.address}:${useEulerLabels().isReady.value ? labelsVersion : 'unavailable-exit'}`
       }
       else version = `effect-target:${address}`
     }
