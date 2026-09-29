@@ -54,6 +54,10 @@ const openSlippageSettings = () => {
 
 const collateralAddress = route.params.collateral as string
 const borrowAddress = route.params.borrow as string
+const { warning: assessmentWarning } = useVaultAssessmentWarning(borrowAddress)
+const { visibility: vaultVisibility, source: labelsSource } = useEulerLabels()
+const isKnownUnlisted = (address: string) => labelsSource.value === 'v3'
+  && ['hidden', 'pending_review'].includes(vaultVisibility.value?.[address.toLowerCase()]?.status ?? '')
 useOperationGuard([collateralAddress, borrowAddress])
 
 const formTabFromQuery = (value: unknown): 'borrow' | 'multiply' | undefined => {
@@ -504,7 +508,8 @@ watch(pair, async (val) => {
     multiply.initMultiplySupplyVault(current.collateral as EVault)
   }
   const { isVerifiedVault } = useVaultRegistry()
-  if (!isVerifiedVault(current.collateral.address) || !isVerifiedVault(current.borrow.address)) {
+  if ((!isVerifiedVault(current.collateral.address) && !isKnownUnlisted(current.collateral.address))
+    || (!isVerifiedVault(current.borrow.address) && !isKnownUnlisted(current.borrow.address))) {
     if (!unverifiedDisclaimerShown) {
       unverifiedDisclaimerShown = true
       modal.open(VaultUnverifiedDisclaimerModal, {
@@ -819,7 +824,7 @@ watch(
                   size="compact"
                 />
 
-                <VaultWarningBanner :warnings="borrow.borrowFormWarnings.value" />
+                <VaultWarningBanner :warnings="[assessmentWarning, ...borrow.borrowFormWarnings.value]" />
 
                 <VaultFormInfoBlock
                   v-if="pair"

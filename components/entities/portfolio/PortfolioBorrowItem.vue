@@ -14,7 +14,7 @@ import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { toUsdAmount, type UsdAmount } from '~/utils/sdk-prices'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
-import { isVaultDeprecated, getVaultNotice, isVaultNoticeSpecific } from '~/utils/eulerLabelsUtils'
+import { getVaultNotice, isVaultNoticeSpecific } from '~/utils/eulerLabelsUtils'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultNetApyModal, PortfolioRoeModal, VaultOverviewModal, UiModalPreviewTrigger } from '#components'
@@ -174,9 +174,6 @@ const borrowNotice = computed(() => {
   if (addresses.some(addr => getVaultNotice(addr) === raw)) return ''
   return prefixNotice(raw, borrowAddress.value)
 })
-const isAnyDeprecated = computed(() =>
-  isVaultDeprecated(primaryCollateralAddress.value) || isVaultDeprecated(borrowAddress.value),
-)
 
 const isAnyUnverified = computed(() =>
   !isVerifiedVault(primaryCollateralAddress.value) || !isVerifiedVault(borrowAddress.value),
@@ -416,6 +413,15 @@ const openPositionInformationModal = () => {
                     :name="pairName"
                     :is-unverified="isAnyUnverified"
                   />
+                  <VaultAssessmentWarning
+                    :address="borrowAddress"
+                    hide-deprecated
+                  />
+                  <VaultAssessmentWarning
+                    v-if="primaryCollateralAddress"
+                    :address="primaryCollateralAddress"
+                    hide-deprecated
+                  />
                   <UiHoverPreviewTooltip
                     v-if="isGeoBlocked"
                     title="Region restricted"
@@ -430,21 +436,13 @@ const openPositionInformationModal = () => {
                       Restricted
                     </span>
                   </UiHoverPreviewTooltip>
-                  <UiHoverPreviewTooltip
-                    v-if="isAnyDeprecated"
-                    title="Deprecated"
-                    text="One or more vaults in this position have been deprecated."
-                    placement="top-start"
-                  >
-                    <span class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5 shrink-0">
-                      <SvgIcon
-                        name="warning"
-                        class="!w-14 !h-14"
-                      />
-                      Deprecated
-                    </span>
-                  </UiHoverPreviewTooltip>
+                  <VaultDeprecatedBadge :addresses="[borrowAddress, primaryCollateralAddress].filter(Boolean)" />
                 </div>
+                <VaultVisibilityNotice :address="borrowAddress" />
+                <VaultVisibilityNotice
+                  v-if="primaryCollateralAddress"
+                  :address="primaryCollateralAddress"
+                />
                 <div
                   class="text-h5 text-content-primary flex flex-wrap items-center gap-8 min-w-0"
                   data-id="data-point"

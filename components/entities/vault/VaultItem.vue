@@ -3,7 +3,7 @@ import type { EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault, useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
-import { isVaultGovernanceLimited, isVaultRecentlyAdded, isVaultKeyring, isVaultCyclicalNote } from '~/utils/eulerLabelsUtils'
+import { isVaultGovernanceLimited, isVaultRecentlyAdded, isVaultKeyring, isVaultCyclicalNote, getVaultDeprecation } from '~/utils/eulerLabelsUtils'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
@@ -12,9 +12,9 @@ import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { VaultApyModal, UiModalPreviewTrigger } from '#components'
 import { isVaultBorrowable } from '~/utils/vault/classification'
-import { getAddress } from 'viem'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
 import { resolveVaultExposureDisplay, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
+import { getCriticalAssessmentWarning } from '~/utils/vault-assessment/presentation'
 
 const { isConnected } = useWagmi()
 const { vault, type = 'lend' } = defineProps<{ vault: EVault, type?: 'lend' | 'borrow' }>()
@@ -120,18 +120,20 @@ const statsGridCols = computed(() => {
   if (isConnected.value) cols.push('1fr') // In wallet
   return cols.join(' ')
 })
-const isDeprecated = computed(() => {
-  try {
-    const addr = getAddress(vault.address)
-    return product.deprecatedVaults?.includes(addr) ?? false
-  }
-  catch {
-    return product.deprecatedVaults?.includes(vault.address) ?? false
+const isDeprecated = computed(() => getVaultDeprecation(vault.address).deprecated)
+const { vaultAssessments, getVaultAssessmentEntry, loadVaultAssessment, visibility, source, loadError } = useEulerLabels()
+watchEffect(() => {
+  if (source.value === 'v3' && !loadError.value
+    && visibility.value?.[vault.address.toLowerCase()]?.status === 'warning') {
+    void loadVaultAssessment(vault.chainId, vault.address, 'evk')
   }
 })
-const deprecationReason = computed(() =>
-  isDeprecated.value ? product.deprecationReason : '',
-)
+const criticalAssessmentWarning = computed(() => {
+  void vaultAssessments.value
+  if (source.value !== 'v3' || loadError.value) return null
+  const entry = getVaultAssessmentEntry(vault.chainId, vault.address, 'evk')
+  return entry.status === 'available' ? getCriticalAssessmentWarning(entry.assessment) : null
+})
 
 const supplyApyModalData = computed(() => ({
   props: {
@@ -207,20 +209,12 @@ watchEffect(async () => {
           <GovernanceLimitedBadge v-if="isGovernanceLimited" />
           <CyclicalNoteBadge v-if="isCyclicalNote && isGovernorVerified" />
           <RestrictedBadge v-if="isGeoBlocked" />
-          <UiHoverPreviewTooltip
-            v-if="isDeprecated"
-            title="Deprecated"
-            :text="deprecationReason || 'This vault has been deprecated.'"
-            placement="top-start"
-          >
-            <span class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5">
-              <SvgIcon
-                name="warning"
-                class="!w-14 !h-14"
-              />
-              Deprecated
-            </span>
-          </UiHoverPreviewTooltip>
+          <VaultDeprecatedBadge :addresses="[vault.address]" />
+          <VaultAssessmentWarning
+            :address="vault.address"
+            :hide-deprecated="isDeprecated"
+          />
+          <VaultWarningIcon :warning="criticalAssessmentWarning" />
         </div>
         <div
           class="text-h5 text-content-primary"

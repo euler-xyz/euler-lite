@@ -242,6 +242,11 @@ const supplyApyModalData = computed(() => ({
             v-if="isRecentlyAdded"
           />
           <RestrictedBadge v-if="isGeoBlocked" />
+          <VaultDeprecatedBadge :addresses="[vault.address]" />
+          <VaultAssessmentWarning
+            :address="vault.address"
+            hide-deprecated
+          />
         </div>
         <div
           class="text-h5 text-content-primary"

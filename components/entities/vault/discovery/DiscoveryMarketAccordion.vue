@@ -761,6 +761,10 @@ onMounted(() => {
                           :vault="pair.borrow"
                           :collateral-vaults="[pair.collateral]"
                         />
+                        <VaultOverviewBlockVaultChecks
+                          v-if="pair"
+                          :address="pair.borrow.address"
+                        />
                       </template>
                     </template>
 
