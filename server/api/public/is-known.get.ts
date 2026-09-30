@@ -53,7 +53,13 @@ export default defineEventHandler(async (event) => {
   }
 
   // A hosted verdict's response cache cannot outlive its V3 read.
-  setResponseHeader(event, 'Cache-Control', getVerifiedAddressCacheControl(verifiedSnapshot))
+  const cacheControl = getVerifiedAddressCacheControl(verifiedSnapshot)
+  setResponseHeader(event, 'Cache-Control', cacheControl)
+  if (verifiedSnapshot.source === 'v3') {
+    const cdnCacheControl = cacheControl.replace('max-age=', 's-maxage=')
+    setResponseHeader(event, 'CDN-Cache-Control', cdnCacheControl)
+    setResponseHeader(event, 'Cloudflare-CDN-Cache-Control', cdnCacheControl)
+  }
   const verifiedSet = verifiedSnapshot.addresses
 
   const response: Record<string, boolean> = {}

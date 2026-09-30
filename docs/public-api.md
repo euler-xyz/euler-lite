@@ -73,7 +73,7 @@ Addresses are validated via viem's `isAddress` (strict EIP-55 checks) and normal
 
 ### Caching and propagation
 
-- **Response header**: up to `Cache-Control: public, max-age=30, stale-while-revalidate=30`. On V3-assessed chains, both cache windows shorten as the source verdict approaches its 15-minute expiry.
+- **Response headers**: browsers receive up to `Cache-Control: public, max-age=30, stale-while-revalidate=30`. On V3-assessed chains, the browser, CDN and Cloudflare cache windows all shorten as the source verdict approaches its 15-minute expiry.
 - **Server-side cache**: per-chain in-memory verified set with a 5-minute TTL, rebuilt on demand from the shared Public Labels bundle. A V3 verdict is usable only within 15 minutes of its source read, even when the derived set was rebuilt more recently.
 - **In-flight dedup**: concurrent cold requests for the same chain collapse onto a single upstream pass.
 - **Propagation**: Public Labels verdict and publication changes, and on-chain governor changes on fallback sources, typically propagate within **~5 minutes**. Public Labels and the vault snapshot are warmed; verified-set requests use those cached inputs.
