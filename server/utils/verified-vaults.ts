@@ -19,16 +19,21 @@ function computeVerifiedSet(view: LabelsView): Set<string> {
   // subset are still covered.
   for (const addr of view.escrowAddresses) result.add(addr)
 
+  // V3 publishes the verdict used to build verified membership. Its entity
+  // consistency decision supersedes the local governor-to-entity probe.
+  if (view.labelsSource === 'v3') {
+    for (const addr of view.publishedVerifiedAddresses) result.add(addr)
+    return result
+  }
+
   for (const vault of view.snapshot.evkVaults) {
     const addr = tryChecksum(vault.address)
-    if (addr && view.productByVault.get(addr)?.forceUnverified === true) continue
     if (isVaultGovernorVerified({ ...vault, escrowVerified: !!addr && view.escrowAddresses.has(addr) }, view.verificationLabels)) {
       if (addr) result.add(addr)
     }
   }
   for (const vault of view.snapshot.securitizeVaults) {
     const addr = tryChecksum(vault.address)
-    if (addr && view.productByVault.get(addr)?.forceUnverified === true) continue
     if (isVaultGovernorVerified({ ...vault, escrowVerified: false }, view.verificationLabels)) {
       if (addr) result.add(addr)
     }

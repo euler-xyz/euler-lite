@@ -55,7 +55,7 @@ export interface VaultMetadata {
   /** The Public Labels product ID, or null for vaults outside a product. */
   productId: string | null
   asset: AssetInfo | null
-  /** All declared product entities whose `addresses` contain the vault's on-chain governor (or owner, for Earn). Empty when no entity matches, the vault is escrow, or the vault is unverified. Multiple entries can occur when a product declares multiple entities and more than one matches. */
+  /** V3 manager identity, or matching on-chain governors/owners on fallback sources. Empty for escrow or unverified vaults. */
   entities: EntityInfo[]
 }
 
@@ -131,15 +131,22 @@ function buildEvkMetadata(
   // deprecationReason) are sourced from labels regardless of verified
   // status — they are authoritative content set by the team that listed
   // the vault. On-chain ERC-20 name is only a fallback when labels carry
-  // no name. Verification (governor match) only gates `entities` resolution
-  // below, which is the security-sensitive "who manages this vault" claim.
+  // no name. Verification gates the security-sensitive "who manages this
+  // vault" claim. V3 supplies the manager; fallback sources match governors.
   // Resolved empty strings clear inherited product content.
   const labelName = strOrNull(override?.name ?? product?.name)
   const description = strOrNull(override?.description ?? product?.description)
   const portfolioNotice = strOrNull(override?.portfolioNotice ?? product?.portfolioNotice)
   const deprecationReason = strOrNull(override?.deprecationReason ?? product?.deprecationReason)
 
-  const entityKeys = verified ? resolveGoverningEntityKeys(vault, ctx.view.verificationLabels) : []
+  let entityKeys: string[] = []
+  if (verified) {
+    if (ctx.view.labelsSource === 'v3') {
+      const key = ctx.view.managingEntityByVault[addr.toLowerCase()]
+      if (key) entityKeys = [key]
+    }
+    else entityKeys = resolveGoverningEntityKeys(vault, ctx.view.verificationLabels)
+  }
   const entities = entityKeys
     .map(key => buildEntityInfo(key, ctx.view.entitiesRaw, ctx.view.logoBaseUrl))
     .filter((e): e is EntityInfo => e !== null)
@@ -177,7 +184,14 @@ function buildEarnMetadata(vault: EulerEarn, ctx: BuildContext): VaultMetadata |
   const portfolioNotice = strOrNull(override?.portfolioNotice ?? earnEntry?.portfolioNotice ?? product?.portfolioNotice)
   const deprecationReason = strOrNull(override?.deprecationReason ?? earnEntry?.deprecationReason ?? product?.deprecationReason)
 
-  const entityKeys = verified ? resolveEarnGoverningEntityKeys(vault, ctx.view.verificationLabels) : []
+  let entityKeys: string[] = []
+  if (verified) {
+    if (ctx.view.labelsSource === 'v3') {
+      const key = ctx.view.managingEntityByVault[addr.toLowerCase()]
+      if (key) entityKeys = [key]
+    }
+    else entityKeys = resolveEarnGoverningEntityKeys(vault, ctx.view.verificationLabels)
+  }
   const entities = entityKeys
     .map(key => buildEntityInfo(key, ctx.view.entitiesRaw, ctx.view.logoBaseUrl))
     .filter((e): e is EntityInfo => e !== null)
