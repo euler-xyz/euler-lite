@@ -26,7 +26,7 @@ async function metadata(vaultType: 'evk' | 'earn', standalone = false, cleared =
     deprecationReason: cleared ? null : 'Vault reason',
   }]
   const labels = normalizeLabelsBundle(1, {
-    source: 'v3-metadata', labelSet: 'public', version: 'test', publicLabels: source,
+    source: 'v3-metadata', labelSet: 'public', version: 'test', publicLabels: source, sourceFetchedAt: Date.now(),
   })
   const vault = { address, shares: { name: 'On-chain name' } }
   mocks.view.mockResolvedValue({

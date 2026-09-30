@@ -34,7 +34,7 @@ describe('V3-only label normalization', () => {
 })
 
 it('maps metadata-only labels for display without granting verification, preserving label listing flags', () => {
-  const data = normalizeLabelsBundle(1, { source: 'v3-metadata', labelSet: 'public', version: 'pinned', publicLabels: publicLabelsFixture })
+  const data = normalizeLabelsBundle(1, { source: 'v3-metadata', labelSet: 'public', version: 'pinned', publicLabels: publicLabelsFixture, sourceFetchedAt: Date.now() })
   expect(data.source).toBe('v3-metadata')
   expect(data.visibility).toBeUndefined()
   expect(data.verifiedVaultAddresses).toEqual([])
@@ -61,7 +61,7 @@ it('honours product and per-side hiding on deprecated metadata-only vaults', () 
   source.vaults[0].deprecated = true
   source.vaults[0].notExplorableLend = true
   source.vaults[0].notExplorableBorrow = false
-  const normalize = () => normalizeLabelsBundle(1, { source: 'v3-metadata', labelSet: 'public', version: 'pinned', publicLabels: source })
+  const normalize = () => normalizeLabelsBundle(1, { source: 'v3-metadata', labelSet: 'public', version: 'pinned', publicLabels: source, sourceFetchedAt: Date.now() })
   const listed = normalize()
   expect(listed.products['kpk-securitize'].notExplorable).toBe(false)
   expect(listed.products['kpk-securitize'].vaultOverrides?.[getAddress(KPK_VAULT)]).toMatchObject({ notExplorableLend: true, notExplorableBorrow: false })

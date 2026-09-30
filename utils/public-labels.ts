@@ -40,6 +40,7 @@ export interface V3LabelsBundle {
   labelSet?: string
   version: string
   publicLabels: PublicLabelsSource
+  sourceFetchedAt: number
   geoFetchedAt?: number
 }
 
@@ -51,7 +52,7 @@ export interface StaticLabelsBundle {
   fetchedAt: number
 }
 
-export type V3MetadataLabelsBundle = PublicLabelsMetadataSnapshot & { geoFetchedAt?: number }
+export type V3MetadataLabelsBundle = PublicLabelsMetadataSnapshot & { sourceFetchedAt: number, geoFetchedAt?: number }
 export type HostedLabelsBundle = V3LabelsBundle | V3MetadataLabelsBundle
 export type PublicLabelsBundle = (HostedLabelsBundle | StaticLabelsBundle) & { vaultTag?: string }
 
