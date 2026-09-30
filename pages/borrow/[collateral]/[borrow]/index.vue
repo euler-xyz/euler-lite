@@ -980,7 +980,7 @@ watch(
                       size="compact"
                     />
 
-                    <VaultWarningBanner :warnings="multiply.multiplyFormWarnings.value" />
+                    <VaultWarningBanner :warnings="[assessmentWarning, ...multiply.multiplyFormWarnings.value]" />
                   </div>
 
                   <div class="flex flex-col gap-16 w-full">

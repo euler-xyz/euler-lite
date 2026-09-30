@@ -76,6 +76,19 @@ describe('vault checks presentation', () => {
     expect(getVaultChecksStatusLine(undecided, 'available')).toBe('Being re-checked')
   })
 
+  it('prefers a confirmed collateral failure over an earlier unknown for the same rule', () => {
+    const mixed = assessment([
+      finding('collateral.0x01.ltv', { outcome: 'unknown', required: true }),
+      finding('collateral.0x02.ltv'),
+    ])
+    expect(getVaultCheckFindings(mixed).lines).toEqual([{
+      key: 'collateral.*.ltv',
+      text: 'V3 says collateral.0x02.ltv',
+      outcome: 'fail',
+    }])
+    expect(getVaultChecksStatusLine(mixed, 'available')).toBe('Flagged · 1 to review')
+  })
+
   it('distinguishes passing, flagged, missing and unavailable states', () => {
     const now = Date.parse('2026-09-29T12:12:00.000Z')
     expect(getVaultChecksStatusLine(assessment([]), 'available', now)).toBe('Verified · checked 12 min ago')
