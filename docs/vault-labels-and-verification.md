@@ -120,6 +120,12 @@ Only a **defined** `governorAdmin` means governance actually resolved. Until the
 
 The UI shows "Ungoverned" from the on-chain zero governor (`governorAdmin` for EVK, `governor` for Securitize), independently of the verification verdict. Metadata-only and static sources still apply their entity-address check for verification.
 
+### Governance facts
+
+The EVK overview reads proxy upgradeability and the current implementation from `evidence.upgradeable` in the V3 vault assessment. If that evidence is unavailable, it queries the EVault factory's `getProxyConfig` through the configured RPC. The curator and address rows use `evidence.multisig` for Safe owner thresholds and `evidence.governance` for the router governor. Missing evidence falls back to the existing Safe and router RPC probes. These facts are informational and do not change verification or action gates.
+
+The Earn Governance block shows on-chain owner, curator, guardian, timelock, pending timelock and guardian changes, pending strategy caps, and supply and withdraw queues from the SDK. It reads pending ownership from the Earn contract. V3 assessment evidence supplies allocator addresses and Safe thresholds; when that evidence is unavailable, allocator rows are omitted and visible governance addresses use the Safe RPC probe. The V3 timelock finding adds its reviewed judgment beside the on-chain duration.
+
 ### How `vault.verified` Is Set
 
 | Vault Source | Verification Method |

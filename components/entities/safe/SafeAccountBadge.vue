@@ -1,14 +1,18 @@
 <script setup lang="ts">
-const { address } = defineProps<{ address: string }>()
+import type { AssessmentSafeEvidence } from '~/utils/vault-assessment/evidence'
 
-const { safeInfo } = useSafeAddressInfo(() => address)
+const { address, evidence } = defineProps<{ address: string, evidence?: AssessmentSafeEvidence | null }>()
+
+const { safeInfo: rpcSafeInfo } = useSafeAddressInfo(() => address, () => evidence === undefined)
+const safeInfo = computed(() => evidence === undefined ? rpcSafeInfo.value : evidence)
 
 // Describes the configured owner threshold only — enabled Safe modules can
 // execute without owner confirmations, and the probe does not inspect them.
 const tooltipText = computed(() => {
   if (!safeInfo.value) return ''
-  const { threshold, owners, version } = safeInfo.value
-  return `This address is a Safe smart account (v${version}) configured with a ${threshold}-of-${owners.length} owner threshold.`
+  const { threshold, owners } = safeInfo.value
+  const version = 'version' in safeInfo.value ? ` (v${safeInfo.value.version})` : ''
+  return `This address is a Safe smart account${version} configured with a ${threshold}-of-${owners.length} owner threshold.`
 })
 
 const ariaLabel = computed(() => {

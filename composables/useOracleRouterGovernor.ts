@@ -39,6 +39,7 @@ const probeGovernor = async (
  */
 export const useOracleRouterGovernor = (
   routerAddress: MaybeRefOrGetter<string | null | undefined>,
+  enabled: MaybeRefOrGetter<boolean> = true,
 ) => {
   const { chainId } = useEulerAddresses()
   const { client } = useRpcClient()
@@ -55,13 +56,13 @@ export const useOracleRouterGovernor = (
   })
 
   watch(
-    [cacheKey, client],
-    ([key, rpcClient]) => {
+    [cacheKey, client, () => toValue(enabled)],
+    ([key, rpcClient, shouldProbe]) => {
       // Probe client-side only — SSR output renders without the row and
       // hydrates identically (the client cache starts empty too).
       if (import.meta.server) return
       const target = probeAddress.value
-      if (!key || !rpcClient || !target) return
+      if (!shouldProbe || !key || !rpcClient || !target) return
       governorCache.load(key, () => probeGovernor(rpcClient, target)).catch(() => {})
     },
     { immediate: true },

@@ -14,6 +14,7 @@ import type { VaultTypeBadge } from '~/composables/useVaultTypeBadges'
 import { AccessControlBadge, CyclicalNoteBadge, GovernanceLimitedBadge, KeyringBadge } from '#components'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
 import { resolveVaultExposureDisplay, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
+import { getAssessmentSafeEvidence } from '~/utils/vault-assessment/evidence'
 
 const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
 const emit = defineEmits<{
@@ -46,6 +47,11 @@ const description = computed(() => {
 })
 
 const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
+const { assessment, fallbackReady } = useVaultAssessmentEvidence(() => vault.address, 'evk')
+const { upgradeability } = useVaultUpgradeability(() => vault.address, assessment, fallbackReady)
+const governorSafeEvidence = computed(() => assessment.value || fallbackReady.value
+  ? getAssessmentSafeEvidence(assessment.value, vault.governorAdmin)
+  : null)
 
 // Count how many borrow pairs have this vault as the liability (borrow) side
 const borrowCount = computed(() => {
@@ -228,11 +234,26 @@ watchEffect(() => {
               v-else
               class="text-p2 text-content-primary"
             >{{ entity.name }}</span>
+            <SafeAccountBadge
+              :address="vault.governorAdmin"
+              :evidence="governorSafeEvidence"
+            />
           </div>
         </div>
         <div v-else>
           -
         </div>
+      </VaultOverviewLabelValue>
+      <VaultOverviewLabelValue
+        v-if="upgradeability"
+        label="Upgradeable"
+        :value="upgradeability.upgradeable ? 'Yes' : 'No'"
+      />
+      <VaultOverviewLabelValue
+        v-if="upgradeability?.implementation"
+        label="Implementation"
+      >
+        <VaultOverviewAddressValue :address="upgradeability.implementation" />
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue label="Can be borrowed">
         <div class="flex min-w-0 items-center gap-8">
