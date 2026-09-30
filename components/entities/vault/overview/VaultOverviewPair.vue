@@ -29,5 +29,6 @@ defineProps<{ pair: AnyBorrowVaultPair | PortfolioBorrowPosition<VaultEntity>, d
       :address="getPairBorrowVault(pair).address"
       :default-open="false"
     />
+    <VaultPairEntityDisclosures :pair="pair" />
   </div>
 </template>
