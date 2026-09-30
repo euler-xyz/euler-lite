@@ -55,7 +55,6 @@ const openSlippageSettings = () => {
 const collateralAddress = route.params.collateral as string
 const borrowAddress = route.params.borrow as string
 const { warning: assessmentWarning } = useVaultAssessmentWarning(borrowAddress)
-useOperationGuard([collateralAddress, borrowAddress])
 
 const formTabFromQuery = (value: unknown): 'borrow' | 'multiply' | undefined => {
   const tabValue = Array.isArray(value) ? value[0] : value
@@ -179,6 +178,19 @@ const multiply = useMultiplyForm({
   isPendingSubAccountLoading,
   isGeoBlocked,
   isMultiplyRestricted,
+})
+useOperationGuard(computed(() => formTab.value === 'multiply'
+  ? [collateralAddress, borrowAddress, multiply.multiplySupplyVault.value?.address, multiply.multiplyLongVault.value?.address].filter(Boolean)
+  : [collateralAddress, borrowAddress]), {
+  depositedVaultAddresses: computed(() => formTab.value === 'multiply'
+    ? [
+        ...(multiply.isMultiplySavingCollateral.value ? [] : [multiply.multiplySupplyVault.value?.address]),
+        multiply.multiplyLongVault.value?.address,
+      ].filter(Boolean)
+    : borrow.isSavingCollateral.value ? [] : [collateralAddress]),
+  newExposureVaultAddresses: computed(() => formTab.value === 'multiply'
+    ? [multiply.multiplySupplyVault.value?.address, multiply.multiplyLongVault.value?.address, borrowAddress].filter(Boolean)
+    : [collateralAddress, borrowAddress]),
 })
 const showMultiplyRoe = computed(() =>
   areRoeCollateralVaultsCorrelatedWithBorrow(
