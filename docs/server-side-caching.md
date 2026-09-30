@@ -133,7 +133,6 @@ Allowed `GET` paths:
 | `/v3/evk/vaults` | EVK vault catalogue. |
 | `/v3/evk/vaults/{chainId}/{vault}/totals` | EVK vault totals history. |
 | `/v3/evk/vaults/bad-debt` | Bad debt rows. |
-| `/v3/evk/vaults/open-interest` | Open interest by vault/collateral query. |
 | `/v3/evk/vaults/open-interest/by-collateral` | Open interest grouped by collateral. |
 
 Activity surfaces are documented end-to-end in [Activity Feed](./activity-feed.md).
