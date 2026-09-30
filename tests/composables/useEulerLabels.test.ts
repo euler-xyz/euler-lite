@@ -257,6 +257,36 @@ describe('useEulerLabels chain-scoped loading', () => {
     finally { vi.useRealTimers() }
   })
 
+  it('hides stale verification during an in-flight refresh and restores it on recovery', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000_000)
+    try {
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('cached')))
+      const labels = useEulerLabels()
+      await labels.loadLabels()
+
+      vi.advanceTimersByTime(15 * 60_000 - 1_000)
+      const refreshed = deferred<PublicLabelsBundle>()
+      mocks.fetchPublicLabelsBundle.mockReturnValueOnce(refreshed.promise)
+      const pending = labels.loadLabels(true)
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(labels.isLoading.value).toBe(true)
+
+      vi.advanceTimersByTime(1_000)
+      expect(labels.isReady.value).toBe(false)
+      expect(labels.loadError.value).toContain('Unable to load vault verification')
+      expect(currentProductKeys()).toEqual(['cached'])
+
+      refreshed.resolve(bundleFor(labelsFor('recovered')))
+      await pending
+      expect(labels.isReady.value).toBe(true)
+      expect(labels.loadError.value).toBeUndefined()
+      expect(currentProductKeys()).toEqual(['recovered'])
+    }
+    finally { vi.useRealTimers() }
+  })
+
   it('refreshes an aged successful snapshot and joins overlapping poll events', async () => {
     const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
     try {

@@ -82,7 +82,7 @@ const scheduleLabelsExpiry = () => {
   }
   labelsExpiryTimer = setTimeout(() => {
     isReady.value = false
-    if (!isLoading.value) loadError.value = 'Unable to load vault verification. Please retry.'
+    loadError.value = 'Unable to load vault verification. Please retry.'
   }, remainingMs)
 }
 
@@ -209,6 +209,7 @@ const loadLabels = async (forceRefresh = false): Promise<void> => {
       setLabelsData(data, chainId)
       hasSuccessfulSnapshot = true
       lastSuccessfulLoadAt = sourceFetchedAt
+      loadError.value = undefined
       scheduleLabelsExpiry()
     }
     if (isCurrentLoad()) {
