@@ -13,6 +13,7 @@ const props = defineProps<{
   defaultOpen?: boolean
 }>()
 const { chainId } = useEulerAddresses()
+const nowMs = useActivityNowMs()
 const { loadError, source, visibility, vaultAssessments, loadVaultAssessment, getVaultAssessmentEntry, isVaultAssessmentAvailableForChain } = useEulerLabels()
 const family = computed(() => props.family ?? 'evk')
 const canShow = computed(() => !!chainId.value
@@ -34,7 +35,7 @@ const notListed = computed(() => getNotListedLine(
   verdict.value?.status,
   verdict.value?.reason || assessment.value?.configReason || assessment.value?.consistencyReason,
 ))
-const statusLine = computed(() => getVaultChecksStatusLine(assessment.value, loadError.value ? 'unavailable' : entry.value.status))
+const statusLine = computed(() => getVaultChecksStatusLine(assessment.value, loadError.value ? 'unavailable' : entry.value.status, nowMs.value))
 
 watch(
   () => [canShow.value, chainId.value, props.address, family.value, loadError.value] as const,

@@ -48,7 +48,7 @@ export const getVaultCheckFindings = (assessment: VaultAssessment): { lines: Vau
   for (const finding of all) {
     if (isShownRule(finding.key, finding)) {
       const key = groupKey(finding.key)
-      if (!shown.has(key)) {
+      if (!shown.has(key) || (shown.get(key)?.outcome === 'unknown' && finding.outcome === 'fail')) {
         shown.set(key, {
           key,
           text: finding.outcome === 'unknown' ? 'Being re-checked' : finding.cause?.summary || finding.description,
