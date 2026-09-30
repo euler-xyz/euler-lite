@@ -37,7 +37,7 @@ const iconClass = computed(() => {
     case 'info':
       return hasOnlySuccessToneInfo.value
         ? 'text-success-500'
-        : 'text-warning-500'
+        : 'text-[var(--ui-toast-info-text-color)]'
     default:
       return 'text-warning-500'
   }
