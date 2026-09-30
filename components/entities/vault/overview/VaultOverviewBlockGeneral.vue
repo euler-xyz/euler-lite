@@ -145,6 +145,7 @@ watchEffect(() => {
     content-class="flex flex-col gap-20"
   >
     <VaultDeprecationBanner :addresses="[vault.address]" />
+    <VaultPublicNotice :addresses="[vault.address]" />
     <!-- eslint-disable vue/no-v-html -- autoLink escapes label text before adding links -->
     <p
       v-if="description"
@@ -188,7 +189,14 @@ watchEffect(() => {
         label="Curator"
       >
         <VaultTypeChip
-          v-if="!isGovernorVerified"
+          v-if="governanceType === 'ungoverned'"
+          :vault="governanceVault"
+          type="ungoverned"
+          nudge
+          class="w-fit"
+        />
+        <VaultTypeChip
+          v-else-if="!isGovernorVerified"
           :vault="governanceVault"
           type="unknown"
           nudge
