@@ -100,9 +100,9 @@ Metadata-only and static sources have no V3 visibility verdict. Their verificati
 
 ### Operation warnings and consent
 
-Operation guards use the selected chain's verification source. Wallet connection and chain switching remain available before other form gates. New exposure waits for verification data or presents a retry action when that data is unavailable. A V3 `pending_review` verdict blocks new deposits and borrows. Existing-position exits remain available during a labels outage.
+Operation guards use the selected chain's verification source. Wallet connection and chain switching remain available before other form gates. Operations wait for verification data or present a retry action when it is unavailable. An unverified vault, including a V3 `hidden` or `pending_review` vault, requires account- and operation-scoped risk acknowledgment in the form and final execution policy.
 
-Vault pages show status in the page. Forms request explicit, account- and operation-scoped acknowledgment for unverified vault risk and a separate acknowledgment for deposits into deprecated vaults. The final execution policy checks the same requirements.
+Vault pages show status in the page without opening a separate page-load disclaimer.
 
 ### Governance hydration guard (SDK 2.0)
 
