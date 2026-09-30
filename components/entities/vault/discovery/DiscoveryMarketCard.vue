@@ -10,6 +10,7 @@ import {
   type BestMaxRoeResult,
 } from '~/utils/discoveryCalculations'
 import { useBestMaxROE } from '~/composables/useBestMaxROE'
+import { getVaultDeprecation } from '~/utils/eulerLabelsUtils'
 import { VaultMaxRoeModal, UiModalPreviewTrigger } from '#components'
 
 const props = defineProps<{
@@ -21,9 +22,34 @@ defineEmits<{
   toggle: []
 }>()
 
-const { products } = useEulerLabels()
+const { products, isReady, source, visibility } = useEulerLabels()
 const bestRoeMarketGroups = computed(() => [props.market])
 const { getBestMaxROE } = useBestMaxROE(bestRoeMarketGroups)
+
+const marketWarnings = computed(() => {
+  if (!isReady.value || source.value !== 'v3') return []
+  const seen = new Set<string>()
+  return [...props.market.vaults, ...props.market.externalCollateral].flatMap((vault) => {
+    const address = vault.address.toLowerCase()
+    if (seen.has(address)) return []
+    seen.add(address)
+    const verdict = visibility.value?.[address]
+    if (verdict?.status !== 'warning') return []
+    if (verdict.decidedBy === 'deprecated' && getVaultDeprecation(address).deprecated) return []
+    return [`${vault.asset.symbol}: ${verdict.reason || 'One or more vault checks need review.'}`]
+  })
+})
+
+const marketDeprecationReasons = computed(() => {
+  const seen = new Set<string>()
+  return [...props.market.vaults, ...props.market.externalCollateral].flatMap((vault) => {
+    const address = vault.address.toLowerCase()
+    if (seen.has(address)) return []
+    seen.add(address)
+    const status = getVaultDeprecation(address)
+    return status.deprecated ? [`${vault.asset.symbol}: ${status.reason}`] : []
+  })
+})
 
 const isGovernanceLimited = computed(() =>
   props.market.source === 'product' && (products[props.market.id]?.tags?.includes('governance limited') ?? false),
@@ -85,6 +111,7 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
             <span
               v-if="marketEntities.name"
               :class="{ 'opacity-20': isGovernanceLimited }"
+              :title="market.curator?.description || undefined"
             >{{ marketEntities.name }}</span>
             <template v-else-if="market.curator">
               {{ market.curator.name }}
@@ -141,8 +168,18 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
           <span
             v-if="getDeprecatedVaultCount(market) > 0"
             class="text-warning-500 text-p5 mt-4"
+            :title="marketDeprecationReasons.join('\n')"
           >
             {{ getDeprecatedVaultCount(market) }} deprecated
+          </span>
+          <span
+            v-if="marketWarnings.length"
+            class="text-warning-500 text-p5 mt-4"
+            :title="marketWarnings.join('\n')"
+            data-id="discovery-market-warning"
+            :data-warning-count="marketWarnings.length"
+          >
+            {{ marketWarnings.length }} {{ marketWarnings.length === 1 ? 'warning' : 'warnings' }}
           </span>
           <UiHoverPreviewTooltip
             v-if="getUnknownCollateralCount(market) > 0"

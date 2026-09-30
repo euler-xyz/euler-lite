@@ -40,6 +40,8 @@ Products provide `entityId`, optional `coBrandEntityIds`, display name, descript
 
 Entity rows provide profile text, hosted logos, website/social links, and optional organization details. Lite also fetches each relevant entity's global governance addresses for metadata-only and static verification.
 
+Verified EVK, Earn, Securitize and borrow-pair overviews show the managing entity's published profile in "Curator details": description, legal name, risk methodology, security information, terms, licenses, disclaimers and links when supplied. Explore market cards expose the curator description on hover and summarize V3 warning verdicts with their reasons. Missing profile fields are omitted.
+
 Vault campaigns have a `name`, hosted `logo`, and `type` of `deposit` or `borrow`. Deposit campaigns render beside supply APY and borrow campaigns render beside borrow APY. Campaign badges are informational and do not change reward APR calculations.
 
 Classification markers use vault `tags`. Current UI-recognized tags include `keyring`, `access control`, `governance limited`, `recently added`, `suppress high utilisation warning`, and `cyclical note`.
@@ -195,6 +197,8 @@ For per-address lookups during direct navigation to a not-yet-cached vault, `fet
 Both Main and Base can use `LABELS_V3_SET=public`; Base additionally sets `LABELS_VAULT_TAG=base`. Populate the desired tags in V3 before enabling the filter. Hosted mode matches each vault row independently, including Earn, Securitize and escrow rows; metadata-only chains use the same tags without requiring V3 indexing. Static mode matches product tags, vault-override tags and Earn-entry tags using its authored inheritance rules.
 
 The filter applies to Explore group members and metrics, Lend/Borrow/Earn lists, both sides of borrow pairs, and new-target suggestions in swap/migration forms. The `showAll` query does not bypass it. Existing visibility, verification, listing and geo rules still apply. Label refreshes update the selection while preserving loaded vaults used by open forms.
+
+On Lend, Borrow and Earn, `?showAll` includes verified vaults that the labels mark as not explorable for that page. It does not include hidden or pending-review vaults, override the deployment tag, or change geo restrictions. On Portfolio, the same query opens the existing "Show all positions" view for the user's positions; it does not change vault verification. Explore has no `showAll` mode. The "Recently added" badge and sort order follow the published `recently added` tag, so publication controls that designation rather than a client-side age cutoff.
 
 Full labels and vault snapshots remain available for positions, direct URLs, collateral relationships and Earn strategy details. Tag selection does not change verification, geo policies, `/api/public/is-known` or `/api/public/metadata`; it is a discovery setting, not an access restriction.
 

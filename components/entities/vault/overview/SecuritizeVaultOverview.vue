@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
-import { useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
-import { getProductByVault, getProductKeyByVault, isVaultGovernanceLimited } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, getProductKeyByVault, isVaultGovernanceLimited, getEntitiesByVault } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { autoLink } from '~/utils/autoLink'
@@ -31,7 +30,7 @@ const product = useEulerProductOfVault(vaultAddress)
 const description = computed(() => {
   return product.vaultOverrides?.[vaultAddress.value]?.description ?? product.description
 })
-const entities = useEulerEntitiesOfVault(vault as unknown as EVault)
+const entities = computed(() => getEntitiesByVault(vault as unknown as EVault))
 const isGovernorVerified = computed(() => isSecuritizeGovernorVerified(vault))
 const isUngoverned = computed(() => vault.governor?.toLowerCase() === zeroAddress)
 const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
@@ -337,5 +336,9 @@ const supplyCapPercentageDisplay = computed(() => {
         />
       </VaultOverviewLabelValue>
     </VaultOverviewAccordionSection>
+    <VaultEntityDisclosures
+      v-if="isGovernorVerified"
+      :entities="entities"
+    />
   </div>
 </template>
