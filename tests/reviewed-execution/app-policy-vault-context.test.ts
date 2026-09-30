@@ -1,4 +1,4 @@
-import { getAddress } from 'viem'
+import { getAddress, zeroHash } from 'viem'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createOperationIntent } from '~/features/reviewed-execution/domain/factory'
 import { clearDeprecatedDepositAcknowledgements, clearUnverifiedVaultAcknowledgements, recordDeprecatedDepositAcknowledgement, recordUnverifiedVaultAcknowledgement } from '~/features/reviewed-execution/policy/acknowledgements'
@@ -116,9 +116,8 @@ describe('final two-vault swap policy', () => {
     await expect(resolveAppPolicy(requestSet, 100, [intent, swapIntent()])).rejects.toThrow('Vault verification is unavailable')
   })
 
-  it('keeps a withdrawal with a wallet swap available when labels and geo are unavailable', async () => {
+  it('keeps a withdrawal with a wallet swap available during a labels outage when geo is known', async () => {
     geo.labelsReady.value = false
-    geo.country.value = null
     const intent = createOperationIntent({
       kind: 'withdraw', planner: 'withdraw-and-swap',
       args: { swapQuote: makeSwapQuote(), vaultAddress: TEST_VAULT, owner: TEST_ACCOUNT, assets: 1n },
@@ -126,6 +125,27 @@ describe('final two-vault swap policy', () => {
     })
     recordUnverifiedVaultAcknowledgement({ chainId: 1, account: TEST_ACCOUNT, operation: 'lend-withdraw', vaults: [TEST_VAULT] })
     await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [intent])).resolves.toBeDefined()
+    geo.country.value = null
+    await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [intent]))
+      .rejects.toThrow('Regional availability could not be determined')
+  })
+
+  it('requires a known region for an outbound migration', async () => {
+    geo.country.value = null
+    const intent = createOperationIntent({
+      kind: 'migration', planner: 'cross-protocol-migration',
+      args: {
+        direction: 'euler-to-external', connectorId: 'aave', owner: TEST_ACCOUNT,
+        positionRef: { collateralAsset: TEST_TOKEN, debtAsset: TEST_TOKEN, pool: TEST_VAULT },
+        source: { eulerAccount: TEST_ACCOUNT, borrowVault: TARGET_VAULT, collateralVault: TEST_VAULT },
+        deadline: 1_000n,
+        authorizationEvidenceDigest: zeroHash,
+      },
+      chainId: 1, account: TEST_ACCOUNT, source: 'test', operation: 'migrate-out', createdAt: 1,
+      constraints: [{ kind: 'deadline', timestamp: 1_000 }],
+    })
+    await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [intent]))
+      .rejects.toThrow('Regional availability could not be determined')
   })
 
   it.each([
@@ -216,6 +236,31 @@ describe('final two-vault swap policy', () => {
     geo.labelsSource.value = 'v3'
     geo.visibility.value = { [TARGET_VAULT.toLowerCase()]: { status: 'pending_review' } }
     await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [swapIntent()]))
+      .rejects.toThrow('not been checked yet')
+  })
+
+  it('blocks refinancing into a pending-review debt vault when the swap repays a verified vault', async () => {
+    geo.labelsSource.value = 'v3'
+    geo.visibility.value = { [TARGET_VAULT.toLowerCase()]: { status: 'pending_review' } }
+    const quote = makeSwapQuote()
+    const intent = createOperationIntent({
+      kind: 'refinance', planner: 'refinance-position',
+      args: {
+        debt: {
+          planner: 'swap-debt',
+          args: {
+            swapQuote: {
+              ...quote,
+              vaultIn: TARGET_VAULT,
+              receiver: TEST_VAULT,
+              verify: { ...quote.verify, vault: TEST_VAULT },
+            },
+          },
+        },
+      },
+      chainId: 1, account: TEST_ACCOUNT, source: 'test', operation: 'refinance', createdAt: 1,
+    })
+    await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [intent]))
       .rejects.toThrow('not been checked yet')
   })
 

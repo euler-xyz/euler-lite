@@ -28,6 +28,16 @@ describe('vault action targets', () => {
     expect(newExposureVaults(value)).toEqual([TARGET, DEBT])
   })
 
+  it('checks the new debt vault in a swapped refinance, not the repaid vault', () => {
+    const value = intent('refinance-position', {
+      debt: {
+        planner: 'swap-debt',
+        args: { swapQuote: { vaultIn: DEBT, receiver: SOURCE, verify: { vault: SOURCE } } },
+      },
+    })
+    expect(newExposureVaults(value)).toEqual([DEBT])
+  })
+
   it('does not gate an outbound migration as new Euler exposure', () => {
     const value = intent('cross-protocol-migration', {
       direction: 'euler-to-external',
