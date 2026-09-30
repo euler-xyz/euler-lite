@@ -74,7 +74,7 @@ const exposureTargets = (name: PlannerName, args: Record<string, unknown>): Addr
     ...depositTargets(name, args), ...address(args.collateralVault), ...address(args.liabilityVault),
   ])
   if (name === 'migrate-same-asset-debt') return address(args.newLiabilityVault)
-  if (name === 'swap-debt') return quoteTarget(args.swapQuote)
+  if (name === 'swap-debt') return address(record(args.swapQuote)?.vaultIn)
   if (name === 'refinance-position') return unique([...legTargets(args.collateral, exposureTargets), ...legTargets(args.debt, exposureTargets)])
   if (name === 'cross-protocol-migration') return args.direction === 'external-to-euler'
     ? unique([...address(record(args.target)?.collateralVault), ...address(record(args.target)?.borrowVault)])
