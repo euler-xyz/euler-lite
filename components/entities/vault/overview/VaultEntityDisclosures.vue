@@ -2,44 +2,15 @@
 import type { EulerLabelEntity } from '~/entities/euler/labels'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { autoLink } from '~/utils/autoLink'
+import { entityDisclosureUrl, getEntityDisclosureFields, getEntitySocialLinks } from '~/utils/entity-disclosures'
 
 const { entities, title = 'Curator details' } = defineProps<{
   entities: EulerLabelEntity[]
   title?: string
 }>()
 
-const externalUrl = (value: string | undefined): string | null => {
-  if (!value) return null
-  try {
-    const url = new URL(value)
-    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : null
-  }
-  catch {
-    return null
-  }
-}
-
-const fields = (entity: EulerLabelEntity) => ([
-  { label: 'Legal name', value: entity.legalEntityName },
-  { label: 'About', value: entity.description },
-  { label: 'Risk methodology', value: entity.riskMethodology },
-  { label: 'Security', value: entity.security },
-  { label: 'Terms of service', value: entity.termsOfService },
-  { label: 'Licenses', value: entity.licenses },
-  { label: 'Disclaimers', value: entity.disclaimers },
-]).filter((field): field is { label: string, value: string } => !!field.value?.trim())
-
-const socialLinks = (entity: EulerLabelEntity) => ([
-  { label: 'X', url: externalUrl(entity.social?.twitter) },
-  { label: 'YouTube', url: externalUrl(entity.social?.youtube) },
-  { label: 'Discord', url: externalUrl(entity.social?.discord) },
-  { label: 'Telegram', url: externalUrl(entity.social?.telegram) },
-  { label: 'GitHub', url: externalUrl(entity.social?.github) },
-  { label: 'DefiLlama', url: externalUrl(entity.social?.defillama) },
-]).filter((link): link is { label: string, url: string } => !!link.url)
-
 const publishedEntities = computed(() => entities.filter(entity =>
-  fields(entity).length || externalUrl(entity.url) || socialLinks(entity).length,
+  getEntityDisclosureFields(entity).length || entityDisclosureUrl(entity.url) || getEntitySocialLinks(entity).length,
 ))
 </script>
 
@@ -63,15 +34,15 @@ const publishedEntities = computed(() => entities.filter(entity =>
         />
         <span class="text-p2 font-semibold text-content-primary">{{ entity.name }}</span>
         <a
-          v-if="externalUrl(entity.url)"
-          :href="externalUrl(entity.url) || undefined"
+          v-if="entityDisclosureUrl(entity.url)"
+          :href="entityDisclosureUrl(entity.url) || undefined"
           target="_blank"
           rel="noopener noreferrer"
           class="text-p3 text-accent-600 underline"
         >Website</a>
       </div>
       <div
-        v-for="field in fields(entity)"
+        v-for="field in getEntityDisclosureFields(entity)"
         :key="field.label"
         class="flex flex-col gap-4"
       >
@@ -83,11 +54,11 @@ const publishedEntities = computed(() => entities.filter(entity =>
         />
       </div>
       <div
-        v-if="socialLinks(entity).length"
+        v-if="getEntitySocialLinks(entity).length"
         class="flex flex-wrap gap-12"
       >
         <a
-          v-for="link in socialLinks(entity)"
+          v-for="link in getEntitySocialLinks(entity)"
           :key="link.label"
           :href="link.url"
           target="_blank"

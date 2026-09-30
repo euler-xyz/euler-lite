@@ -33,8 +33,9 @@ const isPairUngoverned = computed(() => pair.borrow.governorAdmin?.toLowerCase()
     ? pair.collateral.governor?.toLowerCase() === zeroAddress
     : pair.collateral.governorAdmin?.toLowerCase() === zeroAddress))
 
+const pairEntities = computed(() => getUniqueEntitiesByVaults([pair.collateral, pair.borrow]))
 const entityDisplay = computed(() => {
-  const all = getUniqueEntitiesByVaults([pair.collateral, pair.borrow])
+  const all = pairEntities.value
   if (all.length === 0) return { name: '', logos: [] }
   const name = all.length === 1
     ? all[0].name
@@ -482,13 +483,15 @@ const linkPath = computed(() => ({
             :label="entityDisplay.name"
             :src="entityDisplay.logos"
           />
-          <span
-            class="text-p2 text-content-primary truncate"
-            data-id="data-point"
-            :data-key="pairKey"
-            data-field="curator"
-            :data-value="entityDisplay.name"
-          >{{ entityDisplay.name }}</span>
+          <VaultEntityDisclosureTooltip :entities="pairEntities">
+            <span
+              class="text-p2 text-content-primary truncate"
+              data-id="data-point"
+              :data-key="pairKey"
+              data-field="curator"
+              :data-value="entityDisplay.name"
+            >{{ entityDisplay.name }}</span>
+          </VaultEntityDisclosureTooltip>
         </div>
         <div
           v-else

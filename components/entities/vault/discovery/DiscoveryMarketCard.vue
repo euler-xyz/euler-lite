@@ -10,7 +10,7 @@ import {
   type BestMaxRoeResult,
 } from '~/utils/discoveryCalculations'
 import { useBestMaxROE } from '~/composables/useBestMaxROE'
-import { getVaultDeprecation } from '~/utils/eulerLabelsUtils'
+import { getUniqueEntitiesByVaults, getVaultDeprecation } from '~/utils/eulerLabelsUtils'
 import { VaultMaxRoeModal, UiModalPreviewTrigger } from '#components'
 
 const props = defineProps<{
@@ -23,6 +23,9 @@ defineEmits<{
 }>()
 
 const { products, isReady, source, visibility } = useEulerLabels()
+const disclosureEntities = computed(() => props.market.curator
+  ? [props.market.curator]
+  : getUniqueEntitiesByVaults(props.market.vaults))
 const bestRoeMarketGroups = computed(() => [props.market])
 const { getBestMaxROE } = useBestMaxROE(bestRoeMarketGroups)
 
@@ -108,14 +111,14 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
             data-field="market-entity"
             :data-value="marketEntities.name || market.curator?.name || 'Ungrouped'"
           >
-            <span
-              v-if="marketEntities.name"
-              :class="{ 'opacity-20': isGovernanceLimited }"
-              :title="market.curator?.description || undefined"
-            >{{ marketEntities.name }}</span>
-            <template v-else-if="market.curator">
-              {{ market.curator.name }}
-            </template>
+            <VaultEntityDisclosureTooltip
+              v-if="marketEntities.name || market.curator"
+              :entities="disclosureEntities"
+            >
+              <span :class="{ 'opacity-20': isGovernanceLimited }">
+                {{ marketEntities.name || market.curator?.name }}
+              </span>
+            </VaultEntityDisclosureTooltip>
             <template v-else>
               Ungrouped
             </template>

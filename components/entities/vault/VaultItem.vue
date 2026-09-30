@@ -310,13 +310,15 @@ watchEffect(async () => {
             :label="entityName"
             :src="entityLogos"
           />
-          <span
-            class="text-p2 text-content-primary truncate"
-            data-id="data-point"
-            :data-key="vault.address.toLowerCase()"
-            data-field="curator"
-            :data-value="entityName"
-          >{{ entityName }}</span>
+          <VaultEntityDisclosureTooltip :entities="entities">
+            <span
+              class="text-p2 text-content-primary truncate"
+              data-id="data-point"
+              :data-key="vault.address.toLowerCase()"
+              data-field="curator"
+              :data-value="entityName"
+            >{{ entityName }}</span>
+          </VaultEntityDisclosureTooltip>
         </div>
         <div
           v-else
