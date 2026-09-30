@@ -289,6 +289,7 @@ const linkPath = computed(() => ({
             <VaultDisplayName
               :name="pairName"
               :is-unverified="isAnyUnverified"
+              :addresses="[pair.collateral.address, pair.borrow.address]"
             />
             <RecentlyAddedBadge
               v-if="isRecentlyAdded"

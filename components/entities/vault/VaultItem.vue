@@ -203,6 +203,7 @@ watchEffect(async () => {
           <VaultDisplayName
             :name="displayName"
             :is-unverified="isUnverified"
+            :addresses="[vault.address]"
           />
           <RecentlyAddedBadge
             v-if="isRecentlyAdded"
