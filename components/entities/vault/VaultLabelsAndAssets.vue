@@ -115,6 +115,7 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
           <VaultDisplayName
             :name="pairVault ? displayLabel : displayName"
             :is-unverified="(!!vault && !isVerifiedVault(vault.address)) || !!(pairVault && !isVerifiedVault(pairVault.address))"
+            :addresses="[vault.address, ...(pairVault ? [pairVault.address] : [])]"
           />
         </span>
         <VaultDeprecatedBadge :addresses="[vault.address, ...(pairVault ? [pairVault.address] : [])]" />

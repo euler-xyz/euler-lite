@@ -237,6 +237,7 @@ const supplyApyModalData = computed(() => ({
           <VaultDisplayName
             :name="displayName"
             :is-unverified="isUnverified"
+            :addresses="[vault.address]"
           />
           <RecentlyAddedBadge
             v-if="isRecentlyAdded"
