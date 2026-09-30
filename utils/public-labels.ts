@@ -31,7 +31,7 @@ export type {
 
 export type PublicEulerLabelsData = Omit<SdkPublicEulerLabelsData, 'visibility' | 'managingEntityByVault'>
   & Partial<Pick<SdkPublicEulerLabelsData, 'visibility' | 'managingEntityByVault'>>
-  & { geoContext?: HostedGeoContext, source?: 'v3' | 'v3-metadata' | 'static', logoBaseUrl?: string, candidateVaultAddresses?: string[], candidateEarnVaultAddresses?: string[], vaultTagAddresses?: Set<string> }
+  & { geoContext?: HostedGeoContext, source?: 'v3' | 'v3-metadata' | 'static', sourceFetchedAt?: number, logoBaseUrl?: string, candidateVaultAddresses?: string[], candidateEarnVaultAddresses?: string[], vaultTagAddresses?: Set<string> }
 
 export const PUBLIC_LABELS_FIXTURE_VERSION = 'v20260804151305236'
 
@@ -106,7 +106,10 @@ const normalizeLabelsSource = (chainId: number, bundle: PublicLabelsBundle): Pub
 
 /** The optional deployment selection is independent of verification and listing flags. */
 export const normalizeLabelsBundle = (chainId: number, bundle: PublicLabelsBundle): PublicEulerLabelsData => {
-  const data = normalizeLabelsSource(chainId, bundle)
+  const data = {
+    ...normalizeLabelsSource(chainId, bundle),
+    sourceFetchedAt: bundle.source === 'static' ? undefined : bundle.sourceFetchedAt,
+  }
   const tag = bundle.vaultTag?.trim()
   if (!tag) return data
 

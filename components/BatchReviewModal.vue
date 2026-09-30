@@ -20,7 +20,7 @@ import { BatchPreviewNotReadyError, ReviewedPlanDivergenceError } from '~/featur
 import { finalizeSuccessfulSubmission } from '~/features/reviewed-execution/review/submission-completion'
 import { useToast } from '~/components/ui/composables/useToast'
 import { getPositionTag, getSourcePositionTag } from '~/utils/positionTag'
-import { getKnownUnlistedActionNotice } from '~/utils/vault-assessment/presentation'
+import { getKnownUnlistedActionNotice, getUnverifiedActionCopy } from '~/utils/vault-assessment/presentation'
 import { useEulerLabels } from '~/composables/useEulerLabels'
 
 // Whole-batch review: required approvals, then the operations as rows that roll
@@ -246,13 +246,17 @@ const unverifiedVaults = computed(() => {
   return [...vaults].map(([address, name]) => ({ address, name }))
 })
 const unverifiedVaultNames = computed(() => [...new Set(unverifiedVaults.value.map(vault => vault.name))])
-const hasUnverified = computed(() => unverifiedVaultNames.value.length > 0)
-const { source: labelsSource, visibility: vaultVisibility } = useEulerLabels()
-const unlistedNotice = computed(() => getKnownUnlistedActionNotice(
-  unverifiedVaults.value.map(vault => vault.address),
-  labelsSource.value,
-  vaultVisibility.value,
-))
+const { isReady: labelsReady, source: labelsSource, visibility: vaultVisibility } = useEulerLabels()
+const hasUnverified = computed(() => (labelsReady.value || labelsSource.value !== 'v3') && unverifiedVaultNames.value.length > 0)
+const unlistedNotice = computed(() => {
+  if (!labelsReady.value) return null
+  return getKnownUnlistedActionNotice(
+    unverifiedVaults.value.map(vault => vault.address),
+    labelsSource.value,
+    vaultVisibility.value,
+  )
+})
+const unverifiedActionCopy = computed(() => getUnverifiedActionCopy(unlistedNotice.value, unverifiedVaultNames.value))
 
 interface REULUnlockInfo {
   unlockableAmount: number
@@ -803,8 +807,8 @@ const onCloseRequested = () => {
         v-if="hasUnverified"
         variant="warning"
         size="compact"
-        :title="unlistedNotice ? 'Vault not listed' : 'Interacting with an unverified vault'"
-        :description="unlistedNotice || `This batch interacts with an unverified vault (${unverifiedVaultNames.join(', ')}). Proceeding with an unknown and unverified vault may pose security risks — such vaults could potentially be used for phishing attempts.`"
+        :title="unverifiedActionCopy.title"
+        :description="unverifiedActionCopy.description"
       />
 
       <!-- Top-level batch error (revert / status-check / wallet shortfall) -->

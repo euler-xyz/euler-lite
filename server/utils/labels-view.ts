@@ -81,6 +81,7 @@ export interface ProductDescriptor {
 export interface LabelsView {
   chainId: number
   labelsSource?: PublicEulerLabelsData['source']
+  sourceFetchedAt?: number
   publishedVerifiedAddresses: Set<Address>
   managingEntityByVault: Record<string, string>
   logoBaseUrl?: string
@@ -385,6 +386,7 @@ async function assembleLabelsView(chainId: number): Promise<LabelsView> {
   return {
     chainId,
     labelsSource: labels.value.source,
+    sourceFetchedAt: labels.value.sourceFetchedAt,
     publishedVerifiedAddresses: new Set(uniqueAddresses([
       ...labels.value.verifiedVaultAddresses,
       ...labels.value.earnVaults,

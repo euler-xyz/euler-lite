@@ -77,7 +77,7 @@ describe('vault form verification prerequisites', () => {
       isAcknowledgmentRequired: true,
       unlistedNotice: 'This vault is not listed: A required check failed.',
     })
-    expect(html).toContain('Acknowledge Vault Status')
+    expect(html).toContain('Review Vault Status')
     expect(html).not.toContain('Acknowledge Unverified Vault Risk')
   })
 })

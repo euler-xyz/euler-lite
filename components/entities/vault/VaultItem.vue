@@ -123,16 +123,16 @@ const statsGridCols = computed(() => {
   return cols.join(' ')
 })
 const isDeprecated = computed(() => getVaultDeprecation(vault.address).deprecated)
-const { vaultAssessments, getVaultAssessmentEntry, loadVaultAssessment, visibility, source, loadError } = useEulerLabels()
+const { vaultAssessments, getVaultAssessmentEntry, loadVaultAssessment, visibility, source, isReady, loadError } = useEulerLabels()
 watchEffect(() => {
-  if (source.value === 'v3' && !loadError.value
+  if (source.value === 'v3' && isReady.value && !loadError.value
     && visibility.value?.[vault.address.toLowerCase()]?.status === 'warning') {
     void loadVaultAssessment(vault.chainId, vault.address, 'evk')
   }
 })
 const criticalAssessmentWarning = computed(() => {
   void vaultAssessments.value
-  if (source.value !== 'v3' || loadError.value) return null
+  if (source.value !== 'v3' || !isReady.value || loadError.value) return null
   const entry = getVaultAssessmentEntry(vault.chainId, vault.address, 'evk')
   return entry.status === 'available' ? getCriticalAssessmentWarning(entry.assessment) : null
 })

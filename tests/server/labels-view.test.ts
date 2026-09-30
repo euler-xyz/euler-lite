@@ -127,6 +127,7 @@ describe('V3 public verification', () => {
     vi.mocked(getPublicEulerLabelsData).mockResolvedValue({
       ...createEmptyEulerLabelsData(),
       source: 'v3',
+      sourceFetchedAt: Date.now(),
       verifiedVaultAddresses: [listed],
       managingEntityByVault: { [listed.toLowerCase()]: 'curator' },
       entities: { curator: {
