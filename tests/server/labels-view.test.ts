@@ -118,3 +118,37 @@ describe('SDK escrow classification in public views', () => {
     expect(metadata.has(unloaded)).toBe(true)
   })
 })
+
+describe('V3 public verification', () => {
+  it('uses published membership even when the local governor cannot be resolved', async () => {
+    const listed = '0x0000000000000000000000000000000000000801'
+    const hidden = '0x0000000000000000000000000000000000000802'
+    vi.stubGlobal('$fetch', vi.fn(async () => ({ tokens: [] })))
+    vi.mocked(getPublicEulerLabelsData).mockResolvedValue({
+      ...createEmptyEulerLabelsData(),
+      source: 'v3',
+      verifiedVaultAddresses: [listed],
+      managingEntityByVault: { [listed.toLowerCase()]: 'curator' },
+      entities: { curator: {
+        name: 'Curator', logo: '', description: '', url: '', addresses: {},
+        social: { twitter: '', youtube: '', discord: '', telegram: '', github: '' },
+      } },
+      rawGeoPolicies: [],
+    })
+    vi.mocked(getServerSdk).mockResolvedValue({
+      vaultMetaService: { fetchVaultTypes: async () => ({}) },
+      eVaultService: {
+        fetchVerifiedVaultAddresses: async () => [],
+        fetchVaults: async (_chain: number, addresses: string[]) => ({
+          errors: [], result: addresses.map(address => ({ address, collaterals: [], governorAdmin: undefined })),
+        }),
+      },
+    } as never)
+
+    const verified = await refreshVerifiedAddressSet(992)
+    expect(verified.has(listed)).toBe(true)
+    expect(verified.has(hidden)).toBe(false)
+    const metadata = await refreshChainVaultMetadata(992)
+    expect(metadata.get(listed)?.entities.map(entity => entity.name)).toEqual(['Curator'])
+  })
+})
