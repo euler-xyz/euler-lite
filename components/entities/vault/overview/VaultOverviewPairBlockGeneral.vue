@@ -174,20 +174,14 @@ const rampDownModalData = computed(() => ({
     content-class="flex flex-col gap-20"
   >
     <VaultDeprecationBanner :addresses="[collateralVault.address, borrowVault.address]" />
-    <div
+    <VaultPublicNotice :addresses="[collateralVault.address, borrowVault.address]" />
+    <UiAlert
       v-if="isRestricted"
-      class="w-full rounded-12 p-16 bg-warning-100 text-warning-500"
-    >
-      <div class="flex items-center gap-8">
-        <SvgIcon
-          name="warning"
-          class="!w-20 !h-20 flex-shrink-0"
-        />
-        <p class="text-p3 text-warning-500">
-          This vault is not available in your region.
-        </p>
-      </div>
-    </div>
+      title="Region restricted"
+      description="This vault is not available in your region."
+      variant="warning"
+      size="compact"
+    />
     <div class="flex flex-col gap-12">
       <div class="grid grid-cols-2 gap-x-32 gap-y-20">
         <VaultOverviewLabelValue label="Price">
