@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { EVault } from '@eulerxyz/euler-v2-sdk'
-import { isVaultCyclicalNote } from '~/utils/eulerLabelsUtils'
+import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
 
 const emits = defineEmits<{
   'vault-click': [address: string]
@@ -8,7 +8,8 @@ const emits = defineEmits<{
 }>()
 const { vault } = defineProps<{ vault: EVault, desktopOverview?: boolean }>()
 
-const isCyclicalIRM = computed(() => isVaultCyclicalNote(vault.address))
+const isCyclicalIRM = computed(() => vault.interestRateModel.type === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY
+  || vault.interestRateModel.type === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY_MONTHLY)
 </script>
 
 <template>
