@@ -122,6 +122,7 @@ watchEffect(async () => {
           <VaultDisplayName
             :name="displayName"
             :is-unverified="isUnverified"
+            :addresses="[vault.address]"
           />
           <GovernanceLimitedBadge v-if="isGovernanceLimited" />
           <RestrictedBadge v-if="isGeoBlocked" />
