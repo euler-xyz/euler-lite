@@ -238,8 +238,16 @@ export type EulerLabelEntityVaultLike = {
   governor?: string
 }
 
+const getV3ManagingEntity = (address: string | undefined): EulerLabelEntity[] | null => {
+  const data = getEulerLabelsSourceData()
+  if (data.source !== 'v3') return null
+  const key = address && data.managingEntityByVault?.[address.toLowerCase()]
+  const entity = key && data.entities[key]
+  return entity ? [entity as EulerLabelEntity] : []
+}
+
 export const getEntitiesByVault = (vault: EulerLabelEntityVaultLike): EulerLabelEntity[] =>
-  getEulerLabelEntitiesByVault(labels(), vault) as EulerLabelEntity[]
+  getV3ManagingEntity(vault.address) ?? getEulerLabelEntitiesByVault(labels(), vault) as EulerLabelEntity[]
 
 export const getUniqueEntitiesByVaults = (vaults: EulerLabelEntityVaultLike[]): EulerLabelEntity[] => {
   const seen = new Set<string>()
@@ -257,7 +265,7 @@ export const getUniqueEntitiesByVaults = (vaults: EulerLabelEntityVaultLike[]): 
 }
 
 export const getEntitiesByEarnVault = (earnVault: EulerEarn): EulerLabelEntity[] =>
-  getEulerLabelEntitiesByEarnVault(labels(), earnVault) as EulerLabelEntity[]
+  getV3ManagingEntity(earnVault.address) ?? getEulerLabelEntitiesByEarnVault(labels(), earnVault) as EulerLabelEntity[]
 
 export const getPointsByVault = (vaultAddress: string): EulerLabelPointReward[] =>
   getEulerLabelPointsByVault(labels(), vaultAddress) as EulerLabelPointReward[]

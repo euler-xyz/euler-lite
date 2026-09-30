@@ -282,6 +282,11 @@ const isVerifiedVault = (address: string): boolean => {
       ? isEarnVaultOwnerVerified(Object.assign({}, entry.vault as EulerEarn, { verified: true }), verificationLabels)
       : isVaultGovernorVerified(Object.assign({}, entry.vault as EVault | SecuritizeCollateralVault, { verified: true }), verificationLabels)
   }
+  if (labels.source === 'v3') {
+    return isKnownEscrowAddress(normalized)
+      || verifiedVaultAddresses.value.some(vault => normalizeAddress(vault) === normalized)
+      || earnVaults.value.some(vault => normalizeAddress(vault) === normalized)
+  }
   // Registry metadata describes the fetch that created the entry. Current
   // labels must be able to revoke that earlier positive verification.
   return isKnownEscrowAddress(normalized)

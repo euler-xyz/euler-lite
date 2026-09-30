@@ -370,6 +370,35 @@ describe('useVaults EVault verification metadata', () => {
     expect(registry.getVault(BASE_EARN_VAULT)).toBeDefined()
   })
 
+  it('uses the V3 visibility membership without rechecking on-chain governors', () => {
+    const registry = useVaultRegistry()
+    __setEulerLabelsDataForTest({
+      source: 'v3',
+      verifiedVaultAddresses: [getAddress(LABELED_EVAULT)],
+      earnVaults: [getAddress(BASE_EARN_VAULT)],
+      visibility: {
+        [LABELED_EVAULT.toLowerCase()]: { status: 'warning', reason: 'Review this vault', decidedBy: 'assessment', explorableLend: true, explorableBorrow: true },
+        [BASE_EARN_VAULT.toLowerCase()]: { status: 'visible', reason: null, decidedBy: 'assessment', explorableLend: true, explorableBorrow: true },
+      },
+    })
+    registry.set(LABELED_EVAULT, makeVault(LABELED_EVAULT), 'evk', { verified: true })
+    registry.set(BASE_EARN_VAULT, makeEarnVault(BASE_EARN_VAULT), 'earn', { verified: true })
+
+    // Neither fixture has governor or owner metadata. On V3, that is already
+    // incorporated into the published verdict and must not override it.
+    expect(useVaults().isVaultGovernorVerified(makeVault(LABELED_EVAULT))).toBe(true)
+    expect(useVaults().isEarnVaultOwnerVerified(makeEarnVault(BASE_EARN_VAULT))).toBe(true)
+
+    __setEulerLabelsDataForTest({ source: 'v3', visibility: {
+      [LABELED_EVAULT.toLowerCase()]: { status: 'hidden', reason: 'No longer listed', decidedBy: 'assessment', explorableLend: false, explorableBorrow: false },
+    } })
+    expect(useVaults().isVaultGovernorVerified(makeVault(LABELED_EVAULT))).toBe(false)
+    expect(useVaults().isEarnVaultOwnerVerified(makeEarnVault(BASE_EARN_VAULT))).toBe(false)
+    // A stale registry flag cannot revive verification when V3 has no verdict.
+    __setEulerLabelsDataForTest({ source: 'v3' })
+    expect(registry.isVerifiedVault(LABELED_EVAULT)).toBe(false)
+  })
+
   it('clears stale Earn verification when a vault is removed from curation', async () => {
     const registry = useVaultRegistry()
     registry.set(BASE_EARN_VAULT, makeEarnVault(BASE_EARN_VAULT), 'earn', { verified: true })
