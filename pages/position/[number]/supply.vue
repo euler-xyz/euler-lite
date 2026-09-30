@@ -210,7 +210,9 @@ const form = useCollateralForm({
   getSwapToAsset: () => form.asset.value,
 
 })
-useOperationGuard(computed(() => [form.collateralVault.value?.address].filter(Boolean)))
+useOperationGuard(computed(() => [form.collateralVault.value?.address].filter(Boolean)), {
+  depositedVaultAddresses: computed(() => [form.collateralVault.value?.address].filter(Boolean)),
+})
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (form.isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }

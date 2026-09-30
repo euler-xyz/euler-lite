@@ -5,7 +5,7 @@ import { flip, offset, shift, useFloating } from '@floating-ui/vue'
 import { isOperationBlocked, isOperationBlockerKey, operationBlockerEntries, operationBlockReason } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonVariant } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
-import { AcknowledgeTermsModal, VaultUnverifiedDisclaimerModal } from '#components'
+import { AcknowledgeTermsModal, VaultDeprecatedDepositModal, VaultUnverifiedDisclaimerModal } from '#components'
 import type { KeyringFlowState, CredentialData } from '~/composables/useKeyring'
 import type { TosGuardState } from '~/composables/guards/useTosGuard'
 import type { UnverifiedVaultGuardState } from '~/composables/guards/useUnverifiedVaultGuard'
@@ -164,6 +164,10 @@ const showTosFlow = computed(() =>
 const showUnverifiedVaultFlow = computed(() =>
   !showKeyringFlow.value && !showTosFlow.value && unverifiedVaultGuard?.isAcknowledgmentRequired === true,
 )
+const showDeprecatedDepositFlow = computed(() =>
+  !showKeyringFlow.value && !showTosFlow.value && !showUnverifiedVaultFlow.value
+  && unverifiedVaultGuard?.isDeprecatedDepositAcknowledgmentRequired === true,
+)
 
 const openUnverifiedVaultModal = () => {
   modal.open(VaultUnverifiedDisclaimerModal, {
@@ -172,6 +176,15 @@ const openUnverifiedVaultModal = () => {
       acceptAction: () => {
         unverifiedVaultGuard?.acknowledgeRisk()
       },
+    },
+  })
+}
+
+const openDeprecatedDepositModal = () => {
+  modal.open(VaultDeprecatedDepositModal, {
+    props: {
+      reason: unverifiedVaultGuard?.deprecatedDepositNotice,
+      acceptAction: () => unverifiedVaultGuard?.acknowledgeDeprecatedDeposit(),
     },
   })
 }
@@ -299,6 +312,20 @@ const handleAddToBatch = () => {
           Retry verification
         </UiButton>
       </template>
+      <template v-else-if="unverifiedVaultGuard?.actionBlockReason">
+        <p
+          class="text-p3 text-warning-500"
+          role="status"
+        >
+          {{ unverifiedVaultGuard.actionBlockReason }}
+        </p>
+        <UiButton
+          size="large"
+          disabled
+        >
+          Vault review pending
+        </UiButton>
+      </template>
       <template v-else-if="batchBlocksDirect && supportsBatch">
         <UiButton
           size="large"
@@ -371,6 +398,15 @@ const handleAddToBatch = () => {
           @click="openUnverifiedVaultModal"
         >
           {{ unverifiedVaultGuard?.unlistedNotice ? 'Acknowledge Vault Status' : 'Acknowledge Unverified Vault Risk' }}
+        </UiButton>
+      </template>
+      <template v-else-if="showDeprecatedDepositFlow">
+        <UiButton
+          size="large"
+          variant="red"
+          @click="openDeprecatedDepositModal"
+        >
+          Acknowledge Deprecated Vault
         </UiButton>
       </template>
 
