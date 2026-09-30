@@ -1,13 +1,16 @@
 import { getAddress } from 'viem'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createOperationIntent } from '~/features/reviewed-execution/domain/factory'
-import { clearUnverifiedVaultAcknowledgements, recordUnverifiedVaultAcknowledgement } from '~/features/reviewed-execution/policy/acknowledgements'
+import { clearDeprecatedDepositAcknowledgements, clearUnverifiedVaultAcknowledgements, recordDeprecatedDepositAcknowledgement, recordUnverifiedVaultAcknowledgement } from '~/features/reviewed-execution/policy/acknowledgements'
 import { resolveAppPolicy } from '~/features/reviewed-execution/policy/app-policy'
 import { makeReviewedExecution, TEST_ACCOUNT, TEST_TOKEN, TEST_VAULT } from './fixtures'
 import { makeSwapQuote } from './swap-quote.test-fixture'
 
 const geo = vi.hoisted(() => ({
   labelsReady: { value: true },
+  labelsSource: { value: 'static' },
+  visibility: { value: {} as Record<string, { status: string }> },
+  deprecated: new Set<string>(),
   country: { value: 'US' as string | null | undefined },
   blocked: vi.fn(),
   restricted: vi.fn(),
@@ -21,7 +24,11 @@ vi.mock('~/composables/useGeoBlock', () => ({
 
 vi.mock('~/composables/useEulerLabels', () => ({
   getEulerLabelsVersion: () => 1,
-  useEulerLabels: () => ({ isReady: geo.labelsReady }),
+  useEulerLabels: () => ({ isReady: geo.labelsReady, source: geo.labelsSource, visibility: geo.visibility }),
+}))
+
+vi.mock('~/utils/eulerLabelsUtils', () => ({
+  getVaultDeprecation: (address: string) => ({ deprecated: geo.deprecated.has(address.toLowerCase()), reason: 'Deprecated' }),
 }))
 
 const TARGET_VAULT = getAddress('0x5000000000000000000000000000000000000000')
@@ -60,7 +67,11 @@ const swapIntent = () => {
 describe('final two-vault swap policy', () => {
   beforeEach(() => {
     clearUnverifiedVaultAcknowledgements()
+    clearDeprecatedDepositAcknowledgements()
     geo.labelsReady.value = true
+    geo.labelsSource.value = 'static'
+    geo.visibility.value = {}
+    geo.deprecated.clear()
     geo.country.value = 'US'
     geo.blocked.mockReset().mockReturnValue(false)
     geo.restricted.mockReset().mockReturnValue(false)
@@ -85,6 +96,7 @@ describe('final two-vault swap policy', () => {
 
   afterEach(() => {
     clearUnverifiedVaultAcknowledgements()
+    clearDeprecatedDepositAcknowledgements()
     vi.unstubAllGlobals()
   })
 
@@ -102,6 +114,18 @@ describe('final two-vault swap policy', () => {
     recordUnverifiedVaultAcknowledgement({ chainId: 1, account: TEST_ACCOUNT, operation: 'lend-withdraw', vaults: [TEST_VAULT] })
     await expect(resolveAppPolicy(requestSet, 100, [intent])).resolves.toBeDefined()
     await expect(resolveAppPolicy(requestSet, 100, [intent, swapIntent()])).rejects.toThrow('Vault verification is unavailable')
+  })
+
+  it('keeps a withdrawal with a wallet swap available when labels and geo are unavailable', async () => {
+    geo.labelsReady.value = false
+    geo.country.value = null
+    const intent = createOperationIntent({
+      kind: 'withdraw', planner: 'withdraw-and-swap',
+      args: { swapQuote: makeSwapQuote(), vaultAddress: TEST_VAULT, owner: TEST_ACCOUNT, assets: 1n },
+      chainId: 1, account: TEST_ACCOUNT, source: 'test', operation: 'lend-withdraw', createdAt: 1,
+    })
+    recordUnverifiedVaultAcknowledgement({ chainId: 1, account: TEST_ACCOUNT, operation: 'lend-withdraw', vaults: [TEST_VAULT] })
+    await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [intent])).resolves.toBeDefined()
   })
 
   it.each([
@@ -176,5 +200,47 @@ describe('final two-vault swap policy', () => {
     recordUnverifiedVaultAcknowledgement({ ...baseAcknowledgement, vaults: [TEST_VAULT] })
     await expect(resolveAppPolicy(requestSet, 100, [intent]))
       .rejects.toThrow('acknowledgement does not cover the execution')
+  })
+
+  it('blocks pending-review deposits but permits an acknowledged withdrawal', async () => {
+    geo.labelsSource.value = 'v3'
+    geo.visibility.value = { [TEST_VAULT.toLowerCase()]: { status: 'pending_review' } }
+    const deposit = createOperationIntent({ kind: 'deposit', planner: 'deposit', args: { vaultAddress: TEST_VAULT, assetAddress: TEST_TOKEN, amount: 1n }, chainId: 1, account: TEST_ACCOUNT, source: 'test', operation: 'lend-deposit', createdAt: 1 })
+    const withdrawal = createOperationIntent({ kind: 'withdraw', planner: 'withdraw', args: { vaultAddress: TEST_VAULT, owner: TEST_ACCOUNT, assets: 1n }, chainId: 1, account: TEST_ACCOUNT, source: 'test', operation: 'lend-withdraw', createdAt: 1 })
+    const requestSet = makeReviewedExecution().requestSet
+    await expect(resolveAppPolicy(requestSet, 100, [deposit])).rejects.toThrow('not been checked yet')
+    await expect(resolveAppPolicy(requestSet, 100, [withdrawal])).resolves.toBeDefined()
+  })
+
+  it('blocks a pending-review swap destination even when the source vault is verified', async () => {
+    geo.labelsSource.value = 'v3'
+    geo.visibility.value = { [TARGET_VAULT.toLowerCase()]: { status: 'pending_review' } }
+    await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [swapIntent()]))
+      .rejects.toThrow('not been checked yet')
+  })
+
+  it('requires a distinct deprecated-deposit acknowledgement bound to the operation', async () => {
+    geo.deprecated.add(TEST_VAULT.toLowerCase())
+    const deposit = createOperationIntent({ kind: 'deposit', planner: 'deposit', args: { vaultAddress: TEST_VAULT, assetAddress: TEST_TOKEN, amount: 1n }, chainId: 1, account: TEST_ACCOUNT, source: 'test', operation: 'lend-deposit', createdAt: 1 })
+    const requestSet = makeReviewedExecution().requestSet
+    recordUnverifiedVaultAcknowledgement({ chainId: 1, account: TEST_ACCOUNT, operation: 'lend-deposit', vaults: [TEST_VAULT] })
+    await expect(resolveAppPolicy(requestSet, 100, [deposit])).rejects.toThrow('Deprecated vault deposit acknowledgement')
+    recordDeprecatedDepositAcknowledgement({ chainId: 1, account: TEST_ACCOUNT, operation: 'lend-deposit', vaults: [TEST_VAULT] })
+    await expect(resolveAppPolicy(requestSet, 100, [deposit])).resolves.toBeDefined()
+  })
+
+  it('requires acknowledgement for the actual swap deposit receiver', async () => {
+    verifyVault.mockReturnValue(true)
+    geo.deprecated.add(TARGET_VAULT.toLowerCase())
+    const quote = makeSwapQuote()
+    const deposit = createOperationIntent({
+      kind: 'deposit', planner: 'deposit-with-swap',
+      args: { swapQuote: { ...quote, receiver: TARGET_VAULT, verify: { ...quote.verify, vault: TEST_VAULT } }, amount: 10n, tokenIn: TEST_TOKEN },
+      chainId: 1, account: TEST_ACCOUNT, source: 'test', operation: 'lend-deposit', createdAt: 1,
+    })
+    const requestSet = makeReviewedExecution().requestSet
+    await expect(resolveAppPolicy(requestSet, 100, [deposit])).rejects.toThrow('Deprecated vault deposit acknowledgement')
+    recordDeprecatedDepositAcknowledgement({ chainId: 1, account: TEST_ACCOUNT, operation: 'lend-deposit', vaults: [TARGET_VAULT] })
+    await expect(resolveAppPolicy(requestSet, 100, [deposit])).resolves.toBeDefined()
   })
 })

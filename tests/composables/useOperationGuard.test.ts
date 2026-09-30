@@ -12,7 +12,7 @@ const hostedGeo = ref<HostedGeoContext | undefined>()
 
 vi.mock('~/composables/useEulerLabels', () => ({ getEulerLabelsVersion: () => 1, getEulerGeoContext: () => hostedGeo.value }))
 vi.mock('~/composables/guards/useTosGuard', () => ({ useTosGuard: () => ({}) }))
-vi.mock('~/utils/eulerLabelsUtils', () => ({ isVaultKeyring: () => false }))
+vi.mock('~/utils/eulerLabelsUtils', () => ({ isVaultKeyring: () => false, getVaultDeprecation: () => ({ deprecated: false, reason: '' }) }))
 vi.mock('~/composables/useKeyring', () => ({
   useKeyring: () => ({
     isVerificationRequired: ref(false),
@@ -36,6 +36,7 @@ describe('operation verification chain', () => {
     vi.stubGlobal('useRoute', () => ({ name: 'earn-vault' }))
     vi.stubGlobal('useEulerLabels', () => ({
       isReady: ref(true), loadError: ref(undefined), retryLabels: vi.fn(),
+      source: ref('static'), visibility: ref({}),
     }))
     vi.stubGlobal('useVaultRegistry', () => ({
       get: () => ({ type: 'earn', vault }),

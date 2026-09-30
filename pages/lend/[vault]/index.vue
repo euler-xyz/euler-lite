@@ -106,7 +106,7 @@ const vaultAddress = route.params.vault as string
 const { warning: assessmentWarning } = useVaultAssessmentWarning(vaultAddress)
 const isKnownUnlisted = computed(() => labelsSource.value === 'v3'
   && ['hidden', 'pending_review'].includes(vaultVisibility.value?.[vaultAddress.toLowerCase()]?.status ?? ''))
-useOperationGuard([vaultAddress])
+useOperationGuard([vaultAddress], { depositedVaultAddresses: [vaultAddress] })
 const { name } = useEulerProductOfVault(vaultAddress)
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)

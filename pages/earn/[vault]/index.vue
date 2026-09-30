@@ -44,7 +44,7 @@ const { warning: assessmentWarning } = useVaultAssessmentWarning(vaultAddress, '
 const { visibility: vaultVisibility, source: labelsSource } = useEulerLabels()
 const isKnownUnlisted = computed(() => labelsSource.value === 'v3'
   && ['hidden', 'pending_review'].includes(vaultVisibility.value?.[vaultAddress.toLowerCase()]?.status ?? ''))
-const { unverifiedVaultGuard } = useOperationGuard([vaultAddress])
+const { unverifiedVaultGuard } = useOperationGuard([vaultAddress], { depositedVaultAddresses: [vaultAddress] })
 const { name } = useEulerProductOfVault(vaultAddress)
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
