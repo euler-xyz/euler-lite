@@ -41,6 +41,10 @@ const feeDisplay = computed(() => {
     content-class="flex flex-col gap-20"
   >
     <VaultDeprecationBanner :addresses="[vault.address]" />
+    <VaultPublicNotice
+      :addresses="[vault.address]"
+      family="earn"
+    />
     <!-- eslint-disable vue/no-v-html -- autoLink escapes label text before adding links -->
     <p
       v-if="earnDescription"

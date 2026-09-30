@@ -127,22 +127,7 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
           :address="pairVault.address"
           hide-deprecated
         />
-        <UiHoverPreviewTooltip
-          v-if="isRestricted"
-          title="Region restricted"
-          text="This vault is not available in your region"
-          placement="top-start"
-        >
-          <span
-            class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-          >
-            <SvgIcon
-              name="warning"
-              class="!w-14 !h-14"
-            />
-            Restricted
-          </span>
-        </UiHoverPreviewTooltip>
+        <RestrictedBadge v-if="isRestricted" />
         <slot />
       </div>
 

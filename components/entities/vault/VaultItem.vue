@@ -15,6 +15,7 @@ import { isVaultBorrowable } from '~/utils/vault/classification'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
 import { resolveVaultExposureDisplay, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
 import { getCriticalAssessmentWarning } from '~/utils/vault-assessment/presentation'
+import { zeroAddress } from 'viem'
 
 const { isConnected } = useWagmi()
 const { vault, type = 'lend' } = defineProps<{ vault: EVault, type?: 'lend' | 'borrow' }>()
@@ -33,6 +34,7 @@ const {
 } = useCollateralOpenInterest()
 const isUnverified = computed(() => !isVerifiedVault(vault.address))
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault))
+const isUngoverned = computed(() => vault.governorAdmin?.toLowerCase() === zeroAddress)
 const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
 const entityName = computed(() => {
   if (!isGovernorVerified.value || entities.length === 0) return ''
@@ -279,7 +281,16 @@ watchEffect(async () => {
       >
         <div class="text-content-tertiary text-p3 mb-4">Curator</div>
         <div
-          v-if="!isGovernorVerified"
+          v-if="isUngoverned"
+          class="text-p2 text-content-primary"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="curator"
+        >
+          Ungoverned
+        </div>
+        <div
+          v-else-if="!isGovernorVerified"
           class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
         >
           <SvgIcon
@@ -421,7 +432,13 @@ watchEffect(async () => {
         </div>
         <div class="flex gap-8 justify-end items-center text-right flex-1">
           <div
-            v-if="!isGovernorVerified"
+            v-if="isUngoverned"
+            class="text-p2 text-content-primary"
+          >
+            Ungoverned
+          </div>
+          <div
+            v-else-if="!isGovernorVerified"
             class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
           >
             <SvgIcon

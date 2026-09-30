@@ -24,7 +24,7 @@ import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { getAddress, type Address, formatUnits, zeroAddress } from 'viem'
-import { VaultUnverifiedDisclaimerModal, VaultApyModal, SwapTokenSelector, SlippageSettingsModal } from '#components'
+import { VaultApyModal, SwapTokenSelector, SlippageSettingsModal } from '#components'
 import { getProjectedRates } from '~/utils/vault/apy'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { getTxErrorMessage } from '~/utils/tx-errors'
@@ -89,7 +89,7 @@ const buildLendStateOverrideOptions = () => buildStateOverrideOptions({ noBalanc
 const lendPluginPrefetch: PluginPrefetchData = { pyth: { entries: [] } }
 const getLendPluginPrefetch = async (): Promise<PluginPrefetchData> => lendPluginPrefetch
 const { getVault, getSecuritizeVault, getEscrowVault, updateVault, isEscrowLoadedOnce, isMarketDataResolved } = useVaults()
-const { isReady: isLabelsReady, visibility: vaultVisibility, source: labelsSource } = useEulerLabels()
+const { isReady: isLabelsReady } = useEulerLabels()
 const { get: registryGet, getVault: _registryGetVault, isKnownEscrowAddress } = useVaultRegistry()
 const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
 const { chainId } = useEulerAddresses()
@@ -104,8 +104,6 @@ const { getBalance } = useWallets()
 const { runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const vaultAddress = route.params.vault as string
 const { warning: assessmentWarning } = useVaultAssessmentWarning(vaultAddress)
-const isKnownUnlisted = computed(() => labelsSource.value === 'v3'
-  && ['hidden', 'pending_review'].includes(vaultVisibility.value?.[vaultAddress.toLowerCase()]?.status ?? ''))
 useOperationGuard([vaultAddress])
 const { name } = useEulerProductOfVault(vaultAddress)
 const { settings } = useUserSettings()
@@ -432,12 +430,6 @@ const lendWarnings = computed(() => {
 // Check if vault data is loaded
 const isVaultLoaded = computed(() => !!eVault.value || !!securitizeVault.value)
 
-// Check if vault is verified - both EVK and securitize vaults have verified field
-const isVaultVerified = computed(() => {
-  const address = eVault.value?.address ?? securitizeVault.value?.address
-  return address ? useVaultRegistry().isVerifiedVault(address) : true
-})
-
 const load = async () => {
   isLoading.value = true
   try {
@@ -449,18 +441,6 @@ const load = async () => {
     else {
       // For vaults without interest rate info, just use rewards
       estimateSupplyAPY.value = totalRewardsAPY.value + intrinsicApy.value
-    }
-
-    // Show warning modal for any unverified vault
-    if (!isVaultVerified.value && !isKnownUnlisted.value) {
-      modal.open(VaultUnverifiedDisclaimerModal, {
-        isNotClosable: true,
-        props: {
-          cancelAction: () => {
-            router.replace('/')
-          },
-        },
-      })
     }
   }
   catch (e) {

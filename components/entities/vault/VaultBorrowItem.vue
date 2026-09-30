@@ -10,7 +10,7 @@ import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { VaultApyModal, VaultMaxRoeModal, VaultNetApyPairModal, UiModalPreviewTrigger } from '#components'
 import { isSecuritizeBorrowPair, type AnyBorrowVaultPair } from '~/types/borrow-pair'
-import { getAddress } from 'viem'
+import { getAddress, zeroAddress } from 'viem'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { areTokenAddressesCorrelatedByTags, getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 
@@ -28,6 +28,10 @@ const isAnyGovernorUnverified = computed(() => {
     : !isVaultGovernorVerified(pair.collateral)
   return borrowUnverified || collateralUnverified
 })
+const isPairUngoverned = computed(() => pair.borrow.governorAdmin?.toLowerCase() === zeroAddress
+  && (isSecuritizeBorrowPair(pair)
+    ? pair.collateral.governor?.toLowerCase() === zeroAddress
+    : pair.collateral.governorAdmin?.toLowerCase() === zeroAddress))
 
 const entityDisplay = computed(() => {
   const all = getUniqueEntitiesByVaults([pair.collateral, pair.borrow])
@@ -452,7 +456,13 @@ const linkPath = computed(() => ({
       >
         <div class="text-content-tertiary text-p3 mb-4">Curator</div>
         <div
-          v-if="isAnyGovernorUnverified"
+          v-if="isPairUngoverned"
+          class="text-p2 text-content-primary"
+        >
+          Ungoverned
+        </div>
+        <div
+          v-else-if="isAnyGovernorUnverified"
           class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
         >
           <SvgIcon
@@ -653,7 +663,13 @@ const linkPath = computed(() => ({
         </div>
         <div class="flex gap-8 justify-end items-center text-right flex-1">
           <div
-            v-if="isAnyGovernorUnverified"
+            v-if="isPairUngoverned"
+            class="text-p2 text-content-primary"
+          >
+            Ungoverned
+          </div>
+          <div
+            v-else-if="isAnyGovernorUnverified"
             class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
           >
             <SvgIcon
