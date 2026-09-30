@@ -26,6 +26,7 @@ const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getSupplyRewardCampaigns, hasSupplyRewards } = useRewardsApy()
 const vaultAddress = computed(() => getAddress(vault.address))
+const isKnownUnlisted = useKnownUnlistedVault(() => vault.address)
 const product = useEulerProductOfVault(vaultAddress)
 const description = computed(() => {
   return product.vaultOverrides?.[vaultAddress.value]?.description ?? product.description
@@ -195,7 +196,7 @@ const supplyCapPercentageDisplay = computed(() => {
           </div>
         </div>
         <VaultTypeChip
-          v-else-if="!isGovernorVerified"
+          v-else-if="!isGovernorVerified && !isKnownUnlisted"
           :vault="vault"
           type="unknown"
           nudge
@@ -209,9 +210,14 @@ const supplyCapPercentageDisplay = computed(() => {
         label="Vault type"
       >
         <VaultTypeBadges
+          v-if="!isKnownUnlisted || isUngoverned"
           :vault="vault"
           nudge
         />
+        <span
+          v-else
+          class="text-p2 text-content-tertiary"
+        >-</span>
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue label="Can be borrowed">
         <div class="flex items-center gap-8">

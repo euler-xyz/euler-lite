@@ -15,6 +15,7 @@ const { isEarnVaultOwnerVerified } = useVaults()
 const vaultAddress = computed(() => getAddress(vault.address))
 const product = useEulerProductOfVault(vaultAddress)
 const entities = useEulerEntitiesOfEarnVault(vault)
+const isKnownUnlisted = useKnownUnlistedVault(() => vault.address)
 const isOwnerVerified = computed(() => isEarnVaultOwnerVerified(vault))
 const earnDescription = computed(() => getEarnVaultDescription(vault.address))
 
@@ -97,21 +98,30 @@ const feeDisplay = computed(() => {
           </div>
         </div>
         <VaultTypeChip
-          v-else
+          v-else-if="!isKnownUnlisted"
           :vault="vault"
           type="unknown"
           nudge
           class="w-fit"
         />
+        <span
+          v-else
+          class="text-p2 text-content-tertiary"
+        >-</span>
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue
         v-if="enableVaultTypeDisplay"
         label="Vault type"
       >
         <VaultTypeBadges
+          v-if="!isKnownUnlisted"
           :vault="vault"
           nudge
         />
+        <span
+          v-else
+          class="text-p2 text-content-tertiary"
+        >-</span>
       </VaultOverviewLabelValue>
     </div>
   </VaultOverviewAccordionSection>
