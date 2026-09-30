@@ -37,6 +37,7 @@ const vaultAddress = computed(() => getAddress(vault.address))
 const vaultRef = computed(() => vault)
 const product = useEulerProductOfVault(vaultAddress)
 const entities = useEulerEntitiesOfVault(vault)
+const isKnownUnlisted = useKnownUnlistedVault(() => vault.address)
 const { badges, governanceType, isVerified: isGovernorVerified, verificationVault } = useVaultTypeBadges(vaultRef)
 const governanceVault = computed(() => verificationVault.value as EVault)
 const marketProductKey = computed(() => getProductKeyByVault(vault.address))
@@ -162,7 +163,12 @@ watchEffect(() => {
         v-if="enableVaultTypeDisplay"
         label="Vault type"
       >
+        <span
+          v-if="isKnownUnlisted && governanceType !== 'ungoverned' && governanceType !== 'escrow'"
+          class="text-p2 text-content-tertiary"
+        >-</span>
         <VaultTypeChip
+          v-else
           :vault="governanceVault"
           :type="governanceType"
           nudge
@@ -196,7 +202,7 @@ watchEffect(() => {
           class="w-fit"
         />
         <VaultTypeChip
-          v-else-if="!isGovernorVerified"
+          v-else-if="!isGovernorVerified && !isKnownUnlisted"
           :vault="governanceVault"
           type="unknown"
           nudge
