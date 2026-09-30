@@ -92,15 +92,14 @@ export const resolveAppPolicy = async (
     }
 
     const simpleExitPlanners = new Set(['withdraw', 'redeem', 'repay-from-wallet', 'repay-from-deposit', 'repay-with-swap', 'swap-and-repay', 'cleanup', 'reward-claim', 'reul-unlock'])
-    const hardGeoRequired = intents.some(intent => !simpleExitPlanners.has(intent.planner.name) && !isExitWithoutAcquisition(intent))
+    const hardGeoRequired = intents.some(intent => !simpleExitPlanners.has(intent.planner.name))
     const softGeoRequired = intents.some(intent =>
-      !isExitWithoutAcquisition(intent) && (
-        intent.planner.name.includes('swap')
-        || intent.planner.name.includes('borrow')
-        || intent.planner.name.includes('multiply')
-        || intent.planner.name.includes('refinance')
-        || intent.planner.name.includes('migration')
-        || intent.planner.name === 'transfer'),
+      intent.planner.name.includes('swap')
+      || intent.planner.name.includes('borrow')
+      || intent.planner.name.includes('multiply')
+      || intent.planner.name.includes('refinance')
+      || intent.planner.name.includes('migration')
+      || intent.planner.name === 'transfer',
     )
     if ((hardGeoRequired || softGeoRequired) && country.value === undefined) {
       throw new Error('Regional availability is still loading')
