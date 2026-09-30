@@ -87,11 +87,14 @@ export function refreshPublicLabelsBundle(
           })
           const geo = await getGeoSource()(request)
           const snapshot = await adapter.fetchPublicLabelsSnapshot(chainId, selectedVersion, geo.policies)
-          normalizeLabelsBundle(chainId, snapshot)
-          return {
+          const bundle = {
             ...snapshot,
+            // Keep the age of the actual V3 read when this bundle is served stale.
+            sourceFetchedAt: Date.now(),
             geoFetchedAt: geo.fetchedAt,
           }
+          normalizeLabelsBundle(chainId, bundle)
+          return bundle
         },
         REFRESH_BUDGET_MS,
         `public-labels chain=${chainId}`,

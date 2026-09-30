@@ -250,6 +250,7 @@ describe('public labels server source', () => {
   it('serves a bounded stale bundle when a refresh fails', async () => {
     const { getPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
     const first = await getPublicLabelsBundle(1)
+    expect(first).toHaveProperty('sourceFetchedAt', Date.now())
 
     vi.advanceTimersByTime(300_001)
     mocks.fetchWithTimeout.mockRejectedValue(new Error('V3 unavailable'))

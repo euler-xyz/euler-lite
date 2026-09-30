@@ -10,6 +10,7 @@ const hostedBundle = (vaultTag?: string, source: 'v3' | 'v3-metadata' = 'v3'): P
   labelSet: 'public',
   version: 'test',
   publicLabels: structuredClone(publicLabelsFixture),
+  sourceFetchedAt: Date.now(),
   vaultTag,
 })
 

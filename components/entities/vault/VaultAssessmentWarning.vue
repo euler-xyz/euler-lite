@@ -5,8 +5,8 @@ const { address, hideDeprecated = false, badgeLabel } = defineProps<{
   badgeLabel?: string
 }>()
 
-const { isReady, loadError, source, visibility } = useEulerLabels()
-const verdict = computed(() => isReady.value && !loadError.value && source.value === 'v3'
+const { isReady, source, visibility } = useEulerLabels()
+const verdict = computed(() => isReady.value && source.value === 'v3'
   ? visibility.value?.[address.toLowerCase()]
   : undefined)
 const warning = computed(() => {

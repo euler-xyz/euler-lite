@@ -96,6 +96,7 @@ const labelsFor = (marker: string) => ({
 const bundleFor = (labels: EulerLabelsData): PublicLabelsBundle => ({
   version: 'v20260804151305236',
   publicLabels: labels,
+  sourceFetchedAt: Date.now(),
   effectivePolicy: { products: {}, earnVaults: [], assets: [] },
 }) as unknown as PublicLabelsBundle
 
@@ -216,6 +217,44 @@ describe('useEulerLabels chain-scoped loading', () => {
     await labels.loadLabels(true)
     expect(labels.isReady.value).toBe(true)
     expect(currentProductKeys()).toEqual(['cached'])
+  })
+
+  it('expires a server-cached verdict 15 minutes after the actual V3 read', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
+    try {
+      const original = bundleFor(labelsFor('cached'))
+      mocks.fetchPublicLabelsBundle.mockResolvedValue(original)
+      const labels = useEulerLabels()
+      await labels.loadLabels()
+
+      clock.mockReturnValue(1_000_000 + 5 * 60_000)
+      await labels.refreshLabelsIfStale()
+      expect(labels.isReady.value).toBe(true)
+      expect(currentProductKeys()).toEqual(['cached'])
+
+      clock.mockReturnValue(1_000_000 + 15 * 60_000)
+      await labels.refreshLabelsIfStale()
+      expect(labels.isReady.value).toBe(false)
+      expect(labels.loadError.value).toContain('Unable to load vault verification')
+      expect(currentProductKeys()).toEqual(['cached'])
+    }
+    finally { clock.mockRestore() }
+  })
+
+  it('expires verification at the deadline even before the next refresh poll', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000_000)
+    try {
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('cached')))
+      const labels = useEulerLabels()
+      await labels.loadLabels()
+      vi.advanceTimersByTime(15 * 60_000 - 1)
+      expect(labels.isReady.value).toBe(true)
+      vi.advanceTimersByTime(1)
+      expect(labels.isReady.value).toBe(false)
+      expect(labels.loadError.value).toContain('Unable to load vault verification')
+    }
+    finally { vi.useRealTimers() }
   })
 
   it('refreshes an aged successful snapshot and joins overlapping poll events', async () => {
