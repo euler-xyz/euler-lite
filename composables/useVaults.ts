@@ -1264,6 +1264,9 @@ export const useVaults = () => {
   // Check if vault's on-chain governorAdmin matches any of the product's declared entities
   const isVaultGovernorVerified = (vault: EVault): boolean => {
     const { getVaultCategory, isVerifiedVault, isKnownEscrowAddress } = useVaultRegistry()
+    // The hosted visibility verdict already includes governance consistency.
+    // Keep the local governor probe for sources without a V3 verdict.
+    if (getEulerLabelsSourceData().source === 'v3') return isVerifiedVault(vault.address)
     const vaultCategory = getVaultCategory(vault.address)
     return verifyVaultGovernor(
       Object.assign(vault, {
@@ -1282,6 +1285,7 @@ export const useVaults = () => {
   // `governorAdmin`); the shared rule reads `governorAdmin ?? governor`.
   const isSecuritizeGovernorVerified = (vault: SecuritizeCollateralVault): boolean => {
     const { isVerifiedVault } = useVaultRegistry()
+    if (getEulerLabelsSourceData().source === 'v3') return isVerifiedVault(vault.address)
     return verifyVaultGovernor(
       Object.assign(vault, { verified: isVerifiedVault(vault.address) }),
       buildVerificationLabels(),
@@ -1291,6 +1295,7 @@ export const useVaults = () => {
   // Check if earn vault's on-chain owner matches any of the product's declared entities
   const isEarnVaultOwnerVerified = (earnVault: EulerEarn): boolean => {
     const { isVerifiedVault } = useVaultRegistry()
+    if (getEulerLabelsSourceData().source === 'v3') return isVerifiedVault(earnVault.address)
     return verifyEarnVaultOwner(
       Object.assign(earnVault, { verified: isVerifiedVault(earnVault.address) }),
       buildVerificationLabels(),
