@@ -19,7 +19,7 @@ const hasKnownUnlistedVerdict = computed(() => {
 
 <template>
   <span
-    v-if="props.isUnverified && !hasKnownUnlistedVerdict"
+    v-if="props.isUnverified && (isReady || source !== 'v3') && !hasKnownUnlistedVerdict"
     class="flex text-error-500 items-center gap-4"
   >
     <SvgIcon

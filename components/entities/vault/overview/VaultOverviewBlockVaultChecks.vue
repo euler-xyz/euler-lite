@@ -15,7 +15,7 @@ const props = defineProps<{
 }>()
 const { chainId } = useEulerAddresses()
 const nowMs = useActivityNowMs()
-const { loadError, source, visibility, vaultAssessments, loadVaultAssessment, getVaultAssessmentEntry, isVaultAssessmentAvailableForChain } = useEulerLabels()
+const { isReady, loadError, source, visibility, vaultAssessments, loadVaultAssessment, getVaultAssessmentEntry, isVaultAssessmentAvailableForChain } = useEulerLabels()
 const family = computed(() => props.family ?? 'evk')
 const canShow = computed(() => !!chainId.value
   && source.value === 'v3'
@@ -26,7 +26,7 @@ const entry = computed(() => {
   return chainId.value ? getVaultAssessmentEntry(chainId.value, props.address, family.value) : { status: 'idle' as const }
 })
 const assessment = computed(() => loadError.value ? undefined : entry.value.assessment)
-const verdict = computed(() => visibility.value?.[props.address.toLowerCase()])
+const verdict = computed(() => isReady.value ? visibility.value?.[props.address.toLowerCase()] : undefined)
 const findingView = computed(() => assessment.value ? getVaultCheckFindings(assessment.value) : null)
 const upcoming = computed(() => assessment.value ? getUpcomingVaultChanges(assessment.value, props.asset) : [])
 const hasOracleAdapterFinding = computed(() => !!assessment.value?.configContext?.findings.some(

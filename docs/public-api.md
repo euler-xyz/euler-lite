@@ -73,11 +73,11 @@ Addresses are validated via viem's `isAddress` (strict EIP-55 checks) and normal
 
 ### Caching and propagation
 
-- **Response header**: `Cache-Control: public, max-age=30, stale-while-revalidate=30`. CDNs and browsers can cache for 30 s and serve stale for another 30 s while revalidating.
-- **Server-side cache**: per-chain in-memory verified set with a 5-minute TTL. A warm-cache process rebuilds every cache entry every 5 minutes on its own schedule (force-refresh, ignores fresh entries), so the cache is always continuously fresh in steady state.
+- **Response header**: up to `Cache-Control: public, max-age=30, stale-while-revalidate=30`. On V3-assessed chains, both cache windows shorten as the source verdict approaches its 15-minute expiry.
+- **Server-side cache**: per-chain in-memory verified set with a 5-minute TTL, rebuilt on demand from the shared Public Labels bundle. A V3 verdict is usable only within 15 minutes of its source read, even when the derived set was rebuilt more recently.
 - **In-flight dedup**: concurrent cold requests for the same chain collapse onto a single upstream pass.
-- **Propagation**: Public Labels verdict and publication changes, and on-chain governor changes on fallback sources, typically propagate within **~5 minutes**. Public Labels, the vault snapshot, and the verified-set cache are warmed on the same cycle.
-- **Stale fallback**: during upstream outages, the bridge serves only the last-known-good data within each cache's configured stale ceiling before returning a hard error.
+- **Propagation**: Public Labels verdict and publication changes, and on-chain governor changes on fallback sources, typically propagate within **~5 minutes**. Public Labels and the vault snapshot are warmed; verified-set requests use those cached inputs.
+- **Stale fallback**: during upstream outages, the bridge serves only the last-known-good data within each cache's configured stale ceiling. V3 verdicts additionally expire 15 minutes after the source read; after that, the bridge returns an error until a fresh read succeeds.
 
 ### Rate limit
 
@@ -207,11 +207,9 @@ Use `/api/public/is-known` for the verification verdict. Use the non-`null` / `n
 
 ### Caching and propagation
 
-Same shape as [`/is-known` caching](#caching-and-propagation):
-
 - **Response header**: `Cache-Control: public, max-age=30, stale-while-revalidate=30`.
 - **Server-side cache**: per-chain in-memory metadata map, 5-minute TTL.
-- **Warm cycle**: the warm-cache plugin force-rebuilds the metadata map every 5 minutes on its own schedule, so a fresh entry is always available.
+- **Refresh**: requests rebuild an expired metadata map from the shared cached labels and vault inputs.
 - **In-flight dedup**: concurrent cold requests for the same chain collapse onto a single upstream pass.
 - **Propagation**: on-chain changes and label edits propagate within **~5 minutes**.
 - **Stale fallback**: serves last-known-good data for up to 10 minutes past TTL during prolonged upstream outages.

@@ -264,7 +264,7 @@ const isEarnVault = (address: string): boolean => getType(address) === 'earn'
 const isSecuritizeVault = (address: string): boolean => getType(address) === 'securitize'
 const isEVaultAddress = (address: string): boolean => getType(address) === 'evk'
 const isVerifiedVault = (address: string): boolean => {
-  const { verifiedVaultAddresses, earnVaults, visibility } = useEulerLabels()
+  const { verifiedVaultAddresses, earnVaults, visibility, isReady } = useEulerLabels()
   const normalized = normalizeAddress(address)
   const labels = getEulerLabelsSourceData()
   if (labels.source === 'v3-metadata') {
@@ -283,6 +283,8 @@ const isVerifiedVault = (address: string): boolean => {
       : isVaultGovernorVerified(Object.assign({}, entry.vault as EVault | SecuritizeCollateralVault, { verified: true }), verificationLabels)
   }
   if (labels.source === 'v3') {
+    // Retain labels for display, but expire their verification verdict.
+    if (!isReady.value) return isKnownEscrowAddress(normalized)
     return isKnownEscrowAddress(normalized)
       || verifiedVaultAddresses.value.some(vault => normalizeAddress(vault) === normalized)
       || earnVaults.value.some(vault => normalizeAddress(vault) === normalized)

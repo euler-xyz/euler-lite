@@ -2,7 +2,7 @@ import { createError, getQuery, setResponseHeader } from 'h3'
 import { getAddress, isAddress } from 'viem'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { resolveRpcUrl } from '~/server/utils/rpc'
-import { getVerifiedAddressSet } from '~/server/utils/verified-vaults'
+import { getVerifiedAddressSnapshot, getVerifiedAddressCacheControl } from '~/server/utils/verified-vaults'
 import { logger } from '~/server/utils/logger'
 
 const MAX_ADDRESSES = 100
@@ -43,19 +43,18 @@ export default defineEventHandler(async (event) => {
     checksumed.push(getAddress(addr))
   }
 
-  let verifiedSet: Set<string>
+  let verifiedSnapshot: Awaited<ReturnType<typeof getVerifiedAddressSnapshot>>
   try {
-    verifiedSet = await getVerifiedAddressSet(chainId)
+    verifiedSnapshot = await getVerifiedAddressSnapshot(chainId)
   }
   catch (err) {
     logger.warn({ ctx: 'public-is-known', chainId, err }, 'verified-address lookup failed')
     throw createError({ statusCode: 502, statusMessage: 'Upstream error' })
   }
 
-  // Public bridge responses are CDN/browser cacheable for short bursts.
-  // The warm-cache plugin keeps the upstream verified-set continuously fresh
-  // so a stale CDN entry is never more than ~30s behind the server cache.
-  setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
+  // A hosted verdict's response cache cannot outlive its V3 read.
+  setResponseHeader(event, 'Cache-Control', getVerifiedAddressCacheControl(verifiedSnapshot))
+  const verifiedSet = verifiedSnapshot.addresses
 
   const response: Record<string, boolean> = {}
 

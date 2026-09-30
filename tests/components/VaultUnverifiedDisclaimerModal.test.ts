@@ -25,6 +25,8 @@ describe('unverified vault acknowledgement copy', () => {
   })
 
   it('keeps the caution for an unknown vault', async () => {
-    expect(await renderModal()).toContain('phishing attempts')
+    const html = await renderModal()
+    expect(html).toContain('Unverified vault')
+    expect(html).toContain('phishing attempts')
   })
 })

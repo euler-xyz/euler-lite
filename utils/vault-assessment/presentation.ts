@@ -217,7 +217,22 @@ export const getKnownUnlistedActionNotice = (
   if (lines.some(line => line === null)) return null
   return lines.length === 1
     ? lines[0]!
-    : 'These vaults are not listed. Review their vault checks before continuing.'
+    : 'These vaults are not listed.'
+}
+
+/** One risk explanation at the point of action, shared by forms and batch review. */
+export const getUnverifiedActionCopy = (
+  unlistedNotice: string | null | undefined,
+  vaultNames: readonly string[] = [],
+): { title: string, description: string } => {
+  if (unlistedNotice) {
+    return { title: 'Vault not listed', description: `${unlistedNotice} Review the vault checks before continuing.` }
+  }
+  const subject = vaultNames.length ? `This action includes ${vaultNames.join(', ')}. ` : ''
+  return {
+    title: 'Unverified vault',
+    description: `${subject}An unrecognized vault may be used for phishing attempts. Confirm you trust its source before continuing.`,
+  }
 }
 
 export const getCriticalAssessmentWarning = (assessment?: VaultAssessment): VaultWarning | null => {

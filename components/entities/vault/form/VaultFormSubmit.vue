@@ -397,7 +397,7 @@ const handleAddToBatch = () => {
           variant="red"
           @click="openUnverifiedVaultModal"
         >
-          {{ unverifiedVaultGuard?.unlistedNotice ? 'Acknowledge Vault Status' : 'Acknowledge Unverified Vault Risk' }}
+          Review Vault Status
         </UiButton>
       </template>
       <template v-else-if="showDeprecatedDepositFlow">

@@ -3,6 +3,7 @@ import type { VaultAssessment, VaultAssessmentFinding } from '@eulerxyz/euler-v2
 import {
   getCriticalAssessmentWarning,
   getKnownUnlistedActionNotice,
+  getUnverifiedActionCopy,
   getNotListedLine,
   getUpcomingVaultChanges,
   getVaultCheckFindings,
@@ -170,5 +171,13 @@ describe('vault checks presentation', () => {
     expect(getKnownUnlistedActionNotice([address], 'v3', { [address]: { status: 'pending_review' } })).toBe('This vault has not been checked yet, so it is not listed.')
     expect(getKnownUnlistedActionNotice([address], 'static', visibility)).toBeNull()
     expect(getKnownUnlistedActionNotice([address, '0x0000000000000000000000000000000000000002'], 'v3', visibility)).toBeNull()
+  })
+
+  it('gives forms and batch review one non-duplicated action explanation', () => {
+    expect(getUnverifiedActionCopy('These vaults are not listed.').description).toBe(
+      'These vaults are not listed. Review the vault checks before continuing.',
+    )
+    expect(getUnverifiedActionCopy(null, ['Vault A']).description).toContain('Vault A')
+    expect(getUnverifiedActionCopy(null, ['Vault A']).description).toContain('phishing attempts')
   })
 })

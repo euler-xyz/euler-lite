@@ -32,7 +32,7 @@ vi.mock('~/composables/useVaultRegistry', () => ({
 }))
 vi.mock('~/composables/useTokenList', () => ({ getAssetLogoUrl: () => '' }))
 vi.mock('~/composables/useEulerLabels', () => ({
-  useEulerLabels: () => ({ source: ref('static'), visibility: ref({}) }),
+  useEulerLabels: () => ({ isReady: ref(true), source: ref('static'), visibility: ref({}) }),
 }))
 vi.mock('~/components/ui/composables/useToast', () => ({ useToast: () => ({}) }))
 vi.mock('~/utils/errorHandling', () => ({ logWarn: vi.fn() }))
