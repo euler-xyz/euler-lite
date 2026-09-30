@@ -104,7 +104,7 @@ const { getBalance } = useWallets()
 const { runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const vaultAddress = route.params.vault as string
 const { warning: assessmentWarning } = useVaultAssessmentWarning(vaultAddress)
-useOperationGuard([vaultAddress])
+useOperationGuard([vaultAddress], { depositedVaultAddresses: [vaultAddress] })
 const { name } = useEulerProductOfVault(vaultAddress)
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
