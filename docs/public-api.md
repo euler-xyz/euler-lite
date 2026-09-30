@@ -12,26 +12,21 @@ All public endpoints are rate-limited per client IP and return JSON.
 
 Answers whether a given vault address is considered verified by this app — the same verdict the client UI applies before rendering a vault as a known market.
 
-A vault is **verified** through one of two paths:
+A vault is **verified** through one of these paths:
 
 - **Escrow path**: the address appears in the on-chain set returned by `escrowedCollateralPerspective.verifiedArray()` for the chain. Escrow vaults are trusted unconditionally; no product, entity, or governor check applies.
-- **Label + authority path**:
-  - EVK / Securitize vaults must be assigned to a Public Labels V3 product.
-  - The product must declare at least one `entity` key.
-  - The vault's `governorAdmin` must be in the `addresses` map of one of the product's declared entities. If the vault's oracle router has a non-zero governor, that governor must also match.
-  - A product whose `entity` field is empty or omitted is treated as having no on-chain authority to claim the vault — every vault under such a product is unverified, regardless of its `governorAdmin`.
+- **V3 assessment path**: on assessed chains, the published effective visibility verdict is `visible` or `warning` and the vault has a managing entity. `hidden` and `pending_review` vaults are not verified, even when their display metadata is available.
+- **Metadata-only or static path**: without a V3 verdict, the vault must have a qualifying label and the on-chain governor, router governor, or Earn owner must match a declared managing entity, according to the source's verification rules.
 
-Standalone Earn vaults published in the V3 inventory are trusted on the strength of that label. If an Earn vault is assigned to a product, the verifier applies an owner/entity match against that product.
-
-For EVK / Securitize vaults, the same governor check applies to active and deprecated vaults — deprecation does not change the verification rule. The `notExplorable` flag does **not** change verification either: vaults hidden from Explore are still verified.
+Deprecation does not change the verification rule. An independently non-explorable vault can still be verified; a V3 `hidden` visibility verdict cannot.
 
 ### Scope of `is-known`
 
-`is-known` reflects **label / governance consistency only** — that an EVK / Securitize vault's on-chain governor still matches the entity declared by its product label, that an Earn vault is trusted by its Earn label entry, or that the vault is in the on-chain escrow perspective. It does **not** assert:
+`is-known` reflects the source's verification verdict or independent escrow membership. On V3-assessed chains, V3's effective visibility incorporates its own governance consistency decision; Lite does not repeat that check. It does **not** assert:
 
 - smart-contract configuration safety (LTVs, oracle setup, IRM, hooks)
 - absence of risk signals (oracle staleness, asset health, liquidity, market conditions)
-- visibility decisions (whether the vault is shown on lend / borrow / explore pages)
+- discovery eligibility (whether a verified vault is shown on lend / borrow / explore pages)
 
 This endpoint deliberately does not encode configuration-safety or risk-context signals. Integrators that need those signals should consume dedicated risk or market-data endpoints instead of inferring them from `is-known`.
 
@@ -81,7 +76,7 @@ Addresses are validated via viem's `isAddress` (strict EIP-55 checks) and normal
 - **Response header**: `Cache-Control: public, max-age=30, stale-while-revalidate=30`. CDNs and browsers can cache for 30 s and serve stale for another 30 s while revalidating.
 - **Server-side cache**: per-chain in-memory verified set with a 5-minute TTL. A warm-cache process rebuilds every cache entry every 5 minutes on its own schedule (force-refresh, ignores fresh entries), so the cache is always continuously fresh in steady state.
 - **In-flight dedup**: concurrent cold requests for the same chain collapse onto a single upstream pass.
-- **Propagation**: on-chain governor changes and `version=latest` Public Labels updates typically propagate within **~5 minutes**. Public Labels, the vault snapshot, and the verified-set cache are warmed on the same cycle.
+- **Propagation**: Public Labels verdict and publication changes, and on-chain governor changes on fallback sources, typically propagate within **~5 minutes**. Public Labels, the vault snapshot, and the verified-set cache are warmed on the same cycle.
 - **Stale fallback**: during upstream outages, the bridge serves only the last-known-good data within each cache's configured stale ceiling before returning a hard error.
 
 ### Rate limit
@@ -177,7 +172,7 @@ interface VaultMetadata {
     logo: string                             // hosted URL from the Public Labels entity profile
     description: string | null
     url: string | null                       // entity website; only set when http(s) URL
-  }>                                         // empty array when no entity matches (escrow, unverified, or no product); usually 0 or 1 entry, but can be N when a product declares multiple entities that all match the on-chain governor
+  }>                                         // V3 manager on assessed chains, matching on-chain authority on fallback sources; empty for escrow or unverified vaults
 }
 ```
 
@@ -185,22 +180,22 @@ interface VaultMetadata {
 
 Label-derived display fields (`name`, `description`, `portfolioNotice`, `deprecationReason`, `productId`) are sourced from Public Labels V3 regardless of verification state. Vault fields take precedence over product fields. Standalone Earn metadata comes from its V3 inventory row. The on-chain ERC-20 `name` is only a fallback when no published label name is defined.
 
-`entities` identifies every declared product entity whose `addresses` contain the vault's `governorAdmin` (or `owner` for an Earn vault that also appears under a product). A product can declare multiple entity keys, and more than one of those can match — the array preserves the declared-key order. Resolution depends on the vault's verification state:
+`entities` identifies the managing entity supplied by V3 on assessed chains. On metadata-only and static sources, it identifies declared entities whose addresses match the on-chain governor or Earn owner. Resolution depends on the vault's verification state:
 
-- **Verified non-escrow vault** (governor match against at least one declared entity): `entities` contains every matching Public Labels entity profile, including its hosted `logo` URL. Usually 1 entry, but can be N.
-- **Unverified vault** (in labels but governor mismatch, or in a product that declares no entity): `entities` is `[]`. Other label fields (`name`, `description`, `portfolioNotice`, `deprecationReason`, `productId`, `deprecated`) are still populated. `asset` and `type` are also populated.
-- **Standalone Earn vault**: `entities` is `[]`.
+- **Verified non-escrow vault**: `entities` contains the V3 managing entity on assessed chains, or every matching declared entity on fallback sources, including hosted logos.
+- **Unverified vault**: `entities` is `[]`. Other label fields (`name`, `description`, `portfolioNotice`, `deprecationReason`, `productId`, `deprecated`) remain available when published; `asset` and `type` are also populated.
+- **Standalone Earn vault**: V3-assessed rows use their published manager when verified; fallback-source entries without a declared manager return `entities: []`.
 - **Escrow vault** (`escrowedCollateralPerspective.verifiedArray()`): `name` is the constant `"Escrowed collateral"`; all label-derived fields and `productId` are `null`; `entities` is `[]`; `deprecated: false`; `asset` comes from the snapshot when the address is in the referenced subset, otherwise `null`.
 
-The `deprecated` boolean distinguishes deprecated-but-otherwise-fine vaults from genuinely unverified ones. For EVK / Securitize vaults, the same governor check applies to deprecated and active vaults — deprecation only sets the `deprecated` flag and (typically) populates `deprecationReason`.
+The `deprecated` boolean is independent of verification and typically accompanies `deprecationReason`.
 
-Standalone Earn vaults resolve with `description`, `portfolioNotice`, and `deprecationReason` from the V3 inventory row and return `productId: null`, `entities: []`.
+Standalone Earn vaults resolve with `description`, `portfolioNotice`, and `deprecationReason` from the V3 inventory row and return `productId: null`. Verified V3 rows include their published managing entity when available.
 
 #### `entities` is not equivalent to `is-known`
 
 `entities` answers "who manages this vault"; it is independent of `is-known`. An empty `entities` array does **not** mean the vault is unknown — escrow vaults and Earn vaults without a product entry return `entities: []` while still being `is-known: true`.
 
-Use `/api/public/is-known` for the verification verdict. Use the non-`null` / `null` distinction on `/api/public/metadata` for metadata presence. A labeled EVK / Securitize vault with a governor mismatch can return `is-known: false` while still returning non-`null` metadata.
+Use `/api/public/is-known` for the verification verdict. Use the non-`null` / `null` distinction on `/api/public/metadata` for metadata presence. A V3 hidden or pending-review vault, or a fallback-source vault with an authority mismatch, can return `is-known: false` while still returning non-`null` metadata.
 
 ### Errors
 

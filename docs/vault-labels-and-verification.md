@@ -4,7 +4,7 @@ This document explains how euler-lite discovers, categorizes, verifies, and disp
 
 ## Overview
 
-Not all vaults on-chain are equal. Public Labels maps chain-scoped vault addresses to published products, managing entities, display-only co-brands, campaigns, descriptions, tags, and deprecation metadata. Lite combines that published content with on-chain governor checks and its effective visibility data when deciding how a vault is presented.
+Not all vaults on-chain are equal. Public Labels maps chain-scoped vault addresses to published products, managing entities, display-only co-brands, campaigns, descriptions, tags, and deprecation metadata. On V3-assessed chains, Lite uses the effective visibility verdict for verification. Metadata-only and static sources use local governor or owner checks.
 
 ## Label Data Sources
 
@@ -18,7 +18,7 @@ Not all vaults on-chain are equal. Public Labels maps chain-scoped vault address
 | Entity governance addresses | `GET /labels/entities/{entityId}/addresses` |
 | Geo policy records | `GET /geo-policies` |
 
-The adapter also reads `/evk/vaults` and `/earn/vaults` with explicit `visibility=visible,warning,hidden,pending_review`. Trusted label membership requires a visible or warning verdict and a managing entity. Hidden and pending metadata remain available without granting trusted membership. Per-side V3 explorability flags control hosted listing. On-chain governor checks still determine the stronger verification badge.
+The adapter also reads `/evk/vaults` and `/earn/vaults` with explicit `visibility=visible,warning,hidden,pending_review`. Trusted label membership requires a visible or warning verdict and a managing entity. Hidden and pending metadata remain available without granting trusted membership. Per-side V3 explorability flags control hosted listing. The V3 verdict determines the verification badge on assessed chains.
 
 Entity profiles supply hosted logo URLs. A product's `entityId` is its managing entity; `coBrandEntityIds` supplies additional display branding only. Co-brands do not participate in manager ownership, governor verification, or manager-profile market assignment. Neutral escrow inventory rows are not assigned to a product/entity and are not added to the labels-derived verified set.
 
@@ -28,7 +28,7 @@ Oracle adapter identity and health assessments come from Data V3 through the SDK
 
 **Caching and fallback**: The server bundle has a 5-minute chain/version cache, concurrent cold loads share one in-flight fetch, and failures can return a bounded stale bundle. The browser deduplicates chain-scoped loads and rejects superseded responses. Visible tabs check freshness every minute and on focus/visibility changes, requesting a fresh server bundle after five minutes. Same-chain refreshes retain display data; verification becomes unavailable after fifteen minutes without a successful response. Requests time out after 35 seconds. Current hosted membership overrides cached positive registry flags, so refreshed revocations also update verification guards and verified EVault lists. Escrow perspective trust remains independent. An initial failure leaves labels unavailable with a retry action. Retry requests a fresh bundle and reloads vault discovery after labels recover.
 
-**Inventory gaps**: The SDK reads direct V3 visibility for labelled vaults absent from the EVK/Earn inventories, with at most eight requests in flight. This covers Securitize labels without inventing a verdict. Effective lend/borrow listing decisions are preserved, so a visible collateral wrapper may remain hidden from lend discovery. Direct-verdict failures fail the aggregate refresh and use the same bounded stale-snapshot behavior described above. Hosted governor/owner verification still applies separately.
+**Inventory gaps**: The SDK reads direct V3 visibility for labelled vaults absent from the EVK/Earn inventories, with at most eight requests in flight. This covers Securitize labels without inventing a verdict. Effective lend/borrow listing decisions are preserved, so a visible collateral wrapper may remain hidden from lend discovery. Direct-verdict failures fail the aggregate refresh and use the same bounded stale-snapshot behavior described above.
 
 **Address normalization**: All addresses from labels are checksummed via `getAddress()` before storage, ensuring consistent lookups regardless of input casing.
 
@@ -38,7 +38,7 @@ Oracle adapter identity and health assessments come from Data V3 through the SDK
 
 Products provide `entityId`, optional `coBrandEntityIds`, display name, description, URL, portfolio notice, and direct product deprecation metadata. Vault inventory rows provide vault type, product/entity assignment, display metadata, tags, campaigns, and resolved vault deprecation metadata. V3 resolves the display cascade; Lite preserves empty resolved overrides instead of re-inheriting product notices.
 
-Entity rows provide profile text, hosted logos, website/social links, and optional organization details. Lite separately fetches each relevant entity's global governance addresses and checksums them before comparison with on-chain governor addresses.
+Entity rows provide profile text, hosted logos, website/social links, and optional organization details. Lite also fetches each relevant entity's global governance addresses for metadata-only and static verification.
 
 Vault campaigns have a `name`, hosted `logo`, and `type` of `deposit` or `borrow`. Deposit campaigns render beside supply APY and borrow campaigns render beside borrow APY. Campaign badges are informational and do not change reward APR calculations.
 
@@ -94,15 +94,15 @@ Lookup rules:
 
 ### Building the Verified Set
 
-The `useEulerLabels` composable builds a set of verified vault addresses from the labels data: a vault address is added if it appears in any product's `vaults` or `deprecatedVaults` array. This drives the `vault.verified` flag — a precondition for governor verification, but not the full verdict.
+For V3-assessed chains, `useEulerLabels` builds verified membership from visible or warning vaults with a managing entity. The client and `/api/public/is-known` use that membership as the verification verdict. Hidden and pending-review vaults can retain display metadata without becoming verified. Independent on-chain escrow-perspective membership also counts as verified.
 
-The full "is this vault verified?" verdict (used by the UI to render markets, and by the `/api/public/is-known` endpoint) additionally requires the on-chain governor to match a declared entity address. See `utils/vault/governor-verification.ts` for the shared rule, and the "Programmatic verification lookup" section below for the public endpoint.
+Metadata-only and static sources have no V3 visibility verdict. Their verification path matches the on-chain governor, router governor, or Earn owner to the declared managing entity. See `utils/vault/governor-verification.ts` and the "Programmatic verification lookup" section below.
 
 ### Operation warnings and consent
 
-Operation guards verify vaults against the app's selected chain and the shared governor/owner rules. Wallet connection and chain switching remain available before other form gates. While labels or vault metadata are unresolved, operations remain blocked with a loading state or a retry action.
+Operation guards use the selected chain's verification source. Wallet connection and chain switching remain available before other form gates. New exposure waits for verification data or presents a retry action when that data is unavailable. A V3 `pending_review` verdict blocks new deposits and borrows. Existing-position exits remain available during a labels outage.
 
-The Earn deposit page opens its automatic disclaimer only for a resolved unverified vault when the wallet is connected to the selected chain. Clicking Yes dismisses the browsing notice. The form's explicit risk button records the account, chain, operation, and vault-set acknowledgment required by final execution policy. The popup closes when acknowledgment is no longer required or the page unmounts. Final execution policy also requires available verification labels for operations involving vaults.
+Vault pages show status in the page. Forms request explicit, account- and operation-scoped acknowledgment for unverified vault risk and a separate acknowledgment for deposits into deprecated vaults. The final execution policy checks the same requirements.
 
 ### Governance hydration guard (SDK 2.0)
 
@@ -118,9 +118,7 @@ Only a **defined** `governorAdmin` means governance actually resolved. Until the
 
 ### Ungoverned vaults
 
-Vaults with `governorAdmin = address(0)` use the `ungoverned` entity whose governance-address set contains the zero address. A product managed by that entity follows the same governor matching rule as any other product. The UI shows the "Ungoverned" governance type chip independently from entity matching, based directly on `governorAdmin === zeroAddress`.
-
-This keeps the bridge endpoint verification aligned with the UI: label/entity matching proves the vault is governed by the declared entity, while the "Ungoverned" presentation signal comes directly from the on-chain `governorAdmin` value.
+The UI shows "Ungoverned" from the on-chain zero governor (`governorAdmin` for EVK, `governor` for Securitize), independently of the verification verdict. Metadata-only and static sources still apply their entity-address check for verification.
 
 ### How `vault.verified` Is Set
 
@@ -273,12 +271,12 @@ These labels appear in address fields across all vault overview types (EVK, Earn
 
 ## Programmatic verification lookup
 
-External consumers that only need a yes/no answer for a vault address can call the public [`GET /api/public/is-known`](./public-api.md#get-apipublicis-known) endpoint instead of loading the full label set. This server endpoint uses the same normalized Public Labels bundle as the UI plus the on-chain `escrowedCollateralPerspective`, applies governor / router-governor / owner verification, and answers batches of up to 100 addresses per request. The same governor check applies to deprecated and active vaults. Escrow vaults from the on-chain perspective and standalone Earn entries are trusted unconditionally.
+External consumers that only need a yes/no answer for a vault address can call the public [`GET /api/public/is-known`](./public-api.md#get-apipublicis-known) endpoint instead of loading the full label set. It uses V3 verified membership on assessed chains, the governor / router-governor / owner check on metadata-only and static sources, and independent on-chain `escrowedCollateralPerspective` membership. It answers batches of up to 100 addresses per request. Deprecation does not change the verification verdict.
 
 Consumers that need display metadata (resolved name, description, governing entity, asset) on top of the verification verdict can call [`GET /api/public/metadata`](./public-api.md#get-apipublicmetadata), which applies the same labels / override / verification rules the client UI uses and returns a uniform shape across EVK, Securitize, and Earn vaults.
 
 
-Hosted full verification resolves the managing entity from the V3 vault row, including standalone Earn vaults. Missing manager data yields an empty authority set, so a visible/warning inventory entry alone cannot grant an owner-verification badge. Both client and public APIs apply this rule. Static Earn labels preserve their authored membership semantics. Hosted on-chain governor/owner checks remain in place until the verification bake justifies delegation to V3.
+On assessed chains, V3 supplies the managing entity and effective visibility verdict, including for standalone Earn vaults. A visible or warning row without a manager does not grant verified membership. Both client and public APIs apply this rule. Static Earn labels preserve their authored membership semantics.
 
 ## Archived chains: V3 metadata with on-chain verification
 

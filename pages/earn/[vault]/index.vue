@@ -10,14 +10,12 @@ import { formatNumber } from '~/utils/string-utils'
 import { isNativeCurrencyAddress } from '~/utils/native-currency'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import type { Address } from 'viem'
-import { VaultUnverifiedDisclaimerModal, VaultApyModal } from '#components'
+import { VaultApyModal } from '#components'
 
 const router = useRouter()
 const route = useRoute()
-const modal = useModal()
 const { error } = useToast()
 const { planDeposit } = useEulerTx()
 const { create: createIntent } = useOperationIntentFactory()
@@ -26,7 +24,7 @@ const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
 const { getEarnVault, updateEarnVault } = useVaults()
-const { isConnected, address, chainId: walletChainId } = useWagmi()
+const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { chainId } = useEulerAddresses()
 const { primeSlotHintsFor } = useStateOverrideOptions()
@@ -41,10 +39,7 @@ const { getBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const vaultAddress = route.params.vault as string
 const { warning: assessmentWarning } = useVaultAssessmentWarning(vaultAddress, 'earn')
-const { visibility: vaultVisibility, source: labelsSource } = useEulerLabels()
-const isKnownUnlisted = computed(() => labelsSource.value === 'v3'
-  && ['hidden', 'pending_review'].includes(vaultVisibility.value?.[vaultAddress.toLowerCase()]?.status ?? ''))
-const { unverifiedVaultGuard } = useOperationGuard([vaultAddress])
+useOperationGuard([vaultAddress])
 const { name } = useEulerProductOfVault(vaultAddress)
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -110,32 +105,6 @@ const refreshEarnVault = async (address: string, silent = false) => {
     logWarn('[earn] failed to load vault', e)
   }
 })()
-let warningModalId: number | undefined
-watch(
-  () => !!vault.value && isConnected.value && walletChainId.value === chainId.value
-    && unverifiedVaultGuard.isAcknowledgmentRequired && !isKnownUnlisted.value,
-  (required) => {
-    if (required && warningModalId === undefined) {
-      warningModalId = modal.open(VaultUnverifiedDisclaimerModal, {
-        isNotClosable: true,
-        onClose: () => { warningModalId = undefined },
-        props: {
-          // The form collects risk acknowledgment separately from this browsing notice.
-          cancelAction: () => router.replace('/'),
-        },
-      })
-    }
-    else if (!required && warningModalId !== undefined) {
-      modal.close(warningModalId)
-      warningModalId = undefined
-    }
-  },
-  { immediate: true },
-)
-onUnmounted(() => {
-  if (warningModalId !== undefined) modal.close(warningModalId)
-})
-
 const errorText = computed(() => {
   if (balance.value < valueToNano(amount.value, asset.value?.decimals)) {
     return 'Not enough balance'
