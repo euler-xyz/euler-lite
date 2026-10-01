@@ -15,7 +15,7 @@ import { describe, it, expect } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { H3Event } from 'h3'
-import { buildCsp } from '~/server/plugins/csp'
+import { buildCsp, cspConnectOrigin, parseExtraConnectSrc } from '~/server/plugins/csp'
 import { applySecurityHeaders } from '~/server/middleware/security-headers'
 import { ANTI_CLICKJACK_SCRIPT } from '~/server/plugins/00-anti-clickjack'
 import { escapeScriptJson } from '~/server/plugins/app-config'
@@ -203,6 +203,46 @@ describe('server logging and inline-config invariants', () => {
     for (const file of ['server/plugins/app-config.ts', 'server/plugins/chain-config.ts']) {
       const source = readFileSync(join(process.cwd(), file), 'utf8')
       expect(source).toContain('escapeScriptJson(')
+    }
+  })
+})
+
+const directive = (csp: string, name: string) => csp.split(';').map(d => d.trim()).find(d => d.startsWith(`${name} `))
+const sources = (csp: string, name: string) => directive(csp, name)?.split(' ').slice(1) ?? []
+
+describe('the script and frame policy against an injected third-party script', () => {
+  const csp = buildCsp('n0nce', [], { connect: [] }, [])
+
+  it('runs only nonce-bearing scripts and what they load: no inline, no eval, no other origin', () => {
+    expect(sources(csp, 'script-src')).toEqual([
+      '\'self\'',
+      '\'nonce-n0nce\'',
+      '\'strict-dynamic\'',
+      '\'wasm-unsafe-eval\'',
+      'https://static.cloudflareinsights.com',
+    ])
+    expect(sources(csp, 'script-src')).not.toContain('\'unsafe-inline\'')
+    expect(sources(csp, 'script-src')).not.toContain('\'unsafe-eval\'')
+  })
+
+  it('lets a deployment widen connect-src only, never script-src, and only with encrypted origins', () => {
+    const widened = buildCsp('n0nce', ['https://extra.example'], { connect: ['https://swap.example'] }, ['https://rpc.example'])
+    expect(sources(widened, 'script-src')).toEqual(sources(csp, 'script-src'))
+    expect(sources(widened, 'connect-src')).toEqual(expect.arrayContaining(['https://extra.example', 'https://swap.example', 'https://rpc.example']))
+    expect(cspConnectOrigin('https://api.example/v1/path?q=1')).toBe('https://api.example')
+    expect(cspConnectOrigin('wss://relay.example')).toBe('wss://relay.example')
+    expect(cspConnectOrigin('https://*.example.com')).toBe('https://*.example.com')
+    for (const refused of ['http://api.example', 'ws://relay.example', 'javascript:alert(1)', 'data:text/html,x', 'https://a.example; script-src *', ' ', undefined]) {
+      expect(cspConnectOrigin(refused), String(refused)).toBeNull()
+    }
+    const before = process.env.CSP_EXTRA_CONNECT_SRC
+    process.env.CSP_EXTRA_CONNECT_SRC = 'https://ok.example/path, http://plain.example, https://ok.example, wss://socket.example'
+    try {
+      expect(parseExtraConnectSrc()).toEqual(['https://ok.example', 'wss://socket.example'])
+    }
+    finally {
+      if (before === undefined) delete process.env.CSP_EXTRA_CONNECT_SRC
+      else process.env.CSP_EXTRA_CONNECT_SRC = before
     }
   })
 })

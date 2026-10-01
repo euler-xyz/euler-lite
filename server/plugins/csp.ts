@@ -29,26 +29,31 @@ const CONNECT_SRC_DEV = [
 ]
 
 /**
- * Extra connect-src origins (comma-separated).
- * Use CSP_EXTRA_CONNECT_SRC to allow additional origins per deployment
- * on top of the built-in and dev-only lists.
+ * The origin of a URL a deployment configures, for connect-src only: an
+ * encrypted (https or wss) URL reduced to scheme, host and port, so a value
+ * can never carry a path, a second source or a directive into the policy.
  */
-function parseExtraConnectSrc(): string[] {
-  const raw = process.env.CSP_EXTRA_CONNECT_SRC?.trim()
-  if (!raw) return []
-  return raw.split(',').map(s => s.trim()).filter(Boolean)
-}
-
-/** Extract the origin (scheme + host + port) from a URL string. */
-function safeOrigin(raw: string | undefined): string | null {
+export function cspConnectOrigin(raw: string | undefined): string | null {
   const trimmed = raw?.trim()
   if (!trimmed) return null
   try {
-    return new URL(trimmed).origin
+    const url = new URL(trimmed)
+    return url.protocol === 'https:' || url.protocol === 'wss:' ? url.origin : null
   }
   catch {
     return null
   }
+}
+
+/**
+ * Extra connect-src origins (comma-separated).
+ * Use CSP_EXTRA_CONNECT_SRC to allow additional origins per deployment
+ * on top of the built-in and dev-only lists.
+ */
+export function parseExtraConnectSrc(): string[] {
+  const raw = process.env.CSP_EXTRA_CONNECT_SRC?.trim()
+  if (!raw) return []
+  return [...new Set(raw.split(',').map(cspConnectOrigin).filter((origin): origin is string => origin !== null))]
 }
 
 /** Read an env var with fallback names (mirrors app-config.ts resolution order). */
@@ -93,7 +98,7 @@ function parseChainPublicRpcOrigins(): string[] {
     const chain = chainById.get(Number(match[1]))
     const urls = chain?.rpcUrls?.default?.http ?? []
     for (const url of urls) {
-      const origin = safeOrigin(url)
+      const origin = cspConnectOrigin(url)
       if (origin) origins.add(origin)
     }
   }
@@ -111,7 +116,7 @@ function parseEnvOrigins(): { connect: string[] } {
     ...scanDynamicEnvUrls(),
   ]
 
-  const connect = [...new Set(connectVars.map(safeOrigin).filter(Boolean))] as string[]
+  const connect = [...new Set(connectVars.map(cspConnectOrigin).filter(Boolean))] as string[]
   return { connect }
 }
 
