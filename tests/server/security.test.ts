@@ -15,7 +15,7 @@ import { describe, it, expect } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { H3Event } from 'h3'
-import { buildCsp, cspConnectOrigin, parseExtraConnectSrc } from '~/server/plugins/csp'
+import cspPlugin, { buildCsp, cspConnectOrigin, parseExtraConnectSrc } from '~/server/plugins/csp'
 import { applySecurityHeaders } from '~/server/middleware/security-headers'
 import { ANTI_CLICKJACK_SCRIPT } from '~/server/plugins/00-anti-clickjack'
 import { escapeScriptJson } from '~/server/plugins/app-config'
@@ -253,5 +253,69 @@ describe('the script and frame policy against an injected third-party script', (
     expect(sources(csp, 'base-uri')).toEqual(['\'self\''])
     expect(sources(csp, 'form-action')).toEqual(['\'self\''])
     expect(sources(csp, 'worker-src')).toEqual(['\'none\''])
+  })
+
+  it('enforces the policy, with no report-only header and no report endpoint', () => {
+    expect(csp).not.toMatch(/report-uri|report-to/)
+    const plugin = readFileSync('server/plugins/csp.ts', 'utf8')
+    expect(plugin).toContain('setResponseHeader(event, \'Content-Security-Policy\',')
+    expect(plugin).not.toContain('Content-Security-Policy-Report-Only')
+  })
+})
+
+describe('the per-response nonce', () => {
+  const render = () => {
+    let hook: ((html: Record<string, string[]>, context: { event: H3Event }) => void) | null = null
+    const register = (_name: string, callback: typeof hook) => {
+      hook = callback
+    }
+    ;(cspPlugin as unknown as (app: unknown) => void)({ hooks: { hook: register } })
+    const headers: Record<string, string> = {}
+    const setHeader = (name: string, value: string) => {
+      headers[name] = value
+    }
+    const event = { node: { req: {}, res: { setHeader } } } as unknown as H3Event
+    const html = {
+      body: ['<div id="__nuxt"></div><script type="module" src="/_nuxt/entry.js"></script>'],
+      bodyAppend: ['<script>window.__appended=1</script>'],
+      bodyAttrs: [],
+      bodyPrepend: ['<script>window.__prepended=1</script>'],
+      head: ['<script>window.__APP_CONFIG__={}</script>'],
+      htmlAttrs: [],
+      island: [],
+    }
+    hook!(html, { event })
+    return { headers, html }
+  }
+
+  it('is fresh for every response, at least 16 random bytes, and set on every script tag the page carries', () => {
+    const first = render()
+    const second = render()
+    const nonceOf = (csp: string) => /'nonce-([^']+)'/.exec(csp)?.[1] ?? ''
+    const nonce = nonceOf(first.headers['Content-Security-Policy']!)
+    expect(nonce).not.toBe(nonceOf(second.headers['Content-Security-Policy']!))
+    expect(Buffer.from(nonce, 'base64').length).toBeGreaterThanOrEqual(16)
+    for (const section of ['head', 'body', 'bodyPrepend', 'bodyAppend'] as const) {
+      for (const chunk of first.html[section]!) {
+        expect(chunk.split(`<script nonce="${nonce}"`).length, section).toBe(chunk.split(/<script(?=[\s>])/).length)
+      }
+    }
+  })
+
+  it('is never served twice from a cache: every page response is no-store for the browser and the CDN', () => {
+    const config = readFileSync('nuxt.config.ts', 'utf8')
+    const catchAll = config.slice(config.indexOf('\'/**\': {'))
+    expect(catchAll).toMatch(/'Cache-Control': 'no-store, no-cache, must-revalidate'/)
+    expect(catchAll).toMatch(/'CDN-Cache-Control': 'no-store'/)
+    expect(catchAll).toMatch(/'Cloudflare-CDN-Cache-Control': 'no-store'/)
+    expect(config).not.toMatch(/\b(swr|isr|prerender):/)
+  })
+
+  it('loads no external script or stylesheet that would need subresource integrity', () => {
+    for (const file of ['nuxt.config.ts', 'app.vue']) {
+      const source = readFileSync(file, 'utf8')
+      expect(source, file).not.toMatch(/src:\s*'https?:\/\//)
+      expect(source, file).not.toMatch(/rel:\s*'stylesheet'/)
+    }
   })
 })
