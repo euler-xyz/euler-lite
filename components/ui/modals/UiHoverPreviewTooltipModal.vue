@@ -47,6 +47,7 @@ const {
     <div
       v-else
       class="text-p3 text-content-primary"
+      style="white-space: pre-line"
     >
       {{ text }}
     </div>

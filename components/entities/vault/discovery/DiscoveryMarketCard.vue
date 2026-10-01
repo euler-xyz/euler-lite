@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { isEulerEarn, isEVault, type VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
 import type { MarketGroup } from '~/entities/lend-discovery'
 import { formatCompactUsdValue, formatNumber, stringToColor } from '~/utils/string-utils'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
@@ -12,7 +11,7 @@ import {
 } from '~/utils/discoveryCalculations'
 import { useBestMaxROE } from '~/composables/useBestMaxROE'
 import { getUniqueEntitiesByVaults, getVaultDeprecation } from '~/utils/eulerLabelsUtils'
-import { getVaultCheckFindings } from '~/utils/vault-assessment/presentation'
+import { useDiscoveryVaultWarningDetails } from '~/composables/useDiscoveryVaultWarningDetails'
 import { VaultMaxRoeModal, UiModalPreviewTrigger } from '#components'
 
 const props = defineProps<{
@@ -24,15 +23,13 @@ defineEmits<{
   toggle: []
 }>()
 
-const { products, isReady, source, visibility, loadError, vaultAssessments, getVaultAssessmentEntry, loadVaultAssessment } = useEulerLabels()
+const { products, isReady, source, visibility } = useEulerLabels()
+const { getWarningText, loadWarningDetails } = useDiscoveryVaultWarningDetails()
 const disclosureEntities = computed(() => props.market.curator
   ? [props.market.curator]
   : getUniqueEntitiesByVaults(props.market.vaults))
 const bestRoeMarketGroups = computed(() => [props.market])
 const { getBestMaxROE } = useBestMaxROE(bestRoeMarketGroups)
-const getAssessmentFamily = (vault: MarketGroup['vaults'][number]): VaultAssessmentFamily | null =>
-  isEulerEarn(vault) ? 'earn' : isEVault(vault) ? 'evk' : null
-
 const warningVaults = computed(() => {
   if (!isReady.value || source.value !== 'v3') return []
   const seen = new Set<string>()
@@ -47,32 +44,14 @@ const warningVaults = computed(() => {
   })
 })
 
-const marketWarnings = computed(() => {
-  void vaultAssessments.value
-  return warningVaults.value.map(({ vault, reason }) => {
-    const family = getAssessmentFamily(vault)
-    const entry = family && !loadError.value
-      ? getVaultAssessmentEntry(vault.chainId, vault.address, family)
-      : undefined
-    const findings = entry?.status === 'available' && entry.assessment?.assessed
-      ? getVaultCheckFindings(entry.assessment)
-      : undefined
-    const lines = findings?.lines.map(finding => `• ${finding.text}`) ?? []
-    if (lines.length && findings?.moreCount) lines.push(`• ${findings.moreCount} more not shown`)
-    return {
-      title: vault.asset.symbol,
-      text: lines.length ? lines.join('\n') : reason || 'One or more vault checks need review.',
-    }
-  })
-})
+const marketWarnings = computed(() => warningVaults.value.map(({ vault, reason }) => ({
+  title: vault.asset.symbol,
+  text: getWarningText(vault, reason || 'One or more vault checks need review.'),
+})))
 
 const loadMarketWarningDetails = () => {
-  if (loadError.value) return
   for (const { vault } of warningVaults.value) {
-    const family = getAssessmentFamily(vault)
-    if (family && getVaultAssessmentEntry(vault.chainId, vault.address, family).status === 'idle') {
-      void loadVaultAssessment(vault.chainId, vault.address, family)
-    }
+    loadWarningDetails(vault)
   }
 }
 
