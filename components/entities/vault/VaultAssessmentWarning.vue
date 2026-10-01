@@ -43,7 +43,6 @@ const warning = computed(() => {
   >
     <span
       class="inline-flex items-center gap-4 rounded-8 bg-warning-100 px-8 py-2 text-p5 text-warning-500"
-      :title="warning.description"
       data-id="vault-assessment-warning"
       :data-vault-address="address.toLowerCase()"
       :data-warning-reason="verdict?.decidedBy"
