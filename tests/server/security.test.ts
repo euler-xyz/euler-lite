@@ -245,13 +245,29 @@ describe('the script and frame policy against an injected third-party script', (
     }
   })
 
-  it('frames only WalletConnect\'s verify page, and allows no worker or other embedded content, base or form target', () => {
-    expect(sources(csp, 'frame-src')).toEqual(['https://verify.walletconnect.org', 'https://verify.walletconnect.com'])
+  it('frames only WalletConnect\'s Verify attestation page, and allows no worker or other embedded content, base or form target', () => {
+    expect(sources(csp, 'frame-src')).toEqual(['https://verify.walletconnect.org'])
     expect(sources(csp, 'child-src')).toEqual(['\'none\''])
     expect(sources(csp, 'object-src')).toEqual(['\'none\''])
     expect(sources(csp, 'base-uri')).toEqual(['\'self\''])
     expect(sources(csp, 'form-action')).toEqual(['\'self\''])
     expect(sources(csp, 'worker-src')).toEqual(['\'none\''])
+  })
+
+  it('names only origins the browser contacts directly, before any deployment-configured origin', () => {
+    expect(sources(csp, 'connect-src')).toEqual([
+      '\'self\'',
+      'https://api.web3modal.org',
+      'https://rpc.walletconnect.org',
+      'wss://relay.walletconnect.org',
+      'https://pulse.walletconnect.org',
+      'https://registry.npmjs.org',
+      'https://cca-lite.coinbase.com',
+      'wss://www.walletlink.org',
+      'https://api.4byte.sourcify.dev',
+      'https://api.cow.fi',
+    ])
+    expect(sources(csp, 'font-src')).toEqual(['\'self\'', 'https://fonts.reown.com'])
   })
 
   it('enforces the policy, with no report-only header and no report endpoint', () => {
