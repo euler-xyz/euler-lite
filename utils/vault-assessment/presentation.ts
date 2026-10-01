@@ -33,8 +33,7 @@ const isCountedRule = (key: string): boolean =>
 
 const groupKey = (key: string) => key.replace(/^collateral\.[^.]+\./, 'collateral.*.')
 const relevantFinding = (finding: VaultAssessmentFinding) =>
-  (finding.outcome === 'fail' || (finding.outcome === 'unknown' && finding.required))
-  && !finding.exempted
+  (finding.outcome === 'fail' || (finding.outcome === 'unknown' && finding.required && !finding.exempted))
   && !finding.key.startsWith('evidence.')
   && !finding.key.startsWith('scheduled.')
   && finding.key !== 'oracle.adapters-recognized'
