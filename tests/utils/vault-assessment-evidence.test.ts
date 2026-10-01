@@ -49,6 +49,18 @@ describe('vault assessment evidence', () => {
     expect(getEarnAllocatorAddresses(assessment)).toEqual([owner, signer])
   })
 
+  it('includes V3 unprobed allocator addresses', () => {
+    const assessment = assessmentWith([{
+      key: 'evidence.multisig',
+      observed: {
+        allocators: [{ address: owner, safe: null }],
+        unprobedAllocators: [signer.toLowerCase(), owner.toLowerCase(), 'invalid'],
+      },
+    }])
+    expect(getEarnAllocatorAddresses(assessment)).toEqual([owner, signer])
+    expect(getAssessmentSafeEvidence(assessment, signer)).toBeUndefined()
+  })
+
   it('distinguishes a confirmed non-Safe from absent or malformed evidence', () => {
     const assessment = assessmentWith([{
       key: 'evidence.multisig',

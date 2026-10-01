@@ -66,10 +66,14 @@ export const getAssessmentSafeEvidence = (
 
 export const getEarnAllocatorAddresses = (assessment: VaultAssessment | undefined): Address[] => {
   const observed = record(getAssessmentFinding(assessment, 'evidence.multisig')?.observed)
-  if (!observed || !Array.isArray(observed.allocators)) return []
-  return [...new Set(observed.allocators
-    .map(record)
-    .map(role => role?.address)
+  if (!observed) return []
+  const probed = Array.isArray(observed.allocators) ? observed.allocators : []
+  const unprobed = Array.isArray(observed.unprobedAllocators) ? observed.unprobedAllocators : []
+  const addresses = [
+    ...probed.map(record).map(role => role?.address),
+    ...unprobed,
+  ]
+  return [...new Set(addresses
     .filter((address): address is string => typeof address === 'string' && isAddress(address))
     .map(address => getAddress(address)))]
 }
