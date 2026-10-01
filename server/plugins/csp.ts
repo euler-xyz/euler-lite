@@ -28,12 +28,16 @@ const chainById = new Map<number, AppKitNetwork>(
  * encrypted (https or wss) URL reduced to scheme, host and port, so a value
  * can never carry a path, a second source or a directive into the policy.
  */
+// The URL parser keeps ';', ',' and quotes in a hostname (also when percent-encoded), and any of
+// them would end the source or the directive, so only a plain host and port is accepted.
+const CSP_CONNECT_ORIGIN = /^(?:https|wss):\/\/(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*(?::\d{1,5})?$/
+
 export function cspConnectOrigin(raw: string | undefined): string | null {
   const trimmed = raw?.trim()
   if (!trimmed) return null
   try {
-    const url = new URL(trimmed)
-    return url.protocol === 'https:' || url.protocol === 'wss:' ? url.origin : null
+    const { origin } = new URL(trimmed)
+    return CSP_CONNECT_ORIGIN.test(origin) ? origin : null
   }
   catch {
     return null

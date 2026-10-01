@@ -231,11 +231,13 @@ describe('the script and frame policy against an injected third-party script', (
     expect(cspConnectOrigin('https://api.example/v1/path?q=1')).toBe('https://api.example')
     expect(cspConnectOrigin('wss://relay.example')).toBe('wss://relay.example')
     expect(cspConnectOrigin('https://*.example.com')).toBe('https://*.example.com')
-    for (const refused of ['http://api.example', 'ws://relay.example', 'javascript:alert(1)', 'data:text/html,x', 'https://a.example; script-src *', ' ', undefined]) {
+    expect(cspConnectOrigin('https://rpc.example:8443/v1')).toBe('https://rpc.example:8443')
+    expect(cspConnectOrigin('https://bücher.example')).toBe('https://xn--bcher-kva.example')
+    for (const refused of ['http://api.example', 'ws://relay.example', 'javascript:alert(1)', 'data:text/html,x', 'https://a.example; script-src *', 'https://a.example;frame-src', 'https://a.example%3Bframe-src', 'https://a.example,b.example', 'https://a.example\'x', ' ', undefined]) {
       expect(cspConnectOrigin(refused), String(refused)).toBeNull()
     }
     const before = process.env.CSP_EXTRA_CONNECT_SRC
-    process.env.CSP_EXTRA_CONNECT_SRC = 'https://ok.example/path, http://plain.example, https://ok.example, wss://socket.example'
+    process.env.CSP_EXTRA_CONNECT_SRC = 'https://ok.example/path, http://plain.example, https://ok.example, wss://socket.example, https://a.example;frame-src'
     try {
       expect(parseExtraConnectSrc()).toEqual(['https://ok.example', 'wss://socket.example'])
     }
