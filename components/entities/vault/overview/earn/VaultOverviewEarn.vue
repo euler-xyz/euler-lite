@@ -41,6 +41,7 @@ const { vault } = defineProps<{ vault: EulerEarn, desktopOverview?: boolean }>()
 
     <VaultOverviewBlockVaultChecks
       :address="vault.address"
+      :asset="vault.asset"
       family="earn"
       :default-open="false"
     />

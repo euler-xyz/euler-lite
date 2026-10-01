@@ -1,5 +1,6 @@
 import type { VaultAssessment, VaultAssessmentFinding } from '@eulerxyz/euler-v2-sdk'
 import type { VaultWarning } from '~/composables/useVaultWarnings'
+import { formatExactAmount } from '~/utils/string-utils'
 
 export interface VaultCheckLine {
   key: string
@@ -98,7 +99,43 @@ export const getVaultChecksStatusLine = (
     : 'Verified'
 }
 
-export const getUpcomingVaultChanges = (assessment: VaultAssessment): UpcomingVaultChange[] => {
+const formatPendingTimelock = (value: string): string => {
+  if (!/^\d+$/.test(value)) return value
+  const seconds = BigInt(value)
+  for (const [unit, duration] of [['day', 86400n], ['hour', 3600n], ['minute', 60n]] as const) {
+    if (seconds >= duration && seconds % duration === 0n) {
+      const count = seconds / duration
+      return `${count} ${unit}${count === 1n ? '' : 's'}`
+    }
+  }
+  return `${seconds} second${seconds === 1n ? '' : 's'}`
+}
+
+const formatScheduledPending = (
+  finding: VaultAssessmentFinding,
+  pending: unknown,
+  asset?: { decimals: number, symbol?: string },
+): string => {
+  if (finding.key === 'scheduled.governance.timelock' && typeof pending === 'string') {
+    return `timelock ${formatPendingTimelock(pending)}`
+  }
+  if (pending && typeof pending === 'object' && !Array.isArray(pending)) {
+    const value = pending as Record<string, unknown>
+    if (typeof value.cap === 'string' && /^\d+$/.test(value.cap)) {
+      return `cap ${asset ? formatExactAmount(BigInt(value.cap), asset.decimals, asset.symbol) : `${value.cap} base units`}`
+    }
+    for (const key of ['owner', 'strategy', 'collateral']) {
+      if (typeof value[key] === 'string') return `${key} ${value[key]}`
+    }
+    return ''
+  }
+  return typeof pending === 'string' || typeof pending === 'number' ? String(pending) : ''
+}
+
+export const getUpcomingVaultChanges = (
+  assessment: VaultAssessment,
+  asset?: { decimals: number, symbol?: string },
+): UpcomingVaultChange[] => {
   if (assessment.family !== 'earn') return []
   return [
     ...(assessment.configContext?.findings ?? []),
@@ -112,10 +149,10 @@ export const getUpcomingVaultChanges = (assessment: VaultAssessment): UpcomingVa
       const date = validAt && Number.isFinite(Date.parse(validAt))
         ? new Date(validAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' })
         : null
-      const pending = observed.pendingValue ?? observed.value
+      const pending = formatScheduledPending(finding, observed.pending, asset)
       const summary = (finding.cause?.summary || finding.description)
         .replace(/^Pending change, acceptable from [^:]+:\s*/i, '')
-      const parts = [date ? `from ${date}` : '', pending === undefined ? '' : String(pending), summary]
+      const parts = [date ? `from ${date}` : '', pending, summary]
         .filter(Boolean)
       return {
         key: finding.key,
