@@ -25,5 +25,9 @@ defineProps<{ pair: AnyBorrowVaultPair | PortfolioBorrowPosition<VaultEntity>, d
       :collateral-vaults="collateralVaults?.length ? collateralVaults : [getPairCollateralVault(pair)]"
       :default-open="false"
     />
+    <VaultOverviewBlockVaultChecks
+      :address="getPairBorrowVault(pair).address"
+      :default-open="false"
+    />
   </div>
 </template>

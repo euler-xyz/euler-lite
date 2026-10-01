@@ -7,7 +7,6 @@ import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerEntitiesOfVault, useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { getProductByVault, getProductKeyByVault, isVaultGovernanceLimited } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
-import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { autoLink } from '~/utils/autoLink'
 import { formatMarketAvailability } from '~/utils/vault-display'
 import { isVaultBorrowable } from '~/utils/vault/classification'
@@ -46,11 +45,6 @@ const description = computed(() => {
   return product.vaultOverrides?.[vaultAddress.value]?.description ?? product.description
 })
 
-const isDeprecated = computed(() => {
-  return product.deprecatedVaults?.includes(vaultAddress.value) ?? false
-})
-const deprecationReason = computed(() => isDeprecated.value ? product.deprecationReason || '' : '')
-const isRestricted = computed(() => isVaultBlockedByCountry(vault.address))
 const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
 
 // Count how many borrow pairs have this vault as the liability (borrow) side
@@ -150,24 +144,7 @@ watchEffect(() => {
     :default-open="defaultOpen"
     content-class="flex flex-col gap-20"
   >
-    <VaultDeprecationBanner
-      v-if="isDeprecated"
-      :reason="deprecationReason"
-    />
-    <div
-      v-if="isRestricted"
-      class="w-full rounded-12 p-16 bg-warning-100 text-warning-500"
-    >
-      <div class="flex items-center gap-8">
-        <SvgIcon
-          name="warning"
-          class="!w-20 !h-20 flex-shrink-0"
-        />
-        <p class="text-p3 text-warning-500">
-          This vault is not available in your region.
-        </p>
-      </div>
-    </div>
+    <VaultDeprecationBanner :addresses="[vault.address]" />
     <!-- eslint-disable vue/no-v-html -- autoLink escapes label text before adding links -->
     <p
       v-if="description"

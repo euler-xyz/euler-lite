@@ -89,7 +89,7 @@ const buildLendStateOverrideOptions = () => buildStateOverrideOptions({ noBalanc
 const lendPluginPrefetch: PluginPrefetchData = { pyth: { entries: [] } }
 const getLendPluginPrefetch = async (): Promise<PluginPrefetchData> => lendPluginPrefetch
 const { getVault, getSecuritizeVault, getEscrowVault, updateVault, isEscrowLoadedOnce, isMarketDataResolved } = useVaults()
-const { isReady: isLabelsReady } = useEulerLabels()
+const { isReady: isLabelsReady, visibility: vaultVisibility, source: labelsSource } = useEulerLabels()
 const { get: registryGet, getVault: _registryGetVault, isKnownEscrowAddress } = useVaultRegistry()
 const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
 const { chainId } = useEulerAddresses()
@@ -103,6 +103,9 @@ const shareLinkQuery = computed(() => {
 const { getBalance } = useWallets()
 const { runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const vaultAddress = route.params.vault as string
+const { warning: assessmentWarning } = useVaultAssessmentWarning(vaultAddress)
+const isKnownUnlisted = computed(() => labelsSource.value === 'v3'
+  && ['hidden', 'pending_review'].includes(vaultVisibility.value?.[vaultAddress.toLowerCase()]?.status ?? ''))
 useOperationGuard([vaultAddress])
 const { name } = useEulerProductOfVault(vaultAddress)
 const { settings } = useUserSettings()
@@ -419,6 +422,7 @@ const buildProjectedSupplyDetails = (rawApy: number): ProjectedYieldDetails | nu
 const lendWarnings = computed(() => {
   if (!eVault.value) return []
   return [
+    assessmentWarning.value,
     getHookDisabledWarning(eVault.value, OP_DEPOSIT),
     getUtilisationWarning(eVault.value, 'lend'),
     getSupplyCapWarning(eVault.value),
@@ -448,7 +452,7 @@ const load = async () => {
     }
 
     // Show warning modal for any unverified vault
-    if (!isVaultVerified.value) {
+    if (!isVaultVerified.value && !isKnownUnlisted.value) {
       modal.open(VaultUnverifiedDisclaimerModal, {
         isNotClosable: true,
         props: {

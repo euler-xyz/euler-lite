@@ -10,7 +10,7 @@ import {
   useEulerLabels,
 } from '~/composables/useEulerLabels'
 import type { PublicLabelsBundle } from '~/utils/public-labels'
-import { isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
+import { getVaultDeprecation, isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
 
 type Deferred<T> = {
   promise: Promise<T>
@@ -61,7 +61,7 @@ vi.mock('~/composables/useEulerOracleAdapters', () => ({
 }))
 
 vi.mock('~/composables/useVaults', () => ({
-  useVaults: () => ({ isReady: { value: true } }),
+  useVaults: () => ({ isReady: { value: true }, loadVaults: mocks.loadVaults }),
 }))
 
 vi.mock('~/composables/useVaultRegistry', () => ({
@@ -123,6 +123,32 @@ describe('useEulerLabels chain-scoped loading', () => {
 
   afterAll(() => {
     vi.unstubAllGlobals()
+  })
+
+  it('resolves EVK and Earn deprecation with their bundle reasons', () => {
+    const evk = '0x0000000000000000000000000000000000000001'
+    const earn = '0x0000000000000000000000000000000000000002'
+    const productReasonVault = '0x0000000000000000000000000000000000000003'
+    __setEulerLabelsDataForTest({
+      products: {
+        activeProduct: {
+          vaults: [evk],
+          deprecatedVaults: [],
+          deprecationReason: 'Another product reason.',
+        },
+        product: {
+          vaults: [evk, productReasonVault],
+          deprecatedVaults: [evk, productReasonVault],
+          deprecationReason: 'The EVK is deprecated.',
+          vaultOverrides: { [evk]: { deprecationReason: 'This EVK was deprecated for a specific reason.' } },
+        },
+      } as unknown as EulerLabelsData['products'],
+      deprecatedEarnVaults: { [earn.toLowerCase()]: 'The Earn vault is deprecated.' },
+    })
+    expect(getVaultDeprecation(evk)).toEqual({ deprecated: true, reason: 'This EVK was deprecated for a specific reason.' })
+    expect(getVaultDeprecation(productReasonVault)).toEqual({ deprecated: true, reason: 'The EVK is deprecated.' })
+    expect(getVaultDeprecation(earn)).toEqual({ deprecated: true, reason: 'The Earn vault is deprecated.' })
+    expect(getVaultDeprecation('0x0000000000000000000000000000000000000004')).toEqual({ deprecated: false, reason: '' })
   })
 
   it('updates tag selection on a live labels refresh without reloading unchanged vault data', async () => {

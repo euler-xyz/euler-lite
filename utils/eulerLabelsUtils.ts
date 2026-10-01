@@ -147,14 +147,30 @@ export const normalizeProducts = (data: Record<string, EulerLabelProduct>): { pr
   return { products: normalized, vaultAddresses: [...allVaults] }
 }
 
+export const getVaultDeprecation = (vaultAddress: string): { deprecated: boolean, reason: string } => {
+  const normalized = normalizeAddress(vaultAddress)
+  const earnDeprecated = isEulerLabelEarnVaultDeprecated(labels(), normalized)
+  const deprecated = earnDeprecated || isEulerLabelVaultDeprecated(labels(), normalized)
+  if (!deprecated) return { deprecated: false, reason: '' }
+  const product = Object.values(labels().products).find(item => item.deprecatedVaults?.includes(normalized))
+    ?? getEulerLabelProductByVault(labels(), normalized) as EulerLabelProduct | undefined
+  return {
+    deprecated: true,
+    reason: (earnDeprecated ? getEulerLabelEarnVaultDeprecationReason(labels(), normalized) : '')
+      || product?.vaultOverrides?.[normalized]?.deprecationReason
+      || product?.deprecationReason
+      || 'This vault has been deprecated.',
+  }
+}
+
 export const isEarnVaultDeprecated = (vaultAddress: string): boolean =>
-  isEulerLabelEarnVaultDeprecated(labels(), vaultAddress)
+  getVaultDeprecation(vaultAddress).deprecated
 
 export const isEarnVaultNotExplorable = (vaultAddress: string): boolean =>
   isEulerLabelEarnVaultNotExplorable(labels(), vaultAddress)
 
 export const getEarnVaultDeprecationReason = (vaultAddress: string): string =>
-  getEulerLabelEarnVaultDeprecationReason(labels(), vaultAddress)
+  getVaultDeprecation(vaultAddress).reason
 
 export const getEarnVaultDescription = (vaultAddress: string): string =>
   getEulerLabelEarnVaultDescription(labels(), vaultAddress)
@@ -169,7 +185,7 @@ export const isVaultNoticeSpecific = (vaultAddress: string): boolean =>
   isEulerLabelVaultNoticeSpecific(labels(), vaultAddress)
 
 export const isVaultDeprecated = (vaultAddress: string): boolean =>
-  isEulerLabelVaultDeprecated(labels(), vaultAddress)
+  getVaultDeprecation(vaultAddress).deprecated
 
 export const isVaultNotExplorable = (vaultAddress: string): boolean =>
   isEulerLabelVaultNotExplorable(labels(), vaultAddress)

@@ -457,6 +457,7 @@ function continueAfterRequiredAcknowledgments(action: () => Promise<void>) {
   if (unverifiedVaultGuard.isAcknowledgmentRequired) {
     modal.open(VaultUnverifiedDisclaimerModal, {
       props: {
+        unlistedNotice: unverifiedVaultGuard.unlistedNotice,
         acceptAction: () => {
           unverifiedVaultGuard.acknowledgeRisk()
           void nextTick(() => continueAfterRequiredAcknowledgments(action))

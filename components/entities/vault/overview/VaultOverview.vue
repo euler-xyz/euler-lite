@@ -43,6 +43,16 @@ const isCyclicalIRM = computed(() => isVaultCyclicalNote(vault.address))
       :default-open="false"
     />
 
+    <VaultOverviewBlockVaultChecks
+      :address="vault.address"
+      :default-open="false"
+    />
+
+    <VaultOverviewBlockOracleAdapters
+      :vault="vault"
+      :default-open="false"
+    />
+
     <VaultOverviewBlockBorrow
       :vault="vault"
       :default-open="false"

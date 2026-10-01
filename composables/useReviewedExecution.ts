@@ -4,7 +4,8 @@ import { getAddress, type Address, type Hash, type Hex, type StateOverride } fro
 import type { Account, IHasVaultAddress, MigrationAuthorizationRequest, Permit2DataToSign, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { getSafeAtomicCapability, getSafeWalletProvider, isSafeConnectorIdentity } from '~/utils/safeWalletTransactions'
-import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
+import { getEulerLabelsSourceData, getEulerLabelsVersion } from '~/composables/useEulerLabels'
+import { useEulerVaultAssessments } from '~/composables/useEulerVaultAssessments'
 import { canonicalDigest, toCanonicalValue, type CanonicalValue } from '~/features/reviewed-execution/domain/canonical'
 import { connectorSessionDigest } from '~/features/reviewed-execution/domain/wallet-session'
 import type { ReviewedExecution, PluginPlanBundle, WalletBinding, EoaRequest, SignatureSlot } from '~/features/reviewed-execution/domain/reviewed-execution'
@@ -728,6 +729,16 @@ export const useReviewedExecution = () => {
     let result: SubmissionResult | undefined
     try {
       result = await coordinator.execute(execution, { reviewId, reviewDigest })
+      if (result.dispatch?.confirmedBlockNumber !== undefined && getEulerLabelsSourceData().source === 'v3') {
+        const { refreshAfterOwnTransaction } = useEulerVaultAssessments()
+        const { getType } = useVaultRegistry()
+        for (const vaultAddress of collectPlanningRequirements(execution.intents).vaults) {
+          const type = getType(vaultAddress)
+          if (type === 'evk' || type === 'earn') {
+            refreshAfterOwnTransaction(execution.requestSet.wallet.chainId, vaultAddress, type)
+          }
+        }
+      }
       if (!result.canRetry) {
         void refreshPortfolioAfterReviewedSubmission({
           chainId: execution.requestSet.wallet.chainId,

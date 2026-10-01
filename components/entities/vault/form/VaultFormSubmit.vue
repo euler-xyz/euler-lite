@@ -168,6 +168,7 @@ const showUnverifiedVaultFlow = computed(() =>
 const openUnverifiedVaultModal = () => {
   modal.open(VaultUnverifiedDisclaimerModal, {
     props: {
+      unlistedNotice: unverifiedVaultGuard?.unlistedNotice,
       acceptAction: () => {
         unverifiedVaultGuard?.acknowledgeRisk()
       },
@@ -369,7 +370,7 @@ const handleAddToBatch = () => {
           variant="red"
           @click="openUnverifiedVaultModal"
         >
-          Acknowledge Unverified Vault Risk
+          {{ unverifiedVaultGuard?.unlistedNotice ? 'Acknowledge Vault Status' : 'Acknowledge Unverified Vault Risk' }}
         </UiButton>
       </template>
 

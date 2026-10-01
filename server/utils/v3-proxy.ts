@@ -25,6 +25,7 @@ const GET_ONLY_PATHS = new Set([
 ])
 
 const GET_ONLY_PATH_PATTERNS = [
+  /^\/v3\/(?:evk|earn)\/vaults\/[1-9][0-9]{0,15}\/0x[a-fA-F0-9]{40}\/assessment$/,
   /^\/v3\/accounts\/[^/]+\/positions$/,
   /^\/v3\/activity\/accounts\/0x[a-fA-F0-9]{40}\/events$/,
   /^\/v3\/activity\/vaults\/[1-9][0-9]{0,15}\/0x[a-fA-F0-9]{40}\/events$/,
