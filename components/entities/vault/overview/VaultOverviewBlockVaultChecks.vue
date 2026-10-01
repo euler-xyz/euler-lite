@@ -37,6 +37,10 @@ const notListed = computed(() => getNotListedLine(
   verdict.value?.reason || assessment.value?.configReason || assessment.value?.consistencyReason,
 ))
 const statusLine = computed(() => getVaultChecksStatusLine(assessment.value, loadError.value ? 'unavailable' : entry.value.status, nowMs.value))
+const { isCopied, copyToClipboard } = useClipboardCopy()
+const copyAddress = (address: string) => {
+  copyToClipboard(address).catch(() => {})
+}
 
 watch(
   () => [canShow.value, chainId.value, props.address, family.value, loadError.value] as const,
@@ -82,7 +86,31 @@ watch(
             name="warning"
             class="!w-16 !h-16 shrink-0 mt-2"
           />
-          <span>{{ finding.text }}</span>
+          <span>
+            <template v-if="finding.parts">
+              <template
+                v-for="(part, index) in finding.parts"
+                :key="index"
+              >
+                <button
+                  v-if="part.address"
+                  type="button"
+                  class="inline-flex items-center gap-2 align-baseline underline decoration-dotted outline-none hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
+                  :title="isCopied(part.address) ? 'Copied' : 'Copy full address'"
+                  :aria-label="`Copy address ${part.address}`"
+                  @click.stop.prevent="copyAddress(part.address)"
+                >
+                  <span>{{ part.text }}</span>
+                  <SvgIcon
+                    class="!w-14 !h-14"
+                    :name="isCopied(part.address) ? 'check' : 'copy'"
+                  />
+                </button>
+                <template v-else>{{ part.text }}</template>
+              </template>
+            </template>
+            <template v-else>{{ finding.text }}</template>
+          </span>
         </li>
       </ul>
       <p

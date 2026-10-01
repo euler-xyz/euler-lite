@@ -1,4 +1,5 @@
 import type { VaultAssessment, VaultAssessmentFinding } from '@eulerxyz/euler-v2-sdk'
+import { isAddress } from 'viem'
 import type { VaultWarning } from '~/composables/useVaultWarnings'
 import { formatExactAmount } from '~/utils/string-utils'
 
@@ -6,6 +7,7 @@ export interface VaultCheckLine {
   key: string
   text: string
   outcome: 'fail' | 'unknown'
+  parts?: Array<{ text: string, address?: string }>
 }
 
 export interface UpcomingVaultChange {
@@ -32,6 +34,37 @@ const isCountedRule = (key: string): boolean =>
   || /^collateral\.[^.]+\.recognized$/.test(key)
 
 const groupKey = (key: string) => key.replace(/^collateral\.[^.]+\./, 'collateral.*.')
+const ADDRESS_IN_TEXT = /0x[a-fA-F0-9]{40}|0x[a-fA-F0-9]{4,}(?:…|\.{3})[a-fA-F0-9]{4,}/g
+const ADDRESS_IN_KEY = /0x[a-fA-F0-9]{40}/g
+
+const getCopyableParts = (text: string, finding: VaultAssessmentFinding): VaultCheckLine['parts'] => {
+  const candidates = [...new Map(
+    [finding.cause?.subject, ...(finding.key.match(ADDRESS_IN_KEY) ?? [])]
+      .filter((value): value is string => typeof value === 'string' && isAddress(value))
+      .map(address => [address.toLowerCase(), address] as const),
+  ).values()]
+  const parts: NonNullable<VaultCheckLine['parts']> = []
+  let lastIndex = 0
+
+  for (const match of text.matchAll(ADDRESS_IN_TEXT)) {
+    const label = match[0]
+    const [prefix, suffix] = label.split(/…|\.{3}/)
+    const matching = prefix && suffix
+      ? candidates.filter(candidate => candidate.toLowerCase().startsWith(prefix.toLowerCase())
+        && candidate.toLowerCase().endsWith(suffix.toLowerCase()))
+      : []
+    const resolved = isAddress(label) ? label : matching.length === 1 ? matching[0] : undefined
+    if (!resolved) continue
+    if (match.index > lastIndex) parts.push({ text: text.slice(lastIndex, match.index) })
+    parts.push({ text: label, address: resolved })
+    lastIndex = match.index + label.length
+  }
+
+  if (!parts.length) return undefined
+  if (lastIndex < text.length) parts.push({ text: text.slice(lastIndex) })
+  return parts
+}
+
 const relevantFinding = (finding: VaultAssessmentFinding) =>
   (finding.outcome === 'fail' || (finding.outcome === 'unknown' && finding.required && !finding.exempted))
   && !finding.key.startsWith('evidence.')
@@ -49,10 +82,13 @@ export const getVaultCheckFindings = (assessment: VaultAssessment): { lines: Vau
     if (isShownRule(finding.key, finding)) {
       const key = groupKey(finding.key)
       if (!shown.has(key) || (shown.get(key)?.outcome === 'unknown' && finding.outcome === 'fail')) {
+        const text = finding.outcome === 'unknown' ? 'Being re-checked' : finding.cause?.summary || finding.description
+        const parts = getCopyableParts(text, finding)
         shown.set(key, {
           key,
-          text: finding.outcome === 'unknown' ? 'Being re-checked' : finding.cause?.summary || finding.description,
+          text,
           outcome: finding.outcome as 'fail' | 'unknown',
+          ...(parts ? { parts } : {}),
         })
       }
     }
