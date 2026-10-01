@@ -183,7 +183,7 @@ export function buildCsp(
 
   const directives = [
     'default-src \'self\'',
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval' https://static.cloudflareinsights.com`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://static.cloudflareinsights.com`,
     'style-src \'unsafe-inline\' \'self\'',
     'object-src \'none\'',
     'base-uri \'self\'',
@@ -198,7 +198,7 @@ export function buildCsp(
     'img-src \'self\' data: blob: https:',
     'manifest-src \'self\'',
     'media-src \'self\'',
-    'worker-src \'self\' blob:',
+    'worker-src \'none\'',
     'form-action \'self\'',
     ...(isDev ? [] : ['upgrade-insecure-requests']),
   ]

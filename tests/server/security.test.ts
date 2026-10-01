@@ -218,11 +218,11 @@ describe('the script and frame policy against an injected third-party script', (
       '\'self\'',
       '\'nonce-n0nce\'',
       '\'strict-dynamic\'',
-      '\'wasm-unsafe-eval\'',
       'https://static.cloudflareinsights.com',
     ])
     expect(sources(csp, 'script-src')).not.toContain('\'unsafe-inline\'')
     expect(sources(csp, 'script-src')).not.toContain('\'unsafe-eval\'')
+    expect(sources(csp, 'script-src')).not.toContain('\'wasm-unsafe-eval\'')
   })
 
   it('lets a deployment widen connect-src only, never script-src, and only with encrypted origins', () => {
@@ -246,12 +246,12 @@ describe('the script and frame policy against an injected third-party script', (
     }
   })
 
-  it('frames only WalletConnect\'s verify page, and allows no other embedded content, base or form target', () => {
+  it('frames only WalletConnect\'s verify page, and allows no worker or other embedded content, base or form target', () => {
     expect(sources(csp, 'frame-src')).toEqual(['https://verify.walletconnect.org', 'https://verify.walletconnect.com'])
     expect(sources(csp, 'child-src')).toEqual(['\'none\''])
     expect(sources(csp, 'object-src')).toEqual(['\'none\''])
     expect(sources(csp, 'base-uri')).toEqual(['\'self\''])
     expect(sources(csp, 'form-action')).toEqual(['\'self\''])
-    expect(sources(csp, 'worker-src')).toEqual(['\'self\'', 'blob:'])
+    expect(sources(csp, 'worker-src')).toEqual(['\'none\''])
   })
 })
