@@ -98,14 +98,27 @@ describe('vault checks presentation', () => {
     expect(getVaultChecksStatusLine(undefined, 'loading', now)).toBe('')
   })
 
-  it('renders scheduled Earn changes separately and marks failed future checks', () => {
+  it('renders producer-shaped scheduled Earn changes with pending values and failed future checks', () => {
     const result = getUpcomingVaultChanges(assessment([
-      finding('scheduled.strategy.add', {
-        observed: { validAt: '2026-10-01T00:00:00.000Z', pendingValue: '20%' },
+      finding('scheduled.strategy.0x01.recognized', {
+        observed: { validAt: '2026-10-01T00:00:00.000Z', pending: { strategy: '0x01', cap: '20000000', verdict: 'fail' } },
         cause: { code: 'pending', subject: 'strategy', summary: 'Pending change, acceptable from Oct 1: strategy cap is high', remedy: null },
       }),
-    ], { family: 'earn' }))
-    expect(result).toEqual([{ key: 'scheduled.strategy.add', text: 'from Oct 1, 2026 · 20% · strategy cap is high · would not pass the checks', failing: true }])
+      finding('scheduled.governance.timelock', {
+        outcome: 'pass',
+        observed: { validAt: '2026-10-02T00:00:00.000Z', pending: '86400' },
+        cause: { code: 'pending', subject: 'vault', summary: 'Pending timelock will pass', remedy: null },
+      }),
+      finding('scheduled.governance.owner-registered', {
+        observed: { validAt: null, pending: { owner: '0x00000000000000000000000000000000000000aa', entityId: null } },
+        cause: { code: 'pending', subject: 'vault', summary: 'Pending owner is unregistered', remedy: null },
+      }),
+    ], { family: 'earn' }), { decimals: 6, symbol: 'USDC' })
+    expect(result).toEqual([
+      { key: 'scheduled.strategy.0x01.recognized', text: 'from Oct 1, 2026 · cap 20 USDC · strategy cap is high · would not pass the checks', failing: true },
+      { key: 'scheduled.governance.timelock', text: 'from Oct 2, 2026 · timelock 1 day · Pending timelock will pass', failing: false },
+      { key: 'scheduled.governance.owner-registered', text: 'owner 0x00000000000000000000000000000000000000aa · Pending owner is unregistered · would not pass the checks', failing: true },
+    ])
   })
 
   it('only makes a form warning for exit and pricing failures', () => {

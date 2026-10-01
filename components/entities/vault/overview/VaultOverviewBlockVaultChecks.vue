@@ -10,6 +10,7 @@ import {
 const props = defineProps<{
   address: string
   family?: VaultAssessmentFamily
+  asset?: { decimals: number, symbol?: string }
   defaultOpen?: boolean
 }>()
 const { chainId } = useEulerAddresses()
@@ -27,7 +28,7 @@ const entry = computed(() => {
 const assessment = computed(() => loadError.value ? undefined : entry.value.assessment)
 const verdict = computed(() => visibility.value?.[props.address.toLowerCase()])
 const findingView = computed(() => assessment.value ? getVaultCheckFindings(assessment.value) : null)
-const upcoming = computed(() => assessment.value ? getUpcomingVaultChanges(assessment.value) : [])
+const upcoming = computed(() => assessment.value ? getUpcomingVaultChanges(assessment.value, props.asset) : [])
 const hasOracleAdapterFinding = computed(() => !!assessment.value?.configContext?.findings.some(
   finding => finding.key === 'oracle.adapters-recognized' && finding.outcome === 'fail',
 ))
