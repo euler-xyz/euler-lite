@@ -183,7 +183,7 @@ export function buildCsp(
 
   const directives = [
     'default-src \'self\'',
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://static.cloudflareinsights.com`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
     'style-src \'unsafe-inline\' \'self\'',
     'object-src \'none\'',
     'base-uri \'self\'',

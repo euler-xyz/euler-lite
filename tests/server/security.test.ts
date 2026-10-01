@@ -218,7 +218,6 @@ describe('the script and frame policy against an injected third-party script', (
       '\'self\'',
       '\'nonce-n0nce\'',
       '\'strict-dynamic\'',
-      'https://static.cloudflareinsights.com',
     ])
     expect(sources(csp, 'script-src')).not.toContain('\'unsafe-inline\'')
     expect(sources(csp, 'script-src')).not.toContain('\'unsafe-eval\'')
