@@ -103,6 +103,24 @@ describe('vault checks presentation', () => {
     expect(getVaultChecksStatusLine(flagged, 'available')).toBe('Flagged · 2 to review')
   })
 
+  it('makes a shortened finding address copyable only when it matches the full V3 address', () => {
+    const address = '0xf037eeeba7729c39114b9711c75fbccca4a343c8'
+    const summary = 'Collateral 0xf037ee…43c8 has liquidation LTV 99.99%.'
+    const withAddress = assessment([finding(`collateral.${address}.ltv`, {
+      cause: { code: 'collateral-ltv-out-of-range', subject: address, summary, remedy: null },
+    })])
+    expect(getVaultCheckFindings(withAddress).lines[0]?.parts).toEqual([
+      { text: 'Collateral ' },
+      { text: '0xf037ee…43c8', address },
+      { text: ' has liquidation LTV 99.99%.' },
+    ])
+
+    const withoutAddress = assessment([finding('collateral.0x01.ltv', {
+      cause: { code: 'collateral-ltv-out-of-range', subject: 'vault', summary, remedy: null },
+    })])
+    expect(getVaultCheckFindings(withoutAddress).lines[0]?.parts).toBeUndefined()
+  })
+
   it('distinguishes passing, flagged, missing and unavailable states', () => {
     const now = Date.parse('2026-09-29T12:12:00.000Z')
     expect(getVaultChecksStatusLine(assessment([]), 'available', now)).toBe('Verified · checked 12 min ago')
