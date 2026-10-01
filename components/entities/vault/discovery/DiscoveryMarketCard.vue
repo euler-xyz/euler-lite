@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isEulerEarn, isEVault, type VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
 import type { MarketGroup } from '~/entities/lend-discovery'
 import { formatCompactUsdValue, formatNumber, stringToColor } from '~/utils/string-utils'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
@@ -11,6 +12,7 @@ import {
 } from '~/utils/discoveryCalculations'
 import { useBestMaxROE } from '~/composables/useBestMaxROE'
 import { getUniqueEntitiesByVaults, getVaultDeprecation } from '~/utils/eulerLabelsUtils'
+import { getVaultCheckFindings } from '~/utils/vault-assessment/presentation'
 import { VaultMaxRoeModal, UiModalPreviewTrigger } from '#components'
 
 const props = defineProps<{
@@ -22,14 +24,16 @@ defineEmits<{
   toggle: []
 }>()
 
-const { products, isReady, source, visibility } = useEulerLabels()
+const { products, isReady, source, visibility, loadError, vaultAssessments, getVaultAssessmentEntry, loadVaultAssessment } = useEulerLabels()
 const disclosureEntities = computed(() => props.market.curator
   ? [props.market.curator]
   : getUniqueEntitiesByVaults(props.market.vaults))
 const bestRoeMarketGroups = computed(() => [props.market])
 const { getBestMaxROE } = useBestMaxROE(bestRoeMarketGroups)
+const getAssessmentFamily = (vault: MarketGroup['vaults'][number]): VaultAssessmentFamily | null =>
+  isEulerEarn(vault) ? 'earn' : isEVault(vault) ? 'evk' : null
 
-const marketWarnings = computed(() => {
+const warningVaults = computed(() => {
   if (!isReady.value || source.value !== 'v3') return []
   const seen = new Set<string>()
   return [...props.market.vaults, ...props.market.externalCollateral].flatMap((vault) => {
@@ -39,9 +43,38 @@ const marketWarnings = computed(() => {
     const verdict = visibility.value?.[address]
     if (verdict?.status !== 'warning') return []
     if (verdict.decidedBy === 'deprecated' && getVaultDeprecation(address).deprecated) return []
-    return [{ title: vault.asset.symbol, text: verdict.reason || 'One or more vault checks need review.' }]
+    return [{ vault, reason: verdict.reason }]
   })
 })
+
+const marketWarnings = computed(() => {
+  void vaultAssessments.value
+  return warningVaults.value.map(({ vault, reason }) => {
+    const family = getAssessmentFamily(vault)
+    const entry = family && !loadError.value
+      ? getVaultAssessmentEntry(vault.chainId, vault.address, family)
+      : undefined
+    const findings = entry?.status === 'available' && entry.assessment?.assessed
+      ? getVaultCheckFindings(entry.assessment)
+      : undefined
+    const lines = findings?.lines.map(finding => `• ${finding.text}`) ?? []
+    if (lines.length && findings?.moreCount) lines.push(`• ${findings.moreCount} more not shown`)
+    return {
+      title: vault.asset.symbol,
+      text: lines.length ? lines.join('\n') : reason || 'One or more vault checks need review.',
+    }
+  })
+})
+
+const loadMarketWarningDetails = () => {
+  if (loadError.value) return
+  for (const { vault } of warningVaults.value) {
+    const family = getAssessmentFamily(vault)
+    if (family && getVaultAssessmentEntry(vault.chainId, vault.address, family).status === 'idle') {
+      void loadVaultAssessment(vault.chainId, vault.address, family)
+    }
+  }
+}
 
 const marketDeprecationReasons = computed(() => {
   const seen = new Set<string>()
@@ -186,6 +219,9 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
             title="Market warnings"
             :sections="marketWarnings"
             placement="top-start"
+            @mouseenter="loadMarketWarningDetails"
+            @focusin="loadMarketWarningDetails"
+            @pointerdown="loadMarketWarningDetails"
           >
             <span
               class="text-warning-500 text-p5 mt-4"
@@ -193,7 +229,7 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
               :data-warning-count="marketWarnings.length"
               @click.stop
             >
-              {{ marketWarnings.length }} {{ marketWarnings.length === 1 ? 'warning' : 'warnings' }}
+              {{ marketWarnings.length }} {{ marketWarnings.length === 1 ? 'vault flagged' : 'vaults flagged' }}
             </span>
           </UiHoverPreviewTooltip>
           <UiHoverPreviewTooltip

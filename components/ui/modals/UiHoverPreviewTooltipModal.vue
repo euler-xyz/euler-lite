@@ -35,7 +35,10 @@ const {
           <div class="text-p3 font-semibold text-content-primary">
             {{ section.title }}
           </div>
-          <div class="text-p3 text-content-primary">
+          <div
+            class="text-p3 text-content-primary"
+            style="white-space: pre-line"
+          >
             {{ section.text }}
           </div>
         </div>
