@@ -442,6 +442,21 @@ The app is a wallet-bearing DeFi interface. Loading it inside an attacker-contro
 
 `tests/server/security.test.ts` locks in all four layers with pure-function unit tests (no Nitro boot required). The tests assert that `frame-ancestors 'none'`, `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy`, and the frame-busting script content cannot silently regress. Do not weaken these assertions without reviewing the threat model above.
 
+### Injected Script and Frame Defenses
+
+A third-party script that reaches the page could draw a fake wallet prompt in an `<iframe>` it adds, or load more code. The policy in `server/plugins/csp.ts` limits both:
+
+| Directive | Sources | Why |
+|---|---|---|
+| `script-src` | `'self'`, the response's nonce, `'strict-dynamic'`, `https://static.cloudflareinsights.com` | Only scripts the server stamped with this response's nonce run, with the scripts they load. No `'unsafe-inline'`, `'unsafe-eval'` or `'wasm-unsafe-eval'`. The Cloudflare origin serves the Web Analytics beacon. |
+| `frame-src` | `https://verify.walletconnect.org`, `https://verify.walletconnect.com` | WalletConnect's domain verification is the only frame the wallet flows load. Same-origin frames are allowed on the local dev server only, for Nuxt DevTools. |
+| `child-src`, `worker-src`, `object-src` | `'none'` | The app runs no worker and embeds no plugin. |
+| `base-uri`, `form-action` | `'self'` | A script cannot rebase relative URLs or post a form elsewhere. |
+
+Origins a deployment configures (`CSP_EXTRA_CONNECT_SRC`, `RPC_URL_<chainId>`, the swap API URL) and the enabled chains' public RPCs only reach `connect-src`, reduced to an `https://` or `wss://` origin; any other value is dropped. The nonce is 16 random bytes drawn per response, and page responses are `no-store` at the browser and the CDN, so no nonce is served twice. The header is enforced, not report-only.
+
+AppKit's email and social login run in its secure frame (`https://secure.walletconnect.org`), which `frame-src` does not allow; those logins do not work under this policy.
+
 ## 📱 Mobile-First Architecture
 
 ### Responsive Design Principles
