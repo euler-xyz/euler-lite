@@ -89,6 +89,20 @@ describe('vault checks presentation', () => {
     expect(getVaultChecksStatusLine(mixed, 'available')).toBe('Flagged · 1 to review')
   })
 
+  it('shows exempted failures when V3 still marks the checks as a warning', () => {
+    const flagged = assessment([
+      finding('liquidation.max-discount', { exempted: true }),
+      finding('collateral.0x01.ltv', { exempted: true }),
+      finding('governance.timelock', { outcome: 'unknown', required: true, exempted: true }),
+    ], { checksStatus: 'warning' })
+
+    expect(getVaultCheckFindings(flagged).lines.map(line => line.text)).toEqual([
+      'V3 says liquidation.max-discount',
+      'V3 says collateral.0x01.ltv',
+    ])
+    expect(getVaultChecksStatusLine(flagged, 'available')).toBe('Flagged · 2 to review')
+  })
+
   it('distinguishes passing, flagged, missing and unavailable states', () => {
     const now = Date.parse('2026-09-29T12:12:00.000Z')
     expect(getVaultChecksStatusLine(assessment([]), 'available', now)).toBe('Verified · checked 12 min ago')
