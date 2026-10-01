@@ -5,8 +5,10 @@ import {
   getNotListedLine,
   getUpcomingVaultChanges,
   getVaultCheckFindings,
+  getVaultAssessmentCheckSummary,
   getVaultChecksStatusLine,
 } from '~/utils/vault-assessment/presentation'
+import { VaultAssessmentChecksModal } from '#components'
 
 const props = defineProps<{
   address: string
@@ -39,6 +41,10 @@ const notListed = computed(() => getNotListedLine(
   verdict.value?.reason || assessment.value?.configReason || assessment.value?.consistencyReason,
 ))
 const statusLine = computed(() => getVaultChecksStatusLine(assessment.value, loadError.value ? 'unavailable' : entry.value.status, nowMs.value))
+const checkSummary = computed(() => assessment.value ? getVaultAssessmentCheckSummary(assessment.value) : '')
+const checkTone = computed(() => statusLine.value.startsWith('Flagged')
+  ? 'bg-warning-500'
+  : statusLine.value.startsWith('Verified') ? 'bg-success-500' : 'bg-content-muted')
 const { isCopied, copyToClipboard } = useClipboardCopy()
 const copyAddress = (address: string) => {
   copyToClipboard(address).catch(() => {})
@@ -59,7 +65,7 @@ watch(
     title="Vault checks"
     :default-open="props.defaultOpen ?? false"
   >
-    <div class="flex flex-col gap-12 text-p3">
+    <div class="flex flex-col gap-12 rounded-xl border border-line-subtle bg-surface p-16 text-p3">
       <p
         v-if="notListed"
         class="text-content-tertiary"
@@ -67,13 +73,41 @@ watch(
       >
         {{ notListed }}
       </p>
-      <p
-        v-if="statusLine"
-        :class="loadError || entry.status === 'unavailable' || statusLine === 'Not assessed yet' ? 'text-content-tertiary' : 'text-content-primary'"
-        data-id="vault-checks-status"
-      >
-        {{ statusLine }}
-      </p>
+      <div class="grid grid-cols-1 gap-12 sm:grid-cols-2">
+        <div class="flex flex-col gap-4">
+          <span class="text-content-tertiary">Status</span>
+          <span
+            :class="loadError || entry.status === 'unavailable' || statusLine === 'Not assessed yet' ? 'text-content-tertiary' : 'text-content-primary'"
+            data-id="vault-checks-status"
+          >{{ statusLine || 'Checking…' }}</span>
+        </div>
+        <UiModalPreviewTrigger
+          v-if="assessment?.assessed && (assessment.configContext?.findings?.length || assessment.consistencyContext?.findings?.length)"
+          class="flex min-w-0 flex-col gap-4 items-start cursor-default text-left"
+          :component="VaultAssessmentChecksModal"
+          :modal-data="{ props: { assessment } }"
+          aria-label="Show all vault checks"
+          placement="top-start"
+          :clickable="false"
+          popover-width="wide"
+        >
+          <span class="text-content-tertiary">Checks</span>
+          <span class="flex min-w-0 items-center gap-6 text-content-primary">
+            <span
+              class="inline-block h-8 w-8 shrink-0 rounded-full"
+              :class="checkTone"
+            />
+            {{ checkSummary }}
+          </span>
+        </UiModalPreviewTrigger>
+        <div
+          v-else
+          class="flex flex-col gap-4"
+        >
+          <span class="text-content-tertiary">Checks</span>
+          <span class="text-content-secondary">{{ statusLine || 'Checking…' }}</span>
+        </div>
+      </div>
       <ul
         v-if="findingView?.lines.length"
         class="flex flex-col gap-8"

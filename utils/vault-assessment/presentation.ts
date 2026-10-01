@@ -43,7 +43,7 @@ const groupKey = (key: string) => key.replace(/^collateral\.[^.]+\./, 'collatera
 const ADDRESS_IN_TEXT = /0x[a-fA-F0-9]{40}|0x[a-fA-F0-9]{4,}(?:…|\.{3})[a-fA-F0-9]{4,}/g
 const ADDRESS_IN_KEY = /0x[a-fA-F0-9]{40}/g
 
-const getCopyableParts = (text: string, finding: VaultAssessmentFinding): VaultCheckLine['parts'] => {
+export const getVaultCheckCopyableParts = (text: string, finding: VaultAssessmentFinding): VaultCheckLine['parts'] => {
   const candidates = [...new Map(
     [finding.cause?.subject, ...(finding.key.match(ADDRESS_IN_KEY) ?? [])]
       .filter((value): value is string => typeof value === 'string' && isAddress(value))
@@ -89,7 +89,7 @@ export const getVaultCheckFindings = (assessment: VaultAssessment): { lines: Vau
       const key = groupKey(finding.key)
       if (!shown.has(key) || (shown.get(key)?.outcome === 'unknown' && finding.outcome === 'fail')) {
         const text = finding.outcome === 'unknown' ? 'Being re-checked' : finding.cause?.summary || finding.description
-        const parts = getCopyableParts(text, finding)
+        const parts = getVaultCheckCopyableParts(text, finding)
         shown.set(key, {
           key,
           text,
@@ -112,9 +112,40 @@ export const getAcceptedVaultCheckFindings = (assessment: VaultAssessment): Acce
     .filter(finding => finding.outcome === 'fail' && finding.exempted === true)
     .map((finding) => {
       const text = finding.cause?.summary || finding.description
-      const parts = getCopyableParts(text, finding)
+      const parts = getVaultCheckCopyableParts(text, finding)
       return { key: finding.key, text, ...(parts ? { parts } : {}) }
     })
+
+/** Full findings are loaded only for an opened vault, as in Toolbox's detail view. */
+export const getVaultAssessmentCheckDetails = (assessment: VaultAssessment) => {
+  const findings = [
+    ...(assessment.configContext?.findings ?? []),
+    ...(assessment.consistencyContext?.findings ?? []),
+  ]
+  const counts = { passed: 0, failed: 0, unknown: 0, accepted: 0, notApplicable: 0 }
+  for (const finding of findings) {
+    if (finding.outcome === 'fail' && finding.exempted) counts.accepted++
+    else if (finding.outcome === 'pass') counts.passed++
+    else if (finding.outcome === 'fail') counts.failed++
+    else if (finding.outcome === 'unknown') counts.unknown++
+    else counts.notApplicable++
+  }
+  const rank = (finding: VaultAssessmentFinding) => finding.outcome === 'fail'
+    ? finding.exempted ? 2 : 0
+    : finding.outcome === 'unknown' ? 1 : finding.outcome === 'pass' ? 3 : 4
+  return { findings: [...findings].sort((a, b) => rank(a) - rank(b)), counts }
+}
+
+export const getVaultAssessmentCheckSummary = (assessment: VaultAssessment): string => {
+  const { counts } = getVaultAssessmentCheckDetails(assessment)
+  const parts = [
+    counts.failed && `${counts.failed} failed`,
+    counts.unknown && `${counts.unknown} unknown`,
+    counts.accepted && `${counts.accepted} accepted`,
+    counts.passed && `${counts.passed} passed`,
+  ].filter(Boolean)
+  return parts.length ? parts.join(' · ') : counts.notApplicable ? `${counts.notApplicable} N/A` : 'No findings'
+}
 
 export const hasOnlyAcceptedVaultCheckFindings = (assessment: VaultAssessment): boolean => {
   if (!assessment.assessed || assessment.configStatus !== 'verified' || assessment.configContext?.outcome !== 'pass'
