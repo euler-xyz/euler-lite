@@ -448,7 +448,7 @@ A third-party script that reaches the page could draw a fake wallet prompt in an
 
 | Directive | Sources | Why |
 |---|---|---|
-| `script-src` | `'self'`, the response's nonce, `'strict-dynamic'` | Only scripts the server stamped with this response's nonce run, with the scripts they load. No `'unsafe-inline'`, `'unsafe-eval'` or `'wasm-unsafe-eval'`, and no host. Cloudflare copies the nonce onto the scripts its edge injects (Web Analytics beacon, JavaScript detections). |
+| `script-src` | `'self'`, the response's nonce, `'strict-dynamic'` | Only scripts the server stamped with this response's nonce run, together with any script they load or insert; a parser-inserted inline script without the nonce is refused. No `'unsafe-inline'`, `'unsafe-eval'` or `'wasm-unsafe-eval'`, and no host. Cloudflare documents copying the nonce onto its JavaScript detections script. On production (checked 2026-10-01) the edge also stamped it on the Web Analytics beacon, which Cloudflare does not document; a beacon that arrives without the nonce is refused. |
 | `frame-src` | `https://verify.walletconnect.org`, `https://secure.walletconnect.org` | The only frames the wallet flows load: WalletConnect's Verify attestation page, framed when a session is proposed, and AppKit's secure frame, which runs email and social login. Same-origin frames are allowed on the local dev server only, for Nuxt DevTools. |
 | `child-src`, `worker-src`, `object-src` | `'none'` | The app runs no worker and embeds no plugin. |
 | `base-uri`, `form-action` | `'self'` | A script cannot rebase relative URLs or post a form elsewhere. |
