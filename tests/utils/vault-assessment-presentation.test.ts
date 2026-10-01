@@ -7,6 +7,8 @@ import {
   getNotListedLine,
   getUpcomingVaultChanges,
   getAcceptedVaultCheckFindings,
+  getVaultAssessmentCheckDetails,
+  getVaultAssessmentCheckSummary,
   getVaultCheckFindings,
   getVaultChecksStatusLine,
   hasOnlyAcceptedVaultCheckFindings,
@@ -38,6 +40,25 @@ const assessment = (findings: VaultAssessmentFinding[], overrides: Partial<Vault
 })
 
 describe('vault checks presentation', () => {
+  it('shows every finding while separating active failures from accepted exceptions', () => {
+    const reviewed = assessment([
+      finding('deployment.factory', { outcome: 'pass', required: true }),
+      finding('irm.max-apy', { outcome: 'fail' }),
+      finding('liquidation.max-discount', { outcome: 'fail', exempted: true }),
+      finding('oracle.liability-quote', { outcome: 'unknown', required: true }),
+      finding('scheduled.governance.timelock', { outcome: 'not_applicable' }),
+    ])
+
+    expect(getVaultAssessmentCheckDetails(reviewed).counts).toEqual({
+      passed: 1, failed: 1, unknown: 1, accepted: 1, notApplicable: 1,
+    })
+    expect(getVaultAssessmentCheckDetails(reviewed).findings.map(item => item.key)).toEqual([
+      'irm.max-apy', 'oracle.liability-quote', 'liquidation.max-discount',
+      'deployment.factory', 'scheduled.governance.timelock',
+    ])
+    expect(getVaultAssessmentCheckSummary(reviewed)).toBe('1 failed · 1 unknown · 1 accepted · 1 passed')
+  })
+
   it('shows the selected failure classes with V3 sentences and counts other gating rules', () => {
     const view = getVaultCheckFindings(assessment([
       finding('oracle.liability-quote'),
