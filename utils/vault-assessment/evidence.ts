@@ -2,7 +2,6 @@ import type { VaultAssessment, VaultAssessmentFinding } from '@eulerxyz/euler-v2
 import { getAddress, isAddress, zeroAddress, type Address } from 'viem'
 
 export type AssessmentSafeEvidence = { threshold: number, owners: Address[] }
-export type UpgradeabilityEvidence = { upgradeable: boolean, implementation: Address | null }
 
 const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -12,17 +11,6 @@ const record = (value: unknown): Record<string, unknown> | null =>
 export const getAssessmentFinding = (assessment: VaultAssessment | undefined, key: string): VaultAssessmentFinding | undefined =>
   assessment?.configContext?.findings.find(finding => finding.key === key)
   ?? assessment?.consistencyContext?.findings.find(finding => finding.key === key)
-
-export const getUpgradeabilityEvidence = (assessment: VaultAssessment | undefined): UpgradeabilityEvidence | null => {
-  const observed = record(getAssessmentFinding(assessment, 'evidence.upgradeable')?.observed)
-  if (!observed || typeof observed.upgradeable !== 'boolean') return null
-  return {
-    upgradeable: observed.upgradeable,
-    implementation: typeof observed.implementation === 'string' && isAddress(observed.implementation)
-      ? getAddress(observed.implementation)
-      : null,
-  }
-}
 
 export const getRouterGovernorEvidence = (assessment: VaultAssessment | undefined): Address | undefined => {
   const observed = record(getAssessmentFinding(assessment, 'evidence.governance')?.observed)

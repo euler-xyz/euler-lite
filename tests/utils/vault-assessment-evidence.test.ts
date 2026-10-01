@@ -5,12 +5,10 @@ import {
   getAssessmentSafeEvidence,
   getEarnAllocatorAddresses,
   getRouterGovernorEvidence,
-  getUpgradeabilityEvidence,
 } from '~/utils/vault-assessment/evidence'
 
 const owner = getAddress('0x00000000000000000000000000000000000000aa')
 const signer = getAddress('0x00000000000000000000000000000000000000bb')
-const implementation = getAddress('0x00000000000000000000000000000000000000cc')
 
 const assessmentWith = (findings: Array<Pick<VaultAssessmentFinding, 'key' | 'observed'>>): VaultAssessment => ({
   chainId: 1,
@@ -74,18 +72,6 @@ describe('vault assessment evidence', () => {
       observed: { owner: { address: owner, safe: { threshold: '2', owners: [signer] } } },
     }])
     expect(getAssessmentSafeEvidence(invalid, owner)).toBeUndefined()
-  })
-
-  it('shows upgradeability only when V3 supplies a boolean verdict', () => {
-    const assessment = assessmentWith([{
-      key: 'evidence.upgradeable',
-      observed: { upgradeable: true, implementation },
-    }])
-    expect(getUpgradeabilityEvidence(assessment)).toEqual({ upgradeable: true, implementation })
-    expect(getUpgradeabilityEvidence(assessmentWith([{
-      key: 'evidence.upgradeable',
-      observed: { implementation },
-    }]))).toBeNull()
   })
 
   it('uses a valid router governor from assessment evidence', () => {

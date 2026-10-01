@@ -49,7 +49,6 @@ const description = computed(() => {
 
 const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
 const { assessment, fallbackReady } = useVaultAssessmentEvidence(() => vault.address, 'evk')
-const { upgradeability } = useVaultUpgradeability(() => vault.address, assessment, fallbackReady)
 const governorSafeEvidence = computed(() => assessment.value || fallbackReady.value
   ? getAssessmentSafeEvidence(assessment.value, vault.governorAdmin)
   : null)
@@ -249,17 +248,6 @@ watchEffect(() => {
         <div v-else>
           -
         </div>
-      </VaultOverviewLabelValue>
-      <VaultOverviewLabelValue
-        v-if="upgradeability"
-        label="Upgradeable"
-        :value="upgradeability.upgradeable ? 'Yes' : 'No'"
-      />
-      <VaultOverviewLabelValue
-        v-if="upgradeability?.implementation"
-        label="Implementation"
-      >
-        <VaultOverviewAddressValue :address="upgradeability.implementation" />
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue label="Can be borrowed">
         <div class="flex min-w-0 items-center gap-8">
