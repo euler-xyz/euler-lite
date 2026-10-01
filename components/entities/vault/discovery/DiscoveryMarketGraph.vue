@@ -42,10 +42,12 @@ const isNodeCyclicalNote = (address: string): boolean => {
 
 const { isVaultGovernorVerified, isSecuritizeGovernorVerified, isEarnVaultOwnerVerified } = useVaults()
 const { isReady, source, visibility } = useEulerLabels()
-const { getWarningText, loadWarningDetails } = useDiscoveryVaultWarningDetails()
+const { getWarningText, loadWarningDetails, isAcceptedOnlyWarning } = useDiscoveryVaultWarningDetails()
 const getNodeWarning = (address: string) => {
   if (!isReady.value || source.value !== 'v3') return null
   const verdict = visibility.value?.[address.toLowerCase()]
+  if (verdict?.status === 'warning' && verdict.decidedBy === 'advisories'
+    && isAcceptedOnlyWarning(findVault(props.market, address))) return null
   return verdict?.status === 'warning' || verdict?.status === 'hidden' ? verdict : null
 }
 const getNodeWarningText = (address: string) =>

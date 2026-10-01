@@ -151,6 +151,7 @@ const onClick = () => {
               />
               <VaultAssessmentWarning
                 :address="vault.address"
+                family="earn"
                 hide-deprecated
               />
               <UiHoverPreviewTooltip

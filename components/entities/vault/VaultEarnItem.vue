@@ -246,6 +246,7 @@ const supplyApyModalData = computed(() => ({
           <VaultDeprecatedBadge :addresses="[vault.address]" />
           <VaultAssessmentWarning
             :address="vault.address"
+            family="earn"
             hide-deprecated
           />
         </div>

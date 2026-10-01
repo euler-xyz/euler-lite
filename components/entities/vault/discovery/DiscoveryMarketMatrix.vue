@@ -6,7 +6,6 @@ import { buildOracleAdapterViews, collectOracleRouteSteps, type OracleAdapterVie
 import type { MarketGroup } from '~/entities/lend-discovery'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
-import { useDiscoveryVaultWarningDetails } from '~/composables/useDiscoveryVaultWarningDetails'
 
 const props = defineProps<{
   market: MarketGroup
@@ -37,17 +36,6 @@ const {
   loadAllOracleAdapters,
 } = useEulerLabels()
 const { chainId } = useEulerAddresses()
-const { isReady, source, visibility } = useEulerLabels()
-const { getWarningText, loadWarningDetails } = useDiscoveryVaultWarningDetails()
-const getHeaderWarning = (address: string) => {
-  if (!isReady.value || source.value !== 'v3') return null
-  const verdict = visibility.value?.[address.toLowerCase()]
-  return verdict?.status === 'warning' || verdict?.status === 'hidden' ? verdict : null
-}
-const getHeaderWarningText = (address: string) =>
-  getWarningText(findVault(props.market, address), getHeaderWarning(address)?.reason)
-const loadHeaderWarningDetails = (address: string) =>
-  loadWarningDetails(findVault(props.market, address))
 const { getTokenCategoryTags } = useTokenList()
 
 const hoveredCell = ref<{
@@ -334,23 +322,6 @@ watch(
                   size="16"
                 />
                 {{ col.symbol }}
-                <UiHoverPreviewTooltip
-                  v-if="getHeaderWarning(col.address)"
-                  title="Vault checks"
-                  :text="getHeaderWarningText(col.address)"
-                  placement="top"
-                  class="p-4"
-                  @mouseenter="loadHeaderWarningDetails(col.address)"
-                  @focusin="loadHeaderWarningDetails(col.address)"
-                  @pointerdown="loadHeaderWarningDetails(col.address)"
-                  @click.stop
-                >
-                  <span
-                    class="rounded-full bg-warning-500 w-5 h-5"
-                    data-id="vault-checks-status-dot"
-                    @click.stop
-                  />
-                </UiHoverPreviewTooltip>
               </div>
             </th>
           </tr>
@@ -391,23 +362,6 @@ watch(
                   size="16"
                 />
                 {{ row.symbol }}
-                <UiHoverPreviewTooltip
-                  v-if="getHeaderWarning(row.address)"
-                  title="Vault checks"
-                  :text="getHeaderWarningText(row.address)"
-                  placement="top"
-                  class="p-4"
-                  @mouseenter="loadHeaderWarningDetails(row.address)"
-                  @focusin="loadHeaderWarningDetails(row.address)"
-                  @pointerdown="loadHeaderWarningDetails(row.address)"
-                  @click.stop
-                >
-                  <span
-                    class="rounded-full bg-warning-500 w-5 h-5"
-                    data-id="vault-checks-status-dot"
-                    @click.stop
-                  />
-                </UiHoverPreviewTooltip>
               </div>
             </td>
             <td

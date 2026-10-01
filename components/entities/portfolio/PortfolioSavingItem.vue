@@ -166,6 +166,7 @@ const onClick = () => {
               />
               <VaultAssessmentWarning
                 :address="vault.address"
+                :family="isSecuritize ? null : 'evk'"
                 hide-deprecated
               />
               <UiHoverPreviewTooltip
@@ -338,6 +339,7 @@ const onClick = () => {
               />
               <VaultAssessmentWarning
                 :address="vault.address"
+                :family="isSecuritize ? null : 'evk'"
                 hide-deprecated
               />
               <UiHoverPreviewTooltip

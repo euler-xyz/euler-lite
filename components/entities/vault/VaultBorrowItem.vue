@@ -14,7 +14,7 @@ import { getAddress, zeroAddress } from 'viem'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { areTokenAddressesCorrelatedByTags, getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 
-const { pair } = defineProps<{ pair: AnyBorrowVaultPair }>()
+const { pair, assessmentUi = 'badge' } = defineProps<{ pair: AnyBorrowVaultPair, assessmentUi?: 'badge' | 'field' | 'none' }>()
 const { enableEntityBranding } = useDeployConfig()
 const { isVaultGovernorVerified, isSecuritizeGovernorVerified } = useVaults()
 const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
@@ -310,12 +310,15 @@ const linkPath = computed(() => ({
             <VaultDeprecatedBadge :addresses="[pair.collateral.address, pair.borrow.address]" />
             <VaultAssessmentWarning
               :address="pair.collateral.address"
+              :family="isSecuritizeBorrowPair(pair) ? null : 'evk'"
               :hide-deprecated="isAnyDeprecated"
+              :hide-checks="assessmentUi !== 'badge'"
               badge-label="Collateral warning"
             />
             <VaultAssessmentWarning
               :address="pair.borrow.address"
               :hide-deprecated="isAnyDeprecated"
+              :hide-checks="assessmentUi !== 'badge'"
               badge-label="Borrow warning"
             />
           </div>
@@ -449,6 +452,23 @@ const linkPath = computed(() => ({
 
     <!-- Border separator (desktop only) -->
     <div class="col-span-full border-b border-line-subtle mobile:!hidden" />
+
+    <div
+      v-if="assessmentUi === 'field'"
+      class="col-span-full flex flex-wrap gap-x-24 gap-y-6 border-b border-line-subtle px-16 py-8"
+    >
+      <VaultAssessmentChecksField
+        :address="pair.borrow.address"
+        :chain-id="pair.borrow.chainId"
+        label="Borrow checks"
+      />
+      <VaultAssessmentChecksField
+        v-if="!isSecuritizeBorrowPair(pair)"
+        :address="pair.collateral.address"
+        :chain-id="pair.collateral.chainId"
+        label="Collateral checks"
+      />
+    </div>
 
     <!-- Body stats: contents on desktop (children become grid items), flex on mobile -->
     <div class="col-span-full flex items-start mobile:!hidden">

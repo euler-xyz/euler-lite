@@ -1,16 +1,40 @@
 <script setup lang="ts">
-const { address, hideDeprecated = false, badgeLabel } = defineProps<{
+import type { VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
+import { hasOnlyAcceptedVaultCheckFindings } from '~/utils/vault-assessment/presentation'
+
+const { address, hideDeprecated = false, hideChecks = false, badgeLabel, family = 'evk' } = defineProps<{
   address: string
   hideDeprecated?: boolean
+  hideChecks?: boolean
   badgeLabel?: string
+  family?: VaultAssessmentFamily | null
 }>()
 
-const { isReady, source, visibility } = useEulerLabels()
+const { chainId } = useEulerAddresses()
+const { isReady, source, visibility, loadError, vaultAssessments, getVaultAssessmentEntry, loadVaultAssessment } = useEulerLabels()
 const verdict = computed(() => isReady.value && source.value === 'v3'
   ? visibility.value?.[address.toLowerCase()]
   : undefined)
+const assessmentEntry = computed(() => {
+  void vaultAssessments.value
+  return chainId.value && family ? getVaultAssessmentEntry(chainId.value, address, family) : { status: 'idle' as const }
+})
+const acceptedOnly = computed(() => verdict.value?.status === 'warning' && verdict.value.decidedBy === 'advisories'
+  && !loadError.value && assessmentEntry.value.status === 'available'
+  && !!assessmentEntry.value.assessment && hasOnlyAcceptedVaultCheckFindings(assessmentEntry.value.assessment))
+watch(
+  () => [chainId.value, address, family, verdict.value?.status, verdict.value?.decidedBy, loadError.value, hideChecks] as const,
+  ([id, vaultAddress, selectedFamily, status, decidedBy, error, suppressed]) => {
+    if (id && selectedFamily && !error && !suppressed && status === 'warning' && decidedBy === 'advisories' && assessmentEntry.value.status === 'idle') {
+      void loadVaultAssessment(id, vaultAddress, selectedFamily)
+    }
+  },
+  { immediate: true },
+)
 const warning = computed(() => {
+  if (acceptedOnly.value) return null
   if (verdict.value?.status !== 'warning' && verdict.value?.status !== 'hidden') return null
+  if (hideChecks && verdict.value.status === 'warning') return null
   if (hideDeprecated && verdict.value.decidedBy === 'deprecated') return null
 
   if (verdict.value.decidedBy === 'deprecated') {

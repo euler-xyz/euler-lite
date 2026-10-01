@@ -24,13 +24,13 @@ defineEmits<{
 }>()
 
 const { products, isReady, source, visibility } = useEulerLabels()
-const { getWarningText, loadWarningDetails } = useDiscoveryVaultWarningDetails()
+const { getWarningText, loadWarningDetails, isAcceptedOnlyWarning } = useDiscoveryVaultWarningDetails()
 const disclosureEntities = computed(() => props.market.curator
   ? [props.market.curator]
   : getUniqueEntitiesByVaults(props.market.vaults))
 const bestRoeMarketGroups = computed(() => [props.market])
 const { getBestMaxROE } = useBestMaxROE(bestRoeMarketGroups)
-const warningVaults = computed(() => {
+const warningCandidates = computed(() => {
   if (!isReady.value || source.value !== 'v3') return []
   const seen = new Set<string>()
   return [...props.market.vaults, ...props.market.externalCollateral].flatMap((vault) => {
@@ -40,9 +40,17 @@ const warningVaults = computed(() => {
     const verdict = visibility.value?.[address]
     if (verdict?.status !== 'warning') return []
     if (verdict.decidedBy === 'deprecated' && getVaultDeprecation(address).deprecated) return []
-    return [{ vault, reason: verdict.reason }]
+    return [{ vault, reason: verdict.reason, decidedBy: verdict.decidedBy }]
   })
 })
+watchEffect(() => {
+  for (const { vault, decidedBy } of warningCandidates.value) {
+    if (decidedBy === 'advisories') loadWarningDetails(vault)
+  }
+})
+const warningVaults = computed(() => warningCandidates.value.filter(({ vault, decidedBy }) =>
+  decidedBy !== 'advisories' || !isAcceptedOnlyWarning(vault),
+))
 
 const marketWarnings = computed(() => warningVaults.value.map(({ vault, reason }) => ({
   title: vault.asset.symbol,

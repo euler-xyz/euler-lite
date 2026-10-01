@@ -18,7 +18,7 @@ import { getCriticalAssessmentWarning } from '~/utils/vault-assessment/presentat
 import { zeroAddress } from 'viem'
 
 const { isConnected } = useWagmi()
-const { vault, type = 'lend' } = defineProps<{ vault: EVault, type?: 'lend' | 'borrow' }>()
+const { vault, type = 'lend', assessmentUi = 'badge' } = defineProps<{ vault: EVault, type?: 'lend' | 'borrow', assessmentUi?: 'badge' | 'field' | 'none' }>()
 const vaultAddress = computed(() => vault.address)
 const product = useEulerProductOfVault(vaultAddress)
 const { enableEntityBranding } = useDeployConfig()
@@ -216,6 +216,7 @@ watchEffect(async () => {
           <VaultAssessmentWarning
             :address="vault.address"
             :hide-deprecated="isDeprecated"
+            :hide-checks="assessmentUi !== 'badge'"
           />
           <VaultWarningIcon :warning="criticalAssessmentWarning" />
         </div>
@@ -271,6 +272,15 @@ watchEffect(async () => {
           </div>
         </div>
       </div>
+    </div>
+    <div
+      v-if="assessmentUi === 'field'"
+      class="border-b border-line-subtle px-16 py-8"
+    >
+      <VaultAssessmentChecksField
+        :address="vault.address"
+        :chain-id="vault.chainId"
+      />
     </div>
     <div
       class="grid gap-x-16 py-12 px-16 pb-12 mobile:!flex mobile:justify-between mobile:border-b mobile:border-line-subtle"

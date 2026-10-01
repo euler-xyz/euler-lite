@@ -6,8 +6,10 @@ import {
   getUnverifiedActionCopy,
   getNotListedLine,
   getUpcomingVaultChanges,
+  getAcceptedVaultCheckFindings,
   getVaultCheckFindings,
   getVaultChecksStatusLine,
+  hasOnlyAcceptedVaultCheckFindings,
 } from '~/utils/vault-assessment/presentation'
 
 const finding = (key: string, overrides: Partial<VaultAssessmentFinding> = {}): VaultAssessmentFinding => ({
@@ -26,7 +28,7 @@ const assessment = (findings: VaultAssessmentFinding[], overrides: Partial<Vault
   checksStatus: 'positive',
   configReason: null,
   consistencyReason: null,
-  configContext: { findings },
+  configContext: { findings, outcome: 'pass' },
   consistencyContext: null,
   configLastCheckedAt: '2026-09-29T12:00:00.000Z',
   nextCheckAt: null,
@@ -90,18 +92,24 @@ describe('vault checks presentation', () => {
     expect(getVaultChecksStatusLine(mixed, 'available')).toBe('Flagged · 1 to review')
   })
 
-  it('shows exempted failures when V3 still marks the checks as a warning', () => {
+  it('shows exempted failures as accepted evidence when required checks pass', () => {
     const flagged = assessment([
       finding('liquidation.max-discount', { exempted: true }),
       finding('collateral.0x01.ltv', { exempted: true }),
       finding('governance.timelock', { outcome: 'unknown', required: true, exempted: true }),
     ], { checksStatus: 'warning' })
 
-    expect(getVaultCheckFindings(flagged).lines.map(line => line.text)).toEqual([
+    expect(getVaultCheckFindings(flagged).lines).toEqual([])
+    expect(getAcceptedVaultCheckFindings(flagged).map(line => line.text)).toEqual([
       'V3 says liquidation.max-discount',
       'V3 says collateral.0x01.ltv',
     ])
-    expect(getVaultChecksStatusLine(flagged, 'available')).toBe('Flagged · 2 to review')
+    expect(hasOnlyAcceptedVaultCheckFindings(flagged)).toBe(true)
+    expect(getVaultChecksStatusLine(flagged, 'available', Date.parse('2026-09-29T12:12:00.000Z'))).toBe('Verified · checked 12 min ago · 2 accepted exceptions')
+    expect(hasOnlyAcceptedVaultCheckFindings(assessment([
+      finding('liquidation.max-discount', { exempted: true }),
+      finding('irm.max-apy'),
+    ], { checksStatus: 'warning' }))).toBe(false)
   })
 
   it('makes a shortened finding address copyable only when it matches the full V3 address', () => {
