@@ -189,7 +189,9 @@ export function buildCsp(
     'base-uri \'self\'',
     `connect-src ${connectSrc.join(' ')}`,
     'font-src \'self\' https://fonts.reown.com',
-    'frame-src \'self\' https://verify.walletconnect.org https://verify.walletconnect.com',
+    // Nuxt DevTools mounts its panel in a same-origin frame on the local dev server.
+    `frame-src ${import.meta.dev ? '\'self\' ' : ''}https://verify.walletconnect.org https://verify.walletconnect.com`,
+    'child-src \'none\'',
     'frame-ancestors \'none\'',
     // Token logos come from arbitrary CDNs (CoinGecko, DefiLlama, Uniswap, etc.)
     // that cannot be whitelisted upfront. Images are passive content — no script execution risk.

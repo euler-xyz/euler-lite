@@ -245,4 +245,13 @@ describe('the script and frame policy against an injected third-party script', (
       else process.env.CSP_EXTRA_CONNECT_SRC = before
     }
   })
+
+  it('frames only WalletConnect\'s verify page, and allows no other embedded content, base or form target', () => {
+    expect(sources(csp, 'frame-src')).toEqual(['https://verify.walletconnect.org', 'https://verify.walletconnect.com'])
+    expect(sources(csp, 'child-src')).toEqual(['\'none\''])
+    expect(sources(csp, 'object-src')).toEqual(['\'none\''])
+    expect(sources(csp, 'base-uri')).toEqual(['\'self\''])
+    expect(sources(csp, 'form-action')).toEqual(['\'self\''])
+    expect(sources(csp, 'worker-src')).toEqual(['\'self\'', 'blob:'])
+  })
 })
