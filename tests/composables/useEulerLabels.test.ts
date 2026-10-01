@@ -219,6 +219,35 @@ describe('useEulerLabels chain-scoped loading', () => {
     expect(currentProductKeys()).toEqual(['cached'])
   })
 
+  it('keeps checks unavailable during a retry after a failed refresh', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
+    try {
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('cached')))
+      const labels = useEulerLabels()
+      await labels.loadLabels()
+
+      clock.mockReturnValue(1_000_000 + 5 * 60_000)
+      mocks.fetchPublicLabelsBundle.mockRejectedValueOnce(new Error('temporary outage'))
+      await labels.loadLabels(true)
+      expect(labels.isReady.value).toBe(true)
+      expect(labels.loadError.value).toContain('Unable to load vault verification')
+
+      const refreshed = deferred<PublicLabelsBundle>()
+      mocks.fetchPublicLabelsBundle.mockReturnValueOnce(refreshed.promise)
+      const pending = labels.loadLabels(true)
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(labels.isLoading.value).toBe(true)
+      expect(labels.loadError.value).toContain('Unable to load vault verification')
+
+      refreshed.resolve(bundleFor(labelsFor('recovered')))
+      await pending
+      expect(labels.isReady.value).toBe(true)
+      expect(labels.loadError.value).toBeUndefined()
+    }
+    finally { clock.mockRestore() }
+  })
+
   it('expires a server-cached verdict 15 minutes after the actual V3 read', async () => {
     const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
     try {
@@ -283,6 +312,62 @@ describe('useEulerLabels chain-scoped loading', () => {
       expect(labels.isReady.value).toBe(true)
       expect(labels.loadError.value).toBeUndefined()
       expect(currentProductKeys()).toEqual(['recovered'])
+    }
+    finally { vi.useRealTimers() }
+  })
+
+  it('keeps expired verification unavailable when a new refresh starts', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000_000)
+    try {
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('cached')))
+      const labels = useEulerLabels()
+      await labels.loadLabels()
+
+      vi.advanceTimersByTime(15 * 60_000)
+      const refreshed = deferred<PublicLabelsBundle>()
+      mocks.fetchPublicLabelsBundle.mockReturnValueOnce(refreshed.promise)
+      const pending = labels.loadLabels(true)
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(labels.isLoading.value).toBe(true)
+      expect(labels.isReady.value).toBe(false)
+      expect(labels.loadError.value).toContain('Unable to load vault verification')
+      expect(currentProductKeys()).toEqual(['cached'])
+
+      refreshed.resolve(bundleFor(labelsFor('recovered')))
+      await pending
+      expect(labels.isReady.value).toBe(true)
+      expect(labels.loadError.value).toBeUndefined()
+    }
+    finally { vi.useRealTimers() }
+  })
+
+  it('marks expired verification unavailable when a suspended tab resumes before its timer runs', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000_000)
+    try {
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('cached')))
+      const labels = useEulerLabels()
+      await labels.loadLabels()
+
+      vi.setSystemTime(1_000_000 + 15 * 60_000)
+      const refreshed = deferred<PublicLabelsBundle>()
+      mocks.fetchPublicLabelsBundle.mockReturnValueOnce(refreshed.promise)
+      const pending = labels.refreshLabelsIfStale()
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(labels.isLoading.value).toBe(true)
+      expect(labels.isReady.value).toBe(false)
+      expect(labels.loadError.value).toContain('Unable to load vault verification')
+      expect(currentProductKeys()).toEqual(['cached'])
+
+      refreshed.resolve(bundleFor(labelsFor('recovered')))
+      await pending
+      expect(labels.isReady.value).toBe(true)
+      expect(labels.loadError.value).toBeUndefined()
     }
     finally { vi.useRealTimers() }
   })

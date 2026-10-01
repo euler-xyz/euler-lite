@@ -186,9 +186,11 @@ const loadLabels = async (forceRefresh = false): Promise<void> => {
   const isCurrentLoad = () => isCurrentLabelsLoad(chainId, generation)
   if (!isCurrentLoad()) return
 
-  isReady.value = hasCurrentSnapshot && Date.now() - lastSuccessfulLoadAt < LABELS_MAX_AGE_MS
+  const hasUsableSnapshot = hasCurrentSnapshot && Date.now() - lastSuccessfulLoadAt < LABELS_MAX_AGE_MS
+  isReady.value = hasUsableSnapshot
   isLoading.value = true
-  loadError.value = undefined
+  if (!hasCurrentSnapshot) loadError.value = undefined
+  else if (!hasUsableSnapshot) loadError.value = 'Unable to load vault verification. Please retry.'
   const probeGeneration = ++wrapPairProbeGeneration
   Object.keys(wrapPairs).forEach(key => Reflect.deleteProperty(wrapPairs, key))
 
@@ -234,6 +236,7 @@ const loadLabels = async (forceRefresh = false): Promise<void> => {
 const refreshLabelsIfStale = async () => {
   if (hasSuccessfulSnapshot && Date.now() - lastSuccessfulLoadAt >= LABELS_MAX_AGE_MS) {
     isReady.value = false
+    loadError.value = 'Unable to load vault verification. Please retry.'
   }
   if (isLoading.value) return
   const previous = labelsData.value
