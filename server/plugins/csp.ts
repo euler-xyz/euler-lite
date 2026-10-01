@@ -129,8 +129,10 @@ const CONNECT_SRC_BASE = [
   'https://registry.npmjs.org',
   // Coinbase Wallet SDK and Base Account telemetry
   'https://cca-lite.coinbase.com',
-  // Coinbase Wallet SDK WalletLink socket
+  // Coinbase Wallet SDK: WalletLink events and socket, and its RPC
+  'https://www.walletlink.org',
   'wss://www.walletlink.org',
+  'https://rpc.wallet.coinbase.com',
   // Error signature decoding in the SDK
   'https://api.4byte.sourcify.dev',
   // CoW Protocol order submission and status in the SDK

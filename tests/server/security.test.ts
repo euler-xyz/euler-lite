@@ -263,7 +263,9 @@ describe('the script and frame policy against an injected third-party script', (
       'https://pulse.walletconnect.org',
       'https://registry.npmjs.org',
       'https://cca-lite.coinbase.com',
+      'https://www.walletlink.org',
       'wss://www.walletlink.org',
+      'https://rpc.wallet.coinbase.com',
       'https://api.4byte.sourcify.dev',
       'https://api.cow.fi',
     ])
