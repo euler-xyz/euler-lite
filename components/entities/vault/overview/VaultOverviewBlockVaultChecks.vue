@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
 import {
+  getAcceptedVaultCheckFindings,
   getNotListedLine,
   getUpcomingVaultChanges,
   getVaultCheckFindings,
@@ -28,9 +29,10 @@ const entry = computed(() => {
 const assessment = computed(() => loadError.value ? undefined : entry.value.assessment)
 const verdict = computed(() => isReady.value ? visibility.value?.[props.address.toLowerCase()] : undefined)
 const findingView = computed(() => assessment.value ? getVaultCheckFindings(assessment.value) : null)
+const acceptedFindings = computed(() => assessment.value ? getAcceptedVaultCheckFindings(assessment.value) : [])
 const upcoming = computed(() => assessment.value ? getUpcomingVaultChanges(assessment.value, props.asset) : [])
 const hasOracleAdapterFinding = computed(() => !!assessment.value?.configContext?.findings.some(
-  finding => finding.key === 'oracle.adapters-recognized' && finding.outcome === 'fail',
+  finding => finding.key === 'oracle.adapters-recognized' && finding.outcome === 'fail' && !finding.exempted,
 ))
 const notListed = computed(() => getNotListedLine(
   verdict.value?.status,
@@ -119,6 +121,53 @@ watch(
       >
         {{ findingView.moreCount }} more not shown
       </p>
+      <div
+        v-if="acceptedFindings.length"
+        class="flex flex-col gap-8 text-content-tertiary"
+        data-id="vault-checks-accepted-exceptions"
+      >
+        <p class="font-medium text-content-secondary">
+          Accepted exceptions
+        </p>
+        <p>These findings were accepted as exceptions and do not fail the configuration check.</p>
+        <ul class="flex flex-col gap-8">
+          <li
+            v-for="finding in acceptedFindings"
+            :key="finding.key"
+            class="flex gap-8"
+          >
+            <SvgIcon
+              name="info-circle"
+              class="!w-16 !h-16 shrink-0 mt-2"
+            />
+            <span>
+              <template v-if="finding.parts">
+                <template
+                  v-for="(part, index) in finding.parts"
+                  :key="index"
+                >
+                  <button
+                    v-if="part.address"
+                    type="button"
+                    class="inline-flex items-center gap-2 align-baseline underline decoration-dotted outline-none hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
+                    :title="isCopied(part.address) ? 'Copied' : 'Copy full address'"
+                    :aria-label="`Copy address ${part.address}`"
+                    @click.stop.prevent="copyAddress(part.address)"
+                  >
+                    <span>{{ part.text }}</span>
+                    <SvgIcon
+                      class="!w-14 !h-14"
+                      :name="isCopied(part.address) ? 'check' : 'copy'"
+                    />
+                  </button>
+                  <template v-else>{{ part.text }}</template>
+                </template>
+              </template>
+              <template v-else>{{ finding.text }}</template>
+            </span>
+          </li>
+        </ul>
+      </div>
       <p
         v-if="hasOracleAdapterFinding && !findingView?.lines.length && !findingView?.moreCount"
         class="text-content-tertiary"

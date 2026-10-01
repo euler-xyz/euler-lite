@@ -1,7 +1,7 @@
 import { isEulerEarn, isEVault, type VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
 import type { AnyVault } from '~/composables/useVaultRegistry'
 import { useEulerLabels } from '~/composables/useEulerLabels'
-import { getVaultCheckFindings } from '~/utils/vault-assessment/presentation'
+import { getVaultCheckFindings, hasOnlyAcceptedVaultCheckFindings } from '~/utils/vault-assessment/presentation'
 
 const getAssessmentFamily = (vault: AnyVault): VaultAssessmentFamily | null =>
   isEulerEarn(vault) ? 'earn' : isEVault(vault) ? 'evk' : null
@@ -11,6 +11,14 @@ export const useDiscoveryVaultWarningDetails = () => {
     isReady, source, loadError, vaultAssessments,
     getVaultAssessmentEntry, loadVaultAssessment,
   } = useEulerLabels()
+
+  const isAcceptedOnlyWarning = (vault: AnyVault | undefined): boolean => {
+    const family = vault && getAssessmentFamily(vault)
+    if (!vault || !family || !isReady.value || source.value !== 'v3' || loadError.value) return false
+    void vaultAssessments.value
+    const entry = getVaultAssessmentEntry(vault.chainId, vault.address, family)
+    return entry.status === 'available' && !!entry.assessment && hasOnlyAcceptedVaultCheckFindings(entry.assessment)
+  }
 
   const getWarningText = (vault: AnyVault | undefined, fallback?: string | null): string => {
     const summary = fallback || 'Vault checks need review'
@@ -37,5 +45,5 @@ export const useDiscoveryVaultWarningDetails = () => {
     }
   }
 
-  return { getWarningText, loadWarningDetails }
+  return { getWarningText, loadWarningDetails, isAcceptedOnlyWarning }
 }

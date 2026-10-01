@@ -10,6 +10,12 @@ export interface VaultCheckLine {
   parts?: Array<{ text: string, address?: string }>
 }
 
+export interface AcceptedVaultCheckLine {
+  key: string
+  text: string
+  parts?: VaultCheckLine['parts']
+}
+
 export interface UpcomingVaultChange {
   key: string
   text: string
@@ -66,7 +72,7 @@ const getCopyableParts = (text: string, finding: VaultAssessmentFinding): VaultC
 }
 
 const relevantFinding = (finding: VaultAssessmentFinding) =>
-  (finding.outcome === 'fail' || (finding.outcome === 'unknown' && finding.required && !finding.exempted))
+  ((finding.outcome === 'fail' || (finding.outcome === 'unknown' && finding.required)) && !finding.exempted)
   && !finding.key.startsWith('evidence.')
   && !finding.key.startsWith('scheduled.')
   && finding.key !== 'oracle.adapters-recognized'
@@ -98,6 +104,29 @@ export const getVaultCheckFindings = (assessment: VaultAssessment): { lines: Vau
   return { lines: [...shown.values()], moreCount, reviewCount: shown.size + moreCount }
 }
 
+export const getAcceptedVaultCheckFindings = (assessment: VaultAssessment): AcceptedVaultCheckLine[] =>
+  [
+    ...(assessment.configContext?.findings ?? []),
+    ...(assessment.consistencyContext?.findings ?? []),
+  ]
+    .filter(finding => finding.outcome === 'fail' && finding.exempted === true)
+    .map((finding) => {
+      const text = finding.cause?.summary || finding.description
+      const parts = getCopyableParts(text, finding)
+      return { key: finding.key, text, ...(parts ? { parts } : {}) }
+    })
+
+export const hasOnlyAcceptedVaultCheckFindings = (assessment: VaultAssessment): boolean => {
+  if (!assessment.assessed || assessment.configStatus !== 'verified' || assessment.configContext?.outcome !== 'pass'
+    || (assessment.checksStatus !== 'warning' && assessment.checksStatus !== 'positive')) return false
+  const findings = [
+    ...(assessment.configContext?.findings ?? []),
+    ...(assessment.consistencyContext?.findings ?? []),
+  ]
+  return findings.some(finding => finding.outcome === 'fail' && finding.exempted === true)
+    && !findings.some(finding => (finding.outcome === 'fail' || (finding.outcome === 'unknown' && finding.required)) && !finding.exempted)
+}
+
 const formatRelativeCheckedAt = (at: string, now: number): string => {
   const elapsed = Math.max(0, now - new Date(at).getTime())
   if (!Number.isFinite(elapsed)) return 'Verified'
@@ -126,6 +155,13 @@ export const getVaultChecksStatusLine = (
     return `Flagged · ${reviewCount} to review`
   }
   if (findings.some(finding => finding.outcome === 'unknown')) return 'Being re-checked'
+  if (hasOnlyAcceptedVaultCheckFindings(assessment)) {
+    const count = getAcceptedVaultCheckFindings(assessment).length
+    const verified = assessment.configLastCheckedAt
+      ? formatRelativeCheckedAt(assessment.configLastCheckedAt, now)
+      : 'Verified'
+    return `${verified} · ${count} accepted exception${count === 1 ? '' : 's'}`
+  }
   if (assessment.checksStatus === 'warning' || assessment.checksStatus === 'negative'
     || assessment.configStatus === 'suspended' || assessment.configStatus === 'revoked') return 'Flagged'
   if (assessment.configStatus === 'pending' || assessment.configStatus === 'unverified') return 'Being re-checked'

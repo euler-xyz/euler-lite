@@ -129,6 +129,7 @@ watchEffect(async () => {
           <VaultDeprecatedBadge :addresses="[vault.address]" />
           <VaultAssessmentWarning
             :address="vault.address"
+            :family="null"
             hide-deprecated
           />
         </div>
