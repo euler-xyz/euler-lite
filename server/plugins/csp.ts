@@ -131,8 +131,6 @@ const CONNECT_SRC_BASE = [
   'https://pulse.walletconnect.org',
   // AppKit version check
   'https://registry.npmjs.org',
-  // Coinbase Wallet SDK and Base Account telemetry
-  'https://cca-lite.coinbase.com',
   // Coinbase Wallet SDK: WalletLink events and socket, and its RPC
   'https://www.walletlink.org',
   'wss://www.walletlink.org',

@@ -264,7 +264,6 @@ describe('the script and frame policy against an injected third-party script', (
       'wss://relay.walletconnect.org',
       'https://pulse.walletconnect.org',
       'https://registry.npmjs.org',
-      'https://cca-lite.coinbase.com',
       'https://www.walletlink.org',
       'wss://www.walletlink.org',
       'https://rpc.wallet.coinbase.com',
