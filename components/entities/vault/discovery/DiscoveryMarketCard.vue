@@ -39,7 +39,7 @@ const marketWarnings = computed(() => {
     const verdict = visibility.value?.[address]
     if (verdict?.status !== 'warning') return []
     if (verdict.decidedBy === 'deprecated' && getVaultDeprecation(address).deprecated) return []
-    return [`${vault.asset.symbol}: ${verdict.reason || 'One or more vault checks need review.'}`]
+    return [{ title: vault.asset.symbol, text: verdict.reason || 'One or more vault checks need review.' }]
   })
 })
 
@@ -50,7 +50,7 @@ const marketDeprecationReasons = computed(() => {
     if (seen.has(address)) return []
     seen.add(address)
     const status = getVaultDeprecation(address)
-    return status.deprecated ? [`${vault.asset.symbol}: ${status.reason}`] : []
+    return status.deprecated ? [{ title: vault.asset.symbol, text: status.reason }] : []
   })
 })
 
@@ -168,22 +168,34 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
             data-field="pair-count"
             :data-value="diagram.pairCount"
           >{{ diagram.pairCount }} pairs</span>
-          <span
+          <UiHoverPreviewTooltip
             v-if="getDeprecatedVaultCount(market) > 0"
-            class="text-warning-500 text-p5 mt-4"
-            :title="marketDeprecationReasons.join('\n')"
+            title="Deprecated vaults"
+            :sections="marketDeprecationReasons"
+            placement="top-start"
           >
-            {{ getDeprecatedVaultCount(market) }} deprecated
-          </span>
-          <span
+            <span
+              class="text-warning-500 text-p5 mt-4"
+              @click.stop
+            >
+              {{ getDeprecatedVaultCount(market) }} deprecated
+            </span>
+          </UiHoverPreviewTooltip>
+          <UiHoverPreviewTooltip
             v-if="marketWarnings.length"
-            class="text-warning-500 text-p5 mt-4"
-            :title="marketWarnings.join('\n')"
-            data-id="discovery-market-warning"
-            :data-warning-count="marketWarnings.length"
+            title="Market warnings"
+            :sections="marketWarnings"
+            placement="top-start"
           >
-            {{ marketWarnings.length }} {{ marketWarnings.length === 1 ? 'warning' : 'warnings' }}
-          </span>
+            <span
+              class="text-warning-500 text-p5 mt-4"
+              data-id="discovery-market-warning"
+              :data-warning-count="marketWarnings.length"
+              @click.stop
+            >
+              {{ marketWarnings.length }} {{ marketWarnings.length === 1 ? 'warning' : 'warnings' }}
+            </span>
+          </UiHoverPreviewTooltip>
           <UiHoverPreviewTooltip
             v-if="getUnknownCollateralCount(market) > 0"
             title="Unknown collateral"
