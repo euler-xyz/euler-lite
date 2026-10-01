@@ -161,7 +161,7 @@ export function buildCsp(
     `connect-src ${connectSrc.join(' ')}`,
     'font-src \'self\' https://fonts.reown.com',
     // Nuxt DevTools mounts its panel in a same-origin frame on the local dev server.
-    `frame-src ${import.meta.dev ? '\'self\' ' : ''}https://verify.walletconnect.org`,
+    `frame-src ${import.meta.dev ? '\'self\' ' : ''}https://verify.walletconnect.org https://secure.walletconnect.org`,
     'child-src \'none\'',
     'frame-ancestors \'none\'',
     // Token logos come from arbitrary CDNs (CoinGecko, DefiLlama, Uniswap, etc.)
