@@ -453,6 +453,8 @@ A third-party script that reaches the page could draw a fake wallet prompt in an
 | `child-src`, `worker-src`, `object-src` | `'none'` | The app runs no worker and embeds no plugin. |
 | `base-uri`, `form-action` | `'self'` | A script cannot rebase relative URLs or post a form elsewhere. |
 
+`'strict-dynamic'` also lets code the nonce trusts insert inline scripts, so a dependency's own script insertion is not stopped by the policy. The Coinbase Wallet and Base Account connectors are therefore created in `plugins/00.wagmi.ts` with their SDKs' telemetry off, which keeps Coinbase's analytics bundle from being inserted; `npm run csp:probe -- --url <deployment>` checks a deployed page for CSP violations and for that bundle.
+
 Every fixed `connect-src` and `font-src` origin is one the app or a library it ships contacts directly; an API the app reaches through its own `/api/internal` proxies stays out of the policy. Origins a deployment configures (`CSP_EXTRA_CONNECT_SRC`, `RPC_URL_<chainId>`, the swap API URL) and the enabled chains' public RPCs only reach `connect-src`, reduced to an `https://` or `wss://` origin; any other value is dropped. The nonce is 16 random bytes drawn per response, and page responses are `no-store` at the browser and the CDN, so no nonce is served twice. The header is enforced, not report-only.
 
 ## 📱 Mobile-First Architecture
