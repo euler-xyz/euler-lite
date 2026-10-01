@@ -291,29 +291,26 @@ const isNodeCuratorUnknown = (address: string): boolean => {
               !
             </text>
           </g>
-          <g
+          <foreignObject
             v-else-if="getNodeWarning(node.address)"
-            @mouseenter="loadNodeWarningDetails(node.address)"
-            @pointerdown="loadNodeWarningDetails(node.address)"
+            :x="node.x + 1"
+            :y="node.y - 17"
+            width="16"
+            height="16"
           >
-            <title>{{ getNodeWarningText(node.address) }}</title>
-            <circle
-              :cx="node.x + 9"
-              :cy="node.y - 9"
-              r="6"
-              style="fill: var(--warning-500)"
-            />
-            <text
-              :x="node.x + 9"
-              :y="node.y - 5.5"
-              text-anchor="middle"
-              fill="white"
-              font-size="9"
-              font-weight="700"
+            <UiHoverPreviewTooltip
+              title="Vault checks"
+              :text="getNodeWarningText(node.address)"
+              :aria-label="`Vault checks for ${node.assetSymbol}`"
+              placement="top"
+              class="!w-16 !h-16"
+              @mouseenter="loadNodeWarningDetails(node.address)"
+              @focusin="loadNodeWarningDetails(node.address)"
+              @pointerdown="loadNodeWarningDetails(node.address)"
             >
-              !
-            </text>
-          </g>
+              <span class="flex h-12 w-12 items-center justify-center rounded-full bg-warning-500 text-[9px] font-bold text-white">!</span>
+            </UiHoverPreviewTooltip>
+          </foreignObject>
           <!-- Deprecated badge -->
           <g v-else-if="isVaultDeprecated(node.address)">
             <circle
