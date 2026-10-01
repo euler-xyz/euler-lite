@@ -6,6 +6,7 @@ import { isVaultDeprecated, isVaultKeyring, isVaultCyclicalNote } from '~/utils/
 import { hasResolvedGovernorAdmin } from '~/utils/vault/governor-verification'
 import { stringToColor } from '~/utils/string-utils'
 import { getEnlargedDiagram, getArrow, getLabelPosition, getGraphConnectedAddresses, isNodeRampingDown, isExternalCollateral, findVault } from '~/utils/discoveryCalculations'
+import { useDiscoveryVaultWarningDetails } from '~/composables/useDiscoveryVaultWarningDetails'
 
 const props = defineProps<{
   market: MarketGroup
@@ -41,11 +42,16 @@ const isNodeCyclicalNote = (address: string): boolean => {
 
 const { isVaultGovernorVerified, isSecuritizeGovernorVerified, isEarnVaultOwnerVerified } = useVaults()
 const { isReady, source, visibility } = useEulerLabels()
+const { getWarningText, loadWarningDetails } = useDiscoveryVaultWarningDetails()
 const getNodeWarning = (address: string) => {
   if (!isReady.value || source.value !== 'v3') return null
   const verdict = visibility.value?.[address.toLowerCase()]
   return verdict?.status === 'warning' || verdict?.status === 'hidden' ? verdict : null
 }
+const getNodeWarningText = (address: string) =>
+  getWarningText(findVault(props.market, address), getNodeWarning(address)?.reason)
+const loadNodeWarningDetails = (address: string) =>
+  loadWarningDetails(findVault(props.market, address))
 
 // Same signal as the per-pair "Unknown" curator pill: the vault resolved,
 // but its governor/owner isn't part of any declared product entity. Applies to
@@ -285,8 +291,12 @@ const isNodeCuratorUnknown = (address: string): boolean => {
               !
             </text>
           </g>
-          <g v-else-if="getNodeWarning(node.address)">
-            <title>{{ getNodeWarning(node.address)?.reason || 'Vault checks need review' }}</title>
+          <g
+            v-else-if="getNodeWarning(node.address)"
+            @mouseenter="loadNodeWarningDetails(node.address)"
+            @pointerdown="loadNodeWarningDetails(node.address)"
+          >
+            <title>{{ getNodeWarningText(node.address) }}</title>
             <circle
               :cx="node.x + 9"
               :cy="node.y - 9"
