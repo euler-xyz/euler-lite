@@ -303,7 +303,7 @@ const isNodeCuratorUnknown = (address: string): boolean => {
               :text="getNodeWarningText(node.address)"
               :aria-label="`Vault checks for ${node.assetSymbol}`"
               placement="top"
-              class="!w-16 !h-16"
+              class="!flex !w-16 !h-16"
               @mouseenter="loadNodeWarningDetails(node.address)"
               @focusin="loadNodeWarningDetails(node.address)"
               @pointerdown="loadNodeWarningDetails(node.address)"
