@@ -98,7 +98,7 @@ Lookup rules:
 
 For V3-assessed chains, `useEulerLabels` builds verified membership from visible or warning vaults with a managing entity. The client and `/api/public/is-known` use that membership as the verification verdict. Hidden and pending-review vaults can retain display metadata without becoming verified. Independent on-chain escrow-perspective membership also counts as verified.
 
-Vault configuration checks and listing are separate V3 results. A vault can have passed checks and still be unlisted because it has no published vault label. The Vault checks UI says "Checks passed" for that assessment; the listing notice comes from the visibility verdict and its `decidedBy` reason.
+Vault configuration checks and listing are separate V3 results. A vault can have passed checks and still be unlisted because it has no published vault label. The Vault checks UI says "Checks passed" for that assessment. The separate listing notice comes from the visibility verdict and its `decidedBy` reason.
 
 Metadata-only and static sources have no V3 visibility verdict. Their verification path matches the on-chain governor, router governor, or Earn owner to the declared managing entity. See `utils/vault/governor-verification.ts` and the "Programmatic verification lookup" section below.
 

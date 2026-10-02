@@ -2,7 +2,6 @@
 import type { VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
 import {
   getAcceptedVaultCheckFindings,
-  getNotListedLine,
   getUpcomingVaultChanges,
   getVaultCheckFindings,
   getVaultAssessmentCheckSummary,
@@ -18,7 +17,7 @@ const props = defineProps<{
 }>()
 const { chainId } = useEulerAddresses()
 const nowMs = useActivityNowMs()
-const { isReady, loadError, source, visibility, vaultAssessments, loadVaultAssessment, getVaultAssessmentEntry, isVaultAssessmentAvailableForChain } = useEulerLabels()
+const { loadError, source, vaultAssessments, loadVaultAssessment, getVaultAssessmentEntry, isVaultAssessmentAvailableForChain } = useEulerLabels()
 const family = computed(() => props.family ?? 'evk')
 const canShow = computed(() => !!chainId.value
   && source.value === 'v3'
@@ -29,17 +28,11 @@ const entry = computed(() => {
   return chainId.value ? getVaultAssessmentEntry(chainId.value, props.address, family.value) : { status: 'idle' as const }
 })
 const assessment = computed(() => loadError.value ? undefined : entry.value.assessment)
-const verdict = computed(() => isReady.value ? visibility.value?.[props.address.toLowerCase()] : undefined)
 const findingView = computed(() => assessment.value ? getVaultCheckFindings(assessment.value) : null)
 const acceptedFindings = computed(() => assessment.value ? getAcceptedVaultCheckFindings(assessment.value) : [])
 const upcoming = computed(() => assessment.value ? getUpcomingVaultChanges(assessment.value, props.asset) : [])
 const hasOracleAdapterFinding = computed(() => !!assessment.value?.configContext?.findings.some(
   finding => finding.key === 'oracle.adapters-recognized' && finding.outcome === 'fail' && !finding.exempted,
-))
-const notListed = computed(() => getNotListedLine(
-  verdict.value?.status,
-  verdict.value?.reason || assessment.value?.configReason || assessment.value?.consistencyReason,
-  verdict.value?.decidedBy,
 ))
 const statusLine = computed(() => getVaultChecksStatusLine(assessment.value, loadError.value ? 'unavailable' : entry.value.status, nowMs.value))
 const checkSummary = computed(() => assessment.value ? getVaultAssessmentCheckSummary(assessment.value) : '')
@@ -67,13 +60,6 @@ watch(
     :default-open="props.defaultOpen ?? false"
   >
     <div class="flex flex-col gap-12 rounded-xl border border-line-subtle bg-surface p-16 text-p3">
-      <p
-        v-if="notListed"
-        class="text-content-tertiary"
-        data-id="vault-not-listed"
-      >
-        {{ notListed }}
-      </p>
       <div class="grid grid-cols-1 gap-12 sm:grid-cols-2">
         <div class="flex flex-col gap-4">
           <span class="text-content-tertiary">Status</span>
