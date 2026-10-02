@@ -188,9 +188,6 @@ useOperationGuard(computed(() => formTab.value === 'multiply'
         multiply.multiplyLongVault.value?.address,
       ].filter(Boolean)
     : borrow.isSavingCollateral.value ? [] : [collateralAddress]),
-  newExposureVaultAddresses: computed(() => formTab.value === 'multiply'
-    ? [multiply.multiplySupplyVault.value?.address, multiply.multiplyLongVault.value?.address, borrowAddress].filter(Boolean)
-    : [collateralAddress, borrowAddress]),
 })
 const showMultiplyRoe = computed(() =>
   areRoeCollateralVaultsCorrelatedWithBorrow(

@@ -64,22 +64,3 @@ const depositTargets = (name: PlannerName, args: Record<string, unknown>): Addre
 }
 export const depositTargetVaults = (intent: OperationIntent): Address[] =>
   depositTargets(intent.planner.name, intent.planner.args)
-
-/** Pending review blocks newly acquired exposure but never a simple exit. */
-const exposureTargets = (name: PlannerName, args: Record<string, unknown>): Address[] => {
-  if (['withdraw', 'redeem', 'withdraw-and-swap', 'redeem-and-swap', 'repay-from-wallet', 'repay-from-deposit', 'repay-with-swap', 'swap-and-repay', 'cleanup', 'reward-claim', 'reul-unlock'].includes(name)) return []
-  if (name === 'borrow') return unique([...address(args.vaultAddress), ...address(record(args.collateral)?.vault)])
-  if (name === 'swap-and-borrow') return unique([...depositTargets(name, args), ...address(args.borrowVault)])
-  if (name === 'multiply-with-swap' || name === 'multiply-same-asset') return unique([
-    ...depositTargets(name, args), ...address(args.collateralVault), ...address(args.liabilityVault),
-  ])
-  if (name === 'migrate-same-asset-debt') return address(args.newLiabilityVault)
-  if (name === 'swap-debt') return address(record(args.swapQuote)?.vaultIn)
-  if (name === 'refinance-position') return unique([...legTargets(args.collateral, exposureTargets), ...legTargets(args.debt, exposureTargets)])
-  if (name === 'cross-protocol-migration') return args.direction === 'external-to-euler'
-    ? unique([...address(record(args.target)?.collateralVault), ...address(record(args.target)?.borrowVault)])
-    : []
-  return depositTargets(name, args)
-}
-export const newExposureVaults = (intent: OperationIntent): Address[] =>
-  exposureTargets(intent.planner.name, intent.planner.args)

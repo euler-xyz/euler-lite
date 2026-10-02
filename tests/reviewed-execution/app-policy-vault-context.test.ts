@@ -222,24 +222,31 @@ describe('final two-vault swap policy', () => {
       .rejects.toThrow('acknowledgement does not cover the execution')
   })
 
-  it('blocks pending-review deposits but permits an acknowledged withdrawal', async () => {
+  it('requires acknowledgement for a pending-review deposit and permits an exit', async () => {
     geo.labelsSource.value = 'v3'
     geo.visibility.value = { [TEST_VAULT.toLowerCase()]: { status: 'pending_review' } }
+    verifyVault.mockReturnValue(false)
     const deposit = createOperationIntent({ kind: 'deposit', planner: 'deposit', args: { vaultAddress: TEST_VAULT, assetAddress: TEST_TOKEN, amount: 1n }, chainId: 1, account: TEST_ACCOUNT, source: 'test', operation: 'lend-deposit', createdAt: 1 })
     const withdrawal = createOperationIntent({ kind: 'withdraw', planner: 'withdraw', args: { vaultAddress: TEST_VAULT, owner: TEST_ACCOUNT, assets: 1n }, chainId: 1, account: TEST_ACCOUNT, source: 'test', operation: 'lend-withdraw', createdAt: 1 })
     const requestSet = makeReviewedExecution().requestSet
-    await expect(resolveAppPolicy(requestSet, 100, [deposit])).rejects.toThrow('not been checked yet')
+    await expect(resolveAppPolicy(requestSet, 100, [deposit])).rejects.toThrow('acknowledgement does not cover the execution')
+    recordUnverifiedVaultAcknowledgement({ chainId: 1, account: TEST_ACCOUNT, operation: 'lend-deposit', vaults: [TEST_VAULT] })
+    await expect(resolveAppPolicy(requestSet, 100, [deposit])).resolves.toBeDefined()
+    recordUnverifiedVaultAcknowledgement({ chainId: 1, account: TEST_ACCOUNT, operation: 'lend-withdraw', vaults: [TEST_VAULT] })
     await expect(resolveAppPolicy(requestSet, 100, [withdrawal])).resolves.toBeDefined()
   })
 
-  it('blocks a pending-review swap destination even when the source vault is verified', async () => {
+  it('requires acknowledgement for a pending-review swap destination', async () => {
     geo.labelsSource.value = 'v3'
     geo.visibility.value = { [TARGET_VAULT.toLowerCase()]: { status: 'pending_review' } }
-    await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [swapIntent()]))
-      .rejects.toThrow('not been checked yet')
+    const requestSet = makeReviewedExecution().requestSet
+    const intent = swapIntent()
+    await expect(resolveAppPolicy(requestSet, 100, [intent])).rejects.toThrow('acknowledgement does not cover the execution')
+    recordUnverifiedVaultAcknowledgement({ chainId: 1, account: TEST_ACCOUNT, operation: 'lend-swap', vaults: [TARGET_VAULT] })
+    await expect(resolveAppPolicy(requestSet, 100, [intent])).resolves.toBeDefined()
   })
 
-  it('blocks refinancing into a pending-review debt vault when the swap repays a verified vault', async () => {
+  it('requires acknowledgement when refinancing into a pending-review debt vault', async () => {
     geo.labelsSource.value = 'v3'
     geo.visibility.value = { [TARGET_VAULT.toLowerCase()]: { status: 'pending_review' } }
     const quote = makeSwapQuote()
@@ -260,8 +267,10 @@ describe('final two-vault swap policy', () => {
       },
       chainId: 1, account: TEST_ACCOUNT, source: 'test', operation: 'refinance', createdAt: 1,
     })
-    await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [intent]))
-      .rejects.toThrow('not been checked yet')
+    const requestSet = makeReviewedExecution().requestSet
+    await expect(resolveAppPolicy(requestSet, 100, [intent])).rejects.toThrow('acknowledgement does not cover the execution')
+    recordUnverifiedVaultAcknowledgement({ chainId: 1, account: TEST_ACCOUNT, operation: 'refinance', vaults: [TARGET_VAULT] })
+    await expect(resolveAppPolicy(requestSet, 100, [intent])).resolves.toBeDefined()
   })
 
   it('requires a distinct deprecated-deposit acknowledgement bound to the operation', async () => {

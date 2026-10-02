@@ -16,7 +16,7 @@ import { collectPlanningRequirements } from '~/features/reviewed-execution/plann
 import { isVaultBlockedByCountry, isVaultRestrictedByCountry, useGeoBlock } from '~/composables/useGeoBlock'
 import type { EulerEarn, EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { getVaultDeprecation } from '~/utils/eulerLabelsUtils'
-import { depositTargetVaults, newExposureVaults } from '~/utils/vault-action-targets'
+import { depositTargetVaults } from '~/utils/vault-action-targets'
 
 const allowed = (version: string, now: number, expiresAt?: number): PolicyState => ({
   state: 'allowed',
@@ -82,13 +82,6 @@ export const resolveAppPolicy = async (
 
     if (requirements.vaults.length && !useEulerLabels().isReady.value && !onlyExits) {
       throw new Error('Vault verification is unavailable')
-    }
-
-    const { source, visibility } = useEulerLabels()
-    if (source.value === 'v3' && useEulerLabels().isReady.value && intents.some(intent =>
-      newExposureVaults(intent).some(address => visibility.value?.[address.toLowerCase()]?.status === 'pending_review'),
-    )) {
-      throw new Error('This vault has not been checked yet. New deposits and borrows are unavailable.')
     }
 
     const simpleExitPlanners = new Set(['withdraw', 'redeem', 'repay-from-wallet', 'repay-from-deposit', 'repay-with-swap', 'swap-and-repay', 'cleanup', 'reward-claim', 'reul-unlock'])

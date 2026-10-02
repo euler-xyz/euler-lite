@@ -10,7 +10,6 @@ export interface UnverifiedVaultGuardState {
   isAcknowledgmentRequired: boolean
   isDeprecatedDepositAcknowledgmentRequired: boolean
   deprecatedDepositNotice: string | null
-  actionBlockReason: string | null
   unlistedNotice: string | null
   isVerificationLoading: boolean
   verificationError: string | undefined
@@ -25,7 +24,6 @@ interface UnverifiedVaultGuardContext {
   operation: ComputedRef<string>
   allowUnavailableLabels?: boolean
   depositedVaultAddresses?: ComputedRef<string[]>
-  newExposureVaultAddresses?: ComputedRef<string[]>
 }
 
 let unverifiedVaultGuardSequence = 0
@@ -109,14 +107,6 @@ export const useUnverifiedVaultGuard = (
       : []
   })
   const hasUnverifiedVault = computed(() => unverifiedVaultAddresses.value.length > 0)
-  const pendingReviewAddresses = computed(() => {
-    if (!labelsReady.value || source.value !== 'v3' || context.allowUnavailableLabels) return []
-    return (context.newExposureVaultAddresses?.value ?? vaultAddresses.value)
-      .filter(address => visibility.value?.[address.toLowerCase()]?.status === 'pending_review')
-  })
-  const actionBlockReason = computed(() => pendingReviewAddresses.value.length
-    ? 'This vault has not been checked yet. New deposits and borrows are unavailable.'
-    : null)
   const unlistedNotice = computed(() => getKnownUnlistedActionNotice(
     unverifiedVaultAddresses.value,
     source.value,
@@ -132,7 +122,7 @@ export const useUnverifiedVaultGuard = (
   const contextKey = computed(() => unverifiedVaultAcknowledgementKey(acknowledgementContext.value))
 
   const isAcknowledgmentRequired = computed(() =>
-    !actionBlockReason.value && hasUnverifiedVault.value && acknowledgedContextKey.value !== contextKey.value,
+    hasUnverifiedVault.value && acknowledgedContextKey.value !== contextKey.value,
   )
 
   const deprecatedDepositAddresses = computed(() => {
@@ -146,7 +136,7 @@ export const useUnverifiedVaultGuard = (
   }))
   const deprecatedContextKey = computed(() => deprecatedDepositAcknowledgementKey(deprecatedDepositContext.value))
   const isDeprecatedDepositAcknowledgmentRequired = computed(() =>
-    !actionBlockReason.value && deprecatedDepositAddresses.value.length > 0
+    deprecatedDepositAddresses.value.length > 0
     && acknowledgedDeprecatedKey.value !== deprecatedContextKey.value,
   )
   const deprecatedDepositNotice = computed(() => {
@@ -173,7 +163,6 @@ export const useUnverifiedVaultGuard = (
   const blockReason = computed(() => {
     if (verificationError.value) return verificationError.value
     if (!isVerificationReady.value) return 'Checking vault verification'
-    if (actionBlockReason.value) return actionBlockReason.value
     if (isAcknowledgmentRequired.value) return 'Unverified vault risk acknowledgment required'
     if (isDeprecatedDepositAcknowledgmentRequired.value) return 'Deprecated vault deposit acknowledgment required'
     return undefined
@@ -196,7 +185,6 @@ export const useUnverifiedVaultGuard = (
     isAcknowledgmentRequired,
     isDeprecatedDepositAcknowledgmentRequired,
     deprecatedDepositNotice,
-    actionBlockReason,
     unlistedNotice,
     isVerificationLoading,
     verificationError,
