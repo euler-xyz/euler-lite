@@ -160,13 +160,13 @@ export const hasOnlyAcceptedVaultCheckFindings = (assessment: VaultAssessment): 
 
 const formatRelativeCheckedAt = (at: string, now: number): string => {
   const elapsed = Math.max(0, now - new Date(at).getTime())
-  if (!Number.isFinite(elapsed)) return 'Verified'
+  if (!Number.isFinite(elapsed)) return 'Checks passed'
   const minutes = Math.floor(elapsed / 60_000)
-  if (minutes < 1) return 'Verified · checked just now'
-  if (minutes < 60) return `Verified · checked ${minutes} min ago`
+  if (minutes < 1) return 'Checks passed · checked just now'
+  if (minutes < 60) return `Checks passed · checked ${minutes} min ago`
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `Verified · checked ${hours} hr ago`
-  return `Verified · checked ${Math.floor(hours / 24)} days ago`
+  if (hours < 24) return `Checks passed · checked ${hours} hr ago`
+  return `Checks passed · checked ${Math.floor(hours / 24)} days ago`
 }
 
 export const getVaultChecksStatusLine = (
@@ -188,17 +188,17 @@ export const getVaultChecksStatusLine = (
   if (findings.some(finding => finding.outcome === 'unknown')) return 'Being re-checked'
   if (hasOnlyAcceptedVaultCheckFindings(assessment)) {
     const count = getAcceptedVaultCheckFindings(assessment).length
-    const verified = assessment.configLastCheckedAt
+    const checksPassed = assessment.configLastCheckedAt
       ? formatRelativeCheckedAt(assessment.configLastCheckedAt, now)
-      : 'Verified'
-    return `${verified} · ${count} accepted exception${count === 1 ? '' : 's'}`
+      : 'Checks passed'
+    return `${checksPassed} · ${count} accepted exception${count === 1 ? '' : 's'}`
   }
   if (assessment.checksStatus === 'warning' || assessment.checksStatus === 'negative'
     || assessment.configStatus === 'suspended' || assessment.configStatus === 'revoked') return 'Flagged'
   if (assessment.configStatus === 'pending' || assessment.configStatus === 'unverified') return 'Being re-checked'
   return assessment.configLastCheckedAt
     ? formatRelativeCheckedAt(assessment.configLastCheckedAt, now)
-    : 'Verified'
+    : 'Checks passed'
 }
 
 const formatPendingTimelock = (value: string): string => {
@@ -264,7 +264,8 @@ export const getUpcomingVaultChanges = (
     })
 }
 
-export const getNotListedLine = (status: string | undefined, reason?: string | null): string | null => {
+export const getNotListedLine = (status: string | undefined, reason?: string | null, decidedBy?: string | null): string | null => {
+  if (status === 'pending_review' && decidedBy === 'unclaimed') return 'This vault is not listed in the published vault labels.'
   if (status === 'pending_review') return 'This vault has not been checked yet, so it is not listed.'
   if (status === 'hidden') return `This vault is not listed${reason ? `: ${reason}` : '.'}${reason && !/[.!?]$/.test(reason) ? '.' : ''}`
   return null
@@ -273,12 +274,12 @@ export const getNotListedLine = (status: string | undefined, reason?: string | n
 export const getKnownUnlistedActionNotice = (
   addresses: readonly string[],
   source: string | undefined,
-  visibility: Record<string, { status: string, reason?: string | null }> | undefined,
+  visibility: Record<string, { status: string, reason?: string | null, decidedBy?: string | null }> | undefined,
 ): string | null => {
   if (source !== 'v3' || !addresses.length) return null
   const lines = addresses.map((address) => {
     const verdict = visibility?.[address.toLowerCase()]
-    return getNotListedLine(verdict?.status, verdict?.reason)
+    return getNotListedLine(verdict?.status, verdict?.reason, verdict?.decidedBy)
   })
   if (lines.some(line => line === null)) return null
   return lines.length === 1
@@ -292,7 +293,7 @@ export const getUnverifiedActionCopy = (
   vaultNames: readonly string[] = [],
 ): { title: string, description: string } => {
   if (unlistedNotice) {
-    return { title: 'Vault not listed', description: `${unlistedNotice} Review the vault checks before continuing.` }
+    return { title: 'Vault not listed', description: `${unlistedNotice} Review the vault details and confirm you trust the source before continuing.` }
   }
   const subject = vaultNames.length ? `This action includes ${vaultNames.join(', ')}. ` : ''
   return {

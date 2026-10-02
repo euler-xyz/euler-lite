@@ -126,7 +126,7 @@ describe('vault checks presentation', () => {
       'V3 says collateral.0x01.ltv',
     ])
     expect(hasOnlyAcceptedVaultCheckFindings(flagged)).toBe(true)
-    expect(getVaultChecksStatusLine(flagged, 'available', Date.parse('2026-09-29T12:12:00.000Z'))).toBe('Verified · checked 12 min ago · 2 accepted exceptions')
+    expect(getVaultChecksStatusLine(flagged, 'available', Date.parse('2026-09-29T12:12:00.000Z'))).toBe('Checks passed · checked 12 min ago · 2 accepted exceptions')
     expect(hasOnlyAcceptedVaultCheckFindings(assessment([
       finding('liquidation.max-discount', { exempted: true }),
       finding('irm.max-apy'),
@@ -153,7 +153,7 @@ describe('vault checks presentation', () => {
 
   it('distinguishes passing, flagged, missing and unavailable states', () => {
     const now = Date.parse('2026-09-29T12:12:00.000Z')
-    expect(getVaultChecksStatusLine(assessment([]), 'available', now)).toBe('Verified · checked 12 min ago')
+    expect(getVaultChecksStatusLine(assessment([]), 'available', now)).toBe('Checks passed · checked 12 min ago')
     expect(getVaultChecksStatusLine(assessment([finding('oracle.liability-quote')]), 'available', now)).toBe('Flagged · 1 to review')
     expect(getVaultChecksStatusLine(undefined, 'available', now)).toBe('Not assessed yet')
     expect(getVaultChecksStatusLine(undefined, 'unavailable', now)).toBe('Checks unavailable')
@@ -193,17 +193,19 @@ describe('vault checks presentation', () => {
   it('uses distinct non-phishing copy for hidden and pending review', () => {
     expect(getNotListedLine('hidden', 'The check failed')).toBe('This vault is not listed: The check failed.')
     expect(getNotListedLine('pending_review')).toBe('This vault has not been checked yet, so it is not listed.')
+    expect(getNotListedLine('pending_review', null, 'unclaimed')).toBe('This vault is not listed in the published vault labels.')
     const address = '0x0000000000000000000000000000000000000001'
     const visibility = { [address]: { status: 'hidden', reason: 'The check failed' } }
     expect(getKnownUnlistedActionNotice([address], 'v3', visibility)).toBe('This vault is not listed: The check failed.')
     expect(getKnownUnlistedActionNotice([address], 'v3', { [address]: { status: 'pending_review' } })).toBe('This vault has not been checked yet, so it is not listed.')
+    expect(getKnownUnlistedActionNotice([address], 'v3', { [address]: { status: 'pending_review', decidedBy: 'unclaimed' } })).toBe('This vault is not listed in the published vault labels.')
     expect(getKnownUnlistedActionNotice([address], 'static', visibility)).toBeNull()
     expect(getKnownUnlistedActionNotice([address, '0x0000000000000000000000000000000000000002'], 'v3', visibility)).toBeNull()
   })
 
   it('gives forms and batch review one non-duplicated action explanation', () => {
     expect(getUnverifiedActionCopy('These vaults are not listed.').description).toBe(
-      'These vaults are not listed. Review the vault checks before continuing.',
+      'These vaults are not listed. Review the vault details and confirm you trust the source before continuing.',
     )
     expect(getUnverifiedActionCopy(null, ['Vault A']).description).toContain('Vault A')
     expect(getUnverifiedActionCopy(null, ['Vault A']).description).toContain('phishing attempts')
