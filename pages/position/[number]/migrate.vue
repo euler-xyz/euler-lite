@@ -437,7 +437,7 @@ const noTargetsFound = computed(() =>
 const { tosGuard, unverifiedVaultGuard } = useOperationGuard(computed(() => [
   sourceDebtVault.value?.address,
   sourceCollateralVault.value?.address,
-].filter(Boolean)))
+].filter(Boolean)), { acquiresExposure: false })
 
 function continueAfterRequiredAcknowledgments(action: () => Promise<void>) {
   if (tosGuard.isTermsRequired && !tosGuard.tosLoadFailed) {

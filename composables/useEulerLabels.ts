@@ -59,7 +59,9 @@ const LABELS_REFRESH_INTERVAL_MS = 5 * 60_000
 const LABELS_MAX_AGE_MS = 15 * 60_000
 let lastSuccessfulLoadAt = 0
 let hasSuccessfulSnapshot = false
-const pendingLabelsFetches = new Map<number, Promise<PublicEulerLabelsData>>()
+let labelsExpiryTimer: ReturnType<typeof setTimeout> | undefined
+type LabelsFetch = { data: PublicEulerLabelsData, sourceFetchedAt: number }
+const pendingLabelsFetches = new Map<number, Promise<LabelsFetch>>()
 let labelsLoadGeneration = 0
 let wrapPairProbeGeneration = 0
 const wrapPairs = shallowReactive<Record<string, string>>({})
@@ -68,6 +70,20 @@ const setLabelsData = (data: PublicEulerLabelsData, chainId: number | null) => {
   labelsData.value = data
   labelsChainId.value = chainId
   labelsVersion.value += 1
+}
+
+const scheduleLabelsExpiry = () => {
+  clearTimeout(labelsExpiryTimer)
+  const remainingMs = LABELS_MAX_AGE_MS - (Date.now() - lastSuccessfulLoadAt)
+  if (remainingMs <= 0) {
+    isReady.value = false
+    loadError.value = 'Unable to load vault verification. Please retry.'
+    return
+  }
+  labelsExpiryTimer = setTimeout(() => {
+    isReady.value = false
+    loadError.value = 'Unable to load vault verification. Please retry.'
+  }, remainingMs)
 }
 
 export const getCurrentEulerLabelsData = (): EulerLabelsData => labelsData.value
@@ -84,6 +100,8 @@ export const __setEulerLabelsDataForTest = (data: Partial<PublicEulerLabelsData>
   labelsLoadGeneration += 1
   wrapPairProbeGeneration += 1
   pendingLabelsFetches.clear()
+  clearTimeout(labelsExpiryTimer)
+  labelsExpiryTimer = undefined
   lastSuccessfulLoadAt = 0
   Object.keys(wrapPairs).forEach(key => Reflect.deleteProperty(wrapPairs, key))
   setLabelsData({
@@ -137,7 +155,13 @@ const getLabelsFetch = (chainId: number, forceRefresh: boolean) => {
         timeout: 35_000,
         ...(forceRefresh && { headers: { 'cache-control': 'no-cache' } }),
       })
-      return normalizeLabelsBundle(chainId, bundle)
+      const now = Date.now()
+      const sourceFetchedAt = bundle.source === 'static' ? now : bundle.sourceFetchedAt
+      if (!Number.isSafeInteger(sourceFetchedAt) || sourceFetchedAt <= 0 || sourceFetchedAt > now
+        || now - sourceFetchedAt >= LABELS_MAX_AGE_MS) {
+        throw new Error('Vault verification snapshot is too old')
+      }
+      return { data: normalizeLabelsBundle(chainId, bundle), sourceFetchedAt }
     }
     catch (error) {
       logWarn('labels/public-v3', error)
@@ -162,14 +186,18 @@ const loadLabels = async (forceRefresh = false): Promise<void> => {
   const isCurrentLoad = () => isCurrentLabelsLoad(chainId, generation)
   if (!isCurrentLoad()) return
 
-  isReady.value = hasCurrentSnapshot && Date.now() - lastSuccessfulLoadAt < LABELS_MAX_AGE_MS
+  const hasUsableSnapshot = hasCurrentSnapshot && Date.now() - lastSuccessfulLoadAt < LABELS_MAX_AGE_MS
+  isReady.value = hasUsableSnapshot
   isLoading.value = true
-  loadError.value = undefined
+  if (!hasCurrentSnapshot) loadError.value = undefined
+  else if (!hasUsableSnapshot) loadError.value = 'Unable to load vault verification. Please retry.'
   const probeGeneration = ++wrapPairProbeGeneration
   Object.keys(wrapPairs).forEach(key => Reflect.deleteProperty(wrapPairs, key))
 
   if (labelsChainId.value !== chainId && isCurrentLoad()) {
     hasSuccessfulSnapshot = false
+    clearTimeout(labelsExpiryTimer)
+    labelsExpiryTimer = undefined
     setLabelsData(createEmptyEulerLabelsData(), chainId)
   }
 
@@ -178,11 +206,13 @@ const loadLabels = async (forceRefresh = false): Promise<void> => {
   const fetchPromise = getLabelsFetch(chainId, forceRefresh || (hasCurrentSnapshot && !pendingLabelsFetches.has(chainId)))
 
   try {
-    const data = await fetchPromise
+    const { data, sourceFetchedAt } = await fetchPromise
     if (isCurrentLoad()) {
       setLabelsData(data, chainId)
       hasSuccessfulSnapshot = true
-      lastSuccessfulLoadAt = Date.now()
+      lastSuccessfulLoadAt = sourceFetchedAt
+      loadError.value = undefined
+      scheduleLabelsExpiry()
     }
     if (isCurrentLoad()) {
       void probeWrapPairs(chainId, generation, probeGeneration)
@@ -206,6 +236,7 @@ const loadLabels = async (forceRefresh = false): Promise<void> => {
 const refreshLabelsIfStale = async () => {
   if (hasSuccessfulSnapshot && Date.now() - lastSuccessfulLoadAt >= LABELS_MAX_AGE_MS) {
     isReady.value = false
+    loadError.value = 'Unable to load vault verification. Please retry.'
   }
   if (isLoading.value) return
   const previous = labelsData.value

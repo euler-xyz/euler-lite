@@ -2,16 +2,20 @@ import { computed, provide, reactive, ref, watch, onUnmounted, type ComputedRef,
 import type { EulerEarn, EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
 import { registerOperationBlocker, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
-import { recordUnverifiedVaultAcknowledgement, unverifiedVaultAcknowledgementKey } from '~/features/reviewed-execution/policy/acknowledgements'
+import { deprecatedDepositAcknowledgementKey, recordDeprecatedDepositAcknowledgement, recordUnverifiedVaultAcknowledgement, unverifiedVaultAcknowledgementKey } from '~/features/reviewed-execution/policy/acknowledgements'
 import { getKnownUnlistedActionNotice } from '~/utils/vault-assessment/presentation'
+import { getVaultDeprecation } from '~/utils/eulerLabelsUtils'
 
 export interface UnverifiedVaultGuardState {
   isAcknowledgmentRequired: boolean
+  isDeprecatedDepositAcknowledgmentRequired: boolean
+  deprecatedDepositNotice: string | null
   unlistedNotice: string | null
   isVerificationLoading: boolean
   verificationError: string | undefined
   retryVerification: () => Promise<void>
   acknowledgeRisk: () => void
+  acknowledgeDeprecatedDeposit: () => void
 }
 
 interface UnverifiedVaultGuardContext {
@@ -19,6 +23,7 @@ interface UnverifiedVaultGuardContext {
   chainId: Ref<number | undefined>
   operation: ComputedRef<string>
   allowUnavailableLabels?: boolean
+  depositedVaultAddresses?: ComputedRef<string[]>
 }
 
 let unverifiedVaultGuardSequence = 0
@@ -37,6 +42,7 @@ export const useUnverifiedVaultGuard = (
   const { isReady: labelsReady, loadError: labelsError, retryLabels, source, visibility } = useEulerLabels()
   const isResolvingVaults = ref(false)
   const acknowledgedContextKey = ref('')
+  const acknowledgedDeprecatedKey = ref('')
   const blockerKey = `unverified-vault:${++unverifiedVaultGuardSequence}`
   let resolutionGeneration = 0
 
@@ -119,6 +125,25 @@ export const useUnverifiedVaultGuard = (
     hasUnverifiedVault.value && acknowledgedContextKey.value !== contextKey.value,
   )
 
+  const deprecatedDepositAddresses = computed(() => {
+    if (!labelsReady.value) return []
+    getEulerLabelsVersion()
+    return (context.depositedVaultAddresses?.value ?? []).filter(address => getVaultDeprecation(address).deprecated)
+  })
+  const deprecatedDepositContext = computed(() => ({
+    ...acknowledgementContext.value,
+    vaults: deprecatedDepositAddresses.value,
+  }))
+  const deprecatedContextKey = computed(() => deprecatedDepositAcknowledgementKey(deprecatedDepositContext.value))
+  const isDeprecatedDepositAcknowledgmentRequired = computed(() =>
+    deprecatedDepositAddresses.value.length > 0
+    && acknowledgedDeprecatedKey.value !== deprecatedContextKey.value,
+  )
+  const deprecatedDepositNotice = computed(() => {
+    const reasons = [...new Set(deprecatedDepositAddresses.value.map(address => getVaultDeprecation(address).reason))]
+    return reasons.length ? reasons.join(' ') : null
+  })
+
   const acknowledgeRisk = () => {
     const acknowledgement = acknowledgementContext.value
     if (!isVerificationReady.value || !acknowledgement.chainId || !context.account.value) return
@@ -128,11 +153,18 @@ export const useUnverifiedVaultGuard = (
     })
     acknowledgedContextKey.value = contextKey.value
   }
+  const acknowledgeDeprecatedDeposit = () => {
+    const acknowledgement = deprecatedDepositContext.value
+    if (!isVerificationReady.value || !acknowledgement.chainId || !context.account.value || !acknowledgement.vaults.length) return
+    recordDeprecatedDepositAcknowledgement({ ...acknowledgement, account: context.account.value })
+    acknowledgedDeprecatedKey.value = deprecatedContextKey.value
+  }
 
   const blockReason = computed(() => {
     if (verificationError.value) return verificationError.value
     if (!isVerificationReady.value) return 'Checking vault verification'
     if (isAcknowledgmentRequired.value) return 'Unverified vault risk acknowledgment required'
+    if (isDeprecatedDepositAcknowledgmentRequired.value) return 'Deprecated vault deposit acknowledgment required'
     return undefined
   })
   watch(blockReason, (reason) => {
@@ -151,11 +183,14 @@ export const useUnverifiedVaultGuard = (
 
   const guardState = reactive({
     isAcknowledgmentRequired,
+    isDeprecatedDepositAcknowledgmentRequired,
+    deprecatedDepositNotice,
     unlistedNotice,
     isVerificationLoading,
     verificationError,
     retryVerification,
     acknowledgeRisk,
+    acknowledgeDeprecatedDeposit,
   })
   provide('unverified-vault-guard', guardState)
 

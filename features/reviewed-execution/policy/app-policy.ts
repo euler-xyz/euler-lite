@@ -5,6 +5,8 @@ import type { OperationIntent } from '../domain/intents'
 import { buildReviewedPolicy, collectPolicyRequirements, type PolicyResultInput } from './engine'
 import {
   hasUnverifiedVaultAcknowledgement,
+  hasDeprecatedDepositAcknowledgement,
+  deprecatedDepositAcknowledgementKey,
   unverifiedVaultAcknowledgementKey,
   type UnverifiedVaultAcknowledgementContext,
 } from './acknowledgements'
@@ -13,6 +15,8 @@ import { isOperationBlockerKey, operationBlockerEntries } from '~/utils/operatio
 import { collectPlanningRequirements } from '~/features/reviewed-execution/planning/requirements'
 import { isVaultBlockedByCountry, isVaultRestrictedByCountry, useGeoBlock } from '~/composables/useGeoBlock'
 import type { EulerEarn, EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import { getVaultDeprecation } from '~/utils/eulerLabelsUtils'
+import { depositTargetVaults } from '~/utils/vault-action-targets'
 
 const allowed = (version: string, now: number, expiresAt?: number): PolicyState => ({
   state: 'allowed',
@@ -26,14 +30,17 @@ const addressOfSubject = (subject: string): Address | undefined => {
   return isAddress(value) ? getAddress(value) : undefined
 }
 
+const isExitWithoutAcquisition = (intent: OperationIntent): boolean =>
+  ['withdraw', 'redeem', 'withdraw-and-swap', 'redeem-and-swap', 'repay-from-wallet', 'repay-from-deposit', 'repay-with-swap', 'swap-and-repay', 'cleanup', 'reward-claim', 'reul-unlock'].includes(intent.planner.name)
+  || (intent.planner.name === 'cross-protocol-migration' && intent.planner.args.direction === 'euler-to-external')
+
 /** Resolve handoff policy evidence for the exact reviewed request set. */
 export const resolveAppPolicy = async (
   requestSet: ReviewedRequestSet,
   now = Date.now(),
   intents?: readonly OperationIntent[],
 ): Promise<Readonly<ReviewedPolicy>> => {
-  const exitsWithoutAcquisition = new Set(['withdraw', 'redeem', 'repay-from-wallet', 'repay-from-deposit', 'cleanup', 'reward-claim', 'reul-unlock'])
-  const onlyExits = Boolean(intents?.length && intents.every(intent => exitsWithoutAcquisition.has(intent.planner.name)))
+  const onlyExits = Boolean(intents?.length && intents.every(isExitWithoutAcquisition))
   const expiresAt = now + 5 * 60_000
   const { get, getOrFetch, getVault, isVerifiedVault } = useVaultRegistry()
   const { getTokenByAddress } = useTokenList()
@@ -144,6 +151,24 @@ export const resolveAppPolicy = async (
         ))) throw new Error('Unverified vault acknowledgement does not cover the execution')
         const acknowledgementKeys = (requiredContexts ?? []).map(unverifiedVaultAcknowledgementKey).sort()
         version = `unverified:${canonicalDigest('unverified-vault-acknowledgements-v1', toCanonicalValue(acknowledgementKeys))}`
+      }
+      else if (requirement.concern === 'deprecated-deposit-acknowledgement') {
+        const requiredContexts = intentsByOperation && useEulerLabels().isReady.value
+          ? [...intentsByOperation.entries()]
+              .flatMap(([operation, operationIntents]): UnverifiedVaultAcknowledgementContext[] => operationIntents.map(intent => ({
+                chainId: requestSet.wallet.chainId,
+                account: requestSet.wallet.account,
+                operation,
+                vaults: depositTargetVaults(intent)
+                  .filter(address => getVaultDeprecation(address).deprecated),
+              })))
+              .filter(context => context.vaults.length > 0)
+          : []
+        if (requiredContexts.some(context => !hasDeprecatedDepositAcknowledgement(context))) {
+          throw new Error('Deprecated vault deposit acknowledgement does not cover the execution')
+        }
+        const keys = [...new Set(requiredContexts.map(deprecatedDepositAcknowledgementKey))].sort()
+        version = `deprecated-deposit:${canonicalDigest('deprecated-deposit-acknowledgements-v1', toCanonicalValue(keys))}`
       }
     }
     else if (requirement.subject.startsWith('vault-or-contract:')) {

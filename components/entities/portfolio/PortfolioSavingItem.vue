@@ -162,9 +162,11 @@ const onClick = () => {
               <VaultDisplayName
                 :name="displayName"
                 :is-unverified="isUnverified"
+                :addresses="[vault.address]"
               />
               <VaultAssessmentWarning
                 :address="vault.address"
+                :family="isSecuritize ? null : 'evk'"
                 hide-deprecated
               />
               <UiHoverPreviewTooltip
@@ -333,9 +335,11 @@ const onClick = () => {
               <VaultDisplayName
                 :name="displayName"
                 :is-unverified="isUnverified"
+                :addresses="[vault.address]"
               />
               <VaultAssessmentWarning
                 :address="vault.address"
+                :family="isSecuritize ? null : 'evk'"
                 hide-deprecated
               />
               <UiHoverPreviewTooltip

@@ -10,11 +10,11 @@ import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { VaultApyModal, VaultMaxRoeModal, VaultNetApyPairModal, UiModalPreviewTrigger } from '#components'
 import { isSecuritizeBorrowPair, type AnyBorrowVaultPair } from '~/types/borrow-pair'
-import { getAddress } from 'viem'
+import { getAddress, zeroAddress } from 'viem'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { areTokenAddressesCorrelatedByTags, getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 
-const { pair } = defineProps<{ pair: AnyBorrowVaultPair }>()
+const { pair, assessmentUi = 'badge' } = defineProps<{ pair: AnyBorrowVaultPair, assessmentUi?: 'badge' | 'field' | 'none' }>()
 const { enableEntityBranding } = useDeployConfig()
 const { isVaultGovernorVerified, isSecuritizeGovernorVerified } = useVaults()
 const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
@@ -28,9 +28,14 @@ const isAnyGovernorUnverified = computed(() => {
     : !isVaultGovernorVerified(pair.collateral)
   return borrowUnverified || collateralUnverified
 })
+const isPairUngoverned = computed(() => pair.borrow.governorAdmin?.toLowerCase() === zeroAddress
+  && (isSecuritizeBorrowPair(pair)
+    ? pair.collateral.governor?.toLowerCase() === zeroAddress
+    : pair.collateral.governorAdmin?.toLowerCase() === zeroAddress))
 
+const pairEntities = computed(() => getUniqueEntitiesByVaults([pair.collateral, pair.borrow]))
 const entityDisplay = computed(() => {
-  const all = getUniqueEntitiesByVaults([pair.collateral, pair.borrow])
+  const all = pairEntities.value
   if (all.length === 0) return { name: '', logos: [] }
   const name = all.length === 1
     ? all[0].name
@@ -285,6 +290,7 @@ const linkPath = computed(() => ({
             <VaultDisplayName
               :name="pairName"
               :is-unverified="isAnyUnverified"
+              :addresses="[pair.collateral.address, pair.borrow.address]"
             />
             <RecentlyAddedBadge
               v-if="isRecentlyAdded"
@@ -304,12 +310,15 @@ const linkPath = computed(() => ({
             <VaultDeprecatedBadge :addresses="[pair.collateral.address, pair.borrow.address]" />
             <VaultAssessmentWarning
               :address="pair.collateral.address"
+              :family="isSecuritizeBorrowPair(pair) ? null : 'evk'"
               :hide-deprecated="isAnyDeprecated"
+              :hide-checks="assessmentUi !== 'badge'"
               badge-label="Collateral warning"
             />
             <VaultAssessmentWarning
               :address="pair.borrow.address"
               :hide-deprecated="isAnyDeprecated"
+              :hide-checks="assessmentUi !== 'badge'"
               badge-label="Borrow warning"
             />
           </div>
@@ -444,6 +453,23 @@ const linkPath = computed(() => ({
     <!-- Border separator (desktop only) -->
     <div class="col-span-full border-b border-line-subtle mobile:!hidden" />
 
+    <div
+      v-if="assessmentUi === 'field'"
+      class="col-span-full flex flex-wrap gap-x-24 gap-y-6 border-b border-line-subtle px-16 py-8"
+    >
+      <VaultAssessmentChecksField
+        :address="pair.borrow.address"
+        :chain-id="pair.borrow.chainId"
+        label="Borrow checks"
+      />
+      <VaultAssessmentChecksField
+        v-if="!isSecuritizeBorrowPair(pair)"
+        :address="pair.collateral.address"
+        :chain-id="pair.collateral.chainId"
+        label="Collateral checks"
+      />
+    </div>
+
     <!-- Body stats: contents on desktop (children become grid items), flex on mobile -->
     <div class="col-span-full flex items-start mobile:!hidden">
       <div
@@ -452,7 +478,13 @@ const linkPath = computed(() => ({
       >
         <div class="text-content-tertiary text-p3 mb-4">Curator</div>
         <div
-          v-if="isAnyGovernorUnverified"
+          v-if="isPairUngoverned"
+          class="text-p2 text-content-primary"
+        >
+          Ungoverned
+        </div>
+        <div
+          v-else-if="isAnyGovernorUnverified"
           class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
         >
           <SvgIcon
@@ -466,18 +498,22 @@ const linkPath = computed(() => ({
           class="flex items-center gap-6"
           :class="{ 'opacity-20': isAnyGovernanceLimited }"
         >
-          <BaseAvatar
-            class="icon--20"
-            :label="entityDisplay.name"
-            :src="entityDisplay.logos"
-          />
-          <span
-            class="text-p2 text-content-primary truncate"
-            data-id="data-point"
-            :data-key="pairKey"
-            data-field="curator"
-            :data-value="entityDisplay.name"
-          >{{ entityDisplay.name }}</span>
+          <VaultEntityDisclosureTooltip :entities="pairEntities">
+            <span class="inline-flex min-w-0 items-center gap-6">
+              <BaseAvatar
+                class="icon--20"
+                :label="entityDisplay.name"
+                :src="entityDisplay.logos"
+              />
+              <span
+                class="text-p2 text-content-primary truncate"
+                data-id="data-point"
+                :data-key="pairKey"
+                data-field="curator"
+                :data-value="entityDisplay.name"
+              >{{ entityDisplay.name }}</span>
+            </span>
+          </VaultEntityDisclosureTooltip>
         </div>
         <div
           v-else
@@ -653,7 +689,13 @@ const linkPath = computed(() => ({
         </div>
         <div class="flex gap-8 justify-end items-center text-right flex-1">
           <div
-            v-if="isAnyGovernorUnverified"
+            v-if="isPairUngoverned"
+            class="text-p2 text-content-primary"
+          >
+            Ungoverned
+          </div>
+          <div
+            v-else-if="isAnyGovernorUnverified"
             class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
           >
             <SvgIcon

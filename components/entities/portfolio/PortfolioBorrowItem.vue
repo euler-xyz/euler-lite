@@ -412,6 +412,7 @@ const openPositionInformationModal = () => {
                   <VaultDisplayName
                     :name="pairName"
                     :is-unverified="isAnyUnverified"
+                    :addresses="[primaryCollateralAddress, borrowAddress]"
                   />
                   <VaultAssessmentWarning
                     :address="borrowAddress"

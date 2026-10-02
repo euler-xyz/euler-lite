@@ -13,7 +13,10 @@ let geoGuardSequence = 0
 
 export const useOperationGuard = (
   vaultAddresses: Ref<(string | undefined)[]> | (string | undefined)[],
-  options: { acquiresExposure?: boolean } = {},
+  options: {
+    acquiresExposure?: boolean
+    depositedVaultAddresses?: Ref<(string | undefined)[]> | (string | undefined)[]
+  } = {},
 ) => {
   const { isPolicyAvailable } = useGeoBlock()
   const geoBlockerKey = `geo-policy:${++geoGuardSequence}`
@@ -32,6 +35,10 @@ export const useOperationGuard = (
     const raw = isRef(vaultAddresses) ? vaultAddresses.value : vaultAddresses
     return raw.filter((addr): addr is string => Boolean(addr))
   })
+  const depositedAddresses = computed((): string[] => {
+    const raw = isRef(options.depositedVaultAddresses) ? options.depositedVaultAddresses.value : options.depositedVaultAddresses ?? []
+    return raw.filter((addr): addr is string => Boolean(addr))
+  })
 
   // --- TOS guard (global, not vault-specific) ---
   const tosGuard = useTosGuard()
@@ -42,6 +49,7 @@ export const useOperationGuard = (
     chainId: appChainId,
     operation,
     allowUnavailableLabels: options.acquiresExposure === false,
+    depositedVaultAddresses: depositedAddresses,
   })
 
   // --- Keyring guard ---

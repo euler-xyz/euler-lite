@@ -14,6 +14,7 @@ import type { VaultTypeBadge } from '~/composables/useVaultTypeBadges'
 import { AccessControlBadge, CyclicalNoteBadge, GovernanceLimitedBadge, KeyringBadge } from '#components'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
 import { resolveVaultExposureDisplay, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
+import { getAssessmentSafeEvidence } from '~/utils/vault-assessment/evidence'
 
 const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
 const emit = defineEmits<{
@@ -37,6 +38,7 @@ const vaultAddress = computed(() => getAddress(vault.address))
 const vaultRef = computed(() => vault)
 const product = useEulerProductOfVault(vaultAddress)
 const entities = useEulerEntitiesOfVault(vault)
+const isKnownUnlisted = useKnownUnlistedVault(() => vault.address)
 const { badges, governanceType, isVerified: isGovernorVerified, verificationVault } = useVaultTypeBadges(vaultRef)
 const governanceVault = computed(() => verificationVault.value as EVault)
 const marketProductKey = computed(() => getProductKeyByVault(vault.address))
@@ -46,6 +48,10 @@ const description = computed(() => {
 })
 
 const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
+const { assessment, fallbackReady } = useVaultAssessmentEvidence(() => vault.address, 'evk')
+const governorSafeEvidence = computed(() => assessment.value || fallbackReady.value
+  ? getAssessmentSafeEvidence(assessment.value, vault.governorAdmin)
+  : null)
 
 // Count how many borrow pairs have this vault as the liability (borrow) side
 const borrowCount = computed(() => {
@@ -145,6 +151,7 @@ watchEffect(() => {
     content-class="flex flex-col gap-20"
   >
     <VaultDeprecationBanner :addresses="[vault.address]" />
+    <VaultPublicNotice :addresses="[vault.address]" />
     <!-- eslint-disable vue/no-v-html -- autoLink escapes label text before adding links -->
     <p
       v-if="description"
@@ -161,7 +168,12 @@ watchEffect(() => {
         v-if="enableVaultTypeDisplay"
         label="Vault type"
       >
+        <span
+          v-if="isKnownUnlisted && governanceType !== 'ungoverned' && governanceType !== 'escrow'"
+          class="text-p2 text-content-tertiary"
+        >-</span>
         <VaultTypeChip
+          v-else
           :vault="governanceVault"
           :type="governanceType"
           nudge
@@ -188,7 +200,14 @@ watchEffect(() => {
         label="Curator"
       >
         <VaultTypeChip
-          v-if="!isGovernorVerified"
+          v-if="governanceType === 'ungoverned'"
+          :vault="governanceVault"
+          type="ungoverned"
+          nudge
+          class="w-fit"
+        />
+        <VaultTypeChip
+          v-else-if="!isGovernorVerified && !isKnownUnlisted"
           :vault="governanceVault"
           type="unknown"
           nudge
@@ -220,6 +239,10 @@ watchEffect(() => {
               v-else
               class="text-p2 text-content-primary"
             >{{ entity.name }}</span>
+            <SafeAccountBadge
+              :address="vault.governorAdmin"
+              :evidence="governorSafeEvidence"
+            />
           </div>
         </div>
         <div v-else>

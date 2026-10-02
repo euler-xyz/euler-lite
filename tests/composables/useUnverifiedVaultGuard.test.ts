@@ -12,14 +12,19 @@ const verifyEVault = vi.fn()
 const labelsReady = ref(true)
 const labelsError = ref<string | undefined>()
 const labelsSource = ref<'v3' | 'static'>('static')
-const visibility = ref<Record<string, { status: string, reason?: string }>>({})
+const visibility = ref<Record<string, { status: string, reason?: string, decidedBy?: string }>>({})
 const retryLabels = vi.fn()
+const deprecated = ref(false)
+
+vi.mock('~/utils/eulerLabelsUtils', () => ({
+  getVaultDeprecation: () => ({ deprecated: deprecated.value, reason: deprecated.value ? 'Vault is deprecated.' : '' }),
+}))
 
 vi.mock('~/composables/useEulerLabels', () => ({
   getEulerLabelsVersion: () => 1,
 }))
 
-const mountGuard = (options?: { allowUnavailableLabels?: boolean, chainId?: Ref<number | undefined>, account?: Ref<string | undefined>, operation?: Ref<string> }) => {
+const mountGuard = (options?: { allowUnavailableLabels?: boolean, depositedVaultAddresses?: Ref<string[]>, chainId?: Ref<number | undefined>, account?: Ref<string | undefined>, operation?: Ref<string> }) => {
   let state: UnverifiedVaultGuardState | undefined
   const chainId = options?.chainId ?? ref<number | undefined>(1)
   const account = options?.account ?? ref<string | undefined>(ACCOUNT)
@@ -42,6 +47,7 @@ const mountGuard = (options?: { allowUnavailableLabels?: boolean, chainId?: Ref<
       useUnverifiedVaultGuard(computed(() => [VAULT]), {
         chainId,
         allowUnavailableLabels: options?.allowUnavailableLabels,
+        depositedVaultAddresses: computed(() => options?.depositedVaultAddresses?.value ?? []),
         account,
         operation: computed(() => operation.value),
       })
@@ -65,6 +71,7 @@ describe('useUnverifiedVaultGuard canonical context', () => {
     labelsError.value = undefined
     labelsSource.value = 'static'
     visibility.value = {}
+    deprecated.value = false
     retryLabels.mockReset()
     vi.stubGlobal('useEulerLabels', () => ({ isReady: labelsReady, loadError: labelsError, retryLabels, source: labelsSource, visibility }))
     registryVersion.value = 0
@@ -117,6 +124,37 @@ describe('useUnverifiedVaultGuard canonical context', () => {
     expect(mounted.state.unlistedNotice).toBe('This vault is not listed: A required check failed.')
     mounted.state.acknowledgeRisk()
     expect(mounted.state.isAcknowledgmentRequired).toBe(false)
+    mounted.app.unmount()
+  })
+
+  it('requires acknowledgement for a pending-review vault with a soft status notice', async () => {
+    entries.set(VAULT.toLowerCase(), { type: 'evk', vault: { chainId: 1, address: VAULT } })
+    verifyEVault.mockReturnValue(false)
+    labelsSource.value = 'v3'
+    visibility.value = { [VAULT.toLowerCase()]: { status: 'pending_review', decidedBy: 'unclaimed' } }
+    const mounted = mountGuard()
+    await nextTick()
+    expect(mounted.state.unlistedNotice).toBe('This vault is not listed in the published vault labels.')
+    expect(mounted.state.isAcknowledgmentRequired).toBe(true)
+    expect(operationBlockerEntries.value.some(([, reason]) => reason === 'Unverified vault risk acknowledgment required')).toBe(true)
+    mounted.state.acknowledgeRisk()
+    await nextTick()
+    expect(mounted.state.isAcknowledgmentRequired).toBe(false)
+    expect(operationBlockerEntries.value.some(([, reason]) => reason === 'Unverified vault risk acknowledgment required')).toBe(false)
+    mounted.app.unmount()
+  })
+
+  it('requires separate acknowledgement for a deprecated deposit', async () => {
+    entries.set(VAULT.toLowerCase(), { type: 'evk', vault: { chainId: 1, address: VAULT } })
+    verifyEVault.mockReturnValue(true)
+    deprecated.value = true
+    const mounted = mountGuard({ depositedVaultAddresses: ref([VAULT]) })
+    await nextTick()
+    expect(mounted.state.isDeprecatedDepositAcknowledgmentRequired).toBe(true)
+    expect(mounted.state.deprecatedDepositNotice).toBe('Vault is deprecated.')
+    mounted.state.acknowledgeDeprecatedDeposit()
+    await nextTick()
+    expect(mounted.state.isDeprecatedDepositAcknowledgmentRequired).toBe(false)
     mounted.app.unmount()
   })
 

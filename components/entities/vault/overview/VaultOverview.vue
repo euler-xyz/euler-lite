@@ -1,14 +1,19 @@
 <script setup lang="ts">
 import type { EVault } from '@eulerxyz/euler-v2-sdk'
-import { isVaultCyclicalNote } from '~/utils/eulerLabelsUtils'
+import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
+import { getEntitiesByVault } from '~/utils/eulerLabelsUtils'
 
 const emits = defineEmits<{
   'vault-click': [address: string]
   'market-click': []
 }>()
 const { vault } = defineProps<{ vault: EVault, desktopOverview?: boolean }>()
+const entities = computed(() => getEntitiesByVault(vault))
+const { isVaultGovernorVerified } = useVaults()
+const isVerified = computed(() => isVaultGovernorVerified(vault))
 
-const isCyclicalIRM = computed(() => isVaultCyclicalNote(vault.address))
+const isCyclicalIRM = computed(() => vault.interestRateModel.type === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY
+  || vault.interestRateModel.type === INTEREST_RATE_MODEL_TYPE.FIXED_CYCLICAL_BINARY_MONTHLY)
 </script>
 
 <template>
@@ -73,6 +78,11 @@ const isCyclicalIRM = computed(() => isVaultCyclicalNote(vault.address))
     <VaultOverviewBlockAddresses
       :vault="vault"
       :default-open="false"
+    />
+
+    <VaultEntityDisclosures
+      v-if="isVerified"
+      :entities="entities"
     />
   </div>
 </template>

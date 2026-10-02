@@ -10,6 +10,12 @@ export interface VaultCheckLine {
   parts?: Array<{ text: string, address?: string }>
 }
 
+export interface AcceptedVaultCheckLine {
+  key: string
+  text: string
+  parts?: VaultCheckLine['parts']
+}
+
 export interface UpcomingVaultChange {
   key: string
   text: string
@@ -37,7 +43,7 @@ const groupKey = (key: string) => key.replace(/^collateral\.[^.]+\./, 'collatera
 const ADDRESS_IN_TEXT = /0x[a-fA-F0-9]{40}|0x[a-fA-F0-9]{4,}(?:…|\.{3})[a-fA-F0-9]{4,}/g
 const ADDRESS_IN_KEY = /0x[a-fA-F0-9]{40}/g
 
-const getCopyableParts = (text: string, finding: VaultAssessmentFinding): VaultCheckLine['parts'] => {
+export const getVaultCheckCopyableParts = (text: string, finding: VaultAssessmentFinding): VaultCheckLine['parts'] => {
   const candidates = [...new Map(
     [finding.cause?.subject, ...(finding.key.match(ADDRESS_IN_KEY) ?? [])]
       .filter((value): value is string => typeof value === 'string' && isAddress(value))
@@ -66,7 +72,7 @@ const getCopyableParts = (text: string, finding: VaultAssessmentFinding): VaultC
 }
 
 const relevantFinding = (finding: VaultAssessmentFinding) =>
-  (finding.outcome === 'fail' || (finding.outcome === 'unknown' && finding.required && !finding.exempted))
+  ((finding.outcome === 'fail' || (finding.outcome === 'unknown' && finding.required)) && !finding.exempted)
   && !finding.key.startsWith('evidence.')
   && !finding.key.startsWith('scheduled.')
   && finding.key !== 'oracle.adapters-recognized'
@@ -83,7 +89,7 @@ export const getVaultCheckFindings = (assessment: VaultAssessment): { lines: Vau
       const key = groupKey(finding.key)
       if (!shown.has(key) || (shown.get(key)?.outcome === 'unknown' && finding.outcome === 'fail')) {
         const text = finding.outcome === 'unknown' ? 'Being re-checked' : finding.cause?.summary || finding.description
-        const parts = getCopyableParts(text, finding)
+        const parts = getVaultCheckCopyableParts(text, finding)
         shown.set(key, {
           key,
           text,
@@ -98,15 +104,69 @@ export const getVaultCheckFindings = (assessment: VaultAssessment): { lines: Vau
   return { lines: [...shown.values()], moreCount, reviewCount: shown.size + moreCount }
 }
 
+export const getAcceptedVaultCheckFindings = (assessment: VaultAssessment): AcceptedVaultCheckLine[] =>
+  [
+    ...(assessment.configContext?.findings ?? []),
+    ...(assessment.consistencyContext?.findings ?? []),
+  ]
+    .filter(finding => finding.outcome === 'fail' && finding.exempted === true)
+    .map((finding) => {
+      const text = finding.cause?.summary || finding.description
+      const parts = getVaultCheckCopyableParts(text, finding)
+      return { key: finding.key, text, ...(parts ? { parts } : {}) }
+    })
+
+/** Full findings are loaded only for an opened vault, as in Toolbox's detail view. */
+export const getVaultAssessmentCheckDetails = (assessment: VaultAssessment) => {
+  const findings = [
+    ...(assessment.configContext?.findings ?? []),
+    ...(assessment.consistencyContext?.findings ?? []),
+  ]
+  const counts = { passed: 0, failed: 0, unknown: 0, accepted: 0, notApplicable: 0 }
+  for (const finding of findings) {
+    if (finding.outcome === 'fail' && finding.exempted) counts.accepted++
+    else if (finding.outcome === 'pass') counts.passed++
+    else if (finding.outcome === 'fail') counts.failed++
+    else if (finding.outcome === 'unknown') counts.unknown++
+    else counts.notApplicable++
+  }
+  const rank = (finding: VaultAssessmentFinding) => finding.outcome === 'fail'
+    ? finding.exempted ? 2 : 0
+    : finding.outcome === 'unknown' ? 1 : finding.outcome === 'pass' ? 3 : 4
+  return { findings: [...findings].sort((a, b) => rank(a) - rank(b)), counts }
+}
+
+export const getVaultAssessmentCheckSummary = (assessment: VaultAssessment): string => {
+  const { counts } = getVaultAssessmentCheckDetails(assessment)
+  const parts = [
+    counts.failed && `${counts.failed} failed`,
+    counts.unknown && `${counts.unknown} unknown`,
+    counts.accepted && `${counts.accepted} accepted`,
+    counts.passed && `${counts.passed} passed`,
+  ].filter(Boolean)
+  return parts.length ? parts.join(' · ') : counts.notApplicable ? `${counts.notApplicable} N/A` : 'No findings'
+}
+
+export const hasOnlyAcceptedVaultCheckFindings = (assessment: VaultAssessment): boolean => {
+  if (!assessment.assessed || assessment.configStatus !== 'verified' || assessment.configContext?.outcome !== 'pass'
+    || (assessment.checksStatus !== 'warning' && assessment.checksStatus !== 'positive')) return false
+  const findings = [
+    ...(assessment.configContext?.findings ?? []),
+    ...(assessment.consistencyContext?.findings ?? []),
+  ]
+  return findings.some(finding => finding.outcome === 'fail' && finding.exempted === true)
+    && !findings.some(finding => (finding.outcome === 'fail' || (finding.outcome === 'unknown' && finding.required)) && !finding.exempted)
+}
+
 const formatRelativeCheckedAt = (at: string, now: number): string => {
   const elapsed = Math.max(0, now - new Date(at).getTime())
-  if (!Number.isFinite(elapsed)) return 'Verified'
+  if (!Number.isFinite(elapsed)) return 'Checks passed'
   const minutes = Math.floor(elapsed / 60_000)
-  if (minutes < 1) return 'Verified · checked just now'
-  if (minutes < 60) return `Verified · checked ${minutes} min ago`
+  if (minutes < 1) return 'Checks passed · checked just now'
+  if (minutes < 60) return `Checks passed · checked ${minutes} min ago`
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `Verified · checked ${hours} hr ago`
-  return `Verified · checked ${Math.floor(hours / 24)} days ago`
+  if (hours < 24) return `Checks passed · checked ${hours} hr ago`
+  return `Checks passed · checked ${Math.floor(hours / 24)} days ago`
 }
 
 export const getVaultChecksStatusLine = (
@@ -126,12 +186,19 @@ export const getVaultChecksStatusLine = (
     return `Flagged · ${reviewCount} to review`
   }
   if (findings.some(finding => finding.outcome === 'unknown')) return 'Being re-checked'
+  if (hasOnlyAcceptedVaultCheckFindings(assessment)) {
+    const count = getAcceptedVaultCheckFindings(assessment).length
+    const checksPassed = assessment.configLastCheckedAt
+      ? formatRelativeCheckedAt(assessment.configLastCheckedAt, now)
+      : 'Checks passed'
+    return `${checksPassed} · ${count} accepted exception${count === 1 ? '' : 's'}`
+  }
   if (assessment.checksStatus === 'warning' || assessment.checksStatus === 'negative'
     || assessment.configStatus === 'suspended' || assessment.configStatus === 'revoked') return 'Flagged'
   if (assessment.configStatus === 'pending' || assessment.configStatus === 'unverified') return 'Being re-checked'
   return assessment.configLastCheckedAt
     ? formatRelativeCheckedAt(assessment.configLastCheckedAt, now)
-    : 'Verified'
+    : 'Checks passed'
 }
 
 const formatPendingTimelock = (value: string): string => {
@@ -197,7 +264,8 @@ export const getUpcomingVaultChanges = (
     })
 }
 
-export const getNotListedLine = (status: string | undefined, reason?: string | null): string | null => {
+export const getNotListedLine = (status: string | undefined, reason?: string | null, decidedBy?: string | null): string | null => {
+  if (status === 'pending_review' && decidedBy === 'unclaimed') return 'This vault is not listed in the published vault labels.'
   if (status === 'pending_review') return 'This vault has not been checked yet, so it is not listed.'
   if (status === 'hidden') return `This vault is not listed${reason ? `: ${reason}` : '.'}${reason && !/[.!?]$/.test(reason) ? '.' : ''}`
   return null
@@ -206,17 +274,32 @@ export const getNotListedLine = (status: string | undefined, reason?: string | n
 export const getKnownUnlistedActionNotice = (
   addresses: readonly string[],
   source: string | undefined,
-  visibility: Record<string, { status: string, reason?: string | null }> | undefined,
+  visibility: Record<string, { status: string, reason?: string | null, decidedBy?: string | null }> | undefined,
 ): string | null => {
   if (source !== 'v3' || !addresses.length) return null
   const lines = addresses.map((address) => {
     const verdict = visibility?.[address.toLowerCase()]
-    return getNotListedLine(verdict?.status, verdict?.reason)
+    return getNotListedLine(verdict?.status, verdict?.reason, verdict?.decidedBy)
   })
   if (lines.some(line => line === null)) return null
   return lines.length === 1
     ? lines[0]!
-    : 'These vaults are not listed. Review their vault checks before continuing.'
+    : 'These vaults are not listed.'
+}
+
+/** One risk explanation at the point of action, shared by forms and batch review. */
+export const getUnverifiedActionCopy = (
+  unlistedNotice: string | null | undefined,
+  vaultNames: readonly string[] = [],
+): { title: string, description: string } => {
+  if (unlistedNotice) {
+    return { title: 'Vault not listed', description: `${unlistedNotice} Review the vault details and confirm you trust the source before continuing.` }
+  }
+  const subject = vaultNames.length ? `This action includes ${vaultNames.join(', ')}. ` : ''
+  return {
+    title: 'Unverified vault',
+    description: `${subject}An unrecognized vault may be used for phishing attempts. Confirm you trust its source before continuing.`,
+  }
 }
 
 export const getCriticalAssessmentWarning = (assessment?: VaultAssessment): VaultWarning | null => {

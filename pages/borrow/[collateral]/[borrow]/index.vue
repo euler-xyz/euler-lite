@@ -18,7 +18,7 @@ import { useBorrowForm } from '~/composables/borrow/useBorrowForm'
 import { useMultiplyForm, type MultiplyBatchSnapshot } from '~/composables/borrow/useMultiplyForm'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
-import { SlippageSettingsModal, VaultUnverifiedDisclaimerModal } from '#components'
+import { SlippageSettingsModal } from '#components'
 import { formatUnits, getAddress, type Address } from 'viem'
 import { areRoeCollateralVaultsCorrelatedWithBorrow, mergeRoeCollateralVaults } from '~/utils/position-roe'
 import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
@@ -55,10 +55,6 @@ const openSlippageSettings = () => {
 const collateralAddress = route.params.collateral as string
 const borrowAddress = route.params.borrow as string
 const { warning: assessmentWarning } = useVaultAssessmentWarning(borrowAddress)
-const { visibility: vaultVisibility, source: labelsSource } = useEulerLabels()
-const isKnownUnlisted = (address: string) => labelsSource.value === 'v3'
-  && ['hidden', 'pending_review'].includes(vaultVisibility.value?.[address.toLowerCase()]?.status ?? '')
-useOperationGuard([collateralAddress, borrowAddress])
 
 const formTabFromQuery = (value: unknown): 'borrow' | 'multiply' | undefined => {
   const tabValue = Array.isArray(value) ? value[0] : value
@@ -73,7 +69,6 @@ const formTab = ref<'borrow' | 'multiply'>(formTabFromQuery(route.query.tab) ?? 
 const pendingSubAccount = ref<string | null>(null)
 const isPendingSubAccountLoading = ref(false)
 let pendingSubAccountPromise: Promise<string> | null = null
-let unverifiedDisclaimerShown = false
 
 // Load vault pair (non-blocking to avoid Suspense + pageTransition crash on direct navigation)
 const pair: Ref<AnyBorrowVaultPair | undefined> = ref()
@@ -183,6 +178,16 @@ const multiply = useMultiplyForm({
   isPendingSubAccountLoading,
   isGeoBlocked,
   isMultiplyRestricted,
+})
+useOperationGuard(computed(() => formTab.value === 'multiply'
+  ? [collateralAddress, borrowAddress, multiply.multiplySupplyVault.value?.address, multiply.multiplyLongVault.value?.address].filter(Boolean)
+  : [collateralAddress, borrowAddress]), {
+  depositedVaultAddresses: computed(() => formTab.value === 'multiply'
+    ? [
+        ...(multiply.isMultiplySavingCollateral.value ? [] : [multiply.multiplySupplyVault.value?.address]),
+        multiply.multiplyLongVault.value?.address,
+      ].filter(Boolean)
+    : borrow.isSavingCollateral.value ? [] : [collateralAddress]),
 })
 const showMultiplyRoe = computed(() =>
   areRoeCollateralVaultsCorrelatedWithBorrow(
@@ -507,21 +512,6 @@ watch(pair, async (val) => {
   if (!multiply.multiplySupplyVault.value || !isSupplyAllowed) {
     multiply.initMultiplySupplyVault(current.collateral as EVault)
   }
-  const { isVerifiedVault } = useVaultRegistry()
-  if ((!isVerifiedVault(current.collateral.address) && !isKnownUnlisted(current.collateral.address))
-    || (!isVerifiedVault(current.borrow.address) && !isKnownUnlisted(current.borrow.address))) {
-    if (!unverifiedDisclaimerShown) {
-      unverifiedDisclaimerShown = true
-      modal.open(VaultUnverifiedDisclaimerModal, {
-        isNotClosable: true,
-        props: {
-          cancelAction: () => {
-            router.replace('/')
-          },
-        },
-      })
-    }
-  }
   await updateBalance()
 }, { immediate: true })
 
@@ -782,7 +772,7 @@ watch(
                   size="compact"
                 />
                 <UiAlert
-                  v-if="isPairFullyRestricted"
+                  v-if="!isGeoBlocked && isPairFullyRestricted"
                   title="Region restricted"
                   description="This pair is not available in your region."
                   variant="warning"
@@ -944,7 +934,7 @@ watch(
                       size="compact"
                     />
                     <UiAlert
-                      v-if="isPairFullyRestricted"
+                      v-if="!isGeoBlocked && isPairFullyRestricted"
                       title="Region restricted"
                       description="This pair is restricted in your region."
                       variant="warning"

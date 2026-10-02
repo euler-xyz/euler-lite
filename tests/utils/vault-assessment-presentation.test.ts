@@ -3,10 +3,15 @@ import type { VaultAssessment, VaultAssessmentFinding } from '@eulerxyz/euler-v2
 import {
   getCriticalAssessmentWarning,
   getKnownUnlistedActionNotice,
+  getUnverifiedActionCopy,
   getNotListedLine,
   getUpcomingVaultChanges,
+  getAcceptedVaultCheckFindings,
+  getVaultAssessmentCheckDetails,
+  getVaultAssessmentCheckSummary,
   getVaultCheckFindings,
   getVaultChecksStatusLine,
+  hasOnlyAcceptedVaultCheckFindings,
 } from '~/utils/vault-assessment/presentation'
 
 const finding = (key: string, overrides: Partial<VaultAssessmentFinding> = {}): VaultAssessmentFinding => ({
@@ -25,7 +30,7 @@ const assessment = (findings: VaultAssessmentFinding[], overrides: Partial<Vault
   checksStatus: 'positive',
   configReason: null,
   consistencyReason: null,
-  configContext: { findings },
+  configContext: { findings, outcome: 'pass' },
   consistencyContext: null,
   configLastCheckedAt: '2026-09-29T12:00:00.000Z',
   nextCheckAt: null,
@@ -35,6 +40,25 @@ const assessment = (findings: VaultAssessmentFinding[], overrides: Partial<Vault
 })
 
 describe('vault checks presentation', () => {
+  it('shows every finding while separating active failures from accepted exceptions', () => {
+    const reviewed = assessment([
+      finding('deployment.factory', { outcome: 'pass', required: true }),
+      finding('irm.max-apy', { outcome: 'fail' }),
+      finding('liquidation.max-discount', { outcome: 'fail', exempted: true }),
+      finding('oracle.liability-quote', { outcome: 'unknown', required: true }),
+      finding('scheduled.governance.timelock', { outcome: 'not_applicable' }),
+    ])
+
+    expect(getVaultAssessmentCheckDetails(reviewed).counts).toEqual({
+      passed: 1, failed: 1, unknown: 1, accepted: 1, notApplicable: 1,
+    })
+    expect(getVaultAssessmentCheckDetails(reviewed).findings.map(item => item.key)).toEqual([
+      'irm.max-apy', 'oracle.liability-quote', 'liquidation.max-discount',
+      'deployment.factory', 'scheduled.governance.timelock',
+    ])
+    expect(getVaultAssessmentCheckSummary(reviewed)).toBe('1 failed · 1 unknown · 1 accepted · 1 passed')
+  })
+
   it('shows the selected failure classes with V3 sentences and counts other gating rules', () => {
     const view = getVaultCheckFindings(assessment([
       finding('oracle.liability-quote'),
@@ -89,18 +113,24 @@ describe('vault checks presentation', () => {
     expect(getVaultChecksStatusLine(mixed, 'available')).toBe('Flagged · 1 to review')
   })
 
-  it('shows exempted failures when V3 still marks the checks as a warning', () => {
+  it('shows exempted failures as accepted evidence when required checks pass', () => {
     const flagged = assessment([
       finding('liquidation.max-discount', { exempted: true }),
       finding('collateral.0x01.ltv', { exempted: true }),
       finding('governance.timelock', { outcome: 'unknown', required: true, exempted: true }),
     ], { checksStatus: 'warning' })
 
-    expect(getVaultCheckFindings(flagged).lines.map(line => line.text)).toEqual([
+    expect(getVaultCheckFindings(flagged).lines).toEqual([])
+    expect(getAcceptedVaultCheckFindings(flagged).map(line => line.text)).toEqual([
       'V3 says liquidation.max-discount',
       'V3 says collateral.0x01.ltv',
     ])
-    expect(getVaultChecksStatusLine(flagged, 'available')).toBe('Flagged · 2 to review')
+    expect(hasOnlyAcceptedVaultCheckFindings(flagged)).toBe(true)
+    expect(getVaultChecksStatusLine(flagged, 'available', Date.parse('2026-09-29T12:12:00.000Z'))).toBe('Checks passed · checked 12 min ago · 2 accepted exceptions')
+    expect(hasOnlyAcceptedVaultCheckFindings(assessment([
+      finding('liquidation.max-discount', { exempted: true }),
+      finding('irm.max-apy'),
+    ], { checksStatus: 'warning' }))).toBe(false)
   })
 
   it('makes a shortened finding address copyable only when it matches the full V3 address', () => {
@@ -123,7 +153,7 @@ describe('vault checks presentation', () => {
 
   it('distinguishes passing, flagged, missing and unavailable states', () => {
     const now = Date.parse('2026-09-29T12:12:00.000Z')
-    expect(getVaultChecksStatusLine(assessment([]), 'available', now)).toBe('Verified · checked 12 min ago')
+    expect(getVaultChecksStatusLine(assessment([]), 'available', now)).toBe('Checks passed · checked 12 min ago')
     expect(getVaultChecksStatusLine(assessment([finding('oracle.liability-quote')]), 'available', now)).toBe('Flagged · 1 to review')
     expect(getVaultChecksStatusLine(undefined, 'available', now)).toBe('Not assessed yet')
     expect(getVaultChecksStatusLine(undefined, 'unavailable', now)).toBe('Checks unavailable')
@@ -163,11 +193,21 @@ describe('vault checks presentation', () => {
   it('uses distinct non-phishing copy for hidden and pending review', () => {
     expect(getNotListedLine('hidden', 'The check failed')).toBe('This vault is not listed: The check failed.')
     expect(getNotListedLine('pending_review')).toBe('This vault has not been checked yet, so it is not listed.')
+    expect(getNotListedLine('pending_review', null, 'unclaimed')).toBe('This vault is not listed in the published vault labels.')
     const address = '0x0000000000000000000000000000000000000001'
     const visibility = { [address]: { status: 'hidden', reason: 'The check failed' } }
     expect(getKnownUnlistedActionNotice([address], 'v3', visibility)).toBe('This vault is not listed: The check failed.')
     expect(getKnownUnlistedActionNotice([address], 'v3', { [address]: { status: 'pending_review' } })).toBe('This vault has not been checked yet, so it is not listed.')
+    expect(getKnownUnlistedActionNotice([address], 'v3', { [address]: { status: 'pending_review', decidedBy: 'unclaimed' } })).toBe('This vault is not listed in the published vault labels.')
     expect(getKnownUnlistedActionNotice([address], 'static', visibility)).toBeNull()
     expect(getKnownUnlistedActionNotice([address, '0x0000000000000000000000000000000000000002'], 'v3', visibility)).toBeNull()
+  })
+
+  it('gives forms and batch review one non-duplicated action explanation', () => {
+    expect(getUnverifiedActionCopy('These vaults are not listed.').description).toBe(
+      'These vaults are not listed. Review the vault details and confirm you trust the source before continuing.',
+    )
+    expect(getUnverifiedActionCopy(null, ['Vault A']).description).toContain('Vault A')
+    expect(getUnverifiedActionCopy(null, ['Vault A']).description).toContain('phishing attempts')
   })
 })

@@ -6,6 +6,7 @@ import { isVaultDeprecated, isVaultKeyring, isVaultCyclicalNote } from '~/utils/
 import { hasResolvedGovernorAdmin } from '~/utils/vault/governor-verification'
 import { stringToColor } from '~/utils/string-utils'
 import { getEnlargedDiagram, getArrow, getLabelPosition, getGraphConnectedAddresses, isNodeRampingDown, isExternalCollateral, findVault } from '~/utils/discoveryCalculations'
+import { useDiscoveryVaultWarningDetails } from '~/composables/useDiscoveryVaultWarningDetails'
 
 const props = defineProps<{
   market: MarketGroup
@@ -40,12 +41,19 @@ const isNodeCyclicalNote = (address: string): boolean => {
 }
 
 const { isVaultGovernorVerified, isSecuritizeGovernorVerified, isEarnVaultOwnerVerified } = useVaults()
-const { isReady, loadError, source, visibility } = useEulerLabels()
+const { isReady, source, visibility } = useEulerLabels()
+const { getWarningText, loadWarningDetails, isAcceptedOnlyWarning } = useDiscoveryVaultWarningDetails()
 const getNodeWarning = (address: string) => {
-  if (!isReady.value || loadError.value || source.value !== 'v3') return null
+  if (!isReady.value || source.value !== 'v3') return null
   const verdict = visibility.value?.[address.toLowerCase()]
+  if (verdict?.status === 'warning' && verdict.decidedBy === 'advisories'
+    && isAcceptedOnlyWarning(findVault(props.market, address))) return null
   return verdict?.status === 'warning' || verdict?.status === 'hidden' ? verdict : null
 }
+const getNodeWarningText = (address: string) =>
+  getWarningText(findVault(props.market, address), getNodeWarning(address)?.reason)
+const loadNodeWarningDetails = (address: string) =>
+  loadWarningDetails(findVault(props.market, address))
 
 // Same signal as the per-pair "Unknown" curator pill: the vault resolved,
 // but its governor/owner isn't part of any declared product entity. Applies to
@@ -285,25 +293,26 @@ const isNodeCuratorUnknown = (address: string): boolean => {
               !
             </text>
           </g>
-          <g v-else-if="getNodeWarning(node.address)">
-            <title>{{ getNodeWarning(node.address)?.reason || 'Vault checks need review' }}</title>
-            <circle
-              :cx="node.x + 9"
-              :cy="node.y - 9"
-              r="6"
-              style="fill: var(--warning-500)"
-            />
-            <text
-              :x="node.x + 9"
-              :y="node.y - 5.5"
-              text-anchor="middle"
-              fill="white"
-              font-size="9"
-              font-weight="700"
+          <foreignObject
+            v-else-if="getNodeWarning(node.address)"
+            :x="node.x + 1"
+            :y="node.y - 17"
+            width="16"
+            height="16"
+          >
+            <UiHoverPreviewTooltip
+              title="Vault checks"
+              :text="getNodeWarningText(node.address)"
+              :aria-label="`Vault checks for ${node.assetSymbol}`"
+              placement="top"
+              class="!flex !w-16 !h-16"
+              @mouseenter="loadNodeWarningDetails(node.address)"
+              @focusin="loadNodeWarningDetails(node.address)"
+              @pointerdown="loadNodeWarningDetails(node.address)"
             >
-              !
-            </text>
-          </g>
+              <span class="flex h-12 w-12 items-center justify-center rounded-full bg-warning-500 text-[9px] font-bold text-white">!</span>
+            </UiHoverPreviewTooltip>
+          </foreignObject>
           <!-- Deprecated badge -->
           <g v-else-if="isVaultDeprecated(node.address)">
             <circle

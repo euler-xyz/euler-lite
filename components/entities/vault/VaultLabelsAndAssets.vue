@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { SecuritizeCollateralVault, EVault, EulerEarn } from '@eulerxyz/euler-v2-sdk'
+import { isEulerEarn, isSecuritizeCollateralVault, type SecuritizeCollateralVault, type EVault, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
@@ -115,11 +115,13 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
           <VaultDisplayName
             :name="pairVault ? displayLabel : displayName"
             :is-unverified="(!!vault && !isVerifiedVault(vault.address)) || !!(pairVault && !isVerifiedVault(pairVault.address))"
+            :addresses="[vault.address, ...(pairVault ? [pairVault.address] : [])]"
           />
         </span>
         <VaultDeprecatedBadge :addresses="[vault.address, ...(pairVault ? [pairVault.address] : [])]" />
         <VaultAssessmentWarning
           :address="vault.address"
+          :family="isEulerEarn(vault) ? 'earn' : isSecuritizeCollateralVault(vault) ? null : 'evk'"
           hide-deprecated
         />
         <VaultAssessmentWarning
@@ -127,22 +129,7 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
           :address="pairVault.address"
           hide-deprecated
         />
-        <UiHoverPreviewTooltip
-          v-if="isRestricted"
-          title="Region restricted"
-          text="This vault is not available in your region"
-          placement="top-start"
-        >
-          <span
-            class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-          >
-            <SvgIcon
-              name="warning"
-              class="!w-14 !h-14"
-            />
-            Restricted
-          </span>
-        </UiHoverPreviewTooltip>
+        <RestrictedBadge v-if="isRestricted" />
         <slot />
       </div>
 

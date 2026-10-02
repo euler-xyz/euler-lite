@@ -74,13 +74,16 @@ export interface ProductDescriptor {
   portfolioNotice: string | null
   deprecationReason: string | null
   governanceLimited: boolean
-  forceUnverified: boolean
   entityKeys: string[]
   vaultOverrides: Record<string, VaultOverride>
 }
 
 export interface LabelsView {
   chainId: number
+  labelsSource?: PublicEulerLabelsData['source']
+  sourceFetchedAt?: number
+  publishedVerifiedAddresses: Set<Address>
+  managingEntityByVault: Record<string, string>
   logoBaseUrl?: string
   snapshot: ChainVaultsSnapshot
   productByVault: Map<Address, ProductDescriptor>
@@ -169,7 +172,6 @@ export function buildProductDescriptors(products: Record<string, ProductEntryFul
       portfolioNotice: strOrNull(product.portfolioNotice),
       deprecationReason: strOrNull(product.deprecationReason),
       governanceLimited: hasTag(product.tags, 'governance limited'),
-      forceUnverified: strOrNull(product.deprecationReason)?.toLowerCase().includes('unrecognized entity') === true,
       entityKeys: declaredKeysOf(product.entity),
       vaultOverrides: overrides,
     }
@@ -383,6 +385,13 @@ async function assembleLabelsView(chainId: number): Promise<LabelsView> {
 
   return {
     chainId,
+    labelsSource: labels.value.source,
+    sourceFetchedAt: labels.value.sourceFetchedAt,
+    publishedVerifiedAddresses: new Set(uniqueAddresses([
+      ...labels.value.verifiedVaultAddresses,
+      ...labels.value.earnVaults,
+    ])),
+    managingEntityByVault: labels.value.managingEntityByVault ?? {},
     logoBaseUrl: labels.value.logoBaseUrl,
     snapshot,
     productByVault,

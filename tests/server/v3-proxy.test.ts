@@ -43,7 +43,7 @@ describe('v3 proxy utilities', () => {
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/batch')).toBe(true)
     expect(isV3ProxyPathAllowed(`/v3/evk/vaults/1/${VAULT}/totals`)).toBe(true)
     expect(isV3ProxyPathAllowed(`/v3/evk/vaults/1/${VAULT}/assessment`)).toBe(true)
-    expect(isV3ProxyPathAllowed('/v3/evk/vaults/open-interest')).toBe(true)
+    expect(isV3ProxyPathAllowed('/v3/evk/vaults/open-interest')).toBe(false)
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/open-interest/by-collateral')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/liquidations')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/oracles/adapter-assessments')).toBe(true)
@@ -101,7 +101,7 @@ describe('v3 proxy utilities', () => {
     expect(validateV3ProxyUrl(
       'GET',
       new URL(`https://app.example/api/internal/v3/evk/vaults/open-interest?chainId=1&vault=${VAULT}&limit=1`),
-    )).toEqual({ ok: true })
+    )).toEqual({ ok: false, statusCode: 404, statusMessage: 'V3 path not allowed' })
     expect(validateV3ProxyUrl(
       'GET',
       new URL(`https://app.example/api/internal/v3/evk/vaults/1/${VAULT}/totals?resolution=1d&from=1782380000&to=1782984800`),
@@ -172,15 +172,7 @@ describe('v3 proxy utilities', () => {
     })
   })
 
-  it('extracts public open-interest and bad-debt failure context', () => {
-    expect(buildV3ProxyLogFields(
-      new URL(`https://app.example/api/internal/v3/evk/vaults/open-interest?chainId=1&vault=${VAULT}&limit=10`),
-    )).toEqual({
-      v3ChainId: '1',
-      v3Limit: '10',
-      v3VaultAddress: VAULT,
-    })
-
+  it('extracts public bad-debt failure context', () => {
     expect(buildV3ProxyLogFields(
       new URL('https://app.example/api/internal/v3/evk/vaults/bad-debt?chainId=1&minBadDebtUsd=0&offset=100&limit=100'),
     )).toEqual({

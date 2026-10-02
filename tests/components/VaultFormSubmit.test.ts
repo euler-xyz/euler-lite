@@ -16,9 +16,11 @@ vi.mock('@floating-ui/vue', () => ({
 
 const connected = ref(false)
 const walletChain = ref(1)
-const renderSubmit = (guard: Partial<UnverifiedVaultGuardState>) => {
+const advancedMode = ref(false)
+const batchEntries = ref(0)
+const renderSubmit = (guard: Partial<UnverifiedVaultGuardState>, canAddToBatch?: boolean) => {
   const app = createSSRApp({
-    render: () => h(VaultFormSubmit, { disabled: true }, { default: () => 'Deposit' }),
+    render: () => h(VaultFormSubmit, { disabled: true, canAddToBatch }, { default: () => 'Deposit' }),
   })
   app.provide('unverified-vault-guard', guard)
   app.component('UiButton', defineComponent({
@@ -35,14 +37,16 @@ describe('vault form verification prerequisites', () => {
   beforeEach(() => {
     connected.value = false
     walletChain.value = 1
+    advancedMode.value = false
+    batchEntries.value = 0
     vi.stubGlobal('nextTick', nextTick)
-    vi.stubGlobal('useUserSettings', () => ({ settings: ref({ enableAdvancedMode: false }) }))
+    vi.stubGlobal('useUserSettings', () => ({ settings: ref({ enableAdvancedMode: advancedMode.value }) }))
     vi.stubGlobal('useWagmi', () => ({
       isConnected: connected, chainId: walletChain, switchChain: vi.fn(), connect: vi.fn(),
     }))
     vi.stubGlobal('useSpyMode', () => ({ isSpyMode: ref(false) }))
     vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(143) }))
-    vi.stubGlobal('useTxBatch', () => ({ entryCount: ref(0), clearBatch: vi.fn() }))
+    vi.stubGlobal('useTxBatch', () => ({ entryCount: batchEntries, clearBatch: vi.fn() }))
   })
   afterEach(() => vi.unstubAllGlobals())
 
@@ -70,14 +74,40 @@ describe('vault form verification prerequisites', () => {
     expect(html).not.toContain('Acknowledge Unverified Vault Risk')
   })
 
-  it('uses the listed-status acknowledgement label for a known hidden vault', async () => {
+  it.each([
+    'This vault is not listed: A required check failed.',
+    'This vault is not listed in the published vault labels.',
+  ])('uses the listing-status acknowledgement action for %s', async (unlistedNotice) => {
     connected.value = true
     walletChain.value = 143
     const html = await renderSubmit({
       isAcknowledgmentRequired: true,
-      unlistedNotice: 'This vault is not listed: A required check failed.',
+      unlistedNotice,
     })
-    expect(html).toContain('Acknowledge Vault Status')
+    expect(html).toContain('Review listing status')
     expect(html).not.toContain('Acknowledge Unverified Vault Risk')
+  })
+
+  it('keeps the unverified-risk action for a vault with no known listing verdict', async () => {
+    connected.value = true
+    walletChain.value = 143
+    const html = await renderSubmit({ isAcknowledgmentRequired: true })
+    expect(html).toContain('Acknowledge Unverified Vault Risk')
+    expect(html).not.toContain('Review listing status')
+  })
+
+  it('offers listing acknowledgement before adding to an existing batch', async () => {
+    connected.value = true
+    walletChain.value = 143
+    advancedMode.value = true
+    batchEntries.value = 1
+    const unlistedNotice = 'This vault is not listed in the published vault labels.'
+    const beforeConsent = await renderSubmit({ isAcknowledgmentRequired: true, unlistedNotice }, true)
+    expect(beforeConsent).toContain('Review listing status')
+    expect(beforeConsent).not.toContain('data-testid="add-to-batch"')
+
+    const afterConsent = await renderSubmit({ isAcknowledgmentRequired: false, unlistedNotice }, true)
+    expect(afterConsent).toContain('data-testid="add-to-batch"')
+    expect(afterConsent).not.toContain('Review listing status')
   })
 })

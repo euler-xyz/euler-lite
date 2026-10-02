@@ -209,3 +209,21 @@ describe('metadata-only verification uses current governance and membership', ()
     expect(registry.isVerifiedVault(VAULT)).toBe(false)
   })
 })
+
+describe('V3 verification expiry', () => {
+  it('expires the hosted verdict while preserving independent escrow trust', () => {
+    vi.stubGlobal('useEulerAddresses', () => ({ chainId }))
+    vi.stubGlobal('useEulerLabels', useEulerLabels)
+    chainId.value = 1
+    const registry = useVaultRegistry()
+    registry.clear()
+    __setEulerLabelsDataForTest({ source: 'v3', verifiedVaultAddresses: [VAULT] })
+    registry.set(VAULT, vault(ASSET_ONE) as never, 'evk')
+    expect(registry.isVerifiedVault(VAULT)).toBe(true)
+
+    useEulerLabels().isReady.value = false
+    expect(registry.isVerifiedVault(VAULT)).toBe(false)
+    registry.setEscrowAddresses([VAULT])
+    expect(registry.isVerifiedVault(VAULT)).toBe(true)
+  })
+})
