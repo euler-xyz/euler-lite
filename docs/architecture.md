@@ -231,7 +231,7 @@ The client composable `useVaults.loadVaults()` runs in two phases:
 
 The public interface of `useVaults()` is unchanged — the 15 exports (`isReady`, `borrowList`, `getVault`, etc.) keep their names, types, and semantics. Vault entities are SDK-owned (`EVault`, `EulerEarn`, `SecuritizeCollateralVault`), while Lite keeps UI-only categorization, LTV, APY, collateral discovery, and presentation helpers under `utils/vault/`.
 
-The wire payload uses the bigint codec at `utils/snapshot-codec.ts`: bigints serialise as `{ __bi: "<decimal>" }` (object-wrapper tag, unforgeable by adversary-controlled ERC-20 metadata). The server-side SDK builder at `server/utils/sdk-server.ts` instantiates one `EulerSDK` per chain (lazy, cached at module scope) with the default `'fallback'` adapter chain — V3 primary, onchain secondary when V3 is configured; pure onchain otherwise.
+The wire payload uses the bigint codec at `utils/snapshot-codec.ts`: bigints serialise as `{ __bi: "<decimal>" }` (object-wrapper tag, unforgeable by adversary-controlled ERC-20 metadata). The server-side SDK builder at `server/utils/sdk-server.ts` instantiates one `EulerSDK` per chain (lazy, cached at module scope) with the default `'fallback'` adapter chain — V3 primary, onchain secondary when V3 is configured; pure onchain otherwise. That builder talks to `RPC_URL_<chainId>` through `createServerProviderService`: Sonic (`146`) gets a smaller Multicall aggregate; every other chain keeps the SDK provider. See [Server-Side Caching → Server provider overrides](./server-side-caching.md#server-provider-overrides).
 
 ### Reward campaign and claim pipeline
 

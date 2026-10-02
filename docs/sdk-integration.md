@@ -139,7 +139,7 @@ The server-side snapshot builder has its own independent `SERVER_VAULT_CACHE_SOU
 
 Reward provider toggles (`rewardsEnableMerkl`, `rewardsEnableBrevis`, `rewardsEnableFuul`, `rewardsEnableTurtle`) are emitted as `false` only when `useDeployConfig()` disables them.
 
-The server-side SDK (`server/utils/sdk-server.ts`) differs for Turtle: its rewards adapters call `earn.turtle.xyz` directly, so it receives the server-only `TURTLE_EARN_API_KEY` as `rewardsTurtleApiKey` pinned to the fixed Turtle upstream, and is built with `rewardsEnableTurtle: false` when no usable key is configured. That flag disables the direct adapter's Turtle discovery only; Turtle campaigns sourced from euler-data-v3 may still be returned in fallback mode. The key never enters the browser config. See [server-side caching](./server-side-caching.md#server-side-sdk-builder).
+The server-side SDK (`server/utils/sdk-server.ts`) differs for Turtle: its rewards adapters call `earn.turtle.xyz` directly, so it receives the server-only `TURTLE_EARN_API_KEY` as `rewardsTurtleApiKey` pinned to the fixed Turtle upstream, and is built with `rewardsEnableTurtle: false` when no usable key is configured. That flag disables the direct adapter's Turtle discovery only; Turtle campaigns sourced from euler-data-v3 may still be returned in fallback mode. The key never enters the browser config. The same builder wraps the SDK `ProviderService` with `createServerProviderService` so Sonic (`146`) uses a smaller Multicall aggregate; other chains keep the SDK provider. See [server-side caching](./server-side-caching.md#server-side-sdk-builder) and [server provider overrides](./server-side-caching.md#server-provider-overrides).
 
 ### Reward token decimals
 
