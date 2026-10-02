@@ -1,6 +1,6 @@
 <script setup lang="ts">
 defineEmits(['close'])
-type Section = { title: string, text: string }
+type Section = { title: string, text: string, href?: string }
 
 const {
   modalTitle,
@@ -35,7 +35,17 @@ const {
           <div class="text-p3 font-semibold text-content-primary">
             {{ section.title }}
           </div>
+          <a
+            v-if="section.href"
+            :href="section.href"
+            class="w-fit break-all text-p3 text-accent-600 underline hover:text-accent-500"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {{ section.text }}
+          </a>
           <div
+            v-else
             class="text-p3 text-content-primary"
             style="white-space: pre-line"
           >
