@@ -33,11 +33,11 @@ const status = computed(() => {
   if (statusLine.value === 'Checks unavailable') return { text: 'Unavailable', color: 'text-content-tertiary', dot: 'bg-content-muted' }
   if (!statusLine.value) return { text: 'Checking…', color: 'text-content-tertiary', dot: 'bg-content-muted' }
   if (statusLine.value.startsWith('Flagged')) return { text: 'Review', color: 'text-warning-500', dot: 'bg-warning-500' }
-  if (accepted.value.length && statusLine.value.startsWith('Verified')) {
+  if (accepted.value.length && statusLine.value.startsWith('Checks passed')) {
     const count = accepted.value.length
     return { text: `${count} accepted exception${count === 1 ? '' : 's'}`, color: 'text-content-secondary', dot: 'bg-content-muted' }
   }
-  if (statusLine.value.startsWith('Verified')) return { text: 'Verified', color: 'text-success-500', dot: 'bg-success-500' }
+  if (statusLine.value.startsWith('Checks passed')) return { text: 'Passed', color: 'text-success-500', dot: 'bg-success-500' }
   return { text: statusLine.value, color: 'text-content-tertiary', dot: 'bg-content-muted' }
 })
 const verdict = computed(() => visibility.value?.[props.address.toLowerCase()])

@@ -6,7 +6,7 @@ const { isReady, source, visibility } = useEulerLabels()
 const line = computed(() => {
   if (!isReady.value || source.value !== 'v3') return null
   const verdict = visibility.value?.[props.address.toLowerCase()]
-  return getNotListedLine(verdict?.status, verdict?.reason)
+  return getNotListedLine(verdict?.status, verdict?.reason, verdict?.decidedBy)
 })
 </script>
 

@@ -39,12 +39,13 @@ const hasOracleAdapterFinding = computed(() => !!assessment.value?.configContext
 const notListed = computed(() => getNotListedLine(
   verdict.value?.status,
   verdict.value?.reason || assessment.value?.configReason || assessment.value?.consistencyReason,
+  verdict.value?.decidedBy,
 ))
 const statusLine = computed(() => getVaultChecksStatusLine(assessment.value, loadError.value ? 'unavailable' : entry.value.status, nowMs.value))
 const checkSummary = computed(() => assessment.value ? getVaultAssessmentCheckSummary(assessment.value) : '')
 const checkTone = computed(() => statusLine.value.startsWith('Flagged')
   ? 'bg-warning-500'
-  : statusLine.value.startsWith('Verified') ? 'bg-success-500' : 'bg-content-muted')
+  : statusLine.value.startsWith('Checks passed') ? 'bg-success-500' : 'bg-content-muted')
 const { isCopied, copyToClipboard } = useClipboardCopy()
 const copyAddress = (address: string) => {
   copyToClipboard(address).catch(() => {})

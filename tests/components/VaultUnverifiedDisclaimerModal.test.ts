@@ -18,9 +18,10 @@ const renderModal = (unlistedNotice?: string) => {
 
 describe('unverified vault acknowledgement copy', () => {
   it('uses the V3 status without phishing copy for a known unlisted vault', async () => {
-    const html = await renderModal('This vault has not been checked yet, so it is not listed.')
+    const html = await renderModal('This vault is not listed in the published vault labels.')
     expect(html).toContain('Vault not listed')
-    expect(html).toContain('This vault has not been checked yet')
+    expect(html).toContain('published vault labels')
+    expect(html).not.toContain('not been checked yet')
     expect(html).not.toContain('phishing')
   })
 

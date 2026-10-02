@@ -12,7 +12,7 @@ const verifyEVault = vi.fn()
 const labelsReady = ref(true)
 const labelsError = ref<string | undefined>()
 const labelsSource = ref<'v3' | 'static'>('static')
-const visibility = ref<Record<string, { status: string, reason?: string }>>({})
+const visibility = ref<Record<string, { status: string, reason?: string, decidedBy?: string }>>({})
 const retryLabels = vi.fn()
 const deprecated = ref(false)
 
@@ -131,10 +131,10 @@ describe('useUnverifiedVaultGuard canonical context', () => {
     entries.set(VAULT.toLowerCase(), { type: 'evk', vault: { chainId: 1, address: VAULT } })
     verifyEVault.mockReturnValue(false)
     labelsSource.value = 'v3'
-    visibility.value = { [VAULT.toLowerCase()]: { status: 'pending_review' } }
+    visibility.value = { [VAULT.toLowerCase()]: { status: 'pending_review', decidedBy: 'unclaimed' } }
     const mounted = mountGuard()
     await nextTick()
-    expect(mounted.state.unlistedNotice).toBe('This vault has not been checked yet, so it is not listed.')
+    expect(mounted.state.unlistedNotice).toBe('This vault is not listed in the published vault labels.')
     expect(mounted.state.isAcknowledgmentRequired).toBe(true)
     expect(operationBlockerEntries.value.some(([, reason]) => reason === 'Unverified vault risk acknowledgment required')).toBe(true)
     mounted.state.acknowledgeRisk()
