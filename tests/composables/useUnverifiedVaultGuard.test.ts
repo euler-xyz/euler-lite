@@ -127,22 +127,21 @@ describe('useUnverifiedVaultGuard canonical context', () => {
     mounted.app.unmount()
   })
 
-  it('blocks pending review for new exposure while leaving exits available', async () => {
+  it('requires acknowledgement for a pending-review vault with a soft status notice', async () => {
     entries.set(VAULT.toLowerCase(), { type: 'evk', vault: { chainId: 1, address: VAULT } })
     verifyEVault.mockReturnValue(false)
     labelsSource.value = 'v3'
     visibility.value = { [VAULT.toLowerCase()]: { status: 'pending_review' } }
-    const exposure = mountGuard()
-    const exit = mountGuard({ allowUnavailableLabels: true })
+    const mounted = mountGuard()
     await nextTick()
-    expect(exposure.state.actionBlockReason).toContain('not been checked yet')
-    expect(exposure.state.isAcknowledgmentRequired).toBe(false)
-    exposure.state.acknowledgeRisk()
-    expect(operationBlockerEntries.value.some(([, reason]) => reason.includes('not been checked yet'))).toBe(true)
-    expect(exit.state.actionBlockReason).toBeNull()
-    expect(exit.state.isAcknowledgmentRequired).toBe(true)
-    exposure.app.unmount()
-    exit.app.unmount()
+    expect(mounted.state.unlistedNotice).toBe('This vault has not been checked yet, so it is not listed.')
+    expect(mounted.state.isAcknowledgmentRequired).toBe(true)
+    expect(operationBlockerEntries.value.some(([, reason]) => reason === 'Unverified vault risk acknowledgment required')).toBe(true)
+    mounted.state.acknowledgeRisk()
+    await nextTick()
+    expect(mounted.state.isAcknowledgmentRequired).toBe(false)
+    expect(operationBlockerEntries.value.some(([, reason]) => reason === 'Unverified vault risk acknowledgment required')).toBe(false)
+    mounted.app.unmount()
   })
 
   it('requires separate acknowledgement for a deprecated deposit', async () => {

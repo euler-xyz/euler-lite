@@ -312,20 +312,6 @@ const handleAddToBatch = () => {
           Retry verification
         </UiButton>
       </template>
-      <template v-else-if="unverifiedVaultGuard?.actionBlockReason">
-        <p
-          class="text-p3 text-warning-500"
-          role="status"
-        >
-          {{ unverifiedVaultGuard.actionBlockReason }}
-        </p>
-        <UiButton
-          size="large"
-          disabled
-        >
-          Vault review pending
-        </UiButton>
-      </template>
       <template v-else-if="batchBlocksDirect && supportsBatch">
         <UiButton
           size="large"

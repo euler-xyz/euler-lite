@@ -61,7 +61,6 @@ const projectionToVault = computed(() => {
 })
 useOperationGuard(computed(() => [fromVault.value?.address, toVault.value?.address].filter(Boolean)), {
   depositedVaultAddresses: computed(() => [toVault.value?.address].filter(Boolean)),
-  newExposureVaultAddresses: computed(() => [toVault.value?.address].filter(Boolean)),
 })
 
 const fromVaultAsRegular = computed(() => fromVault.value as EVault | undefined)

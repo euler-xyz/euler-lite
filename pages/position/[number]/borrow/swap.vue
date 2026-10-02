@@ -364,7 +364,6 @@ useOperationGuard(computed(() => [
   targetCollateralVault.value?.address,
 ].filter(Boolean)), {
   depositedVaultAddresses: computed(() => [targetCollateralVault.value?.address].filter(Boolean)),
-  newExposureVaultAddresses: computed(() => [targetDebtVault.value?.address, targetCollateralVault.value?.address].filter(Boolean)),
 })
 
 const pairAssetsLabel = usePositionPairLabel(position)

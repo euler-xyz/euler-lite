@@ -207,9 +207,7 @@ const projectionCollateralVault = computed(() => {
   const fallback = collateralVault.value
   return fallback ? getLayeredVault(fallback.address, fallback) : undefined
 })
-useOperationGuard(computed(() => [borrowVault.value?.address, collateralVault.value?.address].filter(Boolean)), {
-  newExposureVaultAddresses: computed(() => [borrowVault.value?.address].filter(Boolean)),
-})
+useOperationGuard(computed(() => [borrowVault.value?.address, collateralVault.value?.address].filter(Boolean)))
 const borrowWarnings = computed(() => {
   if (!borrowVault.value) return []
   return [
