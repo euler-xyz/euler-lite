@@ -113,13 +113,22 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
         v-for="(marketEntities, entitiesIdx) in [getMarketEntities(market)]"
         :key="'entities-' + entitiesIdx"
       >
-        <BaseAvatar
+        <VaultEntityDisclosureTooltip
           v-if="marketEntities.logos.length > 0"
-          class="icon--40 shrink-0"
-          :class="{ 'opacity-20': isGovernanceLimited }"
-          :src="marketEntities.logos"
-          :label="marketEntities.labels"
-        />
+          :entities="disclosureEntities"
+        >
+          <span
+            class="inline-flex"
+            @click.stop
+          >
+            <BaseAvatar
+              class="icon--40 shrink-0"
+              :class="{ 'opacity-20': isGovernanceLimited }"
+              :src="marketEntities.logos"
+              :label="marketEntities.labels"
+            />
+          </span>
+        </VaultEntityDisclosureTooltip>
         <div
           class="flex-grow min-w-0"
           :class="marketEntities.logos.length > 0 ? 'ml-12' : ''"
@@ -135,7 +144,10 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
               v-if="marketEntities.name || market.curator"
               :entities="disclosureEntities"
             >
-              <span :class="{ 'opacity-20': isGovernanceLimited }">
+              <span
+                :class="{ 'opacity-20': isGovernanceLimited }"
+                @click.stop
+              >
                 {{ marketEntities.name || market.curator?.name }}
               </span>
             </VaultEntityDisclosureTooltip>

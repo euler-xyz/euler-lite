@@ -498,19 +498,21 @@ const linkPath = computed(() => ({
           class="flex items-center gap-6"
           :class="{ 'opacity-20': isAnyGovernanceLimited }"
         >
-          <BaseAvatar
-            class="icon--20"
-            :label="entityDisplay.name"
-            :src="entityDisplay.logos"
-          />
           <VaultEntityDisclosureTooltip :entities="pairEntities">
-            <span
-              class="text-p2 text-content-primary truncate"
-              data-id="data-point"
-              :data-key="pairKey"
-              data-field="curator"
-              :data-value="entityDisplay.name"
-            >{{ entityDisplay.name }}</span>
+            <span class="inline-flex min-w-0 items-center gap-6">
+              <BaseAvatar
+                class="icon--20"
+                :label="entityDisplay.name"
+                :src="entityDisplay.logos"
+              />
+              <span
+                class="text-p2 text-content-primary truncate"
+                data-id="data-point"
+                :data-key="pairKey"
+                data-field="curator"
+                :data-value="entityDisplay.name"
+              >{{ entityDisplay.name }}</span>
+            </span>
           </VaultEntityDisclosureTooltip>
         </div>
         <div

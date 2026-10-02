@@ -11,8 +11,8 @@ const sections = computed(() => {
     const website = entityDisclosureUrl(entity.url)
     return [
       ...getEntityDisclosureFields(entity).map(field => ({ title: title(field.label), text: field.value })),
-      ...(website ? [{ title: title('Website'), text: website }] : []),
-      ...getEntitySocialLinks(entity).map(link => ({ title: title(link.label), text: link.url })),
+      ...(website ? [{ title: title('Website'), text: website, href: website }] : []),
+      ...getEntitySocialLinks(entity).map(link => ({ title: title(link.label), text: link.url, href: link.url })),
     ]
   })
 })

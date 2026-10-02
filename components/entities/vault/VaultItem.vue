@@ -315,19 +315,21 @@ watchEffect(async () => {
           class="flex items-center gap-6"
           :class="{ 'opacity-20': isGovernanceLimited }"
         >
-          <BaseAvatar
-            class="icon--20"
-            :label="entityName"
-            :src="entityLogos"
-          />
           <VaultEntityDisclosureTooltip :entities="entities">
-            <span
-              class="text-p2 text-content-primary truncate"
-              data-id="data-point"
-              :data-key="vault.address.toLowerCase()"
-              data-field="curator"
-              :data-value="entityName"
-            >{{ entityName }}</span>
+            <span class="inline-flex min-w-0 items-center gap-6">
+              <BaseAvatar
+                class="icon--20"
+                :label="entityName"
+                :src="entityLogos"
+              />
+              <span
+                class="text-p2 text-content-primary truncate"
+                data-id="data-point"
+                :data-key="vault.address.toLowerCase()"
+                data-field="curator"
+                :data-value="entityName"
+              >{{ entityName }}</span>
+            </span>
           </VaultEntityDisclosureTooltip>
         </div>
         <div
