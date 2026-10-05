@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { getAddress } from 'viem'
-import { flattenBatchEntries, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { planVaultTargets } from '~/utils/plan-vault-targets'
 import { buildModifiedPositionKeySets, buildRemovedPositionKeySets, filterPositionKeysByOwner, useTxBatch } from '~/composables/useTxBatch'
 import { useTokenSymbolResolver } from '~/composables/useTokenSymbolResolver'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
@@ -228,19 +229,16 @@ const unverifiedVaults = computed(() => {
   for (const entry of entries.value) {
     const plan = entryPlans.value[entry.id]
     if (!plan) continue
-    for (const item of plan) {
-      if (item.type !== 'evcBatch') continue
-      for (const bi of flattenBatchEntries(item.items)) {
-        try {
-          const addr = getAddress(bi.targetContract)
-          const vault = getVault(addr) as { shares?: { name?: string }, asset?: { symbol?: string } } | undefined
-          if (vault && !isVerifiedVault(addr)) {
-            const name = vault.shares?.name || vault.asset?.symbol || ''
-            if (name) vaults.set(addr.toLowerCase(), name)
-          }
+    for (const target of planVaultTargets(plan)) {
+      try {
+        const addr = getAddress(target)
+        const vault = getVault(addr) as { shares?: { name?: string }, asset?: { symbol?: string } } | undefined
+        if (vault && !isVerifiedVault(addr)) {
+          const name = vault.shares?.name || vault.asset?.symbol || ''
+          if (name) vaults.set(addr.toLowerCase(), name)
         }
-        catch { /* skip malformed address */ }
       }
+      catch { /* skip malformed address */ }
     }
   }
   return [...vaults].map(([address, name]) => ({ address, name }))
