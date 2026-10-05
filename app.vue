@@ -14,7 +14,11 @@ let isAnnouncementOpen = false
 const { loadEulerConfig, chainId } = useEulerAddresses()
 const { loadVaults, isReady: isVaultsReady, resetVaultsState, refreshVaults, setShowAllLabelEntries } = useVaults()
 const { loadTokenList, isLoaded: isTokenListLoaded } = useTokenList()
-const { loadLabels, refreshLabelsIfStale, retryLabels, isReady: isLabelsReady, isLoading: isLabelsLoading, loadError: labelsLoadError } = useEulerLabels()
+const { loadLabels, refreshLabelsIfStale, retryLabels, isReady: isLabelsReady, isLoading: isLabelsLoading, isStale: isLabelsStale, labelsAgeMs, loadError: labelsLoadError } = useEulerLabels()
+const labelsStaleDescription = computed(() => {
+  const minutes = Math.floor(labelsAgeMs.value / 60_000)
+  return `The last successful read of vault verification was ${minutes} minutes ago. Lite keeps the last known data and retries automatically.`
+})
 const { loadCountry } = useGeoBlock()
 const { updateBalances, resetBalances } = useWallets()
 const { isConnected, address } = useWagmi()
@@ -240,6 +244,15 @@ onUnmounted(() => {
           title="Vault verification unavailable"
           :description="labelsLoadError"
           variant="error"
+          :action-text="isLabelsLoading ? 'Retrying…' : 'Retry'"
+          @action="retryLabels"
+        />
+        <UiAlert
+          v-else-if="isLabelsReady && isLabelsStale"
+          class="mb-16"
+          title="Vault verification may be outdated"
+          :description="labelsStaleDescription"
+          variant="warning"
           :action-text="isLabelsLoading ? 'Retrying…' : 'Retry'"
           @action="retryLabels"
         />

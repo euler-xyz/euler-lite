@@ -14,6 +14,7 @@ import {
   resolveGoverningEntityKeys,
 } from '~/utils/vault/governor-verification'
 import type { EulerEarn, EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import { LABELS_MAX_STALE_MS } from '~/utils/labels-freshness'
 
 interface VaultAsset {
   address: string
@@ -65,7 +66,7 @@ interface BuildContext {
   view: LabelsView
 }
 
-const cache = createTtlCache<Map<string, VaultMetadata>>({ ttlMs: CACHE_TTL_MS, maxEntries: 64 })
+const cache = createTtlCache<Map<string, VaultMetadata>>({ ttlMs: CACHE_TTL_MS, maxStaleMs: LABELS_MAX_STALE_MS, maxEntries: 64 })
 const inflight = new Map<number, Promise<Map<string, VaultMetadata>>>()
 
 function strOrNull(value: unknown): string | null {

@@ -2,7 +2,7 @@ import { createError, getQuery, setResponseHeader } from 'h3'
 import { getAddress, isAddress } from 'viem'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { resolveRpcUrl } from '~/server/utils/rpc'
-import { getVerifiedAddressSnapshot, getVerifiedAddressCacheControl } from '~/server/utils/verified-vaults'
+import { VerificationUnavailableError, getVerifiedAddressSnapshot, getVerifiedAddressCacheControl } from '~/server/utils/verified-vaults'
 import { logger } from '~/server/utils/logger'
 
 const MAX_ADDRESSES = 100
@@ -49,6 +49,10 @@ export default defineEventHandler(async (event) => {
   }
   catch (err) {
     logger.warn({ ctx: 'public-is-known', chainId, err }, 'verified-address lookup failed')
+    if (err instanceof VerificationUnavailableError) {
+      setResponseHeader(event, 'Retry-After', 60)
+      throw createError({ statusCode: 503, statusMessage: 'Vault verification unavailable' })
+    }
     throw createError({ statusCode: 502, statusMessage: 'Upstream error' })
   }
 

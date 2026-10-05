@@ -248,7 +248,7 @@ describe('useEulerLabels chain-scoped loading', () => {
     finally { clock.mockRestore() }
   })
 
-  it('expires a server-cached verdict 15 minutes after the actual V3 read', async () => {
+  it('expires a server-cached verdict a day after the actual V3 read', async () => {
     const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
     try {
       const original = bundleFor(labelsFor('cached'))
@@ -261,7 +261,7 @@ describe('useEulerLabels chain-scoped loading', () => {
       expect(labels.isReady.value).toBe(true)
       expect(currentProductKeys()).toEqual(['cached'])
 
-      clock.mockReturnValue(1_000_000 + 15 * 60_000)
+      clock.mockReturnValue(1_000_000 + 24 * 60 * 60_000)
       await labels.refreshLabelsIfStale()
       expect(labels.isReady.value).toBe(false)
       expect(labels.loadError.value).toContain('Unable to load vault verification')
@@ -277,7 +277,7 @@ describe('useEulerLabels chain-scoped loading', () => {
       mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('cached')))
       const labels = useEulerLabels()
       await labels.loadLabels()
-      vi.advanceTimersByTime(15 * 60_000 - 1)
+      vi.advanceTimersByTime(24 * 60 * 60_000 - 1)
       expect(labels.isReady.value).toBe(true)
       vi.advanceTimersByTime(1)
       expect(labels.isReady.value).toBe(false)
@@ -294,7 +294,7 @@ describe('useEulerLabels chain-scoped loading', () => {
       const labels = useEulerLabels()
       await labels.loadLabels()
 
-      vi.advanceTimersByTime(15 * 60_000 - 1_000)
+      vi.advanceTimersByTime(24 * 60 * 60_000 - 1_000)
       const refreshed = deferred<PublicLabelsBundle>()
       mocks.fetchPublicLabelsBundle.mockReturnValueOnce(refreshed.promise)
       const pending = labels.loadLabels(true)
@@ -324,7 +324,7 @@ describe('useEulerLabels chain-scoped loading', () => {
       const labels = useEulerLabels()
       await labels.loadLabels()
 
-      vi.advanceTimersByTime(15 * 60_000)
+      vi.advanceTimersByTime(24 * 60 * 60_000)
       const refreshed = deferred<PublicLabelsBundle>()
       mocks.fetchPublicLabelsBundle.mockReturnValueOnce(refreshed.promise)
       const pending = labels.loadLabels(true)
@@ -352,7 +352,7 @@ describe('useEulerLabels chain-scoped loading', () => {
       const labels = useEulerLabels()
       await labels.loadLabels()
 
-      vi.setSystemTime(1_000_000 + 15 * 60_000)
+      vi.setSystemTime(1_000_000 + 24 * 60 * 60_000)
       const refreshed = deferred<PublicLabelsBundle>()
       mocks.fetchPublicLabelsBundle.mockReturnValueOnce(refreshed.promise)
       const pending = labels.refreshLabelsIfStale()
@@ -390,7 +390,7 @@ describe('useEulerLabels chain-scoped loading', () => {
       expect(labels.isReady.value).toBe(true)
       await labels.refreshLabelsIfStale()
       expect(mocks.fetchPublicLabelsBundle).toHaveBeenCalledTimes(2)
-      expect(mocks.fetchPublicLabelsBundle).toHaveBeenLastCalledWith('/api/internal/public-labels', expect.objectContaining({ headers: { 'cache-control': 'no-cache' } }))
+      expect(mocks.fetchPublicLabelsBundle).toHaveBeenLastCalledWith('/api/internal/public-labels', expect.not.objectContaining({ headers: expect.anything() }))
       refreshed.resolve(bundleFor(labelsFor('revoked')))
       await pending
       expect(currentProductKeys()).toEqual(['revoked'])
@@ -408,7 +408,7 @@ describe('useEulerLabels chain-scoped loading', () => {
       clock.mockReturnValue(1_000_000 + 300_000)
       await labels.refreshLabelsIfStale()
       expect(labels.isReady.value).toBe(true)
-      clock.mockReturnValue(1_000_000 + 900_000)
+      clock.mockReturnValue(1_000_000 + 86_400_000)
       await labels.refreshLabelsIfStale()
       expect(labels.isReady.value).toBe(false)
       expect(labels.loadError.value).toContain('Unable to load')
@@ -416,6 +416,31 @@ describe('useEulerLabels chain-scoped loading', () => {
       mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('recovered')))
       await labels.refreshLabelsIfStale()
       expect(labels.isReady.value).toBe(true)
+      expect(currentProductKeys()).toEqual(['recovered'])
+    }
+    finally { clock.mockRestore() }
+  })
+
+  it('warns after fifteen minutes of failed refreshes while verification stays available', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
+    try {
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('cached')))
+      const labels = useEulerLabels()
+      await labels.loadLabels()
+      expect(labels.isStale.value).toBe(false)
+      mocks.fetchPublicLabelsBundle.mockRejectedValue(new Error('outage'))
+      clock.mockReturnValue(1_000_000 + 5 * 60_000)
+      await labels.refreshLabelsIfStale()
+      expect(labels.isStale.value).toBe(false)
+      clock.mockReturnValue(1_000_000 + 15 * 60_000)
+      await labels.refreshLabelsIfStale()
+      expect(labels.isReady.value).toBe(true)
+      expect(labels.isStale.value).toBe(true)
+      expect(labels.labelsAgeMs.value).toBe(15 * 60_000)
+      expect(currentProductKeys()).toEqual(['cached'])
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('recovered')))
+      await labels.refreshLabelsIfStale()
+      expect(labels.isStale.value).toBe(false)
       expect(currentProductKeys()).toEqual(['recovered'])
     }
     finally { clock.mockRestore() }

@@ -5,6 +5,7 @@ import { resolveRpcUrl } from '~/server/utils/rpc'
 import { getChainVaultMetadata, type VaultMetadata } from '~/server/utils/vault-metadata'
 import { logger } from '~/server/utils/logger'
 import { parsePublicMetadataProductId } from '~/server/utils/public-metadata-query'
+import { VerificationUnavailableError } from '~/server/utils/verified-vaults'
 
 const MAX_ADDRESSES = 100
 
@@ -56,6 +57,10 @@ export default defineEventHandler(async (event) => {
   }
   catch (err) {
     logger.warn({ ctx: 'public-metadata', chainId, err }, 'metadata lookup failed')
+    if (err instanceof VerificationUnavailableError) {
+      setResponseHeader(event, 'Retry-After', 60)
+      throw createError({ statusCode: 503, statusMessage: 'Vault verification unavailable' })
+    }
     throw createError({ statusCode: 502, statusMessage: 'Upstream error' })
   }
 

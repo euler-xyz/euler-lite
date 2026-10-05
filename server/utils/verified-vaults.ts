@@ -3,9 +3,17 @@ import { tryChecksum } from './labels-helpers'
 import { buildLabelsView, type LabelsView } from './labels-view'
 import { logger } from '~/server/utils/logger'
 import { isEarnVaultOwnerVerified, isVaultGovernorVerified } from '~/utils/vault/governor-verification'
+import { LABELS_MAX_STALE_MS, isLabelsSnapshotUsable } from '~/utils/labels-freshness'
 
 const CACHE_TTL_MS = 300_000
-const MAX_V3_VERDICT_AGE_MS = 15 * 60_000
+
+/** The last successful V3 read is older than the keep-alive window; the public bridge answers 503. */
+export class VerificationUnavailableError extends Error {
+  constructor() {
+    super('Vault verification snapshot is too old')
+    this.name = 'VerificationUnavailableError'
+  }
+}
 
 export interface VerifiedAddressSnapshot {
   addresses: Set<string>
@@ -13,15 +21,12 @@ export interface VerifiedAddressSnapshot {
   sourceFetchedAt?: number
 }
 
-const cache = createTtlCache<VerifiedAddressSnapshot>({ ttlMs: CACHE_TTL_MS, maxEntries: 64 })
+const cache = createTtlCache<VerifiedAddressSnapshot>({ ttlMs: CACHE_TTL_MS, maxStaleMs: LABELS_MAX_STALE_MS, maxEntries: 64 })
 const inflight = new Map<number, Promise<VerifiedAddressSnapshot>>()
 
 const isUsable = (snapshot: VerifiedAddressSnapshot): boolean => {
   if (snapshot.source !== 'v3') return true
-  const fetchedAt = snapshot.sourceFetchedAt
-  return typeof fetchedAt === 'number' && Number.isSafeInteger(fetchedAt)
-    && fetchedAt > 0 && fetchedAt <= Date.now()
-    && Date.now() - fetchedAt < MAX_V3_VERDICT_AGE_MS
+  return isLabelsSnapshotUsable(snapshot.sourceFetchedAt)
 }
 
 function computeVerifiedSet(view: LabelsView): Set<string> {
@@ -77,7 +82,7 @@ async function refreshVerifiedAddressSnapshot(chainId: number): Promise<Verified
         source: view.labelsSource,
         sourceFetchedAt: view.sourceFetchedAt,
       }
-      if (!isUsable(snapshot)) throw new Error('Vault verification snapshot is too old')
+      if (!isUsable(snapshot)) throw new VerificationUnavailableError()
       cache.set(key, snapshot)
       return snapshot
     }
@@ -85,6 +90,7 @@ async function refreshVerifiedAddressSnapshot(chainId: number): Promise<Verified
       logger.warn({ ctx: 'verified-vaults', chainId, err }, 'rebuild failed')
       const stale = cache.getStale(key)
       if (stale && isUsable(stale)) return stale
+      if (stale) throw new VerificationUnavailableError()
       throw err
     }
     finally {
@@ -116,7 +122,7 @@ export function getVerifiedAddressCacheControl(snapshot: VerifiedAddressSnapshot
   }
   if (!snapshot.sourceFetchedAt) return 'no-store'
   // Keep the CDN's fresh and stale windows inside the V3 verdict's expiry.
-  const remainingSeconds = Math.max(0, Math.floor((snapshot.sourceFetchedAt + MAX_V3_VERDICT_AGE_MS - now) / 1000) - 1)
+  const remainingSeconds = Math.max(0, Math.floor((snapshot.sourceFetchedAt + LABELS_MAX_STALE_MS - now) / 1000) - 1)
   const maxAge = Math.min(30, remainingSeconds)
   const staleAge = Math.min(30, remainingSeconds - maxAge)
   return `public, max-age=${maxAge}, stale-while-revalidate=${staleAge}`

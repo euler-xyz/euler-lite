@@ -16,11 +16,12 @@ import {
   type PublicLabelsResponse,
 } from '~/utils/public-labels'
 import { readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-url-env'
+import { LABELS_MAX_STALE_MS } from '~/utils/labels-freshness'
 
 const CACHE_TTL_MS = 300_000
 const REFRESH_BUDGET_MS = 30_000
 
-const cache = createTtlCache<HostedLabelsBundle>({ ttlMs: CACHE_TTL_MS, maxEntries: 64 })
+const cache = createTtlCache<HostedLabelsBundle>({ ttlMs: CACHE_TTL_MS, maxStaleMs: LABELS_MAX_STALE_MS, maxEntries: 64 })
 const inFlight = createInFlightDedup<string, HostedLabelsBundle>()
 
 const geoSources = new Map<string, ReturnType<typeof createGeoPolicySource>>()
