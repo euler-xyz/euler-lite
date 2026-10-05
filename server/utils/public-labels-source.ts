@@ -37,7 +37,7 @@ const getGeoSource = () => {
 const cacheKey = (chainId: number, labelSet: string, version: string): string =>
   JSON.stringify([readResolvedV3ApiUrl(), labelSet, chainId, version, readLabelsOnchainVerificationChains().includes(chainId)])
 
-const buildRequest = (): PublicLabelsRequest => async <T>(
+export const createPublicLabelsRequest = (): PublicLabelsRequest => async <T>(
   path: string,
   query: PublicLabelsQuery,
 ): Promise<PublicLabelsResponse<T>> => {
@@ -54,9 +54,15 @@ const buildRequest = (): PublicLabelsRequest => async <T>(
 
   const response = await fetchWithTimeout(base.toString(), undefined, { headers })
   if (!response.ok) {
-    throw new Error(`Public Labels V3 returned ${response.status} for ${path}`)
+    throw new PublicLabelsRequestError(response.status, path)
   }
   return await response.json() as PublicLabelsResponse<T>
+}
+
+export class PublicLabelsRequestError extends Error {
+  constructor(public readonly statusCode: number, path: string) {
+    super(`Public Labels V3 returned ${statusCode} for ${path}`)
+  }
 }
 
 // Cached source data is complete; deployment selection is attached on every read.
@@ -77,7 +83,7 @@ export function refreshPublicLabelsBundle(
     try {
       const bundle = await withWallClock(
         async () => {
-          const request = buildRequest()
+          const request = createPublicLabelsRequest()
           const Adapter = readLabelsOnchainVerificationChains().includes(chainId) ? PublicLabelsV3MetadataAdapter : PublicLabelsV3Adapter
           const adapter = new Adapter({
             endpoint: readResolvedV3ApiUrl(),

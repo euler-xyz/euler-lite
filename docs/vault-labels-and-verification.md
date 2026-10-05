@@ -15,12 +15,15 @@ Not all vaults on-chain are equal. Public Labels maps chain-scoped vault address
 | Vault inventory and labels | `GET /labels/vaults?view=resolved&version=...&chainId=...` |
 | Products | `GET /labels/products?view=resolved&version=...&chainId=...` |
 | Entities | `GET /labels/entities?version=...` |
+| Curator profile | `GET /labels/entities/{entityId}?version=...` |
 | Entity governance addresses | `GET /labels/entities/{entityId}/addresses` |
 | Geo policy records | `GET /geo-policies` |
 
 The adapter also reads `/evk/vaults` and `/earn/vaults` with explicit `visibility=visible,warning,hidden,pending_review`. Trusted label membership requires a visible or warning verdict and a managing entity. Hidden and pending metadata remain available without granting trusted membership. Per-side V3 explorability flags control hosted listing. On-chain governor checks still determine the stronger verification badge.
 
-Entity profiles supply hosted logo URLs. A product's `entityId` is its managing entity; `coBrandEntityIds` supplies additional display branding only. Co-brands do not participate in manager ownership, governor verification, or manager-profile market assignment. Neutral escrow inventory rows are not assigned to a product/entity and are not added to the labels-derived verified set.
+Entity profiles supply hosted logo URLs. A product's `entityId` is its managing entity; `coBrandEntityIds` supplies additional display branding only. Co-brands do not participate in curator ownership, governor verification, or curator-profile market assignment. Neutral escrow inventory rows are not assigned to a product/entity and are not added to the labels-derived verified set.
+
+Curator pages load one V3 entity profile by ID through `/api/internal/curator-profiles/{entityId}`, independently of the selected chain. The network cards select chain-scoped markets and Earn vaults, which still come from `useEulerLabels`. The profile request has a five-minute server cache with bounded stale fallback. If it fails while a chain labels bundle is available, the page shows entity details from that bundle; if no profile data is available, it offers a retry. With `LABELS_SOURCE=static`, the page uses the selected chain's authored entity profile.
 
 Lite evaluates live V3 geo policies using `countriesResolved` and cumulative global/chain/product/vault/asset rules. The server embeds a validated geo collection with each snapshot and retains a disk checkpoint for stale-on-error recovery. Mount `GEO_POLICY_CACHE_DIR` on persistent storage for redeploy durability. Hosted snapshots have no GitHub-label dependency. `LABELS_SOURCE=static` supplies the same snapshot from operator-owned files; see [Static labels](./static-labels.md). Production bake/canary remain rollout work. See [Geo-Blocking](./geo-blocking.md).
 
@@ -278,7 +281,7 @@ External consumers that only need a yes/no answer for a vault address can call t
 Consumers that need display metadata (resolved name, description, governing entity, asset) on top of the verification verdict can call [`GET /api/public/metadata`](./public-api.md#get-apipublicmetadata), which applies the same labels / override / verification rules the client UI uses and returns a uniform shape across EVK, Securitize, and Earn vaults.
 
 
-Hosted full verification resolves the managing entity from the V3 vault row, including standalone Earn vaults. Missing manager data yields an empty authority set, so a visible/warning inventory entry alone cannot grant an owner-verification badge. Both client and public APIs apply this rule. Static Earn labels preserve their authored membership semantics. Hosted on-chain governor/owner checks remain in place until the verification bake justifies delegation to V3.
+Hosted full verification resolves the managing entity from the V3 vault row, including standalone Earn vaults. Missing curator data yields an empty authority set, so a visible/warning inventory entry alone cannot grant an owner-verification badge. Both client and public APIs apply this rule. Static Earn labels preserve their authored membership semantics. Hosted on-chain governor/owner checks remain in place until the verification bake justifies delegation to V3.
 
 ## Archived chains: V3 metadata with on-chain verification
 
@@ -286,7 +289,7 @@ Enabled `DEPRECATED_CHAINS` select the SDK's `PublicLabelsV3MetadataAdapter`. Ea
 
 The SDK shares metadata fetching and display mapping between its adapters. Metadata-only bundles carry `source: 'v3-metadata'` and contain no visibility verdicts. They use the same label set/publication selection, live entity addresses and live geo policies as the assessed path. Candidate addresses are separate from verified membership.
 
-Lite selects the adapter once in its shared server labels loader. The browser, vault snapshots and public APIs use that selection. The metadata-only path applies the existing governor/router/owner checks against the vault's explicit managing entity; an absent manager cannot inherit static Earn trust. Registry verification uses current candidates and entity addresses rather than a cached positive flag. Independent escrow-perspective verification remains applicable.
+Lite selects the adapter once in its shared server labels loader. The browser, vault snapshots and public APIs use that selection. The metadata-only path applies the existing governor/router/owner checks against the vault's explicit managing entity; an absent curator cannot inherit static Earn trust. Registry verification uses current candidates and entity addresses rather than a cached positive flag. Independent escrow-perspective verification remains applicable.
 
 Metadata-only discovery follows published product `notExplorable` and per-vault `notExplorableLend` / `notExplorableBorrow` flags and normal market filters. Explore product cards are label/market driven; governance checks separately control verified vault lists and verification badges. Deprecation alone does not hide a vault; Earn uses its lend-side flag and product hiding. Published deprecation and display information remains available to direct pages and existing positions. V3 assessment-based platform listing controls are not synthesized for these chains. Errors on normally assessed chains never switch them to metadata-only handling. Static fork mode remains independent.
 

@@ -168,8 +168,8 @@ describe('metadata-only verification uses current governance and membership', ()
     chainId.value = 146
     useVaultRegistry().clear()
     __setEulerLabelsDataForTest({ source: 'v3-metadata', candidateVaultAddresses: [VAULT],
-      managingEntityByVault: { [VAULT.toLowerCase()]: 'manager' },
-      entities: { manager: { name: 'Manager', addresses: { [ASSET_ONE]: 'Governor' } } } as never })
+      managingEntityByVault: { [VAULT.toLowerCase()]: 'curator' },
+      entities: { curator: { name: 'Curator', addresses: { [ASSET_ONE]: 'Governor' } } } as never })
   })
   it('rejects mismatches and revokes cached positives when addresses or membership change', () => {
     const registry = useVaultRegistry()
@@ -197,7 +197,7 @@ describe('metadata-only verification uses current governance and membership', ()
     registry.setEscrowAddresses([VAULT])
     expect(registry.isVerifiedVault(VAULT)).toBe(true)
   })
-  it('checks Earn owners and rejects an absent manager', () => {
+  it('checks Earn owners and rejects an absent curator', () => {
     const registry = useVaultRegistry()
     const labels = getEulerLabelsSourceData()
     __setEulerLabelsDataForTest({ ...labels, candidateVaultAddresses: [], candidateEarnVaultAddresses: [VAULT] })

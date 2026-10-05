@@ -2,7 +2,7 @@
 defineEmits<{ close: [] }>()
 
 const bullets = [
-  'Access is granted by the vault manager — there is no self-service verification',
+  'Access is granted by the vault curator — there is no self-service verification',
   'If your address is not whitelisted, the gated operations will revert',
   'Which operations are gated depends on the vault\'s hook configuration',
 ]

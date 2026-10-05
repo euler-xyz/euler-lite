@@ -121,7 +121,8 @@ const { borrowList, isEVaultUpdating, isEscrowUpdating } = useVaults()
 const { chainId } = useEulerAddresses()
 
 const isPricesReady = ref(false)
-const { entities, isReady: labelsReady } = useEulerLabels()
+const { entities, isReady: labelsReady, loadError: labelsError } = useEulerLabels()
+const labelsUnavailable = computed(() => !labelsReady.value && Boolean(labelsError.value))
 const { enableEntityBranding } = useDeployConfig()
 const showAllLabelEntries = useShowAllLabelEntries()
 
@@ -609,7 +610,10 @@ const clearBorrowFilters = () => {
       />
     </div>
 
-    <div class="mb-16">
+    <div
+      v-if="!labelsUnavailable"
+      class="mb-16"
+    >
       <div class="flex justify-start items-center w-full gap-8 flex-wrap">
         <UiInput
           v-model="searchQuery"
@@ -692,8 +696,14 @@ const clearBorrowFilters = () => {
     </div>
 
     <div class="flex flex-col flex-1">
+      <LabelsUnavailableState
+        v-if="labelsUnavailable"
+        class="flex-1"
+        title="Borrow markets unavailable"
+        description="Published vault verification could not be loaded. Borrow listings are unavailable until it returns."
+      />
       <div
-        v-if="isLoading"
+        v-else-if="isLoading"
         class="flex flex-col flex-1 items-center justify-center gap-12"
       >
         <UiLoader />

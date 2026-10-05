@@ -472,7 +472,7 @@ describe('getMarketEntities', () => {
     })
   })
 
-  it('shows co-brand logos while keeping the product owner as the manager label', () => {
+  it('shows co-brand logos while keeping the product owner as the curator label', () => {
     const market = {
       ...makeMarket([makeVault('0xBorrow', [])]),
       source: 'product',
