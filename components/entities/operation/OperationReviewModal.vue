@@ -415,6 +415,8 @@ const isSwapQuoteStale = computed(() => {
     && nowMs.value - quoteFetchedAt > staleQuoteThresholdMs
 })
 
+const approvalReadIssues = computed(() => useReviewedExecution().approvalReadIssues?.value ?? [])
+const allowanceReadDisclaimerText = 'The current token allowances could not be read from the network, so an approval is included to be safe. If you approved this token before, this approval may be redundant.'
 const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract used to authorize future transfers with signatures. Each future transfer still requires your explicit signature and can be limited by amount and duration.'
 const hasDisplayOnlyConfirmation = computed(() => allowConfirmWithoutPlan && (displaySteps.value.length > 0 || signatureSteps.value.length > 0))
 const isConfirmDisabled = computed(() => readOnly || isSpyMode.value || internalSubmitting.value || hasPendingDetachedExecution.value || isPreparingPlan.value || isResolvingStateOverrideHints.value || !!prepareError.value || (!reviewPlan.value?.length && !hasDisplayOnlyConfirmation.value))
@@ -610,6 +612,13 @@ const confirmLabel = computed(() => {
         title="Infinite approval"
         variant="info"
         :description="permit2DisclaimerText"
+        size="compact"
+      />
+      <UiAlert
+        v-if="approvalReadIssues.length"
+        title="Allowances could not be read"
+        variant="warning"
+        :description="allowanceReadDisclaimerText"
         size="compact"
       />
 

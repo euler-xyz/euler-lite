@@ -39,6 +39,7 @@ import type { AdditionalMaterializedCall } from '~/features/reviewed-execution/m
 import { projectEulerSimulation } from '~/features/reviewed-execution/simulation/euler-projection'
 import { refreshPortfolioAfterReviewedSubmission } from '~/features/reviewed-execution/review/post-tx-refresh'
 import { logWarn } from '~/utils/errorHandling'
+import { approvalAssetsWithSpenders, fetchWalletForApprovals } from '~/features/reviewed-execution/planning/approval-reads'
 
 const COMPILER_VERSION = 'lite-reviewed-execution-v2'
 const CLASSIFICATION_VERSION = 'safe-classification-v2'
@@ -232,6 +233,9 @@ const hydrateRequiredSubAccounts = async (
   }
 }
 
+/** Messages of allowance reads that still failed after a retry; the review shows them beside the approval it then includes. */
+const approvalReadIssues = shallowRef<string[]>([])
+
 export const useReviewedExecution = () => {
   const { rewards, buildClaimRewardPlan } = useSdkRewards()
   const { locks, buildUnlockREULPlan } = useREULLocks()
@@ -376,10 +380,17 @@ export const useReviewedExecution = () => {
         return sdk.executionService.processPlanPlugins(plan, account, binding.chainId, rehydratePluginPrefetch(prefetched))
       },
       async resolveApprovals(plan, binding) {
-        return sdk.executionService.resolveRequiredApprovals({
+        const assets = approvalAssetsWithSpenders(plan)
+        if (!assets.length) return plan
+        const { wallet, allowanceIssues } = await fetchWalletForApprovals(
+          () => sdk.walletService.fetchWallet(binding.chainId, binding.account, assets),
+        )
+        approvalReadIssues.value = allowanceIssues.map(issue => issue.message)
+        if (allowanceIssues.length) logWarn('useReviewedExecution/resolveApprovals', allowanceIssues.map(issue => issue.message).join('; '))
+        return sdk.executionService.resolveRequiredApprovalsWithWallet({
           plan,
+          wallet,
           chainId: binding.chainId,
-          account: binding.account,
           usePermit2: binding.approvalMode === 'permit2',
         })
       },
@@ -764,6 +775,7 @@ export const useReviewedExecution = () => {
   }
 
   return {
+    approvalReadIssues,
     prepare,
     prepareReadOnly,
     compilePreview,

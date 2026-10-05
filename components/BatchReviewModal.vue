@@ -58,6 +58,7 @@ const {
   dismissExecutionError,
 } = useTxBatch()
 const executionService = useReviewedExecution()
+const approvalReadIssueCount = computed(() => executionService.approvalReadIssues?.value.length ?? 0)
 const toast = useToast()
 const isExecuting = ref(false)
 const preparedExecution = shallowRef<PreparedExecutionReview | null>(null)
@@ -604,6 +605,13 @@ const onCloseRequested = () => {
         size="compact"
         title="Infinite approval"
         description="You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract that lets you approve once, then sign per-action permissions without new onchain approvals."
+      />
+      <UiAlert
+        v-if="approvalReadIssueCount"
+        variant="warning"
+        size="compact"
+        title="Allowances could not be read"
+        description="The current token allowances could not be read from the network, so an approval is included to be safe. If you approved this token before, this approval may be redundant."
       />
 
       <UiAlert
