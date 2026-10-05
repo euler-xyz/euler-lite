@@ -129,6 +129,7 @@ export const getVaultChecksStatusLine = (
   if (assessment.checksStatus === 'warning' || assessment.checksStatus === 'negative'
     || assessment.configStatus === 'suspended' || assessment.configStatus === 'revoked') return 'Flagged'
   if (assessment.configStatus === 'pending' || assessment.configStatus === 'unverified') return 'Being re-checked'
+  if (assessment.checksStatus !== 'positive') return 'Being re-checked'
   return assessment.configLastCheckedAt
     ? formatRelativeCheckedAt(assessment.configLastCheckedAt, now)
     : 'Verified'

@@ -125,6 +125,7 @@ describe('vault checks presentation', () => {
     const now = Date.parse('2026-09-29T12:12:00.000Z')
     expect(getVaultChecksStatusLine(assessment([]), 'available', now)).toBe('Verified · checked 12 min ago')
     expect(getVaultChecksStatusLine(assessment([finding('oracle.liability-quote')]), 'available', now)).toBe('Flagged · 1 to review')
+    expect(getVaultChecksStatusLine(assessment([], { checksStatus: null }), 'available', now)).toBe('Being re-checked')
     expect(getVaultChecksStatusLine(undefined, 'available', now)).toBe('Not assessed yet')
     expect(getVaultChecksStatusLine(undefined, 'unavailable', now)).toBe('Checks unavailable')
     expect(getVaultChecksStatusLine(undefined, 'loading', now)).toBe('')
