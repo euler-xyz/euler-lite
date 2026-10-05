@@ -7,11 +7,11 @@ export const useVaultAssessmentEvidence = (
 ) => {
   const { chainId } = useEulerAddresses()
   const {
-    source, loadError, vaultAssessments, loadVaultAssessment,
+    source, vaultAssessments, loadVaultAssessment,
     getVaultAssessmentEntry, isVaultAssessmentAvailableForChain,
   } = useEulerLabels()
   const canLoad = computed(() => !!chainId.value && source.value === 'v3'
-    && !loadError.value && isVaultAssessmentAvailableForChain(chainId.value))
+    && isVaultAssessmentAvailableForChain(chainId.value))
   const entry = computed(() => {
     void vaultAssessments.value
     return canLoad.value && chainId.value
@@ -22,7 +22,7 @@ export const useVaultAssessmentEvidence = (
   const fallbackReady = computed(() => {
     if (source.value === 'v3-metadata' || source.value === 'static') return true
     if (source.value !== 'v3') return false
-    if (loadError.value || !chainId.value || !isVaultAssessmentAvailableForChain(chainId.value)) return true
+    if (!chainId.value || !isVaultAssessmentAvailableForChain(chainId.value)) return true
     return entry.value.status === 'available' || entry.value.status === 'unavailable'
   })
 

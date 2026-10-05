@@ -9,14 +9,13 @@ export const useVaultAssessmentWarning = (
   const { chainId } = useEulerAddresses()
   const {
     isReady,
-    loadError,
     source,
     vaultAssessments,
     getVaultAssessmentEntry,
     loadVaultAssessment,
   } = useEulerLabels()
   const { isV3EnabledForChain } = useV3ChainGate()
-  const enabled = computed(() => !!chainId.value && isReady.value && !loadError.value
+  const enabled = computed(() => !!chainId.value && isReady.value
     && source.value === 'v3' && isV3EnabledForChain(chainId.value))
   const entry = computed(() => {
     void vaultAssessments.value

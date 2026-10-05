@@ -1,52 +1,75 @@
 <script setup lang="ts">
 import type { VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
 import {
-  getAcceptedVaultCheckFindings,
+  getVaultAssessmentCheckDetails,
+  getVaultAssessmentCheckSummary,
   getVaultChecksStatusLine,
 } from '~/utils/vault-assessment/presentation'
 import { VaultAssessmentChecksModal } from '#components'
 
 const props = withDefaults(defineProps<{
-  address: string
+  address?: string
+  addresses?: string[]
   chainId: number
   family?: VaultAssessmentFamily
   label?: string
 }>(), { family: 'evk', label: 'Checks' })
 
 const {
-  isReady, source, loadError, visibility, vaultAssessments,
+  isReady, source, visibility, vaultAssessments,
   getVaultAssessmentEntry, loadVaultAssessment, isVaultAssessmentAvailableForChain,
 } = useEulerLabels()
-const canShow = computed(() => isReady.value && source.value === 'v3'
+const targets = computed(() => props.addresses ?? (props.address ? [props.address] : []))
+const canShow = computed(() => targets.value.length > 0 && isReady.value && source.value === 'v3'
   && isVaultAssessmentAvailableForChain(props.chainId))
-const entry = computed(() => {
+const entries = computed(() => {
   void vaultAssessments.value
-  return getVaultAssessmentEntry(props.chainId, props.address, props.family)
+  return targets.value.map(address => ({ address, entry: getVaultAssessmentEntry(props.chainId, address, props.family) }))
 })
-const assessment = computed(() => loadError.value ? undefined : entry.value.assessment)
-const accepted = computed(() => assessment.value ? getAcceptedVaultCheckFindings(assessment.value) : [])
-const statusLine = computed(() => getVaultChecksStatusLine(
-  assessment.value,
-  loadError.value ? 'unavailable' : entry.value.status,
-))
-const status = computed(() => {
-  if (statusLine.value === 'Checks unavailable') return { text: 'Unavailable', color: 'text-content-tertiary', dot: 'bg-content-muted' }
-  if (!statusLine.value) return { text: 'Checking…', color: 'text-content-tertiary', dot: 'bg-content-muted' }
-  if (statusLine.value.startsWith('Flagged')) return { text: 'Review', color: 'text-warning-500', dot: 'bg-warning-500' }
-  if (accepted.value.length && statusLine.value.startsWith('Checks passed')) {
-    const count = accepted.value.length
-    return { text: `${count} accepted exception${count === 1 ? '' : 's'}`, color: 'text-content-secondary', dot: 'bg-content-muted' }
+const single = computed(() => entries.value.length === 1 ? entries.value[0] : undefined)
+const counts = computed(() => entries.value.reduce((sum, { entry }) => {
+  if (entry.status !== 'available' || !entry.assessment?.assessed) return sum
+  const { counts: own } = getVaultAssessmentCheckDetails(entry.assessment)
+  return {
+    passed: sum.passed + own.passed,
+    failed: sum.failed + own.failed,
+    unknown: sum.unknown + own.unknown,
+    accepted: sum.accepted + own.accepted,
   }
-  if (statusLine.value.startsWith('Checks passed')) return { text: 'Passed', color: 'text-success-500', dot: 'bg-success-500' }
-  return { text: statusLine.value, color: 'text-content-tertiary', dot: 'bg-content-muted' }
+}, { passed: 0, failed: 0, unknown: 0, accepted: 0 }))
+const muted = (text: string) => ({ text, color: 'text-content-tertiary', dot: 'bg-content-muted' })
+const status = computed(() => {
+  if (entries.value.some(({ entry }) => entry.status === 'unavailable')) return muted('Unavailable')
+  if (entries.value.some(({ entry }) => entry.status !== 'available')) return muted('Checking…')
+  if (entries.value.some(({ entry }) => !entry.assessment?.assessed)) return muted('Not assessed yet')
+  const { failed, unknown, accepted, passed } = counts.value
+  if (failed) return { text: `${failed} failed`, color: 'text-warning-500', dot: 'bg-warning-500' }
+  if (unknown) return muted(`${unknown} unknown`)
+  if (accepted) return { text: `${accepted} accepted`, color: 'text-content-secondary', dot: 'bg-content-muted' }
+  if (passed) return { text: `${passed} passed`, color: 'text-success-500', dot: 'bg-success-500' }
+  return muted('No findings')
 })
-const verdict = computed(() => visibility.value?.[props.address.toLowerCase()])
-const tooltipText = computed(() => verdict.value?.reason || statusLine.value || 'Loading vault checks…')
+const shortAddress = (address: string) => `${address.slice(0, 6)}…${address.slice(-4)}`
+const tooltipText = computed(() => {
+  if (single.value) {
+    const verdict = visibility.value?.[single.value.address.toLowerCase()]
+    return verdict?.reason || getVaultChecksStatusLine(single.value.entry.assessment, single.value.entry.status) || 'Loading vault checks…'
+  }
+  return entries.value.map(({ address, entry }) => {
+    const detail = entry.status === 'available' && entry.assessment?.assessed
+      ? getVaultAssessmentCheckSummary(entry.assessment)
+      : getVaultChecksStatusLine(entry.assessment, entry.status) || 'Loading…'
+    return `${shortAddress(address)}: ${detail}`
+  }).join('\n')
+})
 
 watch(
-  () => [canShow.value, props.chainId, props.address, props.family, loadError.value] as const,
-  ([enabled, chainId, address, family, error]) => {
-    if (enabled && !error && entry.value.status === 'idle') void loadVaultAssessment(chainId, address, family)
+  () => [canShow.value, props.chainId, props.family, targets.value.join(',')] as const,
+  ([enabled, chainId, family]) => {
+    if (!enabled) return
+    for (const { address, entry } of entries.value) {
+      if (entry.status === 'idle') void loadVaultAssessment(chainId, address, family)
+    }
   },
   { immediate: true },
 )
@@ -57,13 +80,13 @@ watch(
     v-if="canShow"
     class="flex items-center gap-8 text-p3"
     data-id="vault-assessment-checks-field"
-    :data-vault-address="address.toLowerCase()"
+    :data-vault-address="targets.map(address => address.toLowerCase()).join(',')"
   >
     <span class="text-content-tertiary">{{ label }}</span>
     <UiModalPreviewTrigger
-      v-if="assessment?.assessed"
+      v-if="single?.entry.assessment?.assessed"
       :component="VaultAssessmentChecksModal"
-      :modal-data="{ props: { assessment } }"
+      :modal-data="{ props: { assessment: single.entry.assessment } }"
       :aria-label="`${label}: ${status.text}`"
       placement="top-start"
       :clickable="false"

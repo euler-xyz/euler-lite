@@ -17,7 +17,7 @@ const props = defineProps<{
 }>()
 const { chainId } = useEulerAddresses()
 const nowMs = useActivityNowMs()
-const { loadError, source, vaultAssessments, loadVaultAssessment, getVaultAssessmentEntry, isVaultAssessmentAvailableForChain } = useEulerLabels()
+const { source, vaultAssessments, loadVaultAssessment, getVaultAssessmentEntry, isVaultAssessmentAvailableForChain } = useEulerLabels()
 const family = computed(() => props.family ?? 'evk')
 const canShow = computed(() => !!chainId.value
   && source.value === 'v3'
@@ -27,14 +27,14 @@ const entry = computed(() => {
   void vaultAssessments.value
   return chainId.value ? getVaultAssessmentEntry(chainId.value, props.address, family.value) : { status: 'idle' as const }
 })
-const assessment = computed(() => loadError.value ? undefined : entry.value.assessment)
+const assessment = computed(() => entry.value.assessment)
 const findingView = computed(() => assessment.value ? getVaultCheckFindings(assessment.value) : null)
 const acceptedFindings = computed(() => assessment.value ? getAcceptedVaultCheckFindings(assessment.value) : [])
 const upcoming = computed(() => assessment.value ? getUpcomingVaultChanges(assessment.value, props.asset) : [])
 const hasOracleAdapterFinding = computed(() => !!assessment.value?.configContext?.findings.some(
   finding => finding.key === 'oracle.adapters-recognized' && finding.outcome === 'fail' && !finding.exempted,
 ))
-const statusLine = computed(() => getVaultChecksStatusLine(assessment.value, loadError.value ? 'unavailable' : entry.value.status, nowMs.value))
+const statusLine = computed(() => getVaultChecksStatusLine(assessment.value, entry.value.status, nowMs.value))
 const checkSummary = computed(() => assessment.value ? getVaultAssessmentCheckSummary(assessment.value) : '')
 const checkTone = computed(() => statusLine.value.startsWith('Flagged')
   ? 'bg-warning-500'
@@ -45,9 +45,9 @@ const copyAddress = (address: string) => {
 }
 
 watch(
-  () => [canShow.value, chainId.value, props.address, family.value, loadError.value] as const,
-  ([enabled, id, address, selectedFamily, error]) => {
-    if (enabled && id && !error) void loadVaultAssessment(id, address, selectedFamily)
+  () => [canShow.value, chainId.value, props.address, family.value] as const,
+  ([enabled, id, address, selectedFamily]) => {
+    if (enabled && id) void loadVaultAssessment(id, address, selectedFamily)
   },
   { immediate: true },
 )
@@ -64,7 +64,7 @@ watch(
         <div class="flex flex-col gap-4">
           <span class="text-content-tertiary">Status</span>
           <span
-            :class="loadError || entry.status === 'unavailable' || statusLine === 'Not assessed yet' ? 'text-content-tertiary' : 'text-content-primary'"
+            :class="entry.status === 'unavailable' || statusLine === 'Not assessed yet' ? 'text-content-tertiary' : 'text-content-primary'"
             data-id="vault-checks-status"
           >{{ statusLine || 'Checking…' }}</span>
         </div>
