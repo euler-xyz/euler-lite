@@ -34,10 +34,15 @@ describe('deployment vault tag selection', () => {
     expect(data.products['kpk-securitize'].vaults).toContain(getAddress(sibling))
   })
 
-  it.each(['evk', 'earn', 'securitize', 'escrow'] as const)('retains tag selection for standalone %s rows', (vaultType) => {
+  it.each([
+    { vaultType: 'evk', isEscrow: false },
+    { vaultType: 'earn', isEscrow: false },
+    { vaultType: 'securitize', isEscrow: false },
+    { vaultType: 'evk', isEscrow: true },
+  ] as const)('retains tag selection for standalone $vaultType rows (escrow $isEscrow)', ({ vaultType, isEscrow }) => {
     const bundle = hostedBundle('base')
     if (bundle.source === 'static') throw new Error('Expected hosted bundle')
-    bundle.publicLabels.vaults = [{ ...bundle.publicLabels.vaults[0], vaultType, productId: null, tags: ['base'] }]
+    bundle.publicLabels.vaults = [{ ...bundle.publicLabels.vaults[0], vaultType, isEscrow, productId: null, tags: ['base'] }]
     expect(matchesDeploymentVaultTag(normalizeLabelsBundle(1, bundle), KPK_VAULT)).toBe(true)
   })
 
