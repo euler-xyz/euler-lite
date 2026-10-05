@@ -19,14 +19,17 @@ describe('durable geo source', () => {
     await rm(directory, { recursive: true, force: true })
   })
 
-  it('retains policies across restarts and unbounded outages; successful empty clears them', async () => {
+  it('retains policies across restarts for a day, refuses older ones; successful empty clears them', async () => {
     const first = await createGeoPolicySource('v3', directory)(requestFor([policy]))
     vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(Date.now() + 365 * 86400_000)
+    vi.setSystemTime(Date.now() + 20 * 3600_000)
     const restarted = createGeoPolicySource('v3', directory)
     const offline = vi.fn().mockRejectedValue(new Error('offline')) as PublicLabelsRequest
     expect(await restarted(offline)).toEqual(first)
-    expect(await restarted(requestFor([]))).toEqual({ fetchedAt: Date.now(), policies: [] })
+    vi.setSystemTime(Date.now() + 365 * 86400_000)
+    const aged = createGeoPolicySource('v3', directory)
+    await expect(aged(offline)).rejects.toThrow('offline')
+    expect(await aged(requestFor([]))).toEqual({ fetchedAt: Date.now(), policies: [] })
   })
 
   it('isolates upstream identities and rejects unavailable cold starts', async () => {
