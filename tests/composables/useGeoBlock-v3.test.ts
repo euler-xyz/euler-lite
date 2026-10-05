@@ -38,6 +38,7 @@ describe('V3 geo enforcement', () => {
   it('distinguishes unavailable from authored empty, preserving exits and sanctions', () => {
     set(undefined)
     expect(useGeoBlock().isPolicyAvailable.value).toBe(false)
+    expect(isAssetBlockedByCountry(asset)).toBe(true)
     expect(isVaultRestrictedByCountry(vault, { asset, counterpart: asset })).toBe(true)
     expect(isAssetRestrictedByCountry(asset, { counterpart: asset })).toBe(true)
     expect(isVaultBlockedByCountry(vault, { asset })).toBe(false)

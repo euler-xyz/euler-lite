@@ -108,6 +108,13 @@ export function refreshPublicLabelsBundle(
   }).then(withVaultTag)
 }
 
+export function getCachedPublicLabelsBundle(chainId: number, version?: string): PublicLabelsBundle | undefined {
+  if (readLabelsSource() === 'static') return undefined
+  const selection = readV3LabelsSelection()
+  const hit = cache.get(cacheKey(chainId, selection.labelSet, version ?? selection.version))
+  return hit ? withVaultTag(hit) : undefined
+}
+
 export function getPublicLabelsBundle(
   chainId: number,
   version?: string,

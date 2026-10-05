@@ -130,6 +130,8 @@ export const isAssetBlockedByCountry = (asset: AssetLike): boolean => {
   if (!fields) return false
   if (country.value === undefined) return true // unresolved policy must fail closed
   if (country.value === null) return true // loaded, country unknown
+  const hostedContext = getEulerGeoContext()
+  if (hostedContext && hostedContext.policies === undefined) return true
 
   const cacheKey = makeAssetCacheKey(fields)
   const cached = assetBlockCache.get(cacheKey)

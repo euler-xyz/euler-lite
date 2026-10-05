@@ -71,12 +71,10 @@ describe('static authoring source', () => {
     expect(raw.files.assets).toEqual(files.assets)
     expect(normalizeLabelsBundle(1, raw).assetBlocks).toEqual({ ['0x' + '4'.repeat(40)]: ['US'] })
   })
-  it.each([403, 404])('uses the correct empty shapes when all files return HTTP %s', async (status) => {
+  it.each([403, 404])('fails cold when products and entities both answer HTTP %s instead of publishing an empty set', async (status) => {
     fetchMock.mockImplementation(async () => new Response(null, { status }))
     const { getStaticLabelsBundle } = await import('~/server/utils/static-labels-source')
-    const raw = await getStaticLabelsBundle(1)
-    expect(raw.files).toEqual({ products: {}, entities: {}, points: [], earnVaults: [], assets: [] })
-    expect(normalizeLabelsBundle(1, raw).verifiedVaultAddresses).toEqual([])
+    await expect(getStaticLabelsBundle(1)).rejects.toThrow('products and entities are both missing')
   })
   it.each([401, 429, 500, 503])('fails cold on HTTP %s instead of treating it as an omitted file', async (status) => {
     fetchMock.mockImplementation(async () => new Response(null, { status }))
