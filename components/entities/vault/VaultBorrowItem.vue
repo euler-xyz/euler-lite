@@ -458,15 +458,8 @@ const linkPath = computed(() => ({
       class="col-span-full flex flex-wrap gap-x-24 gap-y-6 border-b border-line-subtle px-16 py-8"
     >
       <VaultAssessmentChecksField
-        :address="pair.borrow.address"
+        :addresses="isSecuritizeBorrowPair(pair) ? [pair.borrow.address] : [pair.borrow.address, pair.collateral.address]"
         :chain-id="pair.borrow.chainId"
-        label="Borrow checks"
-      />
-      <VaultAssessmentChecksField
-        v-if="!isSecuritizeBorrowPair(pair)"
-        :address="pair.collateral.address"
-        :chain-id="pair.collateral.chainId"
-        label="Collateral checks"
       />
     </div>
 

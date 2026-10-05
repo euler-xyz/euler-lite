@@ -24,7 +24,7 @@ defineEmits<{
 }>()
 
 const { products, isReady, source, visibility } = useEulerLabels()
-const { getWarningText, loadWarningDetails, isAcceptedOnlyWarning } = useDiscoveryVaultWarningDetails()
+const { getWarningText, loadWarningDetails } = useDiscoveryVaultWarningDetails()
 const disclosureEntities = computed(() => props.market.curator
   ? [props.market.curator]
   : getUniqueEntitiesByVaults(props.market.vaults))
@@ -48,9 +48,7 @@ watchEffect(() => {
     if (decidedBy === 'advisories') loadWarningDetails(vault)
   }
 })
-const warningVaults = computed(() => warningCandidates.value.filter(({ vault, decidedBy }) =>
-  decidedBy !== 'advisories' || !isAcceptedOnlyWarning(vault),
-))
+const warningVaults = warningCandidates
 
 const marketWarnings = computed(() => warningVaults.value.map(({ vault, reason }) => ({
   title: vault.asset.symbol,

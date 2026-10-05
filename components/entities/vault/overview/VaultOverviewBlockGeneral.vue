@@ -214,7 +214,7 @@ watchEffect(() => {
           class="w-fit"
         />
         <div
-          v-else-if="entities.length"
+          v-else-if="isGovernorVerified && entities.length"
           class="flex flex-col gap-8"
         >
           <div
@@ -245,8 +245,11 @@ watchEffect(() => {
             />
           </div>
         </div>
-        <div v-else>
-          -
+        <div
+          v-else
+          class="text-p2 text-content-tertiary"
+        >
+          {{ isKnownUnlisted ? 'Not listed' : '-' }}
         </div>
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue label="Can be borrowed">
