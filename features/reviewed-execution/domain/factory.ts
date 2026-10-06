@@ -1,4 +1,4 @@
-import { getAddress, type Address, type Hash } from 'viem'
+import { getAddress, isAddress, type Address, type Hash } from 'viem'
 import type { SwapQuote } from '@eulerxyz/euler-v2-sdk'
 import { canonicalDigest, deepFreezeSerializable, toCanonicalValue, type CanonicalValue } from './canonical'
 import type { IntentConstraint, OperationIntent, OperationIntentKind, PlannerName } from './intents'
@@ -35,6 +35,9 @@ const normalizeArgValue = (key: string, value: unknown, path: string): Canonical
     }
     return result
   }
+  // A spender taken from a URL or an API answer may be lowercase; the resolver
+  // and the wallet key allowances by checksummed address.
+  if (typeof value === 'string' && isAddress(value)) return getAddress(value)
   return toCanonicalValue(value, path)
 }
 
