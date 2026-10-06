@@ -24,7 +24,7 @@ defineEmits<{
 }>()
 
 const { products, isReady, source, visibility } = useEulerLabels()
-const { getWarningText, loadWarningDetails } = useDiscoveryVaultWarningDetails()
+const { getWarningText, loadWarningDetails, isAcceptedOnlyWarning } = useDiscoveryVaultWarningDetails()
 const disclosureEntities = computed(() => props.market.curator
   ? [props.market.curator]
   : getUniqueEntitiesByVaults(props.market.vaults))
@@ -48,7 +48,9 @@ watchEffect(() => {
     if (decidedBy === 'advisories') loadWarningDetails(vault)
   }
 })
-const warningVaults = warningCandidates
+const warningVaults = computed(() => warningCandidates.value.filter(({ vault, decidedBy }) =>
+  decidedBy !== 'advisories' || !isAcceptedOnlyWarning(vault),
+))
 
 const marketWarnings = computed(() => warningVaults.value.map(({ vault, reason }) => ({
   title: vault.asset.symbol,
@@ -226,7 +228,7 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
               :data-warning-count="marketWarnings.length"
               @click.stop
             >
-              {{ marketWarnings.length }} {{ marketWarnings.length === 1 ? 'vault flagged' : 'vaults flagged' }}
+              {{ marketWarnings.length }} {{ marketWarnings.length === 1 ? 'vault with a warning' : 'vaults with warnings' }}
             </span>
           </UiHoverPreviewTooltip>
           <UiHoverPreviewTooltip

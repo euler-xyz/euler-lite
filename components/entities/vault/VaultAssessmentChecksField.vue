@@ -1,15 +1,10 @@
 <script setup lang="ts">
 import type { VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
-import {
-  getVaultAssessmentCheckDetails,
-  getVaultAssessmentCheckSummary,
-  getVaultChecksStatusLine,
-} from '~/utils/vault-assessment/presentation'
+import { getVaultChecksCell, getVaultChecksStatusLine } from '~/utils/vault-assessment/presentation'
 import { VaultAssessmentChecksModal } from '#components'
 
 const props = withDefaults(defineProps<{
-  address?: string
-  addresses?: string[]
+  address: string
   chainId: number
   family?: VaultAssessmentFamily
   label?: string
@@ -19,57 +14,30 @@ const {
   isReady, source, visibility, vaultAssessments,
   getVaultAssessmentEntry, loadVaultAssessment, isVaultAssessmentAvailableForChain,
 } = useEulerLabels()
-const targets = computed(() => props.addresses ?? (props.address ? [props.address] : []))
-const canShow = computed(() => targets.value.length > 0 && isReady.value && source.value === 'v3'
-  && isVaultAssessmentAvailableForChain(props.chainId))
-const entries = computed(() => {
+const canShow = computed(() => isReady.value && source.value === 'v3' && isVaultAssessmentAvailableForChain(props.chainId))
+const entry = computed(() => {
   void vaultAssessments.value
-  return targets.value.map(address => ({ address, entry: getVaultAssessmentEntry(props.chainId, address, props.family) }))
+  return getVaultAssessmentEntry(props.chainId, props.address, props.family)
 })
-const single = computed(() => entries.value.length === 1 ? entries.value[0] : undefined)
-const counts = computed(() => entries.value.reduce((sum, { entry }) => {
-  if (entry.status !== 'available' || !entry.assessment?.assessed) return sum
-  const { counts: own } = getVaultAssessmentCheckDetails(entry.assessment)
-  return {
-    passed: sum.passed + own.passed,
-    failed: sum.failed + own.failed,
-    unknown: sum.unknown + own.unknown,
-    accepted: sum.accepted + own.accepted,
-  }
-}, { passed: 0, failed: 0, unknown: 0, accepted: 0 }))
-const muted = (text: string) => ({ text, color: 'text-content-tertiary', dot: 'bg-content-muted' })
+const tones = {
+  positive: { color: 'text-success-500', dot: 'bg-success-500' },
+  warning: { color: 'text-warning-500', dot: 'bg-warning-500' },
+  muted: { color: 'text-content-tertiary', dot: 'bg-content-muted' },
+} as const
 const status = computed(() => {
-  if (entries.value.some(({ entry }) => entry.status === 'unavailable')) return muted('Unavailable')
-  if (entries.value.some(({ entry }) => entry.status !== 'available')) return muted('Checking…')
-  if (entries.value.some(({ entry }) => !entry.assessment?.assessed)) return muted('Not assessed yet')
-  const { failed, unknown, accepted, passed } = counts.value
-  if (failed) return { text: `${failed} failed`, color: 'text-warning-500', dot: 'bg-warning-500' }
-  if (unknown) return muted(`${unknown} unknown`)
-  if (accepted) return { text: `${accepted} accepted`, color: 'text-content-secondary', dot: 'bg-content-muted' }
-  if (passed) return { text: `${passed} passed`, color: 'text-success-500', dot: 'bg-success-500' }
-  return muted('No findings')
+  if (entry.value.status === 'unavailable') return { text: 'Unavailable', ...tones.muted }
+  if (entry.value.status !== 'available' || !entry.value.assessment) return { text: 'Checking…', ...tones.muted }
+  const cell = getVaultChecksCell(entry.value.assessment)
+  return { text: cell.text, ...tones[cell.tone] }
 })
-const shortAddress = (address: string) => `${address.slice(0, 6)}…${address.slice(-4)}`
-const tooltipText = computed(() => {
-  if (single.value) {
-    const verdict = visibility.value?.[single.value.address.toLowerCase()]
-    return verdict?.reason || getVaultChecksStatusLine(single.value.entry.assessment, single.value.entry.status) || 'Loading vault checks…'
-  }
-  return entries.value.map(({ address, entry }) => {
-    const detail = entry.status === 'available' && entry.assessment?.assessed
-      ? getVaultAssessmentCheckSummary(entry.assessment)
-      : getVaultChecksStatusLine(entry.assessment, entry.status) || 'Loading…'
-    return `${shortAddress(address)}: ${detail}`
-  }).join('\n')
-})
+const tooltipText = computed(() => visibility.value?.[props.address.toLowerCase()]?.reason
+  || getVaultChecksStatusLine(entry.value.assessment, entry.value.status)
+  || 'Loading vault checks…')
 
 watch(
-  () => [canShow.value, props.chainId, props.family, targets.value.join(',')] as const,
-  ([enabled, chainId, family]) => {
-    if (!enabled) return
-    for (const { address, entry } of entries.value) {
-      if (entry.status === 'idle') void loadVaultAssessment(chainId, address, family)
-    }
+  () => [canShow.value, props.chainId, props.address, props.family] as const,
+  ([enabled, chainId, address, family]) => {
+    if (enabled && entry.value.status === 'idle') void loadVaultAssessment(chainId, address, family)
   },
   { immediate: true },
 )
@@ -78,22 +46,22 @@ watch(
 <template>
   <div
     v-if="canShow"
-    class="flex items-center gap-8 text-p3"
+    class="flex flex-col"
     data-id="vault-assessment-checks-field"
-    :data-vault-address="targets.map(address => address.toLowerCase()).join(',')"
+    :data-vault-address="address.toLowerCase()"
   >
-    <span class="text-content-tertiary">{{ label }}</span>
+    <div class="text-content-tertiary text-p3 mb-4 whitespace-nowrap">{{ label }}</div>
     <UiModalPreviewTrigger
-      v-if="single?.entry.assessment?.assessed"
+      v-if="entry.assessment?.assessed"
       :component="VaultAssessmentChecksModal"
-      :modal-data="{ props: { assessment: single.entry.assessment } }"
+      :modal-data="{ props: { assessment: entry.assessment } }"
       :aria-label="`${label}: ${status.text}`"
       placement="top-start"
       :clickable="false"
       popover-width="wide"
     >
       <span
-        class="inline-flex items-center gap-5 cursor-help"
+        class="inline-flex items-center gap-6 cursor-help text-p2 whitespace-nowrap"
         :class="status.color"
         @click.stop.prevent
       >
@@ -103,10 +71,6 @@ watch(
           aria-hidden="true"
         />
         {{ status.text }}
-        <SvgIcon
-          name="info-circle"
-          class="!w-14 !h-14"
-        />
       </span>
     </UiModalPreviewTrigger>
     <UiHoverPreviewTooltip
@@ -117,7 +81,7 @@ watch(
       placement="top-start"
     >
       <span
-        class="inline-flex items-center gap-5 cursor-help"
+        class="inline-flex items-center gap-6 cursor-help text-p2 whitespace-nowrap"
         :class="status.color"
         @click.stop.prevent
       >
@@ -127,10 +91,6 @@ watch(
           aria-hidden="true"
         />
         {{ status.text }}
-        <SvgIcon
-          name="info-circle"
-          class="!w-14 !h-14"
-        />
       </span>
     </UiHoverPreviewTooltip>
   </div>

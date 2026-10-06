@@ -110,6 +110,8 @@ const isKeyring = computed(() => isVaultKeyring(vault.address))
 const isCyclicalNote = computed(() => isVaultCyclicalNote(vault.address))
 const utilisationWarning = computed(() => getUtilisationWarning(vault, 'lend'))
 const supplyCapWarning = computed(() => getSupplyCapWarning(vault))
+const { vaultAssessments, getVaultAssessmentEntry, loadVaultAssessment, visibility, source, isReady, isVaultAssessmentAvailableForChain } = useEulerLabels()
+const showChecksColumn = computed(() => assessmentUi === 'field' && source.value === 'v3' && isReady.value && isVaultAssessmentAvailableForChain(vault.chainId))
 const statsGridCols = computed(() => {
   const cols: string[] = []
   if (enableEntityBranding) cols.push('1fr')
@@ -119,11 +121,11 @@ const statsGridCols = computed(() => {
     cols.push('1fr') // Utilization
     cols.push('1fr') // Current exposure
   }
+  if (showChecksColumn.value) cols.push('1fr')
   if (isConnected.value) cols.push('1fr') // In wallet
   return cols.join(' ')
 })
 const isDeprecated = computed(() => getVaultDeprecation(vault.address).deprecated)
-const { vaultAssessments, getVaultAssessmentEntry, loadVaultAssessment, visibility, source, isReady } = useEulerLabels()
 watchEffect(() => {
   if (source.value === 'v3' && isReady.value
     && visibility.value?.[vault.address.toLowerCase()]?.status === 'warning') {
@@ -274,15 +276,6 @@ watchEffect(async () => {
       </div>
     </div>
     <div
-      v-if="assessmentUi === 'field'"
-      class="border-b border-line-subtle px-16 py-8"
-    >
-      <VaultAssessmentChecksField
-        :address="vault.address"
-        :chain-id="vault.chainId"
-      />
-    </div>
-    <div
       class="grid gap-x-16 py-12 px-16 pb-12 mobile:!flex mobile:justify-between mobile:border-b mobile:border-line-subtle"
       :style="{ gridTemplateColumns: statsGridCols }"
     >
@@ -422,6 +415,12 @@ watchEffect(async () => {
           />
         </div>
       </div>
+      <VaultAssessmentChecksField
+        v-if="showChecksColumn"
+        class="flex-1 items-center mobile:!hidden"
+        :address="vault.address"
+        :chain-id="vault.chainId"
+      />
       <div
         v-if="isConnected"
         class="flex flex-col flex-1 items-end text-right mobile:!hidden"
@@ -437,6 +436,10 @@ watchEffect(async () => {
         </BaseLoadableContent>
       </div>
     </div>
+    <VaultAssessmentWarningLines
+      v-if="showChecksColumn"
+      :vaults="[{ address: vault.address, chainId: vault.chainId }]"
+    />
     <div class="hidden mobile:flex mobile:flex-col gap-12 py-12 px-16 pb-16">
       <div
         v-if="enableEntityBranding"

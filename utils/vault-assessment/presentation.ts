@@ -104,6 +104,19 @@ export const getVaultCheckFindings = (assessment: VaultAssessment): { lines: Vau
   return { lines: [...shown.values()], moreCount, reviewCount: shown.size + moreCount }
 }
 
+/** Every failing or undecided check as one line, the curated subset and the counted rules alike, for the warning lines under a row. */
+export const getVaultCheckWarningLines = (assessment: VaultAssessment): VaultCheckLine[] => {
+  const lines = new Map<string, VaultCheckLine>()
+  for (const finding of [...(assessment.configContext?.findings ?? []), ...(assessment.consistencyContext?.findings ?? [])].filter(relevantFinding)) {
+    const key = groupKey(finding.key)
+    if (lines.has(key) && !(lines.get(key)?.outcome === 'unknown' && finding.outcome === 'fail')) continue
+    const text = finding.outcome === 'unknown' ? 'Being re-checked' : finding.cause?.summary || finding.description
+    const parts = getVaultCheckCopyableParts(text, finding)
+    lines.set(key, { key, text, outcome: finding.outcome as 'fail' | 'unknown', ...(parts ? { parts } : {}) })
+  }
+  return [...lines.values()]
+}
+
 export const getAcceptedVaultCheckFindings = (assessment: VaultAssessment): AcceptedVaultCheckLine[] =>
   [
     ...(assessment.configContext?.findings ?? []),
@@ -147,6 +160,18 @@ export const getVaultAssessmentCheckSummary = (assessment: VaultAssessment): str
   return parts.length ? parts.join(' · ') : counts.notApplicable ? `${counts.notApplicable} N/A` : 'No findings'
 }
 
+export type VaultChecksCell = { text: string, tone: 'positive' | 'warning' | 'muted' }
+
+/** The row cell: failures first, then unknowns, else every passing check with the accepted exceptions counted as passed. */
+export const getVaultChecksCell = (assessment: VaultAssessment): VaultChecksCell => {
+  if (!assessment.assessed) return { text: 'Not assessed', tone: 'muted' }
+  const { counts } = getVaultAssessmentCheckDetails(assessment)
+  if (counts.failed) return { text: `${counts.failed} failed`, tone: 'warning' }
+  if (counts.unknown) return { text: `${counts.unknown} unknown`, tone: 'muted' }
+  const passed = counts.passed + counts.accepted
+  return passed ? { text: `${passed} passed`, tone: 'positive' } : { text: 'No findings', tone: 'muted' }
+}
+
 export const hasOnlyAcceptedVaultCheckFindings = (assessment: VaultAssessment): boolean => {
   if (!assessment.assessed || assessment.configStatus !== 'verified' || assessment.configContext?.outcome !== 'pass'
     || (assessment.checksStatus !== 'warning' && assessment.checksStatus !== 'positive')) return false
@@ -183,7 +208,7 @@ export const getVaultChecksStatusLine = (
     ...(assessment.consistencyContext?.findings ?? []),
   ].filter(relevantFinding)
   if (findings.some(finding => finding.outcome === 'fail') && reviewCount > 0) {
-    return `Flagged · ${reviewCount} to review`
+    return `Warning · ${reviewCount} to review`
   }
   if (findings.some(finding => finding.outcome === 'unknown')) return 'Being re-checked'
   if (hasOnlyAcceptedVaultCheckFindings(assessment)) {
@@ -194,7 +219,7 @@ export const getVaultChecksStatusLine = (
     return `${checksPassed} · ${count} accepted exception${count === 1 ? '' : 's'}`
   }
   if (assessment.checksStatus === 'warning' || assessment.checksStatus === 'negative'
-    || assessment.configStatus === 'suspended' || assessment.configStatus === 'revoked') return 'Flagged'
+    || assessment.configStatus === 'suspended' || assessment.configStatus === 'revoked') return 'Warning'
   if (assessment.configStatus === 'pending' || assessment.configStatus === 'unverified') return 'Being re-checked'
   if (assessment.checksStatus !== 'positive') return 'Being re-checked'
   return assessment.configLastCheckedAt

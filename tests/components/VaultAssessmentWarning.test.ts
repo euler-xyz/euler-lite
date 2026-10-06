@@ -36,12 +36,10 @@ describe('vault verdict warning during a labels outage', () => {
     expect(await renderWarning(false)).not.toContain('Vault checks')
   })
 
-  it('words an advisory warning as accepted exceptions when every failed finding is exempted', async () => {
+  it('hides advisory warnings only when every failed finding is exempted', async () => {
     const accepted = { key: 'liquidation.max-discount', description: 'The maximum liquidation discount is between 5% and 20%', outcome: 'fail', required: false, exempted: true }
     const active = { key: 'oracle.liability-quote', description: 'The liability price quote executes on the oracle router', outcome: 'fail', required: false }
-    const acceptedOnly = await renderWarning(true, { loadError: '', decidedBy: 'advisories', findings: [accepted] })
-    expect(acceptedOnly).toContain('vault-assessment-warning')
-    expect(acceptedOnly).toContain('accepted exceptions')
+    expect(await renderWarning(true, { loadError: '', decidedBy: 'advisories', findings: [accepted] })).not.toContain('vault-assessment-warning')
     expect(await renderWarning(true, { loadError: '', decidedBy: 'advisories', findings: [accepted, active] })).toContain('vault-assessment-warning')
     expect(await renderWarning(true, { loadError: '', decidedBy: 'assessment', findings: [accepted] })).toContain('vault-assessment-warning')
   })

@@ -1,7 +1,7 @@
 import { isEulerEarn, isEVault, type VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
 import type { AnyVault } from '~/composables/useVaultRegistry'
 import { useEulerLabels } from '~/composables/useEulerLabels'
-import { getAcceptedVaultCheckFindings, getVaultCheckFindings, hasOnlyAcceptedVaultCheckFindings } from '~/utils/vault-assessment/presentation'
+import { getVaultCheckFindings, hasOnlyAcceptedVaultCheckFindings } from '~/utils/vault-assessment/presentation'
 
 const getAssessmentFamily = (vault: AnyVault): VaultAssessmentFamily | null =>
   isEulerEarn(vault) ? 'earn' : isEVault(vault) ? 'evk' : null
@@ -29,11 +29,6 @@ export const useDiscoveryVaultWarningDetails = () => {
     void vaultAssessments.value
     const entry = getVaultAssessmentEntry(vault.chainId, vault.address, family)
     if (entry.status !== 'available' || !entry.assessment?.assessed) return summary
-    if (hasOnlyAcceptedVaultCheckFindings(entry.assessment)) {
-      const accepted = getAcceptedVaultCheckFindings(entry.assessment).map(finding => `• ${finding.text}`)
-      return ['Accepted exceptions, reviewed by Euler:', ...accepted].join('\n')
-    }
-
     const findings = getVaultCheckFindings(entry.assessment)
     if (!findings.lines.length) return summary
     const lines = findings.lines.map(finding => `• ${finding.text}`)

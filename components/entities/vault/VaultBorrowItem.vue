@@ -160,6 +160,14 @@ const showMaxRoe = computed(() =>
     getTokenCategoryTags,
   ),
 )
+const { source: labelsSourceKind, isReady: labelsReady, isVaultAssessmentAvailableForChain } = useEulerLabels()
+const checksColumns = computed(() => {
+  if (assessmentUi !== 'field' || labelsSourceKind.value !== 'v3' || !labelsReady.value || !isVaultAssessmentAvailableForChain(pair.borrow.chainId)) return []
+  const columns = [{ address: pair.borrow.address, chainId: pair.borrow.chainId, family: 'evk' as const, symbol: pair.borrow.asset.symbol, label: `${pair.borrow.asset.symbol} checks` }]
+  if (isSecuritizeBorrowPair(pair)) return columns
+  return [...columns, { address: pair.collateral.address, chainId: pair.collateral.chainId, family: 'evk' as const, symbol: pair.collateral.asset.symbol, label: `${pair.collateral.asset.symbol} checks` }]
+})
+const pairGridTemplate = computed(() => `140px repeat(${(showMaxRoe.value ? 4 : 3) + checksColumns.value.length}, 112px)`)
 const correlatedBadgeTitle = computed(() => {
   const category = getTokenAddressesCorrelationCategoryLabel(
     [pair.collateral.asset.address, pair.borrow.asset.address],
@@ -453,15 +461,6 @@ const linkPath = computed(() => ({
     <!-- Border separator (desktop only) -->
     <div class="col-span-full border-b border-line-subtle mobile:!hidden" />
 
-    <div
-      v-if="assessmentUi === 'field'"
-      class="col-span-full flex flex-wrap gap-x-24 gap-y-6 border-b border-line-subtle px-16 py-8"
-    >
-      <VaultAssessmentChecksField
-        :addresses="isSecuritizeBorrowPair(pair) ? [pair.borrow.address] : [pair.borrow.address, pair.collateral.address]"
-        :chain-id="pair.borrow.chainId"
-      />
-    </div>
 
     <!-- Body stats: contents on desktop (children become grid items), flex on mobile -->
     <div class="col-span-full flex items-start mobile:!hidden">
@@ -515,7 +514,7 @@ const linkPath = computed(() => ({
       </div>
       <div
         class="ml-auto grid justify-end gap-x-20 pr-16 mobile:contents"
-        :class="showMaxRoe ? 'grid-cols-[140px_repeat(4,112px)]' : 'grid-cols-[140px_repeat(3,112px)]'"
+        :style="{ gridTemplateColumns: pairGridTemplate }"
       >
         <div
           class="py-12 pb-12 text-right mobile:!p-0"
@@ -652,8 +651,22 @@ const linkPath = computed(() => ({
             </div>
           </div>
         </div>
+        <VaultAssessmentChecksField
+          v-for="column in checksColumns"
+          :key="column.address"
+          class="py-12 pb-12 items-end text-right mobile:!hidden"
+          :address="column.address"
+          :chain-id="column.chainId"
+          :family="column.family"
+          :label="column.label"
+        />
       </div>
     </div>
+    <VaultAssessmentWarningLines
+      v-if="checksColumns.length"
+      :vaults="checksColumns"
+      show-symbol
+    />
 
     <!-- Mobile expanded stats -->
     <div class="hidden mobile:flex mobile:flex-col gap-12 py-12 px-16 pb-16">

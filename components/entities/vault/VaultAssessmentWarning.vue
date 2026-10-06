@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
-import { getAcceptedVaultCheckFindings, hasOnlyAcceptedVaultCheckFindings } from '~/utils/vault-assessment/presentation'
+import { hasOnlyAcceptedVaultCheckFindings } from '~/utils/vault-assessment/presentation'
 
 const { address, hideDeprecated = false, hideChecks = false, badgeLabel, family = 'evk' } = defineProps<{
   address: string
@@ -32,12 +32,7 @@ watch(
   { immediate: true },
 )
 const warning = computed(() => {
-  if (acceptedOnly.value && assessmentEntry.value.assessment) {
-    return {
-      title: 'Vault checks · accepted exceptions',
-      description: getAcceptedVaultCheckFindings(assessmentEntry.value.assessment).map(finding => finding.text).join(' '),
-    }
-  }
+  if (acceptedOnly.value) return null
   if (verdict.value?.status !== 'warning' && verdict.value?.status !== 'hidden') return null
   if (hideChecks && verdict.value.status === 'warning') return null
   if (hideDeprecated && verdict.value.decidedBy === 'deprecated') return null

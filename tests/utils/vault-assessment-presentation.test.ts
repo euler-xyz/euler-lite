@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { VaultAssessment, VaultAssessmentFinding } from '@eulerxyz/euler-v2-sdk'
 import {
+  getVaultChecksCell,
   getCriticalAssessmentWarning,
   getKnownUnlistedActionNotice,
   getUnverifiedActionCopy,
@@ -110,7 +111,7 @@ describe('vault checks presentation', () => {
       text: 'V3 says collateral.0x02.ltv',
       outcome: 'fail',
     }])
-    expect(getVaultChecksStatusLine(mixed, 'available')).toBe('Flagged · 1 to review')
+    expect(getVaultChecksStatusLine(mixed, 'available')).toBe('Warning · 1 to review')
   })
 
   it('shows exempted failures as accepted evidence when required checks pass', () => {
@@ -151,10 +152,19 @@ describe('vault checks presentation', () => {
     expect(getVaultCheckFindings(withoutAddress).lines[0]?.parts).toBeUndefined()
   })
 
+  it('counts accepted exceptions as passed in the row cell and puts failures first', () => {
+    const accepted = finding('liquidation.max-discount', { outcome: 'fail', required: false, exempted: true })
+    const passed = finding('oracle.liability-quote', { outcome: 'pass' })
+    expect(getVaultChecksCell(assessment([accepted, passed, finding('irm.max-apy', { outcome: 'pass' })]))).toEqual({ text: '3 passed', tone: 'positive' })
+    expect(getVaultChecksCell(assessment([accepted, finding('oracle.liability-route')]))).toEqual({ text: '1 failed', tone: 'warning' })
+    expect(getVaultChecksCell(assessment([finding('oracle.liability-route', { outcome: 'unknown' }), passed]))).toEqual({ text: '1 unknown', tone: 'muted' })
+    expect(getVaultChecksCell(assessment([], { assessed: false }))).toEqual({ text: 'Not assessed', tone: 'muted' })
+  })
+
   it('distinguishes passing, flagged, missing and unavailable states', () => {
     const now = Date.parse('2026-09-29T12:12:00.000Z')
     expect(getVaultChecksStatusLine(assessment([]), 'available', now)).toBe('Checks passed · checked 12 min ago')
-    expect(getVaultChecksStatusLine(assessment([finding('oracle.liability-quote')]), 'available', now)).toBe('Flagged · 1 to review')
+    expect(getVaultChecksStatusLine(assessment([finding('oracle.liability-quote')]), 'available', now)).toBe('Warning · 1 to review')
     expect(getVaultChecksStatusLine(assessment([], { checksStatus: null }), 'available', now)).toBe('Being re-checked')
     expect(getVaultChecksStatusLine(undefined, 'available', now)).toBe('Not assessed yet')
     expect(getVaultChecksStatusLine(undefined, 'unavailable', now)).toBe('Checks unavailable')

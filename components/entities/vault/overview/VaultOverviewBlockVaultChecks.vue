@@ -36,7 +36,7 @@ const hasOracleAdapterFinding = computed(() => !!assessment.value?.configContext
 ))
 const statusLine = computed(() => getVaultChecksStatusLine(assessment.value, entry.value.status, nowMs.value))
 const checkSummary = computed(() => assessment.value ? getVaultAssessmentCheckSummary(assessment.value) : '')
-const checkTone = computed(() => statusLine.value.startsWith('Flagged')
+const checkTone = computed(() => statusLine.value.startsWith('Warning')
   ? 'bg-warning-500'
   : statusLine.value.startsWith('Checks passed') ? 'bg-success-500' : 'bg-content-muted')
 const { isCopied, copyToClipboard } = useClipboardCopy()
