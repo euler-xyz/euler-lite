@@ -125,7 +125,7 @@ export function refreshPublicLabelsBundle(
         // A newer geo read must never be rolled back with an older labels bundle.
         // Keep the labels source timestamp and cache lifetime unchanged.
         if (currentGeo) {
-          if (currentGeo.fetchedAt <= (stale.geoFetchedAt ?? 0) && hasUsableGeo(stale)) return stale
+          if (currentGeo.fetchedAt < (stale.geoFetchedAt ?? 0) && hasUsableGeo(stale)) return stale
           return withCurrentGeo(stale, currentGeo)
         }
         if (hasUsableGeo(stale)) return stale

@@ -185,7 +185,7 @@ describe('public labels server source', () => {
     expect(data.managingEntityByVault?.[address]).toBe('kpk')
     expect(data.visibility?.[address]).toMatchObject({ status: 'visible', explorableLend: false, explorableBorrow: true })
     failVisibility = true
-    await expect(refreshPublicLabelsBundle(1)).resolves.toBe(first)
+    await expect(refreshPublicLabelsBundle(1)).resolves.toEqual(first)
     vi.resetModules()
     const cold = await import('~/server/utils/public-labels-source')
     await expect(cold.getPublicLabelsBundle(1)).rejects.toThrow('503')
@@ -255,7 +255,7 @@ describe('public labels server source', () => {
     vi.advanceTimersByTime(300_001)
     mocks.fetchWithTimeout.mockRejectedValue(new Error('V3 unavailable'))
 
-    await expect(getPublicLabelsBundle(1)).resolves.toBe(first)
+    await expect(getPublicLabelsBundle(1)).resolves.toEqual(first)
     expect(mocks.warn).toHaveBeenCalledWith(
       expect.objectContaining({ ctx: 'public-labels-source', chainId: 1 }),
       'refresh failed',
