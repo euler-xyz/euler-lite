@@ -422,7 +422,7 @@ watchEffect(async () => {
       </div>
       <VaultAssessmentChecksField
         v-if="showChecksColumn"
-        class="flex-1 items-center mobile:!hidden"
+        class="flex-1 items-end text-right mobile:!hidden"
         :address="vault.address"
         :chain-id="vault.chainId"
         :error-tone="isUnverified"
