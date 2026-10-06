@@ -1,6 +1,7 @@
 import { createSSRApp, h, ref } from 'vue'
 import { renderToString } from '@vue/server-renderer'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { getAddress } from 'viem'
 import VaultAssessmentWarningLines from '~/components/entities/vault/VaultAssessmentWarningLines.vue'
 
 const usdt = '0x00000000000000000000000000000000000000aa'
@@ -12,6 +13,7 @@ const assessmentWith = (findings: Array<Record<string, unknown>>) => ({
 })
 
 const render = (entries: Record<string, ReturnType<typeof assessmentWith>>, showSymbol: boolean, unknown: Partial<{ unverified: boolean, cause: string }> = {}) => {
+  vi.stubGlobal('useClipboardCopy', () => ({ isCopied: () => false, copyToClipboard: vi.fn(async () => {}) }))
   vi.stubGlobal('useEulerLabels', () => ({
     isReady: ref(true),
     source: ref('v3'),
@@ -77,6 +79,7 @@ describe('vault assessment warning lines', () => {
       ] } }]),
     }, false)
     expect(html).toContain('Unknown AggregatorV3 Feed')
+    expect(html).toContain(`aria-label="Copy address ${getAddress('0x00000000000000000000000000000000000000a2')}"`)
     expect(html).toContain('The quote is stale')
     expect(html).not.toContain('0x0000…00a1')
     expect(html).not.toContain('oracle routes include adapters')
