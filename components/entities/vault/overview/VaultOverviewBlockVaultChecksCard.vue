@@ -5,6 +5,7 @@ import {
   getVaultCheckWarningLines,
   getVaultChecksCell,
   getVaultChecksStatusLine,
+  getWarningAdapterFailures,
 } from '~/utils/vault-assessment/presentation'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { shortenAddress } from '~/utils/string-utils'
@@ -18,14 +19,26 @@ const props = defineProps<{
 }>()
 const { chainId } = useEulerAddresses()
 const nowMs = useActivityNowMs()
-const { vaultAssessments, loadVaultAssessment, getVaultAssessmentEntry } = useEulerLabels()
+const { vaultAssessments, loadVaultAssessment, getVaultAssessmentEntry, oracleAdapters, loadOracleAdapters } = useEulerLabels()
+const adapterLabel = (address: string) => {
+  const meta = oracleAdapters[address.toLowerCase()]
+  return meta?.label || meta?.name || undefined
+}
 const family = computed(() => props.family ?? 'evk')
 const entry = computed(() => {
   void vaultAssessments.value
   return chainId.value ? getVaultAssessmentEntry(chainId.value, props.address, family.value) : { status: 'idle' as const }
 })
 const assessment = computed(() => entry.value.assessment)
-const lines = computed(() => assessment.value ? getVaultCheckWarningLines(assessment.value) : [])
+const lines = computed(() => assessment.value ? getVaultCheckWarningLines(assessment.value, { adapterLabel }) : [])
+const warningAdapters = computed(() => {
+  const findings = [...(assessment.value?.configContext?.findings ?? []), ...(assessment.value?.consistencyContext?.findings ?? [])]
+  return findings.flatMap(finding => getWarningAdapterFailures(finding).map(failure => failure.address))
+})
+watch([warningAdapters, chainId], ([addresses, id]) => {
+  const missing = addresses.filter(address => !oracleAdapters[address.toLowerCase()])
+  if (id && missing.length) void loadOracleAdapters(id, missing)
+}, { immediate: true })
 const upcoming = computed(() => assessment.value ? getUpcomingVaultChanges(assessment.value, props.asset) : [])
 const statusLine = computed(() => getVaultChecksStatusLine(assessment.value, entry.value.status, nowMs.value))
 const hasFindings = computed(() => !!assessment.value?.assessed
@@ -153,6 +166,11 @@ watch(
             </template>
           </template>
           <template v-else>{{ finding.text }}</template>
+          <NuxtLink
+            v-if="finding.anchor"
+            :to="{ hash: `#${finding.anchor}` }"
+            class="ml-6 whitespace-nowrap text-accent-600 underline decoration-dotted hover:text-accent-500"
+          >Show in Oracles</NuxtLink>
         </span>
       </li>
     </ul>

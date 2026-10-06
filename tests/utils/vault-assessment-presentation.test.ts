@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { VaultAssessment, VaultAssessmentFinding } from '@eulerxyz/euler-v2-sdk'
+import { getAddress } from 'viem'
+import { shortenAddress } from '~/utils/string-utils'
 import {
   getVaultChecksCell,
   getVaultCheckFindingTone,
   getUnknownVaultCause,
+  adapterFailureWarnsVault,
   getVaultCheckWarningLines,
   getCriticalAssessmentWarning,
   getKnownUnlistedActionNotice,
@@ -52,7 +55,7 @@ describe('vault checks presentation', () => {
     ])
 
     expect(getVaultAssessmentCheckDetails(reviewed).counts).toEqual({
-      passed: 1, failed: 1, unknown: 1, accepted: 1, notApplicable: 1,
+      passed: 1, failed: 1, unknown: 1, accepted: 1, notApplicable: 1, muted: 0,
     })
     expect(getVaultAssessmentCheckDetails(reviewed).findings.map(item => item.key)).toEqual([
       'irm.max-apy', 'oracle.liability-quote', 'liquidation.max-discount',
@@ -278,5 +281,47 @@ describe('vault checks presentation', () => {
     )
     expect(getUnverifiedActionCopy(null, ['Vault A']).description).toContain('Vault A')
     expect(getUnverifiedActionCopy(null, ['Vault A']).description).toContain('phishing attempts')
+  })
+
+  describe('oracle adapter failures reaching the vault', () => {
+    const A = '0x00000000000000000000000000000000000000a1'
+    const B = '0x00000000000000000000000000000000000000a2'
+    const C = '0x00000000000000000000000000000000000000a3'
+    const feed = { key: 'feed-recognized', description: 'The connected price feed is not recognized.', severity: 'medium' }
+    const live = { key: 'quote-liveness', description: 'The quote is stale.', severity: 'medium' }
+    const high = { key: 'pyth-feed-recognized', description: 'The Pyth feed id is not recognized.', severity: 'high' }
+    const adapter = (address: string, checksStatus: 'warning' | 'negative', findings: Array<typeof feed>) => ({ address, checksStatus, findings })
+    const adaptersFinding = (failing: Array<ReturnType<typeof adapter>>) =>
+      finding('oracle.adapters-checks', { observed: { adapters: failing.length, failing } })
+
+    it('warns the vault for a negative adapter, a high-severity check, or an unrecognised feed plus another failure', () => {
+      expect(adapterFailureWarnsVault(adapter(A, 'warning', [feed]))).toBe(false)
+      expect(adapterFailureWarnsVault(adapter(A, 'warning', [live]))).toBe(false)
+      expect(adapterFailureWarnsVault(adapter(A, 'warning', [feed, live]))).toBe(true)
+      expect(adapterFailureWarnsVault(adapter(A, 'warning', [high]))).toBe(true)
+      expect(adapterFailureWarnsVault(adapter(A, 'negative', [live]))).toBe(true)
+    })
+
+    it('keeps a below-threshold adapter failure off the vault: no line, not failed, chip hidden', () => {
+      const muted = assessment([adaptersFinding([adapter(A, 'warning', [feed])]), finding('irm.max-apy', { outcome: 'pass' })], { checksStatus: 'warning' })
+      expect(getVaultCheckWarningLines(muted)).toEqual([])
+      expect(getVaultChecksCell(muted)).toEqual({ text: '1 passed', tone: 'positive' })
+      expect(getVaultAssessmentCheckDetails(muted).counts).toMatchObject({ failed: 0, muted: 1, passed: 1 })
+      expect(hasOnlyAcceptedVaultCheckFindings(muted)).toBe(true)
+      expect(getVaultChecksStatusLine(muted, 'available', Date.parse('2026-09-29T12:12:00.000Z'))).toBe('Checks passed · checked 12 min ago')
+    })
+
+    it('lists one line per adapter that reaches the vault, named by its label and anchored to its Oracles card', () => {
+      const lines = getVaultCheckWarningLines(
+        assessment([adaptersFinding([adapter(A, 'warning', [feed]), adapter(B, 'warning', [feed, live]), adapter(C, 'negative', [live])])]),
+        { adapterLabel: address => address.toLowerCase() === B ? 'Unknown AggregatorV3 Feed' : undefined },
+      )
+      expect(lines.map(line => [line.key, line.text, line.anchor])).toEqual([
+        [`oracle.adapters-checks:${B}`, 'Unknown AggregatorV3 Feed · The connected price feed is not recognized · The quote is stale', `oracle-adapter-${B}`],
+        [`oracle.adapters-checks:${C}`, `${shortenAddress(getAddress(C))} · The quote is stale`, `oracle-adapter-${C}`],
+      ])
+      expect(lines[0]?.parts?.[0]).toEqual({ text: 'Unknown AggregatorV3 Feed', address: getAddress(B) })
+      expect(getVaultChecksCell(assessment([adaptersFinding([adapter(C, 'negative', [live])])]))).toEqual({ text: '1 failed', tone: 'warning' })
+    })
   })
 })
