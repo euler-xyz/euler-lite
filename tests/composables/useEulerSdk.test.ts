@@ -34,6 +34,9 @@ type BuildEulerSDKOptions = {
   deploymentServiceConfig?: unknown
   eulerLabelsAdapterConfig?: unknown
   oracleAdapterServiceConfig?: unknown
+  servicesOverrides?: {
+    eulerLabelsService?: unknown
+  }
 }
 
 interface Deferred<T> {
@@ -77,6 +80,11 @@ const importUseEulerSdk = async (
     },
     IntrinsicApyV3Adapter: class IntrinsicApyV3Adapter {
       constructor(readonly config: unknown, readonly buildQuery: unknown) {}
+    },
+  }))
+  vi.doMock('~/utils/sdk-labels', () => ({
+    LiteEulerLabelsService: class LiteEulerLabelsService {
+      fetchEulerLabelsData = vi.fn()
     },
   }))
   vi.stubGlobal('useEulerAddresses', () => ({
@@ -169,6 +177,7 @@ describe('useEulerSdk', () => {
     expect(options.rpcUrls).toBeUndefined()
     expect(options.deploymentServiceConfig).toBeUndefined()
     expect(options.eulerLabelsAdapterConfig).toBeUndefined()
+    expect(options.servicesOverrides?.eulerLabelsService).toBeDefined()
     expect(options.oracleAdapterServiceConfig).toBeUndefined()
   })
 

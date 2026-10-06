@@ -5,6 +5,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { sdkBuildQuery, sdkFreshBuildQuery } from '~/utils/sdk-query-cache'
 import { createLiteTosPlugin } from '~/utils/sdk-tos'
 import { createYuzuIntrinsicApyService } from '~/utils/yuzu-intrinsic-apy'
+import { LiteEulerLabelsService } from '~/utils/sdk-labels'
 import { PYTH_MAX_UPDATE_FEE } from '~/features/reviewed-execution/planning/plugin-config'
 
 // sdk-keyring is loaded dynamically below to avoid a static import cycle:
@@ -311,7 +312,7 @@ const buildInstance = async ({ backend, buildQuery }: InstanceBuildArgs): Promis
       morpho: { morphoGraphqlUrl: buildMorphoProxyApiPath() },
       aave: { graphqlEndpoint: buildAaveProxyApiPath() },
     },
-    servicesOverrides: { intrinsicApyService },
+    servicesOverrides: { intrinsicApyService, eulerLabelsService: new LiteEulerLabelsService() },
     plugins: [
       createPythPlugin({ buildQuery, fetchFn: pythProxyFetch, maxUpdateFee: PYTH_MAX_UPDATE_FEE }),
       createKeyringPlugin({
