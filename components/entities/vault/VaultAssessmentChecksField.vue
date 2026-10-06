@@ -54,7 +54,9 @@ watch(
     data-id="vault-assessment-checks-field"
     :data-vault-address="address.toLowerCase()"
   >
-    <div class="text-content-tertiary text-p3 mb-4 whitespace-nowrap">{{ label }}</div>
+    <div class="text-content-tertiary text-p3 mb-4 whitespace-nowrap">
+      {{ label }}
+    </div>
     <UiModalPreviewTrigger
       v-if="entry.assessment?.assessed"
       :component="VaultAssessmentChecksModal"

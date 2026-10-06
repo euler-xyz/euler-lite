@@ -261,7 +261,7 @@ export const getUpcomingVaultChanges = (
         : null
       const pending = formatScheduledPending(finding, observed.pending, asset)
       const summary = (finding.cause?.summary || finding.description)
-        .replace(/^Pending change, acceptable from [^:]+:\s*/i, '')
+        .replace(/^Pending change, acceptable from .*?:\s+/i, '')
       const parts = [date ? `from ${date}` : '', pending, summary]
         .filter(Boolean)
       return {

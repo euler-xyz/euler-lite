@@ -14,7 +14,7 @@ import {
   resolveGoverningEntityKeys,
 } from '~/utils/vault/governor-verification'
 import type { EulerEarn, EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
-import { LABELS_MAX_STALE_MS } from '~/utils/labels-freshness'
+import { isLabelsSnapshotUsable, LABELS_MAX_STALE_MS } from '~/utils/labels-freshness'
 
 interface VaultAsset {
   address: string
@@ -66,8 +66,21 @@ interface BuildContext {
   view: LabelsView
 }
 
-const cache = createTtlCache<Map<string, VaultMetadata>>({ ttlMs: CACHE_TTL_MS, maxStaleMs: LABELS_MAX_STALE_MS, maxEntries: 64 })
+interface CachedVaultMetadata {
+  data: Map<string, VaultMetadata>
+  labelsSource?: LabelsView['labelsSource']
+  sourceFetchedAt?: number
+}
+
+const cache = createTtlCache<CachedVaultMetadata>({ ttlMs: CACHE_TTL_MS, maxStaleMs: LABELS_MAX_STALE_MS, maxEntries: 64 })
 const inflight = new Map<number, Promise<Map<string, VaultMetadata>>>()
+
+const currentMetadata = (snapshot: CachedVaultMetadata): Map<string, VaultMetadata> => {
+  if (snapshot.labelsSource !== 'v3' && snapshot.labelsSource !== 'v3-metadata') return snapshot.data
+  if (isLabelsSnapshotUsable(snapshot.sourceFetchedAt)) return snapshot.data
+  // Display content can remain stale, but manager attribution requires a usable verification source.
+  return new Map([...snapshot.data].map(([address, entry]) => [address, { ...entry, entities: [] }]))
+}
 
 function strOrNull(value: unknown): string | null {
   if (typeof value !== 'string') return null
@@ -293,14 +306,18 @@ export async function refreshChainVaultMetadata(chainId: number): Promise<Map<st
         buildLabelsView(chainId),
         refreshVerifiedAddressSet(chainId),
       ])
-      const map = computeMetadata({ chainId, view, verifiedSet })
-      cache.set(key, map)
-      return map
+      const snapshot = {
+        data: computeMetadata({ chainId, view, verifiedSet }),
+        labelsSource: view.labelsSource,
+        sourceFetchedAt: view.sourceFetchedAt,
+      }
+      cache.set(key, snapshot)
+      return currentMetadata(snapshot)
     }
     catch (err) {
       logger.warn({ ctx: 'vault-metadata', chainId, err }, 'rebuild failed')
       const stale = cache.getStale(key)
-      if (stale) return stale
+      if (stale) return currentMetadata(stale)
       throw err
     }
     finally {
@@ -314,6 +331,6 @@ export async function refreshChainVaultMetadata(chainId: number): Promise<Map<st
 
 export async function getChainVaultMetadata(chainId: number): Promise<Map<string, VaultMetadata>> {
   const fresh = cache.get(String(chainId))
-  if (fresh) return fresh
+  if (fresh) return currentMetadata(fresh)
   return refreshChainVaultMetadata(chainId)
 }
