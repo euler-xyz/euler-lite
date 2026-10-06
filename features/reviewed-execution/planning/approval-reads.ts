@@ -1,5 +1,6 @@
 import type { Address } from 'viem'
 import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 
 export type AllowanceReadIssue = { source?: string, message: string }
 
@@ -35,6 +36,10 @@ export const fetchWalletForApprovals = async <TWallet>(
   const firstIssues = allowanceReadIssues(first.errors)
   if (!firstIssues.length) return { wallet: first.result, allowanceIssues: [] }
   await wait()
+  const failedQueries: Array<'queryAllowance' | 'queryPermit2Allowance'> = []
+  if (firstIssues.some(issue => issue.source === 'erc20.allowance')) failedQueries.push('queryAllowance')
+  if (firstIssues.some(issue => issue.source === 'permit2.allowance')) failedQueries.push('queryPermit2Allowance')
+  await invalidateSdkQueries(failedQueries)
   const second = await fetchWallet()
   return { wallet: second.result, allowanceIssues: allowanceReadIssues(second.errors) }
 }

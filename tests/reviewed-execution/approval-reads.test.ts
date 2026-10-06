@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { allowanceReadIssues, approvalAssetsWithSpenders, fetchWalletForApprovals } from '~/features/reviewed-execution/planning/approval-reads'
+import { clearSdkQueryFailureCacheForTest, sdkFreshBuildQuery, sdkQueryClient } from '~/utils/sdk-query-cache'
 
 const token = '0x0000000000000000000000000000000000000021'
 const vault = '0x0000000000000000000000000000000000000011'
@@ -8,6 +9,11 @@ const other = '0x0000000000000000000000000000000000000012'
 const owner = '0x0000000000000000000000000000000000000002'
 
 describe('approval reads', () => {
+  afterEach(() => {
+    sdkQueryClient.clear()
+    clearSdkQueryFailureCacheForTest()
+  })
+
   it('collects one spender list per token from the plan', () => {
     const plan = [
       { type: 'requiredApproval', token, owner, spender: vault, amount: 1n },
@@ -40,6 +46,50 @@ describe('approval reads', () => {
     expect(outcome.wallet).toBe('first')
     expect(outcome.allowanceIssues.map(issue => issue.message)).toEqual([failed.errors[0].message])
     expect(stillFailing).toHaveBeenCalledTimes(2)
+  })
+
+  for (const [source, queryName] of [
+    ['erc20.allowance', 'queryAllowance'],
+    ['permit2.allowance', 'queryPermit2Allowance'],
+  ] as const) {
+    it(`retries the underlying ${source} query after a cached failure`, async () => {
+      const read = vi.fn()
+        .mockRejectedValueOnce(new Error('temporary RPC failure'))
+        .mockResolvedValueOnce(42n)
+      const wrappedRead = sdkFreshBuildQuery(queryName, read, {})
+      const fetchWallet = vi.fn(async () => {
+        try {
+          return { result: await wrappedRead(token), errors: [] }
+        }
+        catch {
+          return { result: 0n, errors: [{ source, message: 'Allowance read failed' }] }
+        }
+      })
+
+      expect(await fetchWalletForApprovals(fetchWallet, async () => {})).toEqual({ wallet: 42n, allowanceIssues: [] })
+      expect(fetchWallet).toHaveBeenCalledTimes(2)
+      expect(read).toHaveBeenCalledTimes(2)
+    })
+  }
+
+  it('reports a persistent failure after two underlying reads', async () => {
+    const read = vi.fn().mockRejectedValue(new Error('RPC unavailable'))
+    const wrappedRead = sdkFreshBuildQuery('queryAllowance', read, {})
+    const fetchWallet = vi.fn(async () => {
+      try {
+        return { result: await wrappedRead(token), errors: [] }
+      }
+      catch {
+        return { result: 0n, errors: [{ source: 'erc20.allowance', message: 'Allowance read failed' }] }
+      }
+    })
+
+    expect(await fetchWalletForApprovals(fetchWallet, async () => {})).toEqual({
+      wallet: 0n,
+      allowanceIssues: [{ source: 'erc20.allowance', message: 'Allowance read failed' }],
+    })
+    expect(fetchWallet).toHaveBeenCalledTimes(2)
+    expect(read).toHaveBeenCalledTimes(2)
   })
 
   it('does not retry when the reads succeeded', async () => {
