@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
-import { getVaultCheckWarningLines } from '~/utils/vault-assessment/presentation'
+import { getVaultCheckWarningLines, getWarningAdapterFailures } from '~/utils/vault-assessment/presentation'
 
 export type VaultAssessmentWarningTarget = {
   address: string
@@ -17,7 +17,27 @@ const props = withDefaults(defineProps<{
   showSymbol?: boolean
 }>(), { showSymbol: false })
 
-const { isReady, source, vaultAssessments, getVaultAssessmentEntry, isVaultAssessmentAvailableForChain } = useEulerLabels()
+const { isReady, source, vaultAssessments, getVaultAssessmentEntry, isVaultAssessmentAvailableForChain, oracleAdapters, loadOracleAdapters } = useEulerLabels()
+const adapterLabel = (address: string) => {
+  const meta = oracleAdapters[address.toLowerCase()]
+  return meta?.label || meta?.name || undefined
+}
+const adapterAddresses = computed(() => {
+  void vaultAssessments.value
+  return props.vaults.flatMap((vault) => {
+    const entry = getVaultAssessmentEntry(vault.chainId, vault.address, vault.family ?? 'evk')
+    const findings = [...(entry.assessment?.configContext?.findings ?? []), ...(entry.assessment?.consistencyContext?.findings ?? [])]
+    return findings.flatMap(finding => getWarningAdapterFailures(finding).map(failure => ({ chainId: vault.chainId, address: failure.address })))
+  })
+})
+watch(adapterAddresses, (targets) => {
+  const byChain = new Map<number, string[]>()
+  for (const target of targets) {
+    if (oracleAdapters[target.address.toLowerCase()]) continue
+    byChain.set(target.chainId, [...(byChain.get(target.chainId) ?? []), target.address])
+  }
+  for (const [chainId, addresses] of byChain) void loadOracleAdapters(chainId, addresses)
+}, { immediate: true })
 
 const rows = computed(() => {
   void vaultAssessments.value
@@ -29,7 +49,7 @@ const rows = computed(() => {
     const cause = vault.unverified && vault.cause ? [{ key: `${vault.address}:cause`, symbol, text: vault.cause, tone }] : []
     const entry = getVaultAssessmentEntry(vault.chainId, vault.address, vault.family ?? 'evk')
     if (entry.status !== 'available' || !entry.assessment?.assessed) return cause
-    const checks = getVaultCheckWarningLines(entry.assessment)
+    const checks = getVaultCheckWarningLines(entry.assessment, { adapterLabel })
       .map(line => ({ key: `${vault.address}:${line.key}`, symbol, text: line.text, tone: vault.unverified ? tone : line.outcome === 'unknown' ? 'muted' : tone }))
     return [...cause, ...checks]
   })

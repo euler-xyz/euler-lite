@@ -11,6 +11,8 @@ import { getOracleRouteStepKey, useOracleAdapterPrices } from '~/composables/use
 import { isOracleAdapterRouteStep } from '~/utils/oracle-route-steps'
 import { buildOracleAdapterViews, collectOracleRouteSteps, type OracleAdapterView } from '~/utils/oracle-adapter-views'
 import { OracleAdapterChecksModal } from '#components'
+import { oracleAdapterAnchor } from '~/utils/vault-assessment/presentation'
+import { registerOracleAdapterAnchors } from '~/composables/useOracleAdapterAnchors'
 
 const props = defineProps<{
   vault?: EVault
@@ -98,6 +100,22 @@ const routerRecognition = computed(() => {
 })
 
 const resolveSymbol = (address: string) => resolveTokenSymbol(address, knownSymbols.value)
+registerOracleAdapterAnchors(computed(() => oracleAssessmentsStatus.value === 'available'
+  ? adapterViews.value.map(adapter => oracleAdapterAnchor(adapter.oracle))
+  : []))
+const route = useRoute()
+const section = ref<{ setOpen: (open: boolean) => void } | null>(null)
+const revealTargetAdapter = async () => {
+  if (!import.meta.client) return
+  const id = route.hash.replace(/^#/, '')
+  if (!id.startsWith('oracle-adapter-') || !adapterViews.value.some(adapter => oracleAdapterAnchor(adapter.oracle) === id)) return
+  section.value?.setOpen(true)
+  await nextTick()
+  document.getElementById(id)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+}
+watch([() => route.hash, () => adapterViews.value.length], () => {
+  void revealTargetAdapter()
+}, { immediate: true })
 
 const { copyToClipboard } = useClipboardCopy()
 
@@ -161,6 +179,7 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
 
 <template>
   <VaultOverviewAccordionSection
+    ref="section"
     title="Oracles"
     :default-open="props.defaultOpen ?? true"
     content-class="flex flex-col gap-24"
@@ -204,6 +223,7 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
     >
       <div
         v-for="adapter in adapterViews"
+        :id="oracleAdapterAnchor(adapter.oracle)"
         :key="getOracleRouteStepKey(adapter)"
         class="w-full rounded-xl bg-surface p-16 flex flex-col gap-12 border border-line-subtle"
       >

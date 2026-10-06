@@ -18,6 +18,8 @@ const render = (entries: Record<string, ReturnType<typeof assessmentWith>>, show
     vaultAssessments: ref({}),
     getVaultAssessmentEntry: (_chainId: number, address: string) => entries[address.toLowerCase()] ?? { status: 'idle' },
     isVaultAssessmentAvailableForChain: () => true,
+    oracleAdapters: { '0x00000000000000000000000000000000000000a2': { label: 'Unknown AggregatorV3 Feed' } },
+    loadOracleAdapters: async () => {},
   }))
   const app = createSSRApp({
     render: () => h(VaultAssessmentWarningLines, {
@@ -63,6 +65,21 @@ describe('vault assessment warning lines', () => {
     expect(html).toContain('Euler has not finished checking 4 adapters on the oracle routes.')
     expect(html).toContain('data-tone="error"')
     expect(html).not.toContain('data-tone="muted"')
+  })
+
+  it('names a failing oracle adapter by its label and leaves below-threshold adapters to the Oracles section', async () => {
+    const feed = { key: 'feed-recognized', description: 'The connected price feed is not recognized.', severity: 'medium' }
+    const live = { key: 'quote-liveness', description: 'The quote is stale.', severity: 'medium' }
+    const html = await render({
+      [usdt]: assessmentWith([{ key: 'oracle.adapters-checks', description: 'The oracle routes include adapters whose own checks are failing', outcome: 'fail', required: false, observed: { adapters: 2, failing: [
+        { address: '0x00000000000000000000000000000000000000a1', checksStatus: 'warning', findings: [feed] },
+        { address: '0x00000000000000000000000000000000000000a2', checksStatus: 'warning', findings: [feed, live] },
+      ] } }]),
+    }, false)
+    expect(html).toContain('Unknown AggregatorV3 Feed')
+    expect(html).toContain('The quote is stale')
+    expect(html).not.toContain('0x0000…00a1')
+    expect(html).not.toContain('oracle routes include adapters')
   })
 
   it('renders nothing when no vault has a failing check', async () => {

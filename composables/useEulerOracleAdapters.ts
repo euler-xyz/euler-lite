@@ -64,6 +64,7 @@ const toOracleAdapterMeta = (assessment: OracleAdapterAssessment): OracleAdapter
     severity: normalizeOracleAdapterCheckSeverity(finding.severity),
     expected: finding.expected,
     observed: finding.observed,
+    ...((finding as { exempted?: unknown }).exempted === true ? { exempted: true } : {}),
   })),
   summary: assessment.summary ?? undefined,
   policyId: assessment.policyId ?? undefined,
