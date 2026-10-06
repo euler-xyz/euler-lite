@@ -164,6 +164,22 @@ describe('vault checks presentation', () => {
     ])
   })
 
+  it('keeps one line per deprecated collateral and strategy instead of folding them into one rule', () => {
+    const lines = getVaultCheckWarningLines(assessment([
+      finding('strategy.0x01.visible'),
+      finding('collateral.0x02.visible'),
+      finding('collateral.0x03.visible'),
+      finding('collateral.0x03.ltv', { outcome: 'unknown', required: true }),
+      finding('collateral.0x03.ltv'),
+    ]))
+    expect(lines.map(line => [line.key, line.outcome])).toEqual([
+      ['strategy.0x01.visible', 'fail'],
+      ['collateral.0x02.visible', 'fail'],
+      ['collateral.0x03.visible', 'fail'],
+      ['collateral.0x03.ltv', 'fail'],
+    ])
+  })
+
   it('names why an unknown vault is unknown without calling a labelled vault unlisted', () => {
     expect(getUnknownVaultCause(undefined)).toBe('This vault is not listed in the published vault labels.')
     expect(getUnknownVaultCause({ status: 'hidden', reason: 'Deprecated due to low activity.', decidedBy: 'deprecated' })).toBe('This vault is not listed: Deprecated due to low activity.')

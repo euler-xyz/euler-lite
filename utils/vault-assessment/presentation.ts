@@ -91,11 +91,11 @@ export const getVaultCheckFindings = (assessment: VaultAssessment): { lines: Vau
   return { lines: [...shown.values()], moreCount, reviewCount: shown.size + moreCount }
 }
 
-/** One line per check the row cell counts as failed or unknown; no rule is left out, or the count and the lines disagree. */
+/** One line per check the row cell counts as failed or unknown, each collateral and strategy on its own; no finding is left out, or the count and the lines disagree. */
 export const getVaultCheckWarningLines = (assessment: VaultAssessment): VaultCheckLine[] => {
   const lines = new Map<string, VaultCheckLine>()
   for (const finding of [...(assessment.configContext?.findings ?? []), ...(assessment.consistencyContext?.findings ?? [])].filter(isOpenFinding)) {
-    const key = groupKey(finding.key)
+    const key = finding.key
     if (lines.has(key) && !(lines.get(key)?.outcome === 'unknown' && finding.outcome === 'fail')) continue
     const text = finding.outcome === 'unknown' ? finding.cause?.summary || 'Being re-checked' : finding.cause?.summary || finding.description
     const parts = getVaultCheckCopyableParts(text, finding)
