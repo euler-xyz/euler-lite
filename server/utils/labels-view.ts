@@ -11,6 +11,7 @@ import {
   type EulerLabelEarnVaultEntry,
   type EulerLabelEntity,
   type EulerLabelProduct,
+  type EulerLabelVaultAnnotation,
   type EulerLabelsData,
   type EulerSDK,
   type EVault,
@@ -149,7 +150,7 @@ export async function fetchTokenList(chainId: number): Promise<TokenListEntry[]>
   return Array.isArray(data?.tokens) ? data.tokens : []
 }
 
-export function buildProductDescriptors(products: Record<string, ProductEntryFull>): {
+export function buildProductDescriptors(products: Record<string, ProductEntryFull>, annotations: Record<string, EulerLabelVaultAnnotation> = {}): {
   productByVault: Map<Address, ProductDescriptor>
   deprecatedSet: Set<Address>
 } {
@@ -190,6 +191,22 @@ export function buildProductDescriptors(products: Record<string, ProductEntryFul
         deprecatedSet.add(addr)
       }
     }
+  }
+  for (const [rawAddress, annotation] of Object.entries(annotations)) {
+    const address = tryChecksum(rawAddress)
+    if (!address || productByVault.has(address)) continue
+    if (!annotation.deprecated && !annotation.deprecationReason && !annotation.portfolioNotice && !annotation.tags?.length) continue
+    productByVault.set(address, {
+      slug: null,
+      name: '',
+      description: null,
+      portfolioNotice: strOrNull(annotation.portfolioNotice),
+      deprecationReason: strOrNull(annotation.deprecationReason),
+      governanceLimited: hasTag(annotation.tags, 'governance limited'),
+      entityKeys: [],
+      vaultOverrides: { [address]: annotation },
+    })
+    if (annotation.deprecated) deprecatedSet.add(address)
   }
   return { productByVault, deprecatedSet }
 }
@@ -359,7 +376,7 @@ async function assembleLabelsView(chainId: number): Promise<LabelsView> {
   }
 
   const { snapshot, escrowAddresses } = await buildSnapshot(chainId, sdk, labels.value)
-  const { productByVault, deprecatedSet } = buildProductDescriptors(labels.value.products as Record<string, ProductEntryFull>)
+  const { productByVault, deprecatedSet } = buildProductDescriptors(labels.value.products as Record<string, ProductEntryFull>, labels.value.vaultAnnotations)
   const { earnByAddr, deprecatedEarnSet } = buildEarnEntryMap(labels.value)
 
   const tokenLogos = tokens.status === 'fulfilled'

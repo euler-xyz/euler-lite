@@ -41,7 +41,8 @@ it('maps metadata-only labels for display without granting verification, preserv
   expect(data.earnVaults).toEqual([])
   expect(getLabelVaultCandidates(data).vaults).toContain(getAddress(KPK_VAULT))
   expect(data.products['kpk-securitize'].notExplorable).toBe(false)
-  expect(data.products['kpk-securitize'].vaultOverrides?.[getAddress(KPK_VAULT)]).toMatchObject({ notExplorableLend: false, notExplorableBorrow: false })
+  expect(data.products['kpk-securitize'].vaultOverrides?.[getAddress(KPK_VAULT)]?.notExplorableLend).toBeUndefined()
+  expect(data.products['kpk-securitize'].vaultOverrides?.[getAddress(KPK_VAULT)]?.notExplorableBorrow).toBeUndefined()
   expect(data.geoContext?.policies).toEqual(publicLabelsFixture.geoPolicies)
 })
 
@@ -68,6 +69,9 @@ it('honours product and per-side hiding on deprecated metadata-only vaults', () 
   source.products[0].notExplorable = true
   const hidden = normalize()
   expect(hidden.products['kpk-securitize'].notExplorable).toBe(true)
-  expect(getLabelsVaultLoadKey(hidden)).not.toBe(getLabelsVaultLoadKey(listed))
+  expect(getLabelsVaultLoadKey(hidden)).toBe(getLabelsVaultLoadKey(listed))
+  source.vaults[0].notExplorableLend = null
+  source.vaults[0].notExplorableBorrow = null
+  expect(getLabelsVaultLoadKey(normalize())).not.toBe(getLabelsVaultLoadKey(listed))
   expect(hidden.verifiedVaultAddresses).toEqual([])
 })

@@ -4,12 +4,12 @@ import { normalizeLabelsBundle } from '~/utils/public-labels'
 import { buildProductDescriptors } from '~/server/utils/labels-view'
 import { publicLabelsFixture, KPK_VAULT } from '~/tests/fixtures/public-labels-v20260804151305236'
 
-const mocks = vi.hoisted(() => ({ view: vi.fn() }))
+const mocks = vi.hoisted(() => ({ view: vi.fn(), verified: vi.fn() }))
 vi.mock('~/server/utils/labels-view', async original => ({
   ...await original<typeof import('~/server/utils/labels-view')>(),
   buildLabelsView: mocks.view,
 }))
-vi.mock('~/server/utils/verified-vaults', () => ({ refreshVerifiedAddressSet: async () => new Set() }))
+vi.mock('~/server/utils/verified-vaults', () => ({ refreshVerifiedAddressSet: mocks.verified }))
 
 const address = getAddress(KPK_VAULT)
 
@@ -41,7 +41,10 @@ async function metadata(vaultType: 'evk' | 'earn', standalone = false, cleared =
 }
 
 describe('public metadata resolved V3 content', () => {
-  beforeEach(() => vi.resetModules())
+  beforeEach(() => {
+    vi.resetModules()
+    mocks.verified.mockResolvedValue(new Set())
+  })
 
   it.each(['evk', 'earn'] as const)('preserves cleared %s fields and the vault-specific name', async (type) => {
     expect(await metadata(type)).toMatchObject({
@@ -58,5 +61,36 @@ describe('public metadata resolved V3 content', () => {
 
   it('does not expose synthetic display groups as V3 product IDs', async () => {
     expect(await metadata('evk', true)).toMatchObject({ name: 'Vault-specific name', productId: null })
+  })
+
+  it('drops verified manager attribution when its source expires, even if the derived cache is younger', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-06T10:00:00Z'))
+      const sourceFetchedAt = Date.now()
+      const labels = normalizeLabelsBundle(1, {
+        source: 'v3-metadata', labelSet: 'public', version: 'test', publicLabels: publicLabelsFixture, sourceFetchedAt,
+      })
+      mocks.verified.mockResolvedValue(new Set([address]))
+      mocks.view.mockResolvedValue({
+        ...buildProductDescriptors(labels.products),
+        labelsSource: 'v3', sourceFetchedAt,
+        managingEntityByVault: { [address.toLowerCase()]: 'kpk' },
+        entitiesRaw: labels.entities, tokenLogos: new Map(),
+        snapshot: { evkVaults: [{ address, shares: { name: 'Vault' } }], earnVaults: [], securitizeVaults: [], escrowVaults: [] },
+        deprecatedEarnSet: new Set(), escrowAddresses: new Set(), earnByAddr: new Map(),
+      })
+      const { getChainVaultMetadata, refreshChainVaultMetadata } = await import('~/server/utils/vault-metadata')
+      expect((await getChainVaultMetadata(1)).get(address)?.entities).toHaveLength(1)
+
+      vi.advanceTimersByTime(23 * 60 * 60_000)
+      expect((await refreshChainVaultMetadata(1)).get(address)?.entities).toHaveLength(1)
+      mocks.view.mockRejectedValue(new Error('labels unavailable'))
+      vi.advanceTimersByTime(2 * 60 * 60_000)
+      expect((await getChainVaultMetadata(1)).get(address)?.entities).toEqual([])
+    }
+    finally {
+      vi.useRealTimers()
+    }
   })
 })

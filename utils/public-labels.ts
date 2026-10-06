@@ -68,6 +68,11 @@ export const normalizePublicLabelsData = (chainId: number, source: PublicLabelsS
       override.notExplorableBorrow = verdict?.explorableBorrow !== true
     }
   }
+  for (const [address, annotation] of Object.entries(data.vaultAnnotations ?? {})) {
+    const verdict = source.visibility[address]
+    annotation.notExplorableLend = verdict?.explorableLend !== true
+    annotation.notExplorableBorrow = verdict?.explorableBorrow !== true
+  }
   for (const [address, entry] of Object.entries(data.earnVaultEntries)) {
     entry.notExplorable = source.visibility[address]?.explorableLend !== true
     if (entry.notExplorable) data.notExplorableEarnVaults.add(address)

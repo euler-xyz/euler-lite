@@ -262,6 +262,49 @@ describe('public labels server source', () => {
     )
   })
 
+  it('keeps newly fetched geo restrictions when the labels refresh fails', async () => {
+    const { getPublicLabelsBundle, refreshPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
+    const first = await getPublicLabelsBundle(1)
+    if (first.source === 'static') throw new Error('Expected V3 labels')
+    const restriction = {
+      id: 'new-restriction', chainId: 1, productId: null, vaultAddress: null,
+      assetAddress: null, countries: ['US'], countriesResolved: ['US'],
+      policyType: 'block', reason: 'Restricted', createdAt: '2026-08-05T10:00:00Z',
+    }
+
+    vi.advanceTimersByTime(300_001)
+    mocks.fetchWithTimeout.mockImplementation(async (input: string) => {
+      if (new URL(input).pathname.endsWith('/geo-policies')) {
+        return new Response(JSON.stringify({ data: [restriction], meta: { total: 1 } }), { status: 200 })
+      }
+      throw new Error('labels unavailable')
+    })
+
+    const fallback = await refreshPublicLabelsBundle(1)
+    if (fallback.source === 'static') throw new Error('Expected V3 labels')
+    expect(fallback.publicLabels.geoPolicies).toEqual([restriction])
+    expect(fallback.geoFetchedAt).toBe(Date.now())
+    expect(fallback.sourceFetchedAt).toBe(first.sourceFetchedAt)
+  })
+
+  it('never serves an aggregate bundle after its geo rules expire', async () => {
+    const { getPublicLabelsBundle, refreshPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
+    const first = await getPublicLabelsBundle(1)
+    if (first.source === 'static') throw new Error('Expected V3 labels')
+    vi.advanceTimersByTime(23 * 60 * 60_000)
+    mocks.fetchWithTimeout.mockImplementation(async (input: string) => {
+      if (new URL(input).pathname.endsWith('/geo-policies')) throw new Error('geo unavailable')
+      return new URL(input).pathname.endsWith('/versions') ? versionsResponse() : emptyListResponse()
+    })
+    const refreshed = await refreshPublicLabelsBundle(1)
+    if (refreshed.source === 'static') throw new Error('Expected V3 labels')
+    expect(refreshed.geoFetchedAt).toBe(first.geoFetchedAt)
+    expect(refreshed.sourceFetchedAt).toBe(Date.now())
+
+    vi.advanceTimersByTime(2 * 60 * 60_000)
+    await expect(getPublicLabelsBundle(1)).rejects.toThrow('geo unavailable')
+  })
+
   it('does not publish a snapshot when geo is unavailable on a cold start', async () => {
     mocks.fetchWithTimeout.mockRejectedValue(new Error('geo unavailable'))
     const { getPublicLabelsBundle } = await import('~/server/utils/public-labels-source')

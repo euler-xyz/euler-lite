@@ -14,9 +14,10 @@ import {
   type PublicLabelsQuery,
   type PublicLabelsRequest,
   type PublicLabelsResponse,
+  type PublicGeoPolicy,
 } from '~/utils/public-labels'
 import { readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-url-env'
-import { LABELS_MAX_STALE_MS } from '~/utils/labels-freshness'
+import { isLabelsSnapshotUsable, LABELS_MAX_STALE_MS } from '~/utils/labels-freshness'
 
 const CACHE_TTL_MS = 300_000
 const REFRESH_BUDGET_MS = 30_000
@@ -66,6 +67,19 @@ const withVaultTag = (bundle: PublicLabelsBundle): PublicLabelsBundle => {
   return vaultTag ? { ...bundle, vaultTag } : bundle
 }
 
+const hasUsableGeo = (bundle: HostedLabelsBundle): boolean =>
+  typeof bundle.geoFetchedAt === 'number' && isLabelsSnapshotUsable(bundle.geoFetchedAt)
+
+const withCurrentGeo = (
+  bundle: HostedLabelsBundle,
+  geo: { fetchedAt: number, policies: PublicGeoPolicy[] },
+): HostedLabelsBundle => {
+  if (bundle.source === 'v3-metadata') {
+    return { ...bundle, publicLabels: { ...bundle.publicLabels, geoPolicies: geo.policies }, geoFetchedAt: geo.fetchedAt }
+  }
+  return { ...bundle, publicLabels: { ...bundle.publicLabels, geoPolicies: geo.policies }, geoFetchedAt: geo.fetchedAt }
+}
+
 export function refreshPublicLabelsBundle(
   chainId: number,
   version?: string,
@@ -75,6 +89,7 @@ export function refreshPublicLabelsBundle(
   const selectedVersion = version ?? selection.version
   const key = cacheKey(chainId, selection.labelSet, selectedVersion)
   return inFlight.run(key, async () => {
+    let currentGeo: { fetchedAt: number, policies: PublicGeoPolicy[] } | undefined
     try {
       const bundle = await withWallClock(
         async () => {
@@ -86,13 +101,13 @@ export function refreshPublicLabelsBundle(
             version: selectedVersion,
             request,
           })
-          const geo = await getGeoSource()(request)
-          const snapshot = await adapter.fetchPublicLabelsSnapshot(chainId, selectedVersion, geo.policies)
+          currentGeo = await getGeoSource()(request)
+          const snapshot = await adapter.fetchPublicLabelsSnapshot(chainId, selectedVersion, currentGeo.policies)
           const bundle = {
             ...snapshot,
             // Keep the age of the actual V3 read when this bundle is served stale.
             sourceFetchedAt: Date.now(),
-            geoFetchedAt: geo.fetchedAt,
+            geoFetchedAt: currentGeo.fetchedAt,
           }
           normalizeLabelsBundle(chainId, bundle)
           return bundle
@@ -106,7 +121,15 @@ export function refreshPublicLabelsBundle(
     catch (err) {
       logger.warn({ ctx: 'public-labels-source', chainId, version, err }, 'refresh failed')
       const stale = cache.getStale(key)
-      if (stale) return stale
+      if (stale) {
+        // A newer geo read must never be rolled back with an older labels bundle.
+        // Keep the labels source timestamp and cache lifetime unchanged.
+        if (currentGeo) {
+          if (currentGeo.fetchedAt <= (stale.geoFetchedAt ?? 0) && hasUsableGeo(stale)) return stale
+          return withCurrentGeo(stale, currentGeo)
+        }
+        if (hasUsableGeo(stale)) return stale
+      }
       throw err
     }
   }).then(withVaultTag)
@@ -116,7 +139,7 @@ export function getCachedPublicLabelsBundle(chainId: number, version?: string): 
   if (readLabelsSource() === 'static') return undefined
   const selection = readV3LabelsSelection()
   const hit = cache.get(cacheKey(chainId, selection.labelSet, version ?? selection.version))
-  return hit ? withVaultTag(hit) : undefined
+  return hit && hasUsableGeo(hit) ? withVaultTag(hit) : undefined
 }
 
 export function getPublicLabelsBundle(
@@ -127,7 +150,7 @@ export function getPublicLabelsBundle(
   const selection = readV3LabelsSelection()
   const selectedVersion = version ?? selection.version
   const hit = cache.get(cacheKey(chainId, selection.labelSet, selectedVersion))
-  return hit ? Promise.resolve(withVaultTag(hit)) : refreshPublicLabelsBundle(chainId, selectedVersion)
+  return hit && hasUsableGeo(hit) ? Promise.resolve(withVaultTag(hit)) : refreshPublicLabelsBundle(chainId, selectedVersion)
 }
 
 export async function getPublicEulerLabelsData(

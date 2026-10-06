@@ -226,6 +226,16 @@ describe('vault checks presentation', () => {
     ])
   })
 
+  it('removes the complete ISO timestamp prefix from an upcoming Earn change', () => {
+    const result = getUpcomingVaultChanges(assessment([
+      finding('scheduled.governance.timelock', {
+        observed: { validAt: '2026-10-06T14:30:00.000Z', pending: '86400' },
+        cause: { code: 'pending', subject: 'vault', summary: 'Pending change, acceptable from 2026-10-06T14:30:00.000Z: timelock update', remedy: null },
+      }),
+    ], { family: 'earn' }))
+    expect(result[0]?.text).toBe('from Oct 6, 2026 · timelock 1 day · timelock update · would not pass the checks')
+  })
+
   it('only makes a form warning for exit and pricing failures', () => {
     expect(getCriticalAssessmentWarning(assessment([finding('oracle.adapters-recognized')]))).toBeNull()
     expect(getCriticalAssessmentWarning(assessment([finding('hooks.zero-or-trusted', {
