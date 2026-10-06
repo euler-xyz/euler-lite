@@ -32,7 +32,7 @@ afterEach(() => vi.unstubAllGlobals())
 
 describe('vault verdict warning during a labels outage', () => {
   it('keeps the last-good warning until verification expires', async () => {
-    expect(await renderWarning(true)).toContain('>Warning<')
+    expect(await renderWarning(true)).toMatch(/\sWarning<\/span>/)
     expect(await renderWarning(false)).not.toContain('vault-assessment-warning')
   })
 
