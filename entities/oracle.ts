@@ -75,6 +75,8 @@ export type OracleAdapterCheck = {
   severity: OracleAdapterCheckSeverity
   expected?: unknown
   observed?: unknown
+  /** A failure Euler accepted on this adapter: noted, counted as passed, never a warning. */
+  exempted?: boolean
 }
 
 export type OracleCheckQuoteContext = {

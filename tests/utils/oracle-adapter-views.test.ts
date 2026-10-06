@@ -157,6 +157,24 @@ describe('buildOracleAdapterView', () => {
     expect(view.checks).toHaveLength(2)
   })
 
+  it('counts an accepted failure as passed and keeps it out of the failed list', () => {
+    const meta: Record<string, OracleAdapterMeta> = {
+      [oracle.toLowerCase()]: assessed({
+        provider: 'Chainlink',
+        checksStatus: 'positive',
+        checks: [
+          { id: 'adapter-exists', message: 'ok', outcome: OracleAdapterCheckOutcome.Pass, severity: OracleAdapterCheckSeverity.High },
+          { id: 'quote-price-consistency', message: 'fixed rate by design', outcome: OracleAdapterCheckOutcome.Fail, severity: OracleAdapterCheckSeverity.High, exempted: true },
+          { id: 'quote-liveness', message: 'stale', outcome: OracleAdapterCheckOutcome.Fail, severity: OracleAdapterCheckSeverity.Medium },
+        ],
+      }),
+    }
+    const view = buildOracleAdapterView(adapterStep(), meta)
+
+    expect(view.passedChecks).toBe(2)
+    expect(view.failedChecks.map(check => check.id)).toEqual(['quote-liveness'])
+  })
+
   it('keeps the configured route separate from a proxy feed label', () => {
     const meta: Record<string, OracleAdapterMeta> = {
       [oracle.toLowerCase()]: assessed({
