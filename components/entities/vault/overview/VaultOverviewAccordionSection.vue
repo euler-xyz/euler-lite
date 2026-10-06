@@ -1,6 +1,7 @@
 <script setup lang="ts">
 const props = withDefaults(defineProps<{
   title: string
+  icon?: string
   defaultOpen?: boolean
   contentClass?: string
   hasActions?: boolean
@@ -74,6 +75,12 @@ onMounted(async () => {
         :aria-controls="panelId"
         :aria-label="`${isOpen ? 'Collapse' : 'Expand'} ${title}`"
         @click="toggle"
+      />
+      <SvgIcon
+        v-if="icon"
+        :name="icon"
+        class="pointer-events-none relative z-10 !w-24 !h-24 shrink-0 text-accent-600"
+        aria-hidden="true"
       />
       <span class="pointer-events-none relative z-10 min-w-0 flex-1 text-h3 text-content-primary transition-colors group-hover:text-accent-500">
         {{ title }}

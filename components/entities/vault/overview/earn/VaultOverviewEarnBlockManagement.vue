@@ -73,6 +73,7 @@ const timelockDisplay = computed(() => formatTimelock(vault.governance.timelock)
 <template>
   <VaultOverviewAccordionSection
     title="Governance"
+    icon="section-governance"
     :default-open="defaultOpen"
     content-class="flex flex-col items-start gap-24"
   >

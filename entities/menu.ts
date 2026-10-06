@@ -16,27 +16,27 @@ const allMenuItems: MenuItem[] = [
   {
     name: 'explore',
     label: 'Explore',
-    icon: 'nodes',
-    activeIcon: 'nodes',
+    icon: 'nav-explore',
+    activeIcon: 'nav-explore',
   },
   {
     name: 'earn',
     label: 'Earn',
-    icon: 'earn-outline',
-    activeIcon: 'earn-filled',
+    icon: 'nav-earn',
+    activeIcon: 'nav-earn',
   },
   {
     name: 'lend',
     label: 'Lend',
-    icon: 'lend-outline',
-    activeIcon: 'lend-filled',
+    icon: 'nav-lend',
+    activeIcon: 'nav-lend',
   },
   {
     name: 'borrow',
     label: 'Borrow',
     sublabel: 'Multiply',
-    icon: 'borrow-outline',
-    activeIcon: 'borrow-filled',
+    icon: 'nav-borrow',
+    activeIcon: 'nav-borrow',
   },
 ]
 

@@ -147,6 +147,7 @@ watchEffect(() => {
 <template>
   <VaultOverviewAccordionSection
     title="Overview"
+    icon="section-overview"
     :default-open="defaultOpen"
     content-class="flex flex-col gap-20"
   >

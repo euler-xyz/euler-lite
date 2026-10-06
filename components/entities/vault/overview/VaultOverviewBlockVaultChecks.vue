@@ -57,6 +57,7 @@ watch(
   <VaultOverviewAccordionSection
     v-if="canShow"
     title="Vault checks"
+    icon="section-vault-checks"
     :default-open="props.defaultOpen ?? false"
   >
     <div class="flex flex-col gap-12 rounded-xl border border-line-subtle bg-surface p-16 text-p3">

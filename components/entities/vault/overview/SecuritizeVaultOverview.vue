@@ -121,6 +121,7 @@ const supplyCapPercentageDisplay = computed(() => {
     <!-- Overview -->
     <VaultOverviewAccordionSection
       title="Overview"
+      icon="section-overview"
       :default-open="true"
       content-class="flex flex-col items-start gap-24"
     >
@@ -233,6 +234,7 @@ const supplyCapPercentageDisplay = computed(() => {
     <!-- Statistics -->
     <VaultOverviewAccordionSection
       title="Statistics"
+      icon="section-statistics"
       :default-open="true"
       content-class="flex flex-col items-start gap-24"
     >
