@@ -30,7 +30,7 @@ const rows = computed(() => {
     const entry = getVaultAssessmentEntry(vault.chainId, vault.address, vault.family ?? 'evk')
     if (entry.status !== 'available' || !entry.assessment?.assessed) return cause
     const checks = getVaultCheckWarningLines(entry.assessment)
-      .map(line => ({ key: `${vault.address}:${line.key}`, symbol, text: line.text, tone: line.outcome === 'unknown' ? 'muted' : tone }))
+      .map(line => ({ key: `${vault.address}:${line.key}`, symbol, text: line.text, tone: vault.unverified ? tone : line.outcome === 'unknown' ? 'muted' : tone }))
     return [...cause, ...checks]
   })
 })

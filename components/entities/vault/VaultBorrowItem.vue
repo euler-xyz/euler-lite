@@ -474,7 +474,6 @@ const linkPath = computed(() => ({
     <!-- Border separator (desktop only) -->
     <div class="col-span-full border-b border-line-subtle mobile:!hidden" />
 
-
     <!-- Body stats: contents on desktop (children become grid items), flex on mobile -->
     <div class="col-span-full flex items-start mobile:!hidden">
       <div
@@ -678,6 +677,7 @@ const linkPath = computed(() => ({
     </div>
     <VaultAssessmentWarningLines
       v-if="checksColumns.length"
+      class="col-span-full"
       :vaults="checksColumns"
       show-symbol
     />

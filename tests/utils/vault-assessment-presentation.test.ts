@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { VaultAssessment, VaultAssessmentFinding } from '@eulerxyz/euler-v2-sdk'
 import {
   getVaultChecksCell,
+  getVaultCheckFindingTone,
+  getVaultCheckWarningLines,
   getCriticalAssessmentWarning,
   getKnownUnlistedActionNotice,
   getUnverifiedActionCopy,
@@ -152,12 +154,39 @@ describe('vault checks presentation', () => {
     expect(getVaultCheckFindings(withoutAddress).lines[0]?.parts).toBeUndefined()
   })
 
+  it('lists every counted failure under the row, the adapter and evidence rules included, and names an undecided check by its cause', () => {
+    const lines = getVaultCheckWarningLines(assessment([
+      finding('oracle.adapters-recognized'),
+      finding('evidence.safe-threshold'),
+      finding('oracle.liability-quote', { outcome: 'unknown', required: true, cause: { code: 'adapters-pending', subject: 'vault', summary: 'Euler has not finished checking 4 adapters on the oracle routes.', remedy: null } }),
+      finding('liquidation.max-discount', { outcome: 'unknown' }),
+      finding('irm.max-apy', { exempted: true }),
+      finding('deployment.factory', { outcome: 'pass' }),
+    ]))
+    expect(lines.map(line => [line.key, line.outcome, line.text])).toEqual([
+      ['oracle.adapters-recognized', 'fail', 'V3 says oracle.adapters-recognized'],
+      ['evidence.safe-threshold', 'fail', 'V3 says evidence.safe-threshold'],
+      ['oracle.liability-quote', 'unknown', 'Euler has not finished checking 4 adapters on the oracle routes.'],
+    ])
+  })
+
+  it('colours a finding red only when it keeps the vault from being listed', () => {
+    expect(getVaultCheckFindingTone(finding('oracle.adapters-recognized', { outcome: 'unknown', required: true }))).toBe('error')
+    expect(getVaultCheckFindingTone(finding('oracle.liability-quote', { required: true }))).toBe('error')
+    expect(getVaultCheckFindingTone(finding('irm.max-apy'))).toBe('warning')
+    expect(getVaultCheckFindingTone(finding('liquidation.max-discount', { outcome: 'unknown' }))).toBe('warning')
+    expect(getVaultCheckFindingTone(finding('governance.timelock', { required: true, exempted: true }))).toBe('warning')
+    expect(getVaultCheckFindingTone(finding('deployment.factory', { outcome: 'pass' }))).toBe('pass')
+    expect(getVaultCheckFindingTone(finding('market.asset-present', { outcome: 'not_applicable' }))).toBe('muted')
+  })
+
   it('counts accepted exceptions as passed in the row cell and puts failures first', () => {
     const accepted = finding('liquidation.max-discount', { outcome: 'fail', required: false, exempted: true })
     const passed = finding('oracle.liability-quote', { outcome: 'pass' })
     expect(getVaultChecksCell(assessment([accepted, passed, finding('irm.max-apy', { outcome: 'pass' })]))).toEqual({ text: '3 passed', tone: 'positive' })
     expect(getVaultChecksCell(assessment([accepted, finding('oracle.liability-route')]))).toEqual({ text: '1 failed', tone: 'warning' })
     expect(getVaultChecksCell(assessment([finding('oracle.liability-route', { outcome: 'unknown' }), passed]))).toEqual({ text: '1 unknown', tone: 'muted' })
+    expect(getVaultChecksCell(assessment([finding('oracle.adapters-recognized', { outcome: 'unknown', required: true }), passed]))).toEqual({ text: '1 unknown', tone: 'warning' })
     expect(getVaultChecksCell(assessment([], { assessed: false }))).toEqual({ text: 'Not assessed', tone: 'muted' })
   })
 

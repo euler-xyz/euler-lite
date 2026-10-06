@@ -71,8 +71,11 @@ export const getVaultCheckCopyableParts = (text: string, finding: VaultAssessmen
   return parts
 }
 
+const isOpenFinding = (finding: VaultAssessmentFinding) =>
+  (finding.outcome === 'fail' || (finding.outcome === 'unknown' && finding.required)) && !finding.exempted
+
 const relevantFinding = (finding: VaultAssessmentFinding) =>
-  ((finding.outcome === 'fail' || (finding.outcome === 'unknown' && finding.required)) && !finding.exempted)
+  isOpenFinding(finding)
   && !finding.key.startsWith('evidence.')
   && !finding.key.startsWith('scheduled.')
   && finding.key !== 'oracle.adapters-recognized'
@@ -104,13 +107,13 @@ export const getVaultCheckFindings = (assessment: VaultAssessment): { lines: Vau
   return { lines: [...shown.values()], moreCount, reviewCount: shown.size + moreCount }
 }
 
-/** Every failing or undecided check as one line, the curated subset and the counted rules alike, for the warning lines under a row. */
+/** One line per check the row cell counts as failed or unknown; no rule is left out, or the count and the lines disagree. */
 export const getVaultCheckWarningLines = (assessment: VaultAssessment): VaultCheckLine[] => {
   const lines = new Map<string, VaultCheckLine>()
-  for (const finding of [...(assessment.configContext?.findings ?? []), ...(assessment.consistencyContext?.findings ?? [])].filter(relevantFinding)) {
+  for (const finding of [...(assessment.configContext?.findings ?? []), ...(assessment.consistencyContext?.findings ?? [])].filter(isOpenFinding)) {
     const key = groupKey(finding.key)
     if (lines.has(key) && !(lines.get(key)?.outcome === 'unknown' && finding.outcome === 'fail')) continue
-    const text = finding.outcome === 'unknown' ? 'Being re-checked' : finding.cause?.summary || finding.description
+    const text = finding.outcome === 'unknown' ? finding.cause?.summary || 'Being re-checked' : finding.cause?.summary || finding.description
     const parts = getVaultCheckCopyableParts(text, finding)
     lines.set(key, { key, text, outcome: finding.outcome as 'fail' | 'unknown', ...(parts ? { parts } : {}) })
   }
@@ -165,11 +168,23 @@ export type VaultChecksCell = { text: string, tone: 'positive' | 'warning' | 'mu
 /** The row cell: failures first, then unknowns, else every passing check with the accepted exceptions counted as passed. */
 export const getVaultChecksCell = (assessment: VaultAssessment): VaultChecksCell => {
   if (!assessment.assessed) return { text: 'Not assessed', tone: 'muted' }
-  const { counts } = getVaultAssessmentCheckDetails(assessment)
+  const { counts, findings } = getVaultAssessmentCheckDetails(assessment)
   if (counts.failed) return { text: `${counts.failed} failed`, tone: 'warning' }
-  if (counts.unknown) return { text: `${counts.unknown} unknown`, tone: 'muted' }
+  if (counts.unknown) {
+    const blocking = findings.some(finding => finding.outcome === 'unknown' && finding.required && !finding.exempted)
+    return { text: `${counts.unknown} unknown`, tone: blocking ? 'warning' : 'muted' }
+  }
   const passed = counts.passed + counts.accepted
   return passed ? { text: `${passed} passed`, tone: 'positive' } : { text: 'No findings', tone: 'muted' }
+}
+
+export type VaultCheckFindingTone = 'pass' | 'error' | 'warning' | 'muted'
+
+/** Red only for what keeps a vault from being listed: a required check that failed or is still undecided and has no accepted exception. */
+export const getVaultCheckFindingTone = (finding: VaultAssessmentFinding): VaultCheckFindingTone => {
+  if (finding.outcome === 'pass') return 'pass'
+  if (finding.outcome === 'not_applicable') return 'muted'
+  return finding.required && !finding.exempted ? 'error' : 'warning'
 }
 
 export const hasOnlyAcceptedVaultCheckFindings = (assessment: VaultAssessment): boolean => {

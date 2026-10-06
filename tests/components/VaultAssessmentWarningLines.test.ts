@@ -56,6 +56,15 @@ describe('vault assessment warning lines', () => {
     expect(html).not.toContain('data-tone="warning"')
   })
 
+  it('shows the undecided required check that keeps an unknown vault unlisted as an error, by its cause', async () => {
+    const html = await render({
+      [usdt]: assessmentWith([{ key: 'oracle.adapters-recognized', description: 'Some oracle route adapters have not been assessed yet', outcome: 'unknown', required: true, cause: { code: 'adapters-pending', subject: 'vault', summary: 'Euler has not finished checking 4 adapters on the oracle routes.', remedy: null } }]),
+    }, false, { unverified: true, cause: 'This vault is not listed in the published vault labels.' })
+    expect(html).toContain('Euler has not finished checking 4 adapters on the oracle routes.')
+    expect(html).toContain('data-tone="error"')
+    expect(html).not.toContain('data-tone="muted"')
+  })
+
   it('renders nothing when no vault has a failing check', async () => {
     const html = await render({ [usdt]: assessmentWith([{ key: 'oracle.liability-quote', description: 'ok', outcome: 'pass', required: true }]) }, false)
     expect(html).not.toContain('vault-assessment-warning-lines')

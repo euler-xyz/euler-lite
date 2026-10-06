@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { VaultAssessment, VaultAssessmentFinding } from '@eulerxyz/euler-v2-sdk'
-import { getVaultAssessmentCheckDetails, getVaultCheckCopyableParts } from '~/utils/vault-assessment/presentation'
+import { getVaultAssessmentCheckDetails, getVaultCheckCopyableParts, getVaultCheckFindingTone } from '~/utils/vault-assessment/presentation'
 import { getRelativeTimeBetweenDates } from '~/utils/time-utils'
 import { shortenAddress } from '~/utils/string-utils'
 
@@ -27,6 +27,12 @@ const titleFor = (finding: VaultAssessmentFinding) => {
     .replace(/\bevc\b/gi, 'EVC').replace(/\bevault\b/gi, 'EVault')
 }
 const addressFor = (finding: VaultAssessmentFinding) => finding.key.match(/0x[a-fA-F0-9]{40}/)?.[0]
+const iconFor = (finding: VaultAssessmentFinding) => {
+  const tone = getVaultCheckFindingTone(finding)
+  if (tone === 'pass') return 'check'
+  if (tone === 'muted') return 'info-circle'
+  return tone === 'error' && finding.outcome === 'fail' ? 'close' : 'warning'
+}
 const messageFor = (finding: VaultAssessmentFinding) => finding.cause?.summary || finding.description
 const messagePartsFor = (finding: VaultAssessmentFinding) =>
   getVaultCheckCopyableParts(messageFor(finding), finding) ?? [{ text: messageFor(finding), address: undefined }]
@@ -68,14 +74,15 @@ const copyAddress = (address: string) => {
         <span
           class="flex-shrink-0 w-20 h-20 rounded-full flex items-center justify-center mt-8"
           :class="{
-            'bg-success-500': finding.outcome === 'pass',
-            'bg-warning-500': finding.outcome === 'unknown' || (finding.outcome === 'fail' && (finding.exempted || !finding.required)),
-            'bg-error-500': finding.outcome === 'fail' && finding.required && !finding.exempted,
-            'bg-content-muted': finding.outcome === 'not_applicable',
+            'bg-success-500': getVaultCheckFindingTone(finding) === 'pass',
+            'bg-warning-500': getVaultCheckFindingTone(finding) === 'warning',
+            'bg-error-500': getVaultCheckFindingTone(finding) === 'error',
+            'bg-content-muted': getVaultCheckFindingTone(finding) === 'muted',
           }"
+          :data-tone="getVaultCheckFindingTone(finding)"
         >
           <SvgIcon
-            :name="finding.outcome === 'pass' ? 'check' : finding.outcome === 'fail' && finding.required && !finding.exempted ? 'close' : finding.outcome === 'fail' || finding.outcome === 'unknown' ? 'warning' : 'info-circle'"
+            :name="iconFor(finding)"
             class="!w-10 !h-10 text-white"
           />
         </span>

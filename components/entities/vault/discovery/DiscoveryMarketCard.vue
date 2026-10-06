@@ -228,7 +228,7 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
               :data-warning-count="marketWarnings.length"
               @click.stop
             >
-              {{ marketWarnings.length }} {{ marketWarnings.length === 1 ? 'vault with a warning' : 'vaults with warnings' }}
+              {{ marketWarnings.length }} {{ marketWarnings.length === 1 ? 'warning' : 'warnings' }}
             </span>
           </UiHoverPreviewTooltip>
           <UiHoverPreviewTooltip
