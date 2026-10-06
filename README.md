@@ -101,6 +101,8 @@ These settings use `NUXT_PUBLIC_CONFIG_*` env vars. Branding and announcement va
 | `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL`       | —                                          | Explicit URL for EulerChains.json; takes precedence over the Euler interfaces branch |
 | `NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL` | — | Base URL serving `{contract}.json` for runtime ABIs; takes precedence over the Euler interfaces branch. |
 | `NUXT_PUBLIC_CONFIG_DOCS_URL`               | —                                          | Documentation link                                    |
+| `NUXT_PUBLIC_CONFIG_TOOLBOX_URL`            | —                                          | Toolbox link                                          |
+| `NUXT_PUBLIC_CONFIG_RISK_ANALYTICS_URL`     | —                                          | Risk & Analytics link                                 |
 | `NUXT_PUBLIC_CONFIG_STARGATE_URL`           | —                                          | Stargate link                                         |
 | `NUXT_PUBLIC_CONFIG_TOS_URL`                | —                                          | Terms of Service link                                 |
 | `NUXT_PUBLIC_CONFIG_TOS_MD_URL`             | —                                          | TOS markdown URL (enables TOS signing when set)       |

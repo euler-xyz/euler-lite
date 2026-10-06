@@ -142,7 +142,7 @@ The Earn Governance block shows on-chain owner, curator, guardian, timelock, pen
 | **Securitize vaults** | Address appears in `verifiedVaultAddresses` from labels |
 | **Unknown vaults** | Resolved via subgraph; verified only if in labels |
 
-Registry presence is not Earn verification. `updateEarnVaults` / `refreshVaults` builds `verified` as `curatedAddresses.has(vault.address)` from `useEulerLabels().earnVaults`. On-demand unlisted Earn vaults stay unverified after a refresh that still fetches them. Removing an address from `earn-vaults.json` clears stale verification on the next Earn update — do not copy the prior `verified: true`. Server snapshot hydration can mark snapshot Earn rows verified because that snapshot only includes labeled earn addresses.
+Registry presence is not Earn verification. `updateEarnVaults` / `refreshVaults` builds `verified` as `curatedAddresses.has(vault.address)` from `useEulerLabels().earnVaults`. On-demand unlisted Earn vaults stay unverified after a refresh that still fetches them. When an address is absent from the selected labels snapshot, the next Earn update clears its prior verification rather than copying `verified: true`. Server snapshot hydration can mark snapshot Earn rows verified because that snapshot only includes labeled earn addresses.
 
 ### On-Chain Perspectives
 
@@ -193,6 +193,40 @@ The selected SDK adapter supplies the flag: V3 first with on-chain fallback for 
 For per-address lookups during direct navigation to a not-yet-cached vault, `fetchVaultCategory(address)` checks the SDK escrow verified array first, then asks `vaultMetaService.fetchVaultType` for the vault type.
 
 **Important: labels remain authoritative for which vaults are _shown_.** SDK categorization says "what category each vault is"; normalized Public Labels products and earn-vault entries say "which vaults to include in lists". The two are composed in `useVaults.loadVaults`: labels select the set, categorization picks the right lens per address.
+
+## Cyclical IRM overview
+
+The cyclical Interest Rate Model block is **label-gated**, not IRM-type-gated.
+
+`isVaultCyclicalNote(address)` in `utils/eulerLabelsUtils.ts` is true when the product `tags` or that vault's `vaultOverrides.tags` include `cyclical note`. That helper is what `VaultOverview.vue` uses to swap `VaultOverviewBlockCyclicalIRM` in for the generic IRM block. The same tag participates in these UI gates:
+
+| Surface | Gate |
+|---|---|
+| Overview IRM block | `isVaultCyclicalNote(vault.address)` |
+| `cyclicalNote` type badge | verified **and** the tag |
+| Lend list "cyclical note" badge | the tag and verified vault governance |
+| Borrow list "cyclical note" badge | the borrow vault's tag and verified governance for both vaults in the pair |
+| Discovery graph "cyclical note" badge | the tag, subject to the graph's badge priority |
+| Target-utilisation info warning (`useVaultWarnings`) | the tag, at least 95% utilisation, and a context other than `repay`; repay keeps its standard high/critical warning |
+
+`isCyclicalNoteVault` in `utils/vault/classification.ts` is a different helper: it only inspects `vault.interestRateModel.type` (`FIXED_CYCLICAL_BINARY` = 4 or `FIXED_CYCLICAL_BINARY_MONTHLY` = 5). A vault can have a cyclical IRM on-chain and still render the generic IRM block if the label tag is absent. Do not treat the type number as permission to show cyclical-note UI.
+
+Inside `VaultOverviewBlockCyclicalIRM.vue` the block still hides itself unless the vault has collateral exposure (`hasCollateralExposure`) and a non-zero IRM address. Both IRM variants are then normalised into one `{ primaryRate, secondaryRate, startSec, primaryDurationSec, secondaryDurationSec }` cycle:
+
+| `interestRateModel.type` | Cycle bounds | Date display |
+|---|---|---|
+| `FIXED_CYCLICAL_BINARY` | `startTimestamp` plus `primaryDuration` / `secondaryDuration` | Local timezone |
+| `FIXED_CYCLICAL_BINARY_MONTHLY` | UTC calendar month; `cycleStartDay` must be `1n…31n` or the cycle is `null` | UTC |
+
+The monthly variant clamps a start day past a short month to that month's last day (`Math.min(startDay, daysInMonth)`) so `Date.UTC` cannot roll 31 February into March. That matches the contract.
+
+The live "Now" marker and elapsed-cycle math use:
+
+```ts
+const now = useNow({ scheduler: cb => useIntervalFn(cb, 1_000) })
+```
+
+The custom scheduler updates the clock once per second; VueUse 15's bare `useNow()` is valid and defaults to animation-frame updates. Borrow APYs on the block convert the IRM's 27-decimal per-second rate (`SPY`) with `(1 + spy)^(secondsInYear) - 1`.
 
 ## Discovery Page Filtering
 

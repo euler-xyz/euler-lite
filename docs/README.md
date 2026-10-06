@@ -17,10 +17,12 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Component architecture
 - Data flow patterns
 - Technology decisions
+- Shareable Explore / Lend / Borrow / Earn query parameters and curator aliases
 
 ### 🚀 [Development Guide](./development-guide.md)
 
 - Development workflow
+- Shareable listing-filter URLs (`?curator=` plus legacy `riskManager` / Earn `allocator`)
 
 ### 💰 [Pricing System](./pricing-system.md)
 
@@ -53,6 +55,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Earn refresh re-derives `verified` from current `earn-vaults.json` (unlisted/delisted vaults are not promoted)
 - SDK 2.0 governance hydration guard (`hasResolvedGovernorAdmin`)
 - Oracle provider logos from the V3 managed-image namespace (not `V3_API_URL`)
+- `cyclical note` is the UI gate for the cyclical IRM overview (on-chain IRM type alone is not enough)
 - Shared Oracles-block / Explore-matrix adapter display is covered in [Oracle Adapter Display](./oracle-adapter-display.md)
 
 ### 🧿 [Oracle Adapter Display](./oracle-adapter-display.md)
@@ -68,6 +71,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Gasless-signature preference (`useSignaturePreference`), Safe forced-off override, and sequential vs atomic Safe migration authorization paths
 - Sub-accounts and position isolation
 - Simulation performance tuning, batch-cart slot-hint / account prefetch, and plugin-layer mapping
+- Raw plugin-plan snapshot before in-place approval resolution; cart `expectedIntentPlans` reject preview drift; typed prepare errors stay verbatim in the modal
 - [User-facing review compatibility](./transaction-building.md#user-facing-review-compatibility): exhaustive internal reviewed executions remain separate from the unchanged handcrafted review
 - Add-time `captureSwapReview` keeps Swap row amounts when the live quote resets; batch close discards cached preparation so reopen reprepares
 - Spy-mode review uses `prepareReadOnly` and a synthetic approval-only wallet binding; confirm stays disabled
@@ -94,7 +98,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 
 - V3-backed vault and portfolio activity surfaces
 - Availability gating, category defaults, and display event-type allowlists
-- Liquidation enrichment, transaction grouping, and proxy allowlist constraints
+- Liquidation enrichment (USD and native conversion are independent), transaction grouping, and proxy allowlist constraints
 
 ### 🧩 [SDK Integration](./sdk-integration.md)
 
@@ -111,6 +115,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Vault snapshot pipeline (`/api/internal/vaults`) with two-pass client hydration
 - V3 proxy allowlist, rate limits, failure backoff, and troubleshooting
 - V3-conditional warm-cache cadence (1-min vaults timer with V3, 5-min without)
+- Server provider overrides: Sonic Multicall byte cap vs SDK `fetchVaults` chunking
 - Bigint wire codec and adversary-safe wrapper tag
 
 ### 🔮 [Pyth Oracle Handling](./pyth-oracle-handling.md)
