@@ -27,12 +27,6 @@ const isShownRule = (key: string, finding: VaultAssessmentFinding): boolean => {
   return false
 }
 
-const isCountedRule = (key: string): boolean =>
-  /^(deployment|configuration)\./.test(key)
-  || /^market\..+-present$/.test(key)
-  || ['oracle.recognized-router', 'oracle.no-fallback', 'governance.router', 'irm.rate-computation', 'liquidation.cool-off'].includes(key)
-  || /^collateral\.[^.]+\.recognized$/.test(key)
-
 const groupKey = (key: string) => key.replace(/^collateral\.[^.]+\./, 'collateral.*.')
 const ADDRESS_IN_TEXT = /0x[a-fA-F0-9]{40}|0x[a-fA-F0-9]{4,}(?:…|\.{3})[a-fA-F0-9]{4,}/g
 const ADDRESS_IN_KEY = /0x[a-fA-F0-9]{40}/g
@@ -68,11 +62,7 @@ export const getVaultCheckCopyableParts = (text: string, finding: VaultAssessmen
 const isOpenFinding = (finding: VaultAssessmentFinding) =>
   (finding.outcome === 'fail' || (finding.outcome === 'unknown' && finding.required)) && !finding.exempted
 
-const relevantFinding = (finding: VaultAssessmentFinding) =>
-  isOpenFinding(finding)
-  && !finding.key.startsWith('evidence.')
-  && !finding.key.startsWith('scheduled.')
-  && finding.key !== 'oracle.adapters-recognized'
+const relevantFinding = isOpenFinding
 
 export const getVaultCheckFindings = (assessment: VaultAssessment): { lines: VaultCheckLine[], moreCount: number, reviewCount: number } => {
   const all = [
@@ -95,7 +85,7 @@ export const getVaultCheckFindings = (assessment: VaultAssessment): { lines: Vau
         })
       }
     }
-    else if (isCountedRule(finding.key)) counted.add(groupKey(finding.key))
+    else counted.add(groupKey(finding.key))
   }
   const moreCount = counted.size
   return { lines: [...shown.values()], moreCount, reviewCount: shown.size + moreCount }

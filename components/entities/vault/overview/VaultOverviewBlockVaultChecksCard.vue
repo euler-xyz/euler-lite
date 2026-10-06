@@ -2,7 +2,7 @@
 import type { VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
 import {
   getUpcomingVaultChanges,
-  getVaultCheckFindings,
+  getVaultCheckWarningLines,
   getVaultChecksCell,
   getVaultChecksStatusLine,
 } from '~/utils/vault-assessment/presentation'
@@ -25,11 +25,8 @@ const entry = computed(() => {
   return chainId.value ? getVaultAssessmentEntry(chainId.value, props.address, family.value) : { status: 'idle' as const }
 })
 const assessment = computed(() => entry.value.assessment)
-const findingView = computed(() => assessment.value ? getVaultCheckFindings(assessment.value) : null)
+const lines = computed(() => assessment.value ? getVaultCheckWarningLines(assessment.value) : [])
 const upcoming = computed(() => assessment.value ? getUpcomingVaultChanges(assessment.value, props.asset) : [])
-const hasOracleAdapterFinding = computed(() => !!assessment.value?.configContext?.findings.some(
-  finding => finding.key === 'oracle.adapters-recognized' && finding.outcome === 'fail' && !finding.exempted,
-))
 const statusLine = computed(() => getVaultChecksStatusLine(assessment.value, entry.value.status, nowMs.value))
 const hasFindings = computed(() => !!assessment.value?.assessed
   && !!(assessment.value.configContext?.findings?.length || assessment.value.consistencyContext?.findings?.length))
@@ -119,11 +116,11 @@ watch(
       </div>
     </div>
     <ul
-      v-if="findingView?.lines.length"
+      v-if="lines.length"
       class="flex flex-col gap-8"
     >
       <li
-        v-for="finding in findingView.lines"
+        v-for="finding in lines"
         :key="finding.key"
         class="flex gap-8"
         :class="finding.outcome === 'fail' ? 'text-warning-500' : 'text-content-tertiary'"
@@ -159,18 +156,6 @@ watch(
         </span>
       </li>
     </ul>
-    <p
-      v-if="findingView?.moreCount"
-      class="text-content-tertiary"
-    >
-      {{ findingView.moreCount }} more not shown
-    </p>
-    <p
-      v-if="hasOracleAdapterFinding && !findingView?.lines.length && !findingView?.moreCount"
-      class="text-content-tertiary"
-    >
-      Oracle adapter details are shown in Oracles.
-    </p>
     <div
       v-if="upcoming.length"
       class="flex flex-col gap-8"

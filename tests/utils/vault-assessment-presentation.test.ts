@@ -60,7 +60,7 @@ describe('vault checks presentation', () => {
     ])
   })
 
-  it('shows the selected failure classes with V3 sentences and counts other gating rules', () => {
+  it('shows the selected failure classes with V3 sentences and counts every other open finding', () => {
     const view = getVaultCheckFindings(assessment([
       finding('oracle.liability-quote'),
       finding('collateral.0x01.ltv'),
@@ -76,8 +76,8 @@ describe('vault checks presentation', () => {
       'V3 says oracle.liability-quote',
       'V3 says collateral.0x01.ltv',
     ])
-    expect(view.moreCount).toBe(2)
-    expect(view.reviewCount).toBe(4)
+    expect(view.moreCount).toBe(4)
+    expect(view.reviewCount).toBe(6)
   })
 
   it.each([
