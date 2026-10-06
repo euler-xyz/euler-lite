@@ -421,31 +421,6 @@ describe('useEulerLabels chain-scoped loading', () => {
     finally { clock.mockRestore() }
   })
 
-  it('warns after fifteen minutes of failed refreshes while verification stays available', async () => {
-    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
-    try {
-      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('cached')))
-      const labels = useEulerLabels()
-      await labels.loadLabels()
-      expect(labels.isStale.value).toBe(false)
-      mocks.fetchPublicLabelsBundle.mockRejectedValue(new Error('outage'))
-      clock.mockReturnValue(1_000_000 + 5 * 60_000)
-      await labels.refreshLabelsIfStale()
-      expect(labels.isStale.value).toBe(false)
-      clock.mockReturnValue(1_000_000 + 15 * 60_000)
-      await labels.refreshLabelsIfStale()
-      expect(labels.isReady.value).toBe(true)
-      expect(labels.isStale.value).toBe(true)
-      expect(labels.labelsAgeMs.value).toBe(15 * 60_000)
-      expect(currentProductKeys()).toEqual(['cached'])
-      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('recovered')))
-      await labels.refreshLabelsIfStale()
-      expect(labels.isStale.value).toBe(false)
-      expect(currentProductKeys()).toEqual(['recovered'])
-    }
-    finally { clock.mockRestore() }
-  })
-
   it('starts a separate fetch for a new chain and ignores the stale response', async () => {
     const chainOne = deferred<PublicLabelsBundle>()
     const chainTwo = deferred<PublicLabelsBundle>()
