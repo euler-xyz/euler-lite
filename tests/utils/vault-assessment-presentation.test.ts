@@ -3,6 +3,7 @@ import type { VaultAssessment, VaultAssessmentFinding } from '@eulerxyz/euler-v2
 import {
   getVaultChecksCell,
   getVaultCheckFindingTone,
+  getUnknownVaultCause,
   getVaultCheckWarningLines,
   getCriticalAssessmentWarning,
   getKnownUnlistedActionNotice,
@@ -161,6 +162,14 @@ describe('vault checks presentation', () => {
       ['evidence.safe-threshold', 'fail', 'V3 says evidence.safe-threshold'],
       ['oracle.liability-quote', 'unknown', 'Euler has not finished checking 4 adapters on the oracle routes.'],
     ])
+  })
+
+  it('names why an unknown vault is unknown without calling a labelled vault unlisted', () => {
+    expect(getUnknownVaultCause(undefined)).toBe('This vault is not listed in the published vault labels.')
+    expect(getUnknownVaultCause({ status: 'hidden', reason: 'Deprecated due to low activity.', decidedBy: 'deprecated' })).toBe('This vault is not listed: Deprecated due to low activity.')
+    expect(getUnknownVaultCause({ status: 'pending_review', decidedBy: 'unclaimed' })).toBe('This vault is not listed in the published vault labels.')
+    expect(getUnknownVaultCause({ status: 'pending_review', decidedBy: 'checks' })).toBe('This vault has not been checked yet, so it is not listed.')
+    expect(getUnknownVaultCause({ status: 'warning', reason: 'Deprecated due to low activity.', decidedBy: 'deprecated' })).toBe('This vault is in the published vault labels but could not be verified.')
   })
 
   it('colours a finding red only when it keeps the vault from being listed', () => {

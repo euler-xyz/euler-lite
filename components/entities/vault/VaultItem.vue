@@ -14,7 +14,7 @@ import { VaultApyModal, UiModalPreviewTrigger } from '#components'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
 import { resolveVaultExposureDisplay, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
-import { getCriticalAssessmentWarning, getNotListedLine } from '~/utils/vault-assessment/presentation'
+import { getCriticalAssessmentWarning, getUnknownVaultCause } from '~/utils/vault-assessment/presentation'
 import { zeroAddress } from 'viem'
 
 const { isConnected } = useWagmi()
@@ -114,8 +114,7 @@ const { vaultAssessments, getVaultAssessmentEntry, loadVaultAssessment, visibili
 const showChecksColumn = computed(() => assessmentUi === 'field' && source.value === 'v3' && isReady.value && isVaultAssessmentAvailableForChain(vault.chainId))
 const unknownCause = computed(() => {
   if (!isUnverified.value) return null
-  const verdict = visibility.value?.[vault.address.toLowerCase()]
-  return getNotListedLine(verdict?.status, verdict?.reason, verdict?.decidedBy) ?? 'This vault is not listed in the published vault labels.'
+  return getUnknownVaultCause(visibility.value?.[vault.address.toLowerCase()])
 })
 const statsGridCols = computed(() => {
   const cols: string[] = []

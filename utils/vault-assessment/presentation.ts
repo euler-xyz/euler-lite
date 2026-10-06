@@ -279,6 +279,14 @@ export const getNotListedLine = (status: string | undefined, reason?: string | n
   return null
 }
 
+/** The line under an unknown vault's row. A row that exists in the labels is never called "not listed". */
+export const getUnknownVaultCause = (verdict: { status: string, reason?: string | null, decidedBy?: string | null } | undefined): string => {
+  const line = getNotListedLine(verdict?.status, verdict?.reason, verdict?.decidedBy)
+  if (line) return line
+  if (verdict) return 'This vault is in the published vault labels but could not be verified.'
+  return 'This vault is not listed in the published vault labels.'
+}
+
 export const getKnownUnlistedActionNotice = (
   addresses: readonly string[],
   source: string | undefined,
