@@ -12,6 +12,7 @@ import { isOracleAdapterRouteStep } from '~/utils/oracle-route-steps'
 import { buildOracleAdapterViews, collectOracleRouteSteps, type OracleAdapterView } from '~/utils/oracle-adapter-views'
 import { OracleAdapterChecksModal } from '#components'
 import { oracleAdapterAnchor } from '~/utils/vault-assessment/presentation'
+import { registerOracleAdapterAnchors } from '~/composables/useOracleAdapterAnchors'
 
 const props = defineProps<{
   vault?: EVault
@@ -99,6 +100,9 @@ const routerRecognition = computed(() => {
 })
 
 const resolveSymbol = (address: string) => resolveTokenSymbol(address, knownSymbols.value)
+registerOracleAdapterAnchors(computed(() => oracleAssessmentsStatus.value === 'available'
+  ? adapterViews.value.map(adapter => oracleAdapterAnchor(adapter.oracle))
+  : []))
 const route = useRoute()
 const section = ref<{ setOpen: (open: boolean) => void } | null>(null)
 const revealTargetAdapter = async () => {

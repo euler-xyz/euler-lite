@@ -10,6 +10,7 @@ import {
 import { getExplorerLink } from '~/utils/block-explorer'
 import { shortenAddress } from '~/utils/string-utils'
 import { VaultAssessmentChecksModal } from '#components'
+import { useOracleAdapterAnchors } from '~/composables/useOracleAdapterAnchors'
 
 const props = defineProps<{
   address: string
@@ -45,6 +46,7 @@ const hasFindings = computed(() => !!assessment.value?.assessed
   && !!(assessment.value.configContext?.findings?.length || assessment.value.consistencyContext?.findings?.length))
 const cell = computed(() => assessment.value?.assessed ? getVaultChecksCell(assessment.value) : null)
 const toneClass = { positive: 'bg-success-500', warning: 'bg-warning-500', muted: 'bg-content-muted' } as const
+const { hasAnchor } = useOracleAdapterAnchors()
 const { isCopied, copyToClipboard } = useClipboardCopy()
 const copyAddress = (address: string) => {
   copyToClipboard(address).catch(() => {})
@@ -167,7 +169,7 @@ watch(
           </template>
           <template v-else>{{ finding.text }}</template>
           <NuxtLink
-            v-if="finding.anchor"
+            v-if="finding.anchor && hasAnchor(finding.anchor)"
             :to="{ hash: `#${finding.anchor}` }"
             class="ml-6 whitespace-nowrap text-accent-600 underline decoration-dotted hover:text-accent-500"
           >Show in Oracles</NuxtLink>
