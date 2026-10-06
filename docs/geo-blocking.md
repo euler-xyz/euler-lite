@@ -105,11 +105,13 @@ Sanctions remain in `SANCTIONED_COUNTRIES`, enforced independently at the server
 
 ## Availability and durable fallback
 
-`server/utils/geo-policy-source.ts` refreshes the full live collection every five minutes, deduplicates concurrent reads, and writes an atomic, upstream-specific checkpoint containing `policies` and `fetchedAt`. A failed or malformed fetch retains last-known-good policies without an age limit and logs their age. A successful empty collection clears previous rules. Partial pagination never replaces the checkpoint.
+`server/utils/geo-policy-source.ts` refreshes the full live collection every five minutes, deduplicates concurrent reads, and writes an atomic, upstream-specific checkpoint containing `policies` and `fetchedAt`. A failed or malformed fetch can reuse last-known-good policies for up to 24 hours and logs their age. After that, the labels response fails until geo rules refresh. A successful empty collection clears previous rules. Partial pagination never replaces the checkpoint.
 
 Set `GEO_POLICY_CACHE_DIR` to a mounted persistent directory to survive container replacement. The default `.data/geo-policies` survives process restarts on the same filesystem. Failed checkpoint writes are logged; current validated live rules remain in use, but that write is not durable. Log monitoring must alert on stale-policy age and checkpoint failures; this code does not provision production alerting.
 
 A cold start with no valid policy snapshot fails the entire labels response. The client distinguishes unavailable policies from an authored empty collection. `useOperationGuard` registers “Compliance data unavailable. Please retry.” for acquisition forms, including direct wallet deposits. Repay and withdrawal forms opt out of this availability blocker. Simple withdrawals/redemptions and repayment without swaps can acknowledge unverified-vault risk when labels are unavailable, in both the form and final reviewed-execution policy. Missing/wrong-chain vault metadata still blocks; swaps, borrowing and mixed acquisition batches still require labels. Country, sanctions and operation-specific checks still apply. Soft restriction helpers also deny acquisition while policies are unavailable, including wrap exemptions.
+
+The browser tracks geo-rule and labels timestamps separately. Hosted geo rules become unavailable 24 hours after their own fetch even when labels were refreshed more recently or remain usable after a failed refresh. The acquisition blocker and restriction helpers react to geo expiry; the simple-exit exceptions above still apply. Static label deployments use their authored-file geo rules.
 
 ## Helper functions
 

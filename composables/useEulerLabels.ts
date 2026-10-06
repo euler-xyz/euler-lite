@@ -21,7 +21,7 @@ import { useEulerVaultAssessments } from '~/composables/useEulerVaultAssessments
 import { erc4626AssetAbi } from '~/abis/erc4626'
 import { buildBatchItem, evcBatchCall } from '~/utils/multicall'
 import { normalizeAddress } from '~/utils/normalizeAddress'
-import { LABELS_MAX_STALE_MS, LABELS_REFRESH_INTERVAL_MS } from '~/utils/labels-freshness'
+import { isLabelsSnapshotUsable, LABELS_MAX_STALE_MS, LABELS_REFRESH_INTERVAL_MS } from '~/utils/labels-freshness'
 import {
   normalizeLabelsBundle,
   getLabelVaultCandidates,
@@ -53,12 +53,14 @@ const createEmptyEulerLabelsData = (): PublicEulerLabelsData => ({
 const labelsData = shallowRef<PublicEulerLabelsData>(createEmptyEulerLabelsData())
 const labelsChainId = ref<number | null>(null)
 const labelsVersion = ref(0)
+const geoExpiryVersion = ref(0)
 const isLoading = ref(false)
 const isReady = ref(false)
 const loadError = ref<string | undefined>()
 let lastSuccessfulLoadAt = 0
 let hasSuccessfulSnapshot = false
 let labelsExpiryTimer: ReturnType<typeof setTimeout> | undefined
+let geoExpiryTimer: ReturnType<typeof setTimeout> | undefined
 type LabelsFetch = { data: PublicEulerLabelsData, sourceFetchedAt: number }
 const pendingLabelsFetches = new Map<number, Promise<LabelsFetch>>()
 let labelsLoadGeneration = 0
@@ -69,6 +71,14 @@ const setLabelsData = (data: PublicEulerLabelsData, chainId: number | null) => {
   labelsData.value = data
   labelsChainId.value = chainId
   labelsVersion.value += 1
+  clearTimeout(geoExpiryTimer)
+  geoExpiryTimer = undefined
+  if ((data.source === 'v3' || data.source === 'v3-metadata') && isLabelsSnapshotUsable(data.geoFetchedAt)) {
+    geoExpiryTimer = setTimeout(() => {
+      geoExpiryVersion.value += 1
+      geoExpiryTimer = undefined
+    }, data.geoFetchedAt! + LABELS_MAX_STALE_MS - Date.now())
+  }
 }
 
 const scheduleLabelsExpiry = () => {
@@ -89,7 +99,17 @@ export const getCurrentEulerLabelsData = (): EulerLabelsData => labelsData.value
 
 export const getEulerLabelsSourceData = () => labelsData.value
 
-export const getEulerGeoContext = () => labelsData.value.geoContext
+export const getEulerGeoContext = () => {
+  void geoExpiryVersion.value
+  const data = labelsData.value
+  if (data.source !== 'v3' && data.source !== 'v3-metadata') return data.geoContext
+  if (data.geoContext && isLabelsSnapshotUsable(data.geoFetchedAt)) return data.geoContext
+  return {
+    chainId: data.geoContext?.chainId ?? null,
+    policies: undefined,
+    productByVault: data.geoContext?.productByVault ?? {},
+  }
+}
 
 export const getEulerLabelsVersion = (): number => labelsVersion.value
 

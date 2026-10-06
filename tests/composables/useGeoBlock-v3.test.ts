@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PublicGeoPolicy } from '@eulerxyz/euler-v2-sdk/public-labels'
-import { __setEulerLabelsDataForTest } from '~/composables/useEulerLabels'
+import { __setEulerLabelsDataForTest, getEulerLabelsSourceData, getEulerGeoContext } from '~/composables/useEulerLabels'
 import { isAssetBlockedByCountry, isAssetRestrictedByCountry, isVaultBlockedByCountry, isVaultRestrictedByCountry, useGeoBlock } from '~/composables/useGeoBlock'
+import { normalizeLabelsBundle } from '~/utils/public-labels'
+import { publicLabelsFixture } from '~/tests/fixtures/public-labels-v20260804151305236'
 
 vi.mock('~/composables/useVaultRegistry', () => ({ useVaultRegistry: () => ({ getVault: () => undefined }) }))
 const vault = '0x1111111111111111111111111111111111111111'
@@ -57,5 +59,41 @@ describe('V3 geo enforcement', () => {
     expect(isVaultRestrictedByCountry(vault, { asset, counterpart: asset })).toBe(false)
     set([rule({ policyType: 'restrict', chainId: 1, productId: 'current' })])
     expect(isVaultRestrictedByCountry(vault, { asset, counterpart: asset })).toBe(true)
+  })
+
+  it('expires geo rules independently after a more recent labels refresh', async () => {
+    vi.useFakeTimers()
+    try {
+      const t0 = 1_000_000
+      vi.setSystemTime(t0)
+      const publicLabels = { ...publicLabelsFixture, geoPolicies: [] }
+      const setHosted = (sourceFetchedAt: number) => __setEulerLabelsDataForTest(normalizeLabelsBundle(1, {
+        source: 'v3', version: 'test', publicLabels, sourceFetchedAt, geoFetchedAt: t0,
+      }))
+
+      setHosted(t0)
+      useGeoBlock().country.value = 'FR'
+      const { isPolicyAvailable } = useGeoBlock()
+      expect(isPolicyAvailable.value).toBe(true)
+      expect(isVaultRestrictedByCountry(vault, { asset })).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(23 * 60 * 60_000)
+      setHosted(Date.now())
+      expect(getEulerLabelsSourceData().sourceFetchedAt).toBe(t0 + 23 * 60 * 60_000)
+      expect(getEulerLabelsSourceData().geoFetchedAt).toBe(t0)
+      expect(isPolicyAvailable.value).toBe(true)
+
+      await vi.advanceTimersByTimeAsync(2 * 60 * 60_000)
+      expect(isPolicyAvailable.value).toBe(false)
+      expect(getEulerGeoContext()?.policies).toBeUndefined()
+      expect(isAssetBlockedByCountry(asset)).toBe(true)
+      expect(isAssetRestrictedByCountry(asset, { counterpart: asset })).toBe(true)
+      expect(isVaultRestrictedByCountry(vault, { asset, counterpart: asset })).toBe(true)
+      expect(isVaultBlockedByCountry(vault, { asset })).toBe(false)
+    }
+    finally {
+      __setEulerLabelsDataForTest()
+      vi.useRealTimers()
+    }
   })
 })

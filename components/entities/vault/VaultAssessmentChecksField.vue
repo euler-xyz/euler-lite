@@ -29,7 +29,8 @@ const tones = {
 } as const
 const status = computed(() => {
   if (entry.value.status === 'unavailable') return { text: 'Unavailable', ...tones.muted }
-  if (entry.value.status !== 'available' || !entry.value.assessment) return { text: 'Checking…', ...tones.muted }
+  if (entry.value.status !== 'available') return { text: 'Checking…', ...tones.muted }
+  if (!entry.value.assessment) return { text: 'Not assessed', ...tones.muted }
   const cell = getVaultChecksCell(entry.value.assessment)
   const tone = cell.tone === 'warning' && props.errorTone ? 'error' : cell.tone
   return { text: cell.text, ...tones[tone] }
