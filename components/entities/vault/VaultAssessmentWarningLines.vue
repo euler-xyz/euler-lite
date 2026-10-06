@@ -2,7 +2,15 @@
 import type { VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
 import { getVaultCheckWarningLines } from '~/utils/vault-assessment/presentation'
 
-export type VaultAssessmentWarningTarget = { address: string, chainId: number, family?: VaultAssessmentFamily, symbol?: string }
+export type VaultAssessmentWarningTarget = {
+  address: string
+  chainId: number
+  family?: VaultAssessmentFamily
+  symbol?: string
+  /** Unknown to the app: the cause comes first and every failing check is an error. */
+  unverified?: boolean
+  cause?: string | null
+}
 
 const props = withDefaults(defineProps<{
   vaults: VaultAssessmentWarningTarget[]
@@ -16,10 +24,14 @@ const rows = computed(() => {
   if (!isReady.value || source.value !== 'v3') return []
   return props.vaults.flatMap((vault) => {
     if (!isVaultAssessmentAvailableForChain(vault.chainId)) return []
-    const entry = getVaultAssessmentEntry(vault.chainId, vault.address, vault.family ?? 'evk')
-    if (entry.status !== 'available' || !entry.assessment?.assessed) return []
     const symbol = props.showSymbol ? vault.symbol : undefined
-    return getVaultCheckWarningLines(entry.assessment).map(line => ({ key: `${vault.address}:${line.key}`, symbol, text: line.text, muted: line.outcome === 'unknown' }))
+    const tone = vault.unverified ? 'error' : 'warning'
+    const cause = vault.unverified && vault.cause ? [{ key: `${vault.address}:cause`, symbol, text: vault.cause, tone }] : []
+    const entry = getVaultAssessmentEntry(vault.chainId, vault.address, vault.family ?? 'evk')
+    if (entry.status !== 'available' || !entry.assessment?.assessed) return cause
+    const checks = getVaultCheckWarningLines(entry.assessment)
+      .map(line => ({ key: `${vault.address}:${line.key}`, symbol, text: line.text, tone: line.outcome === 'unknown' ? 'muted' : tone }))
+    return [...cause, ...checks]
   })
 })
 </script>
@@ -34,10 +46,11 @@ const rows = computed(() => {
       v-for="row in rows"
       :key="row.key"
       class="flex items-start gap-8"
-      :class="row.muted ? 'text-content-tertiary' : 'text-warning-500'"
+      :class="row.tone === 'error' ? 'text-error-500' : row.tone === 'warning' ? 'text-warning-500' : 'text-content-tertiary'"
+      :data-tone="row.tone"
     >
       <SvgIcon
-        v-if="!row.muted"
+        v-if="row.tone !== 'muted'"
         name="warning"
         class="mt-1 !w-16 !h-16 shrink-0"
       />

@@ -13,6 +13,8 @@ import { isSecuritizeBorrowPair, type AnyBorrowVaultPair } from '~/types/borrow-
 import { getAddress, zeroAddress } from 'viem'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { areTokenAddressesCorrelatedByTags, getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
+import { getNotListedLine } from '~/utils/vault-assessment/presentation'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 
 const { pair, assessmentUi = 'badge' } = defineProps<{ pair: AnyBorrowVaultPair, assessmentUi?: 'badge' | 'field' | 'none' }>()
 const { enableEntityBranding } = useDeployConfig()
@@ -160,12 +162,23 @@ const showMaxRoe = computed(() =>
     getTokenCategoryTags,
   ),
 )
-const { source: labelsSourceKind, isReady: labelsReady, isVaultAssessmentAvailableForChain } = useEulerLabels()
+const { source: labelsSourceKind, isReady: labelsReady, isVaultAssessmentAvailableForChain, visibility: labelsVisibility } = useEulerLabels()
+const checksColumn = (vault: EVault) => {
+  const unverified = !isVerifiedVault(vault.address)
+  const verdict = labelsVisibility.value?.[vault.address.toLowerCase()]
+  return {
+    address: vault.address,
+    chainId: vault.chainId,
+    family: 'evk' as const,
+    symbol: vault.asset.symbol,
+    label: `${vault.asset.symbol} checks`,
+    unverified,
+    cause: unverified ? getNotListedLine(verdict?.status, verdict?.reason, verdict?.decidedBy) ?? 'This vault is not listed in the published vault labels.' : null,
+  }
+}
 const checksColumns = computed(() => {
   if (assessmentUi !== 'field' || labelsSourceKind.value !== 'v3' || !labelsReady.value || !isVaultAssessmentAvailableForChain(pair.borrow.chainId)) return []
-  const columns = [{ address: pair.borrow.address, chainId: pair.borrow.chainId, family: 'evk' as const, symbol: pair.borrow.asset.symbol, label: `${pair.borrow.asset.symbol} checks` }]
-  if (isSecuritizeBorrowPair(pair)) return columns
-  return [...columns, { address: pair.collateral.address, chainId: pair.collateral.chainId, family: 'evk' as const, symbol: pair.collateral.asset.symbol, label: `${pair.collateral.asset.symbol} checks` }]
+  return isSecuritizeBorrowPair(pair) ? [checksColumn(pair.borrow)] : [checksColumn(pair.borrow), checksColumn(pair.collateral)]
 })
 const pairGridTemplate = computed(() => `140px repeat(${(showMaxRoe.value ? 4 : 3) + checksColumns.value.length}, 112px)`)
 const correlatedBadgeTitle = computed(() => {
@@ -659,6 +672,7 @@ const linkPath = computed(() => ({
           :chain-id="column.chainId"
           :family="column.family"
           :label="column.label"
+          :error-tone="column.unverified"
         />
       </div>
     </div>

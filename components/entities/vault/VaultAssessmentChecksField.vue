@@ -8,7 +8,9 @@ const props = withDefaults(defineProps<{
   chainId: number
   family?: VaultAssessmentFamily
   label?: string
-}>(), { family: 'evk', label: 'Checks' })
+  /** The vault is unknown to the app, so a failing check is an error, not a warning. */
+  errorTone?: boolean
+}>(), { family: 'evk', label: 'Checks', errorTone: false })
 
 const {
   isReady, source, visibility, vaultAssessments,
@@ -22,13 +24,15 @@ const entry = computed(() => {
 const tones = {
   positive: { color: 'text-success-500', dot: 'bg-success-500' },
   warning: { color: 'text-warning-500', dot: 'bg-warning-500' },
+  error: { color: 'text-error-500', dot: 'bg-error-500' },
   muted: { color: 'text-content-tertiary', dot: 'bg-content-muted' },
 } as const
 const status = computed(() => {
   if (entry.value.status === 'unavailable') return { text: 'Unavailable', ...tones.muted }
   if (entry.value.status !== 'available' || !entry.value.assessment) return { text: 'Checking…', ...tones.muted }
   const cell = getVaultChecksCell(entry.value.assessment)
-  return { text: cell.text, ...tones[cell.tone] }
+  const tone = cell.tone === 'warning' && props.errorTone ? 'error' : cell.tone
+  return { text: cell.text, ...tones[tone] }
 })
 const tooltipText = computed(() => visibility.value?.[props.address.toLowerCase()]?.reason
   || getVaultChecksStatusLine(entry.value.assessment, entry.value.status)
