@@ -47,6 +47,21 @@ describe('SDK labels source in Lite', () => {
     expect(labels.entities.curator?.logo).toBe('https://fork.test/labels/logo/curator.svg')
   })
 
+  it('accepts a server bundle loader for either configured source without a browser fetch', async () => {
+    const loadBundle = vi.fn().mockResolvedValue({
+      source: 'static',
+      version: 'fork',
+      files,
+      logoBaseUrl: 'https://fork.test/labels',
+      fetchedAt: Date.now(),
+    })
+
+    const labels = await new LiteEulerLabelsService(loadBundle).fetchEulerLabelsData(1)
+    expect(loadBundle).toHaveBeenCalledWith(1)
+    expect(labels.products.fork?.name).toBe('Fork product')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('rejects an expired hosted snapshot without reading file labels', async () => {
     fetchMock.mockResolvedValue({
       source: 'v3',

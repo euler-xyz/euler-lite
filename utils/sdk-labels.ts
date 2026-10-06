@@ -6,9 +6,16 @@ const unsupportedFileRead = async (): Promise<never> => {
   throw new Error('Lite labels are available as a complete V3 or static snapshot')
 }
 
+type LoadLabelsBundle = (chainId: number) => Promise<PublicLabelsBundle>
+
+const loadBrowserLabelsBundle: LoadLabelsBundle = chainId => $fetch<PublicLabelsBundle>('/api/internal/public-labels', {
+  query: { chainId },
+  timeout: 35_000,
+})
+
 /** Keep SDK label population on the same source as Lite's verification and discovery. */
 export class LiteEulerLabelsService extends EulerLabelsService {
-  constructor() {
+  constructor(private readonly loadBundle: LoadLabelsBundle = loadBrowserLabelsBundle) {
     // SDK internals use fetchEulerLabelsData through populateLabels. File-specific
     // reads are unavailable here so they cannot silently contact euler-labels.
     super({
@@ -21,10 +28,7 @@ export class LiteEulerLabelsService extends EulerLabelsService {
   }
 
   override async fetchEulerLabelsData(chainId: number): Promise<EulerLabelsData> {
-    const bundle = await $fetch<PublicLabelsBundle>('/api/internal/public-labels', {
-      query: { chainId },
-      timeout: 35_000,
-    })
+    const bundle = await this.loadBundle(chainId)
     if (bundle.source !== 'static' && !isLabelsSnapshotUsable(bundle.sourceFetchedAt)) {
       throw new Error('Vault labels snapshot is too old')
     }

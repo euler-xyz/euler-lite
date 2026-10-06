@@ -41,6 +41,8 @@ import {
   type VaultDataSource,
 } from '~/utils/api-url-env'
 import { parseChainIds } from '~/utils/parseChainIds'
+import { LiteEulerLabelsService } from '~/utils/sdk-labels'
+import { getPublicLabelsBundle } from './public-labels-source'
 import { resolveRpcUrl } from './rpc'
 import { TURTLE_EARN_API_URL } from './turtle-proxy'
 
@@ -117,7 +119,10 @@ const buildServerSdkConfig = (chainId: number): EulerSDKConfig => {
 export const getServerSdk = (chainId: number): Promise<EulerSDK> => {
   const existing = sdkByChain.get(chainId)
   if (existing) return existing
-  const promise = buildEulerSDK({ config: buildServerSdkConfig(chainId) }).catch((err) => {
+  const promise = buildEulerSDK({
+    config: buildServerSdkConfig(chainId),
+    servicesOverrides: { eulerLabelsService: new LiteEulerLabelsService(getPublicLabelsBundle) },
+  }).catch((err) => {
     if (sdkByChain.get(chainId) === promise) sdkByChain.delete(chainId)
     throw err
   })

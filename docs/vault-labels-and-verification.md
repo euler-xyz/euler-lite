@@ -10,7 +10,7 @@ Not all vaults on-chain are equal. Public Labels maps chain-scoped vault address
 
 `useEulerLabels` reads one chain-scoped bundle from `/api/internal/public-labels`. The server resolves `version=latest` once through the published-versions endpoint, pins resolved metadata pages and entity profiles to that publication. Geo policies, global entity addresses, platform tags and visibility remain live even for a concrete version. Tests use captured fixtures for those live overlays. List reads follow `meta.total` with `limit=100` and increasing `offset`, because V3 caps each page at 100 records.
 
-SDK label population in Lite reads the same `/api/internal/public-labels` bundle. The server selects hosted V3 or the configured static fork source; an SDK vault read never selects the SDK's default file URL. Portfolio reads request their required account fields explicitly and use the already loaded Lite labels snapshot for presentation, so they do not populate labels a second time.
+SDK label population in Lite uses the same public-labels bundle. Browser SDK instances read `/api/internal/public-labels`; server SDK instances read the bundle source directly. The server selects hosted V3 or the configured static fork source. Portfolio reads request their required account fields explicitly and use the already loaded Lite labels snapshot for presentation, so they do not populate labels a second time.
 
 | Public data | V3 path |
 |---|---|

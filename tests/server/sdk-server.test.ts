@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   buildEulerSDK: vi.fn(),
   resolveRpcUrl: vi.fn(),
+  getPublicLabelsBundle: vi.fn(),
 }))
 
 vi.mock('@eulerxyz/euler-v2-sdk', () => ({
@@ -13,11 +14,22 @@ vi.mock('~/server/utils/rpc', () => ({
   resolveRpcUrl: mocks.resolveRpcUrl,
 }))
 
+vi.mock('~/server/utils/public-labels-source', () => ({
+  getPublicLabelsBundle: mocks.getPublicLabelsBundle,
+}))
+
+vi.mock('~/utils/sdk-labels', () => ({
+  LiteEulerLabelsService: class {
+    constructor(readonly loadBundle: unknown) {}
+  },
+}))
+
 describe('getServerSdk', () => {
   beforeEach(() => {
     vi.resetModules()
     mocks.buildEulerSDK.mockReset()
     mocks.resolveRpcUrl.mockReset()
+    mocks.getPublicLabelsBundle.mockReset()
     mocks.buildEulerSDK.mockImplementation(async options => ({ options }))
     mocks.resolveRpcUrl.mockReturnValue('https://rpc.example')
     process.env.V3_API_URL = 'https://v3.example'
@@ -48,6 +60,10 @@ describe('getServerSdk', () => {
       eulerEarnServiceAdapter: 'onchain',
       rewardsServiceAdapter: 'direct',
     })
+    expect(mocks.buildEulerSDK.mock.calls[0]?.[0].servicesOverrides.eulerLabelsService.loadBundle)
+      .toBe(mocks.getPublicLabelsBundle)
+    expect(mocks.buildEulerSDK.mock.calls[1]?.[0].servicesOverrides.eulerLabelsService.loadBundle)
+      .toBe(mocks.getPublicLabelsBundle)
   })
 
   it('hands the server-only Turtle key and fixed upstream to the rewards adapters', async () => {
