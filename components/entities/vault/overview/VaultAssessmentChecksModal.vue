@@ -69,13 +69,13 @@ const copyAddress = (address: string) => {
           class="flex-shrink-0 w-20 h-20 rounded-full flex items-center justify-center mt-8"
           :class="{
             'bg-success-500': finding.outcome === 'pass',
-            'bg-warning-500': finding.outcome === 'unknown' || (finding.outcome === 'fail' && finding.exempted),
-            'bg-error-500': finding.outcome === 'fail' && !finding.exempted,
+            'bg-warning-500': finding.outcome === 'unknown' || (finding.outcome === 'fail' && (finding.exempted || !finding.required)),
+            'bg-error-500': finding.outcome === 'fail' && finding.required && !finding.exempted,
             'bg-content-muted': finding.outcome === 'not_applicable',
           }"
         >
           <SvgIcon
-            :name="finding.outcome === 'pass' ? 'check' : finding.outcome === 'fail' && !finding.exempted ? 'close' : finding.outcome === 'unknown' ? 'warning' : 'info-circle'"
+            :name="finding.outcome === 'pass' ? 'check' : finding.outcome === 'fail' && finding.required && !finding.exempted ? 'close' : finding.outcome === 'fail' || finding.outcome === 'unknown' ? 'warning' : 'info-circle'"
             class="!w-10 !h-10 text-white"
           />
         </span>
