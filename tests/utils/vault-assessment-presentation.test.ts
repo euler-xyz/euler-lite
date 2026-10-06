@@ -9,9 +9,7 @@ import {
   getUnverifiedActionCopy,
   getNotListedLine,
   getUpcomingVaultChanges,
-  getAcceptedVaultCheckFindings,
   getVaultAssessmentCheckDetails,
-  getVaultAssessmentCheckSummary,
   getVaultCheckFindings,
   getVaultChecksStatusLine,
   hasOnlyAcceptedVaultCheckFindings,
@@ -59,7 +57,6 @@ describe('vault checks presentation', () => {
       'irm.max-apy', 'oracle.liability-quote', 'liquidation.max-discount',
       'deployment.factory', 'scheduled.governance.timelock',
     ])
-    expect(getVaultAssessmentCheckSummary(reviewed)).toBe('1 failed · 1 unknown · 1 accepted · 1 passed')
   })
 
   it('shows the selected failure classes with V3 sentences and counts other gating rules', () => {
@@ -116,7 +113,7 @@ describe('vault checks presentation', () => {
     expect(getVaultChecksStatusLine(mixed, 'available')).toBe('Warning · 1 to review')
   })
 
-  it('shows exempted failures as accepted evidence when required checks pass', () => {
+  it('reads a vault with only accepted exceptions as passed', () => {
     const flagged = assessment([
       finding('liquidation.max-discount', { exempted: true }),
       finding('collateral.0x01.ltv', { exempted: true }),
@@ -124,12 +121,8 @@ describe('vault checks presentation', () => {
     ], { checksStatus: 'warning' })
 
     expect(getVaultCheckFindings(flagged).lines).toEqual([])
-    expect(getAcceptedVaultCheckFindings(flagged).map(line => line.text)).toEqual([
-      'V3 says liquidation.max-discount',
-      'V3 says collateral.0x01.ltv',
-    ])
     expect(hasOnlyAcceptedVaultCheckFindings(flagged)).toBe(true)
-    expect(getVaultChecksStatusLine(flagged, 'available', Date.parse('2026-09-29T12:12:00.000Z'))).toBe('Checks passed · checked 12 min ago · 2 accepted exceptions')
+    expect(getVaultChecksStatusLine(flagged, 'available', Date.parse('2026-09-29T12:12:00.000Z'))).toBe('Checks passed · checked 12 min ago')
     expect(hasOnlyAcceptedVaultCheckFindings(assessment([
       finding('liquidation.max-discount', { exempted: true }),
       finding('irm.max-apy'),
@@ -187,6 +180,7 @@ describe('vault checks presentation', () => {
     expect(getVaultChecksCell(assessment([accepted, finding('oracle.liability-route')]))).toEqual({ text: '1 failed', tone: 'warning' })
     expect(getVaultChecksCell(assessment([finding('oracle.liability-route', { outcome: 'unknown' }), passed]))).toEqual({ text: '1 unknown', tone: 'muted' })
     expect(getVaultChecksCell(assessment([finding('oracle.adapters-recognized', { outcome: 'unknown', required: true }), passed]))).toEqual({ text: '1 unknown', tone: 'warning' })
+    expect(getVaultChecksCell(assessment([finding('irm.max-apy'), finding('liquidation.max-discount', { outcome: 'unknown' }), passed]))).toEqual({ text: '1 failed · 1 unknown', tone: 'warning' })
     expect(getVaultChecksCell(assessment([], { assessed: false }))).toEqual({ text: 'Not assessed', tone: 'muted' })
   })
 

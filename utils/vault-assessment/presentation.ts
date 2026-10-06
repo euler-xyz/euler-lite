@@ -10,12 +10,6 @@ export interface VaultCheckLine {
   parts?: Array<{ text: string, address?: string }>
 }
 
-export interface AcceptedVaultCheckLine {
-  key: string
-  text: string
-  parts?: VaultCheckLine['parts']
-}
-
 export interface UpcomingVaultChange {
   key: string
   text: string
@@ -120,18 +114,6 @@ export const getVaultCheckWarningLines = (assessment: VaultAssessment): VaultChe
   return [...lines.values()]
 }
 
-export const getAcceptedVaultCheckFindings = (assessment: VaultAssessment): AcceptedVaultCheckLine[] =>
-  [
-    ...(assessment.configContext?.findings ?? []),
-    ...(assessment.consistencyContext?.findings ?? []),
-  ]
-    .filter(finding => finding.outcome === 'fail' && finding.exempted === true)
-    .map((finding) => {
-      const text = finding.cause?.summary || finding.description
-      const parts = getVaultCheckCopyableParts(text, finding)
-      return { key: finding.key, text, ...(parts ? { parts } : {}) }
-    })
-
 /** Full findings are loaded only for an opened vault, as in Toolbox's detail view. */
 export const getVaultAssessmentCheckDetails = (assessment: VaultAssessment) => {
   const findings = [
@@ -152,27 +134,16 @@ export const getVaultAssessmentCheckDetails = (assessment: VaultAssessment) => {
   return { findings: [...findings].sort((a, b) => rank(a) - rank(b)), counts }
 }
 
-export const getVaultAssessmentCheckSummary = (assessment: VaultAssessment): string => {
-  const { counts } = getVaultAssessmentCheckDetails(assessment)
-  const parts = [
-    counts.failed && `${counts.failed} failed`,
-    counts.unknown && `${counts.unknown} unknown`,
-    counts.accepted && `${counts.accepted} accepted`,
-    counts.passed && `${counts.passed} passed`,
-  ].filter(Boolean)
-  return parts.length ? parts.join(' · ') : counts.notApplicable ? `${counts.notApplicable} N/A` : 'No findings'
-}
-
 export type VaultChecksCell = { text: string, tone: 'positive' | 'warning' | 'muted' }
 
-/** The row cell: failures first, then unknowns, else every passing check with the accepted exceptions counted as passed. */
+/** The checks cell, shaped like the oracle rows: open findings as "X failed · Y unknown", else every passing check with the accepted exceptions counted as passed. */
 export const getVaultChecksCell = (assessment: VaultAssessment): VaultChecksCell => {
   if (!assessment.assessed) return { text: 'Not assessed', tone: 'muted' }
   const { counts, findings } = getVaultAssessmentCheckDetails(assessment)
-  if (counts.failed) return { text: `${counts.failed} failed`, tone: 'warning' }
-  if (counts.unknown) {
+  if (counts.failed || counts.unknown) {
     const blocking = findings.some(finding => finding.outcome === 'unknown' && finding.required && !finding.exempted)
-    return { text: `${counts.unknown} unknown`, tone: blocking ? 'warning' : 'muted' }
+    const text = [counts.failed && `${counts.failed} failed`, counts.unknown && `${counts.unknown} unknown`].filter(Boolean).join(' · ')
+    return { text, tone: counts.failed || blocking ? 'warning' : 'muted' }
   }
   const passed = counts.passed + counts.accepted
   return passed ? { text: `${passed} passed`, tone: 'positive' } : { text: 'No findings', tone: 'muted' }
@@ -227,11 +198,7 @@ export const getVaultChecksStatusLine = (
   }
   if (findings.some(finding => finding.outcome === 'unknown')) return 'Being re-checked'
   if (hasOnlyAcceptedVaultCheckFindings(assessment)) {
-    const count = getAcceptedVaultCheckFindings(assessment).length
-    const checksPassed = assessment.configLastCheckedAt
-      ? formatRelativeCheckedAt(assessment.configLastCheckedAt, now)
-      : 'Checks passed'
-    return `${checksPassed} · ${count} accepted exception${count === 1 ? '' : 's'}`
+    return assessment.configLastCheckedAt ? formatRelativeCheckedAt(assessment.configLastCheckedAt, now) : 'Checks passed'
   }
   if (assessment.checksStatus === 'warning' || assessment.checksStatus === 'negative'
     || assessment.configStatus === 'suspended' || assessment.configStatus === 'revoked') return 'Warning'
