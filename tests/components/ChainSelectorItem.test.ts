@@ -11,9 +11,9 @@ vi.mock('@vueuse/core', () => ({
 const { default: BaseAvatar } = await import('~/components/base/BaseAvatar.vue')
 const { default: ChainSelectorItem } = await import('~/components/entities/chains/ChainSelectorItem.vue')
 
-const render = () => {
+const render = (props: { chainId: number, name: string }) => {
   vi.stubGlobal('useEnvConfig', () => ({ v3ImagesUrl: 'https://images.example' }))
-  const app = createSSRApp({ render: () => h(ChainSelectorItem, { chainId: 8453, name: 'Base' }) })
+  const app = createSSRApp({ render: () => h(ChainSelectorItem, props) })
   app.component('BaseAvatar', BaseAvatar)
   return renderToString(app)
 }
@@ -23,19 +23,26 @@ describe('ChainSelectorItem', () => {
     vi.unstubAllGlobals()
   })
 
-  it('loads the chain logo only from the V3 images host', async () => {
+  it('shows the V3 chain logo once it has loaded', async () => {
     imageState.isReady = true
-    const html = await render()
+    const html = await render({ chainId: 8453, name: 'Base' })
 
     expect(html).toContain('src="https://images.example/v3/images/chains/8453"')
-    expect(html).not.toContain('data:image')
   })
 
-  it('shows the chain initials until the V3 logo loads, with no bundled image', async () => {
+  it('shows the bundled chain logo while the V3 logo loads', async () => {
     imageState.isReady = false
-    const html = await render()
+    const html = await render({ chainId: 8453, name: 'Base' })
 
-    expect(html).toContain('data-label="Ba"')
+    expect(html).toMatch(/<img[^>]+src="data:image\//)
+    expect(html).not.toContain('data-label')
+  })
+
+  it('shows the chain initials for a chain with no bundled logo', async () => {
+    imageState.isReady = false
+    const html = await render({ chainId: 424242, name: 'Forknet' })
+
+    expect(html).toContain('data-label="Fo"')
     expect(html).not.toContain('<img')
   })
 })
