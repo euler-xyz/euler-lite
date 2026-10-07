@@ -253,7 +253,7 @@ export const getVaultChecksStatusLine = (
     ...(assessment.configContext?.findings ?? []),
     ...(assessment.consistencyContext?.findings ?? []),
   ].filter(relevantFinding)
-  const reviewCount = findings.length
+  const reviewCount = getVaultCheckWarningLines(assessment).length
   if (findings.some(finding => finding.outcome === 'fail') && reviewCount > 0) {
     return `Warning · ${reviewCount} to review`
   }

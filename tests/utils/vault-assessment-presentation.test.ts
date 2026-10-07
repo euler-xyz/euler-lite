@@ -332,9 +332,20 @@ describe('vault checks presentation', () => {
         [`oracle.adapters-checks:${C}`, `${shortenAddress(getAddress(C))} · The quote is stale`, `oracle-adapter-${C}`],
       ])
       expect(lines[0]?.parts?.[0]).toEqual({ text: 'Unknown AggregatorV3 Feed', address: getAddress(B) })
-      expect(getVaultChecksStatusLine(checked, 'available')).toBe('Warning · 1 to review')
+      expect(getVaultChecksStatusLine(checked, 'available')).toBe('Warning · 2 to review')
       expect(getVaultChecksCell(checked).text).toBe('1 failed')
       expect(getVaultChecksCell(assessment([adaptersFinding([adapter(C, 'negative', [live])])]))).toEqual({ text: '1 failed', tone: 'warning' })
+    })
+
+    it('counts each visible adapter warning in the review status, even under one V3 finding', () => {
+      const checked = assessment([adaptersFinding([
+        adapter(A, 'negative', [live]),
+        adapter(B, 'warning', [high]),
+        adapter(C, 'warning', [feed, live]),
+      ])])
+      expect(getVaultCheckWarningLines(checked)).toHaveLength(3)
+      expect(getVaultChecksStatusLine(checked, 'available')).toBe('Warning · 3 to review')
+      expect(getVaultChecksCell(checked).text).toBe('1 failed')
     })
   })
 })
