@@ -32,7 +32,7 @@ import { createTtlCache } from './cache'
 import { createInFlightDedup } from '~/utils/in-flight'
 import { logger } from './logger'
 import { reportStatus } from './log'
-import { summarizeSdkIssue } from './observability'
+import { buildVaultAssetLookup, summarizeSdkIssue } from './observability'
 import { getServerSdk } from './sdk-server'
 import { isSdkErrorDiagnostic } from './sdk-diagnostics'
 import {
@@ -262,6 +262,7 @@ export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot>
         : empty,
     ])
 
+    const assetForVault = buildVaultAssetLookup([...evk.result, ...earn.result, ...securitize.result, ...escrow.result])
     for (const { errors, ctx } of [
       { errors: evk.errors, ctx: 'evk' },
       { errors: earn.errors, ctx: 'earn' },
@@ -270,7 +271,7 @@ export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot>
     ] as const) {
       for (const issue of errors as unknown[]) {
         if (isSdkErrorDiagnostic(issue)) {
-          logger.error({ ctx: 'vaults-cache', chainId, kind: ctx, issue: summarizeSdkIssue(issue) }, 'sdk fetch issue')
+          logger.error({ ctx: 'vaults-cache', chainId, kind: ctx, issue: summarizeSdkIssue(issue, assetForVault) }, 'sdk fetch issue')
         }
       }
     }
