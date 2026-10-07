@@ -55,6 +55,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Earn refresh re-derives `verified` from current `earn-vaults.json` (unlisted/delisted vaults are not promoted)
 - SDK 2.0 governance hydration guard (`hasResolvedGovernorAdmin`)
 - Oracle provider logos from the V3 managed-image namespace (not `V3_API_URL`)
+- `cyclical note` is the UI gate for the cyclical IRM overview (on-chain IRM type alone is not enough)
 - Shared Oracles-block / Explore-matrix adapter display is covered in [Oracle Adapter Display](./oracle-adapter-display.md)
 
 ### 🧿 [Oracle Adapter Display](./oracle-adapter-display.md)
@@ -114,6 +115,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Vault snapshot pipeline (`/api/internal/vaults`) with two-pass client hydration
 - V3 proxy allowlist, rate limits, failure backoff, and troubleshooting
 - V3-conditional warm-cache cadence (1-min vaults timer with V3, 5-min without)
+- Server provider overrides: Sonic Multicall byte cap vs SDK `fetchVaults` chunking
 - Bigint wire codec and adversary-safe wrapper tag
 
 ### 🔮 [Pyth Oracle Handling](./pyth-oracle-handling.md)

@@ -26,6 +26,7 @@ This document covers the per-host proxies, the vault snapshot pipeline, the warm
 | `server/api/internal/vaults.get.ts` | Per-chain consolidated vault snapshot endpoint |
 | `server/utils/vaults-cache.ts` | `refreshChainVaults` + `vaultsCache` |
 | `server/utils/sdk-server.ts` | Lazy per-chain server-side SDK builder |
+| `server/utils/server-provider-service.ts` | Chain-specific server `IProviderService` overrides (Sonic Multicall throttle); all other chains stay on the SDK provider |
 | `server/plugins/warm-cache.ts` | Boot + interval warm cycles for labels, token-list, vault snapshot |
 | `utils/snapshot-codec.ts` | Bigint-safe JSON wire format |
 | `utils/snapshot-types.ts` | Wire-shape types shared client + server |
@@ -252,6 +253,35 @@ A boot-time warning fires if `SERVER_VAULT_CACHE_SOURCE` (or `NUXT_PUBLIC_BROWSE
 
 Every server-side SDK build resolves the deployments manifest through the euler-chains cache chain rather than fetching euler-interfaces directly: `server/plugins/sdk-deployments.ts` installs `DeploymentService.setQueryDeployments(loadEulerChains)` at boot, so all server SDK builds share one cached copy with its 7-day stale window instead of issuing their own GitHub fetches.
 
+### Server provider overrides
+
+`getServerSdk` does **not** use the browser JSON-RPC proxy (`/api/internal/rpc/{chainId}`). It talks to `RPC_URL_<chainId>` through an `IProviderService` installed as `servicesOverrides.providerService`.
+
+`createServerProviderService(rpcUrls, delegate)` in `server/utils/server-provider-service.ts` wraps the SDK `ProviderService`:
+
+- Chains **without** an override keep the SDK client (Ethereum in tests: Multicall `batchSize: 2048`, `wait: 10`).
+- Chains **with** an override get a Lite-constructed viem `PublicClient` that reuses the SDK provider's `chain` metadata — including its Multicall3 address — because the SDK ships its own viem and Lite cannot assign that `Chain` type directly.
+- `getSupportedChainIds()` still comes from the delegate. Each `getServerSdk(chainId)` instance is built with only that chain's `rpcUrls`, so asking it for another chain throws.
+
+Overrides are a code map, not an env flag. Add a row to `providerOverrides` and cover it in `tests/server/sdk-server.test.ts`. Because the server SDK is cached per chain at first use, a changed override needs a process restart.
+
+**Sonic (`146`) is the only override today.** Sonic's public RPC / lens path rejects the SDK's default Multicall aggregates, so the replacement client uses:
+
+| Layer | Value | Effect |
+|---|---|---|
+| `batch.multicall` | `{ batchSize: 128, wait: 10 }` | viem Multicall **byte** cap (not a call count). For VaultLens `getVaultInfoFull` reads this budget is **3 calls per `aggregate3`**. |
+| HTTP `http(rpcUrl, { batch })` | `{ batchSize: 100, wait: 10 }` | JSON-RPC requests per HTTP body. The 3-call aggregates are then packed into one HTTP batch. |
+
+Pinned by `tests/server/sdk-server.test.ts`: 36 concurrent Sonic lens reads become twelve `aggregate3` calls of three targets each, issued as a single HTTP JSON-RPC batch to the configured `RPC_URL_146`.
+
+This is a different throttle from `EVAULT_FETCH_CHUNK_CHAINS`, which splits Lite's `eVaultService.fetchVaults(...)` into sequential SDK calls of 6 addresses. The two compose: chunked `fetchVaults` still uses the Sonic-throttled provider for each on-chain read. Browser wagmi / `getPublicClient` batching (`batchSize: 100`, Ankr-public clamp of 10) does not apply here.
+
+| Symptom | First check |
+|---|---|
+| Sonic snapshot / server label reads fail with oversized Multicall or RPC batch errors | Confirm `createServerProviderService` still wraps chain `146` and the process was restarted after a change |
+| Other chains suddenly issue tiny Multicall aggregates | An override was added too broadly — only list the chain that needs it |
+| `EVAULT_FETCH_CHUNK_CHAINS=146` does not stop Sonic Multicall failures | Expected: that env only chunks `fetchVaults`, it does not change viem Multicall size |
+
 ### Disabling the snapshot
 
 Set `DISABLE_SERVER_VAULT_CACHE=true` to:
@@ -383,7 +413,7 @@ Pinning either source to `onchain` ignores V3 even when `V3_API_URL` is set. Pin
 
 Chains listed in `ONCHAIN_SDK_CHAINS` use onchain adapters for chain-aware browser SDK reads and server snapshot builds, so regular chains continue to follow the configured V3/fallback source while pinned chains avoid V3-backed account/vault/Earn reads. Independently, the warm-cache plugin skips per-chain warm work for chains listed in `DEPRECATED_CHAINS`; deprecated chains whose V3 data is gone should typically also be listed in `ONCHAIN_SDK_CHAINS`.
 
-Chains listed in `EVAULT_FETCH_CHUNK_CHAINS` split EVault list reads into small sequential SDK calls in both the browser loader and the server snapshot builder. This is a Lite-side throttle around SDK `eVaultService.fetchVaults` calls for chains whose RPC/lens path does not tolerate larger concurrent onchain EVault reads.
+Chains listed in `EVAULT_FETCH_CHUNK_CHAINS` split EVault list reads into small sequential SDK calls in both the browser loader and the server snapshot builder. This is a Lite-side throttle around SDK `eVaultService.fetchVaults` calls for chains whose RPC/lens path does not tolerate larger concurrent onchain EVault reads. It does not replace [server provider overrides](#server-provider-overrides): Sonic's Multicall byte cap is applied inside the server viem client, not by this env list.
 
 The snapshot remains active in all modes (unless `DISABLE_SERVER_VAULT_CACHE=true`). With V3 the snapshot is built quickly from V3's batched endpoints; without V3 it's built from onchain lens multicalls. Either way the browser sees the same wire-format payload and benefits identically.
 

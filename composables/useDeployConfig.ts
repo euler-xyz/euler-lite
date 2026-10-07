@@ -11,6 +11,8 @@ export const useDeployConfig = () => {
   return {
     // URLs (empty string = not configured, hide UI element)
     docsUrl: rc.configDocsUrl,
+    toolboxUrl: rc.configToolboxUrl,
+    riskAnalyticsUrl: rc.configRiskAnalyticsUrl,
     stargateUrl: rc.configStargateUrl,
     tosUrl: rc.configTosUrl || 'https://www.euler.finance/terms',
     tosMdUrl: rc.configTosMdUrl,

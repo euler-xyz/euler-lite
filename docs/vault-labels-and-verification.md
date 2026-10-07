@@ -98,7 +98,7 @@ Structure: `Record<string, Product>` — keys are product identifiers (e.g. `"eu
 | `vaults` | `string[]` | Yes | Active vault addresses (checksummed). These become "verified" vaults in the app. |
 | `deprecatedVaults` | `string[]` | No | Phased-out vault addresses. Still verified and viewable in portfolio, but hidden from discovery tables and shown with a deprecation warning. |
 | `deprecationReason` | `string` | No | Explanation for deprecation. Shown in a warning banner on vault overview. URLs are auto-linked. Also accepts legacy key `deprecateReason`. |
-| `tags` | `string[]` | No | Product classification tags. `keyring` marks all product vaults as requiring Keyring identity verification; `access control` marks vaults gated by an allowlist hook; `governance limited` shows "Limited risk management" and fades the curator entity display; `suppress high utilisation warning` hides the high-utilisation warning while leaving critical utilisation warnings visible; `cyclical note` shows cyclical-note badges, target-utilisation copy, and the cyclical IRM overview. |
+| `tags` | `string[]` | No | Product classification tags. `keyring` marks all product vaults as requiring Keyring identity verification; `access control` marks vaults gated by an allowlist hook; `governance limited` shows "Limited risk management" and fades the curator entity display; `suppress high utilisation warning` hides the high-utilisation warning while leaving critical utilisation warnings visible; `cyclical note` is the **UI gate** for cyclical-note badges, target-utilisation copy, and the cyclical IRM overview — an on-chain cyclical IRM type alone does not show those surfaces. See [Cyclical IRM overview](#cyclical-irm-overview). |
 | `notExplorable` | `boolean` | No | If `true`, hides **all** vaults in this product from lend, borrow, and explore discovery pages. Takes precedence over per-vault `notExplorableLend`/`notExplorableBorrow`. Vaults remain accessible via direct URL. |
 | `block` | `string[]` | No | Country codes or group aliases (`EU`, `EEA`, `EFTA`) for hard geo-blocking. See [geo-blocking.md](./geo-blocking.md). |
 | `vaultOverrides` | `Record<string, VaultOverride>` | No | Per-vault customizations keyed by checksummed address. See next section. |
@@ -118,7 +118,7 @@ Per-vault overrides allow customizing behavior for individual vaults within a pr
 | `restricted` | `string[]` | Soft geo-restriction for this vault only. No product-level fallback. See [geo-blocking.md](./geo-blocking.md). |
 | `notExplorableLend` | `boolean` | If `true`, hides this vault from the **lend** discovery page. Product-level `notExplorable` takes precedence. |
 | `notExplorableBorrow` | `boolean` | If `true`, hides this vault from the **borrow** discovery page — both as a borrow vault and as collateral. Product-level `notExplorable` takes precedence. |
-| `tags` | `string[]` | Vault classification tags. `keyring`, `access control`, `recently added`, `suppress high utilisation warning`, and `cyclical note` apply to this specific vault. See [keyring-hooks.md](./keyring-hooks.md). |
+| `tags` | `string[]` | Vault classification tags. `keyring`, `access control`, `recently added`, `suppress high utilisation warning`, and `cyclical note` apply to this specific vault. See [keyring-hooks.md](./keyring-hooks.md) and [Cyclical IRM overview](#cyclical-irm-overview). |
 
 **Precedence rules**:
 - `block`: vault override replaces product-level (not additive)
@@ -370,6 +370,40 @@ The selected SDK adapter supplies the flag: V3 first with on-chain fallback for 
 For per-address lookups during direct navigation to a not-yet-cached vault, `fetchVaultCategory(address)` checks the SDK escrow verified array first, then asks `vaultMetaService.fetchVaultType` for the vault type.
 
 **Important: labels remain authoritative for which vaults are _shown_.** SDK categorization says "what category each vault is"; `products.json` / `earn-vaults.json` still say "which vaults to include in lists". The two are composed in `useVaults.loadVaults`: labels select the set, categorization picks the right lens per address.
+
+## Cyclical IRM overview
+
+The cyclical Interest Rate Model block is **label-gated**, not IRM-type-gated.
+
+`isVaultCyclicalNote(address)` in `utils/eulerLabelsUtils.ts` is true when the product `tags` or that vault's `vaultOverrides.tags` include `cyclical note`. That helper is what `VaultOverview.vue` uses to swap `VaultOverviewBlockCyclicalIRM` in for the generic IRM block. The same tag participates in these UI gates:
+
+| Surface | Gate |
+|---|---|
+| Overview IRM block | `isVaultCyclicalNote(vault.address)` |
+| `cyclicalNote` type badge | verified **and** the tag |
+| Lend list "cyclical note" badge | the tag and verified vault governance |
+| Borrow list "cyclical note" badge | the borrow vault's tag and verified governance for both vaults in the pair |
+| Discovery graph "cyclical note" badge | the tag, subject to the graph's badge priority |
+| Target-utilisation info warning (`useVaultWarnings`) | the tag, at least 95% utilisation, and a context other than `repay`; repay keeps its standard high/critical warning |
+
+`isCyclicalNoteVault` in `utils/vault/classification.ts` is a different helper: it only inspects `vault.interestRateModel.type` (`FIXED_CYCLICAL_BINARY` = 4 or `FIXED_CYCLICAL_BINARY_MONTHLY` = 5). A vault can have a cyclical IRM on-chain and still render the generic IRM block if the label tag is absent. Do not treat the type number as permission to show cyclical-note UI.
+
+Inside `VaultOverviewBlockCyclicalIRM.vue` the block still hides itself unless the vault has collateral exposure (`hasCollateralExposure`) and a non-zero IRM address. Both IRM variants are then normalised into one `{ primaryRate, secondaryRate, startSec, primaryDurationSec, secondaryDurationSec }` cycle:
+
+| `interestRateModel.type` | Cycle bounds | Date display |
+|---|---|---|
+| `FIXED_CYCLICAL_BINARY` | `startTimestamp` plus `primaryDuration` / `secondaryDuration` | Local timezone |
+| `FIXED_CYCLICAL_BINARY_MONTHLY` | UTC calendar month; `cycleStartDay` must be `1n…31n` or the cycle is `null` | UTC |
+
+The monthly variant clamps a start day past a short month to that month's last day (`Math.min(startDay, daysInMonth)`) so `Date.UTC` cannot roll 31 February into March. That matches the contract.
+
+The live "Now" marker and elapsed-cycle math use:
+
+```ts
+const now = useNow({ scheduler: cb => useIntervalFn(cb, 1_000) })
+```
+
+The custom scheduler updates the clock once per second; VueUse 15's bare `useNow()` is valid and defaults to animation-frame updates. Borrow APYs on the block convert the IRM's 27-decimal per-second rate (`SPY`) with `(1 + spy)^(secondsInYear) - 1`.
 
 ## Discovery Page Filtering
 
