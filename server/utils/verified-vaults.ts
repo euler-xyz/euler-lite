@@ -25,7 +25,7 @@ const cache = createTtlCache<VerifiedAddressSnapshot>({ ttlMs: CACHE_TTL_MS, max
 const inflight = new Map<number, Promise<VerifiedAddressSnapshot>>()
 
 const isUsable = (snapshot: VerifiedAddressSnapshot): boolean => {
-  if (snapshot.source !== 'v3') return true
+  if (snapshot.source !== 'v3' && snapshot.source !== 'v3-metadata') return true
   return isLabelsSnapshotUsable(snapshot.sourceFetchedAt)
 }
 
@@ -117,7 +117,7 @@ export async function getVerifiedAddressSet(chainId: number): Promise<Set<string
 }
 
 export function getVerifiedAddressCacheControl(snapshot: VerifiedAddressSnapshot, now = Date.now()): string {
-  if (snapshot.source !== 'v3') {
+  if (snapshot.source !== 'v3' && snapshot.source !== 'v3-metadata') {
     return 'public, max-age=30, stale-while-revalidate=30'
   }
   if (!snapshot.sourceFetchedAt) return 'no-store'

@@ -14,6 +14,8 @@ import { groupHasExplorableMarket } from '~/utils/vault/market-group-visibility'
 import { liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
 import { resolveEulerRouterGovernors } from '~/utils/vault/euler-router-governance'
 import { governableGovernorAbi } from '~/abis/oracle'
+import { getEulerLabelsSourceData } from '~/composables/useEulerLabels'
+import { getPublishedVaultCandidates } from '~/utils/public-labels'
 
 // -- Helpers --
 
@@ -378,7 +380,7 @@ const resolveGroupTVL = async (group: MarketGroup): Promise<MarketGroup> => {
 // -- Main Composable --
 
 export const useMarketGroups = () => {
-  const { getAll } = useVaultRegistry()
+  const { getAll, isKnownEscrowAddress } = useVaultRegistry()
   const { products, entities, isReady: labelsReady } = useEulerLabels()
   const { isVaultGovernorVerified, isCollateralResolved, isMarketDataResolved, isReady: vaultsReady } = useVaults()
   const showAllLabelEntries = useShowAllLabelEntries()
@@ -389,9 +391,18 @@ export const useMarketGroups = () => {
 
   /** All vaults available for grouping */
   const allVaults = computed((): AnyVault[] => {
+    const labels = getEulerLabelsSourceData()
+    const candidates = getPublishedVaultCandidates(labels)
+    const published = labels.source === 'v3' || labels.source === 'v3-metadata'
+      ? new Set([...candidates.vaults, ...candidates.earn].map(address => address.toLowerCase()))
+      : null
     return registryVaults.value.filter((vault) => {
       const address = getVaultAddress(vault)
-      return address ? isVaultSelectedByTag(address) && (showAllLabelEntries.value || !isVaultNotExplorable(address)) : false
+      if (!address) return false
+      // Escrow perspective membership is an independent discovery source.
+      return (!published || published.has(address.toLowerCase()) || isKnownEscrowAddress(address))
+        && isVaultSelectedByTag(address)
+        && (showAllLabelEntries.value || !isVaultNotExplorable(address))
     })
   })
 

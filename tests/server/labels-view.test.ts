@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createEmptyEulerLabelsData } from '@eulerxyz/euler-v2-sdk'
+import { getAddress } from 'viem'
+import { normalizePublicLabelsData } from '~/utils/public-labels'
+import { KPK_VAULT, publicLabelsFixture } from '~/tests/fixtures/public-labels-v20260804151305236'
 import { buildLabelsView, buildProductDescriptors, buildTokenLogoMap, fetchTokenList } from '~/server/utils/labels-view'
 import { getServerSdk } from '~/server/utils/sdk-server'
 import { refreshVerifiedAddressSet } from '~/server/utils/verified-vaults'
@@ -135,6 +138,37 @@ describe('SDK escrow classification in public views', () => {
 })
 
 describe('V3 public verification', () => {
+  it('keeps a published hidden vault in metadata without manager attribution', async () => {
+    const source = structuredClone(publicLabelsFixture)
+    source.visibility[KPK_VAULT.toLowerCase()] = {
+      status: 'hidden', explorableLend: false, explorableBorrow: false, decidedBy: 'config-failed', reason: 'Config failed',
+    }
+    vi.stubGlobal('$fetch', vi.fn(async () => ({ tokens: [] })))
+    vi.mocked(getPublicEulerLabelsData).mockResolvedValue({
+      ...normalizePublicLabelsData(1, source), sourceFetchedAt: Date.now(),
+    })
+    vi.mocked(getServerSdk).mockResolvedValue({
+      vaultMetaService: { fetchVaultTypes: async () => ({}) },
+      eVaultService: {
+        fetchVerifiedVaultAddresses: async () => [],
+        fetchVaults: async (_chain: number, addresses: string[]) => ({
+          errors: [], result: addresses.map(address => ({ address, collaterals: [], shares: { name: 'On-chain name' } })),
+        }),
+      },
+      eulerEarnService: { fetchVaults: async () => ({ errors: [], result: [] }) },
+      securitizeVaultService: { fetchVaults: async () => ({ errors: [], result: [] }) },
+    } as never)
+
+    const verified = await refreshVerifiedAddressSet(1)
+    expect(verified.has(getAddress(KPK_VAULT))).toBe(false)
+    const metadata = await refreshChainVaultMetadata(1)
+    expect(metadata.get(getAddress(KPK_VAULT))).toMatchObject({
+      name: 'KPK VBILL/USDC Lend',
+      description: 'USDC lending vault for the KPK VBILL market.',
+      entities: [],
+    })
+  })
+
   it('uses published membership even when the local governor cannot be resolved', async () => {
     const listed = '0x0000000000000000000000000000000000000801'
     const hidden = '0x0000000000000000000000000000000000000802'
@@ -144,6 +178,7 @@ describe('V3 public verification', () => {
       source: 'v3',
       sourceFetchedAt: Date.now(),
       verifiedVaultAddresses: [listed],
+      candidateVaultAddresses: [listed, hidden],
       managingEntityByVault: { [listed.toLowerCase()]: 'curator' },
       entities: { curator: {
         name: 'Curator', logo: '', description: '', url: '', addresses: {},
@@ -156,7 +191,7 @@ describe('V3 public verification', () => {
       eVaultService: {
         fetchVerifiedVaultAddresses: async () => [],
         fetchVaults: async (_chain: number, addresses: string[]) => ({
-          errors: [], result: addresses.map(address => ({ address, collaterals: [], governorAdmin: undefined })),
+          errors: [], result: addresses.map(address => ({ address, collaterals: [], governorAdmin: undefined, shares: { name: address === hidden ? 'Hidden vault' : 'Listed vault' } })),
         }),
       },
     } as never)
@@ -166,5 +201,6 @@ describe('V3 public verification', () => {
     expect(verified.has(hidden)).toBe(false)
     const metadata = await refreshChainVaultMetadata(992)
     expect(metadata.get(listed)?.entities.map(entity => entity.name)).toEqual(['Curator'])
+    expect(metadata.get(hidden)).toMatchObject({ name: 'Hidden vault', entities: [] })
   })
 })

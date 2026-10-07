@@ -42,7 +42,6 @@ const pendingTimelock = computed(() => vault.governance.pendingTimelockValidAt >
   ? { value: vault.governance.pendingTimelock, validAt: vault.governance.pendingTimelockValidAt }
   : null)
 const pendingGuardian = computed(() => vault.governance.pendingGuardianValidAt > 0
-  && vault.governance.pendingGuardian.toLowerCase() !== zeroAddress
   ? { address: vault.governance.pendingGuardian, validAt: vault.governance.pendingGuardianValidAt }
   : null)
 const pendingCaps = computed(() => vault.strategies.filter(strategy => strategy.allocationCap.pendingValidAt > 0))
@@ -135,7 +134,9 @@ const timelockDisplay = computed(() => formatTimelock(vault.governance.timelock)
       orientation="horizontal"
     >
       <div class="flex flex-col items-end gap-4">
+        <span v-if="pendingGuardian.address.toLowerCase() === zeroAddress">Guardian removal</span>
         <VaultOverviewAddressValue
+          v-else
           :address="pendingGuardian.address"
           check-safe
         />
