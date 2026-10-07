@@ -420,6 +420,7 @@ describe('attribute stats matrix', () => {
         collateralUsd: 25,
         coveredDebtUsd: 25,
         accountCount: 2,
+        pricing: { status: 'reported', unpricedUsd: 25, unpricedCollateralCount: 1 },
         calculationTimestamp: '2026-06-25T10:14:59.000Z',
         priceTimestamp: '2026-06-25T10:14:24.994Z',
         refreshedAt: '2026-06-25T10:15:08.039Z',
@@ -433,6 +434,7 @@ describe('attribute stats matrix', () => {
     expect(cell.numeric).toBe(125)
     expect(cell.hint).toContain('25% of total borrows')
     expect(cell.hint).toContain('2 underwater accounts')
+    expect(cell.hint).toContain('$25 of the bad debt is from 1 collateral position with no price')
   })
 
   it('shows zero bad debt for borrowable vaults when loaded data has no row', () => {
