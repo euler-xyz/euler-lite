@@ -114,7 +114,17 @@ describe('vault checks presentation', () => {
       text: 'V3 says collateral.0x02.ltv',
       outcome: 'fail',
     }])
-    expect(getVaultChecksStatusLine(mixed, 'available')).toBe('Warning · 1 to review')
+    expect(getVaultChecksStatusLine(mixed, 'available')).toBe('Warning · 2 to review')
+  })
+
+  it('counts each collateral failure shown on the vault card', () => {
+    const flagged = assessment([
+      finding('collateral.0x01.ltv'),
+      finding('collateral.0x02.ltv'),
+    ])
+    expect(getVaultCheckWarningLines(flagged)).toHaveLength(2)
+    expect(getVaultChecksCell(flagged).text).toBe('2 failed')
+    expect(getVaultChecksStatusLine(flagged, 'available')).toBe('Warning · 2 to review')
   })
 
   it('reads a vault with only accepted exceptions as passed', () => {

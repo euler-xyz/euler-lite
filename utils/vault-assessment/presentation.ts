@@ -249,7 +249,7 @@ export const getVaultChecksStatusLine = (
   if (status === 'unavailable') return 'Checks unavailable'
   if (status !== 'available') return ''
   if (!assessment || !assessment.assessed) return 'Not assessed yet'
-  const { reviewCount } = getVaultCheckFindings(assessment)
+  const reviewCount = getVaultCheckWarningLines(assessment).length
   const findings = [
     ...(assessment.configContext?.findings ?? []),
     ...(assessment.consistencyContext?.findings ?? []),
