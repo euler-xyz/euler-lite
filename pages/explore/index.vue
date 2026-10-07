@@ -321,7 +321,7 @@ const clearExploreFilters = () => {
       title="Explore"
       description="Discover lending markets across Euler. Filter by asset, curator, or market type."
       class="mb-16"
-      icon="nodes"
+      icon="nav-explore"
     />
 
     <div class="mb-16 -mx-16">
@@ -404,7 +404,7 @@ const clearExploreFilters = () => {
       <UiEmptyState
         v-else
         class="flex-1"
-        icon="nodes"
+        icon="nav-explore"
         :title="emptyStateTitle"
         :description="emptyStateDescription"
       >

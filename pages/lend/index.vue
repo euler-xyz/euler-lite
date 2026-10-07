@@ -309,7 +309,7 @@ const clearLendFilters = () => {
       title="Lend"
       description="Supply assets to isolated lending markets. Earn yield from borrower demand."
       class="mb-16"
-      arrow-down
+      icon="nav-lend"
     />
 
     <div class="mb-16 -mx-16">
@@ -390,7 +390,7 @@ const clearLendFilters = () => {
       <UiEmptyState
         v-else
         class="flex-1"
-        icon="lend-outline"
+        icon="nav-lend"
         :title="emptyStateTitle"
         :description="emptyStateDescription"
       >

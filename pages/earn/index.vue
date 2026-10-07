@@ -254,7 +254,7 @@ const clearEarnFilters = () => {
       title="Earn"
       description="One deposit, diversified yield. Curators allocate your capital across multiple lending strategies."
       class="mb-16"
-      arrow-right
+      icon="nav-earn"
     />
 
     <div class="mb-16 -mx-16">
@@ -325,7 +325,7 @@ const clearEarnFilters = () => {
       <UiEmptyState
         v-else
         class="flex-1"
-        icon="earn-outline"
+        icon="nav-earn"
         :title="emptyStateTitle"
         :description="emptyStateDescription"
       >

@@ -606,6 +606,7 @@ const clearBorrowFilters = () => {
       <BasePageHeader
         title="Borrow/Multiply"
         description="Borrow against your assets in isolated lending markets."
+        icon="nav-borrow"
       />
     </div>
 
@@ -711,7 +712,7 @@ const clearBorrowFilters = () => {
       <UiEmptyState
         v-else
         class="flex-1"
-        icon="borrow-outline"
+        icon="nav-borrow"
         :title="emptyStateTitle"
         :description="emptyStateDescription"
       >
