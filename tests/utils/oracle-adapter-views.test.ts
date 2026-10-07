@@ -42,24 +42,23 @@ describe('buildOracleAdapterView', () => {
         checks: [{ id: 'staleness', message: 'ok', outcome: OracleAdapterCheckOutcome.Pass, severity: OracleAdapterCheckSeverity.Info }],
       }),
     }
-    const view = buildOracleAdapterView(adapterStep(), meta)
+    const view = buildOracleAdapterView(adapterStep(), meta, 'https://v3.example/v3/images')
 
     expect(view.provider).toBe('Chainlink')
     expect(view.name).toBe('Chainlink WETH/USD')
     expect(view.isCustomAdapter).toBe(false)
     expect(view.methodology).toBe('Market price')
-    expect(view.logo).toBe('https://v3.euler.finance/v3/images/oracle-providers/chainlink')
+    expect(view.logo).toBe('https://v3.example/v3/images/oracle-providers/chainlink')
     expect(view.label).toEqual({ primary: 'Chainlink WETH/USD', suffix: '(Primary)' })
     expect(view.checksStatus).toBe('positive')
   })
 
-  it('builds the provider logo on the configured images host', () => {
+  it('shows no provider logo when the images base is unknown', () => {
     const meta: Record<string, OracleAdapterMeta> = {
       [oracle.toLowerCase()]: assessed({ base: weth, quote: usd, name: 'Chainlink WETH/USD', provider: 'Chainlink' }),
     }
 
-    expect(buildOracleAdapterView(adapterStep(), meta, 'https://images.example').logo)
-      .toBe('https://images.example/v3/images/oracle-providers/chainlink')
+    expect(buildOracleAdapterView(adapterStep(), meta, '').logo).toBeUndefined()
   })
 
   it('flags an adapter with no curated entry as custom (no onchain-name leak, no logo)', () => {

@@ -54,7 +54,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Unknown vault resolution
 - Earn refresh re-derives `verified` from current `earn-vaults.json` (unlisted/delisted vaults are not promoted)
 - SDK 2.0 governance hydration guard (`hasResolvedGovernorAdmin`)
-- Oracle provider logos from the V3 managed-image host (`V3_IMAGES_URL`, not `V3_API_URL`)
+- Oracle provider logos from the public images base the server reads from its V3 (`GET /v3/images`)
 - `cyclical note` is the UI gate for the cyclical IRM overview (on-chain IRM type alone is not enough)
 - Shared Oracles-block / Explore-matrix adapter display is covered in [Oracle Adapter Display](./oracle-adapter-display.md)
 

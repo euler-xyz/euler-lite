@@ -33,6 +33,13 @@ describe('BaseAvatar', () => {
     expect(html).not.toContain('<img')
   })
 
+  it('shows the fallback straight away when there is no primary image', async () => {
+    imageState.isReady = false
+    const html = await render({ src: '', fallbackSrc: INLINE_LOGO, label: 'Base' })
+
+    expect(html).toContain(`src="${INLINE_LOGO}"`)
+  })
+
   it('shows the remote image once it has loaded', async () => {
     imageState.isReady = true
     const html = await render({ src: REMOTE_LOGO, fallbackSrc: INLINE_LOGO, label: 'Base' })

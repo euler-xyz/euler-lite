@@ -1,17 +1,45 @@
 import { describe, expect, it } from 'vitest'
-import { v3ChainLogoUrl, v3OracleProviderLogoUrl } from '~/utils/v3-images'
+import { parsePublicImagesBaseUrl, v3ChainLogoUrl, v3OracleProviderLogoUrl } from '~/utils/v3-images'
+
+const BASE = 'https://v3.example/v3/images'
 
 describe('V3 image URLs', () => {
-  it('builds the chain logo URL on the default host', () => {
-    expect(v3ChainLogoUrl(8453)).toBe('https://v3.euler.finance/v3/images/chains/8453')
-  })
-
-  it('builds image URLs on a configured host', () => {
-    expect(v3ChainLogoUrl(1, 'https://images.example')).toBe('https://images.example/v3/images/chains/1')
-    expect(v3OracleProviderLogoUrl('pyth', 'https://images.example')).toBe('https://images.example/v3/images/oracle-providers/pyth')
+  it('builds chain and oracle-provider logo URLs under the published images base', () => {
+    expect(v3ChainLogoUrl(8453, BASE)).toBe('https://v3.example/v3/images/chains/8453')
+    expect(v3OracleProviderLogoUrl('pyth', BASE)).toBe('https://v3.example/v3/images/oracle-providers/pyth')
   })
 
   it('encodes the oracle provider key as one path segment', () => {
-    expect(v3OracleProviderLogoUrl('a/b')).toBe('https://v3.euler.finance/v3/images/oracle-providers/a%2Fb')
+    expect(v3OracleProviderLogoUrl('a/b', BASE)).toBe('https://v3.example/v3/images/oracle-providers/a%2Fb')
+  })
+
+  it('builds no URL when the images base is unknown', () => {
+    expect(v3ChainLogoUrl(1, '')).toBe('')
+    expect(v3ChainLogoUrl(1, undefined)).toBe('')
+    expect(v3OracleProviderLogoUrl('pyth', '')).toBeUndefined()
+  })
+})
+
+describe('parsePublicImagesBaseUrl', () => {
+  it('accepts a plain https URL and drops a trailing slash', () => {
+    expect(parsePublicImagesBaseUrl('https://v3.example/v3/images/')).toBe(BASE)
+    expect(parsePublicImagesBaseUrl(` ${BASE} `)).toBe(BASE)
+  })
+
+  it('rejects anything else', () => {
+    for (const value of [
+      'http://v3.example/v3/images',
+      'https://v3.example/v3/images?v=2',
+      'https://v3.example/v3/images#top',
+      'https://user:secret@v3.example/v3/images',
+      'javascript:alert(1)',
+      'not a url',
+      '',
+      42,
+      null,
+      undefined,
+    ]) {
+      expect(parsePublicImagesBaseUrl(value)).toBe('')
+    }
   })
 })

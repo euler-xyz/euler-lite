@@ -11,12 +11,9 @@
  */
 
 import {
-  DEFAULT_V3_IMAGES_URL,
   DEFAULT_VAULT_DATA_SOURCE,
-  normalizeV3ImagesUrl,
   readBrowserVaultSource,
   readV3ApiUrl,
-  readV3ImagesUrl,
   V3_API_PROXY_URL,
   type VaultDataSource,
 } from '~/utils/api-url-env'
@@ -36,7 +33,9 @@ export interface EnvConfig {
   appKitProjectId: string
   appUrl: string
   v3ApiUrl: string
-  /** Public host for V3 managed images (chain and oracle-provider logos). */
+  /** Public V3 images base (ends in /v3/images) the server read from its V3;
+   *  empty when unknown, so chain logos use bundled files and oracle-provider
+   *  logos are hidden. */
   v3ImagesUrl: string
   /** True when the deployment has an upstream V3 API configured. Drives the
    *  SDK "fast" instance: when true it uses v3 adapters; when false it falls
@@ -69,7 +68,7 @@ const DEFAULTS: EnvConfig = {
   appKitProjectId: '',
   appUrl: '',
   v3ApiUrl: '',
-  v3ImagesUrl: DEFAULT_V3_IMAGES_URL,
+  v3ImagesUrl: '',
   enableV3Backend: false,
   browserVaultSource: DEFAULT_VAULT_DATA_SOURCE,
   swapApiUrl: '',
@@ -98,7 +97,7 @@ function scanEnv(): EnvConfig {
     appKitProjectId: env('APPKIT_PROJECT_ID', 'NUXT_PUBLIC_APP_KIT_PROJECT_ID') || DEFAULTS.appKitProjectId,
     appUrl: env('NUXT_PUBLIC_APP_URL') || DEFAULTS.appUrl,
     v3ApiUrl: V3_API_PROXY_URL,
-    v3ImagesUrl: readV3ImagesUrl(),
+    v3ImagesUrl: DEFAULTS.v3ImagesUrl,
     enableV3Backend: v3UpstreamConfigured,
     browserVaultSource: readBrowserVaultSource(),
     swapApiUrl: env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL') || DEFAULTS.swapApiUrl,
@@ -140,7 +139,7 @@ function fromRuntimeConfig(): EnvConfig {
     appKitProjectId: str(rc.appKitProjectId) || DEFAULTS.appKitProjectId,
     appUrl: str(rc.appUrl) || DEFAULTS.appUrl,
     v3ApiUrl: str(rc.v3ApiUrl) || V3_API_PROXY_URL,
-    v3ImagesUrl: normalizeV3ImagesUrl(str(rc.v3ImagesUrl)),
+    v3ImagesUrl: DEFAULTS.v3ImagesUrl,
     enableV3Backend: isTruthy(rc.enableV3Backend),
     browserVaultSource: parseSource(rc.browserVaultSource),
     swapApiUrl: str(rc.swapApiUrl) || DEFAULTS.swapApiUrl,

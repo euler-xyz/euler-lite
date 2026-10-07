@@ -20,7 +20,7 @@ const images = computed(() => {
   const labels = listFromProp(props.label)
   return srcs.map((s, index) => {
     const fb = fallbacks[index] || ''
-    const effectiveSrc = (fb && fallbackRedirects.get(s) === fb) ? fb : s
+    const effectiveSrc = (fb && (!s || fallbackRedirects.get(s) === fb)) ? fb : s
 
     if (effectiveSrc && (isInlineImage(effectiveSrc) || loadedImages.has(effectiveSrc))) {
       return { label: labels[index], src: effectiveSrc, state: { isReady: true } }

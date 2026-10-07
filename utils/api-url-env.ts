@@ -1,5 +1,4 @@
 export const DEFAULT_V3_API_URL = 'https://v3.euler.finance'
-export const DEFAULT_V3_IMAGES_URL = DEFAULT_V3_API_URL
 export const INTERNAL_API_BASE = '/api/internal'
 export const V3_API_PROXY_URL = `${INTERNAL_API_BASE}/v3`
 
@@ -7,11 +6,6 @@ const V3_API_ENV_KEYS = [
   'V3_API_URL',
   'EULER_SDK_V3_API_URL',
   'NUXT_PUBLIC_V3_API_URL',
-] as const
-
-const V3_IMAGES_ENV_KEYS = [
-  'V3_IMAGES_URL',
-  'NUXT_PUBLIC_V3_IMAGES_URL',
 ] as const
 
 const V3_API_KEY_ENV_KEYS = [
@@ -86,36 +80,6 @@ function isTruthyEnv(value: string): boolean {
 
 export function readV3ApiUrl(env: NodeJS.ProcessEnv = process.env): string {
   return firstEnv(env, V3_API_ENV_KEYS)
-}
-
-function parseV3ImagesUrl(value: unknown): string | undefined {
-  if (typeof value !== 'string' || !value.trim()) return undefined
-  try {
-    const url = new URL(value.trim())
-    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) return undefined
-    return `${url.origin}${url.pathname.replace(/\/+$/, '')}`
-  }
-  catch {
-    return undefined
-  }
-}
-
-export function normalizeV3ImagesUrl(value: unknown): string {
-  return parseV3ImagesUrl(value) ?? DEFAULT_V3_IMAGES_URL
-}
-
-/**
- * Public host the browser loads chain and oracle-provider logos from. Kept
- * apart from V3_API_URL, which may name a private upstream and never reaches
- * the browser.
- */
-export function readV3ImagesUrl(env: NodeJS.ProcessEnv = process.env): string {
-  const raw = firstEnv(env, V3_IMAGES_ENV_KEYS)
-  const parsed = parseV3ImagesUrl(raw)
-  if (raw.trim() && !parsed) {
-    console.warn(`[euler-lite] V3_IMAGES_URL is not a plain https URL; using ${DEFAULT_V3_IMAGES_URL}.`)
-  }
-  return parsed ?? DEFAULT_V3_IMAGES_URL
 }
 
 export function readV3ApiKey(env: NodeJS.ProcessEnv = process.env): string {

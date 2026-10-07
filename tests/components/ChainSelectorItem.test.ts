@@ -11,8 +11,10 @@ vi.mock('@vueuse/core', () => ({
 const { default: BaseAvatar } = await import('~/components/base/BaseAvatar.vue')
 const { default: ChainSelectorItem } = await import('~/components/entities/chains/ChainSelectorItem.vue')
 
-const render = (props: { chainId: number, name: string }) => {
-  vi.stubGlobal('useEnvConfig', () => ({ v3ImagesUrl: 'https://images.example' }))
+const BASE = 'https://v3.example/v3/images'
+
+const render = (props: { chainId: number, name: string }, v3ImagesUrl = BASE) => {
+  vi.stubGlobal('useEnvConfig', () => ({ v3ImagesUrl }))
   const app = createSSRApp({ render: () => h(ChainSelectorItem, props) })
   app.component('BaseAvatar', BaseAvatar)
   return renderToString(app)
@@ -27,7 +29,7 @@ describe('ChainSelectorItem', () => {
     imageState.isReady = true
     const html = await render({ chainId: 8453, name: 'Base' })
 
-    expect(html).toContain('src="https://images.example/v3/images/chains/8453"')
+    expect(html).toContain(`src="${BASE}/chains/8453"`)
   })
 
   it('shows the bundled chain logo while the V3 logo loads', async () => {
@@ -36,6 +38,14 @@ describe('ChainSelectorItem', () => {
 
     expect(html).toMatch(/<img[^>]+src="data:image\//)
     expect(html).not.toContain('data-label')
+  })
+
+  it('goes straight to the bundled logo when the images base is unknown', async () => {
+    imageState.isReady = false
+    const html = await render({ chainId: 8453, name: 'Base' }, '')
+
+    expect(html).toMatch(/<img[^>]+src="data:image\//)
+    expect(html).not.toContain('/chains/8453')
   })
 
   it('shows the chain initials for a chain with no bundled logo', async () => {
