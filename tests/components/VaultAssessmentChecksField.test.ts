@@ -7,13 +7,13 @@ vi.mock('#components', () => ({ VaultAssessmentChecksModal: {} }))
 
 const address = '0x00000000000000000000000000000000000000aa'
 
-const render = (findings: Array<Record<string, unknown>>, errorTone: boolean) => {
+const render = (findings: Array<Record<string, unknown>>, errorTone: boolean, missingAssessment = false) => {
   vi.stubGlobal('useEulerLabels', () => ({
     isReady: ref(true),
     source: ref('v3'),
     visibility: ref({}),
     vaultAssessments: ref({}),
-    getVaultAssessmentEntry: () => ({ status: 'available', assessment: { assessed: true, configStatus: 'verified', checksStatus: 'warning', configContext: { outcome: 'pass', findings }, consistencyContext: null } }),
+    getVaultAssessmentEntry: () => ({ status: 'available', assessment: missingAssessment ? undefined : { assessed: true, configStatus: 'verified', checksStatus: 'warning', configContext: { outcome: 'pass', findings }, consistencyContext: null } }),
     loadVaultAssessment: vi.fn(),
     isVaultAssessmentAvailableForChain: () => true,
   }))
@@ -27,6 +27,12 @@ const render = (findings: Array<Record<string, unknown>>, errorTone: boolean) =>
 afterEach(() => vi.unstubAllGlobals())
 
 describe('vault checks cell', () => {
+  it('shows a completed missing assessment as not assessed', async () => {
+    const html = await render([], false, true)
+    expect(html).toContain('Not assessed')
+    expect(html).not.toContain('Checking…')
+  })
+
   it('counts accepted exceptions as passed and colours a failure by the vault status', async () => {
     const accepted = { key: 'liquidation.max-discount', description: 'd', outcome: 'fail', required: false, exempted: true }
     const passed = { key: 'oracle.liability-quote', description: 'd', outcome: 'pass', required: true }

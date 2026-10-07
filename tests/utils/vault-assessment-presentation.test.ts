@@ -1,17 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import type { VaultAssessment, VaultAssessmentFinding } from '@eulerxyz/euler-v2-sdk'
+import { getAddress } from 'viem'
+import { shortenAddress } from '~/utils/string-utils'
 import {
   getVaultChecksCell,
   getVaultCheckFindingTone,
+  getUnknownVaultCause,
+  adapterFailureWarnsVault,
   getVaultCheckWarningLines,
   getCriticalAssessmentWarning,
   getKnownUnlistedActionNotice,
   getUnverifiedActionCopy,
   getNotListedLine,
   getUpcomingVaultChanges,
-  getAcceptedVaultCheckFindings,
   getVaultAssessmentCheckDetails,
-  getVaultAssessmentCheckSummary,
   getVaultCheckFindings,
   getVaultChecksStatusLine,
   hasOnlyAcceptedVaultCheckFindings,
@@ -53,16 +55,15 @@ describe('vault checks presentation', () => {
     ])
 
     expect(getVaultAssessmentCheckDetails(reviewed).counts).toEqual({
-      passed: 1, failed: 1, unknown: 1, accepted: 1, notApplicable: 1,
+      passed: 1, failed: 1, unknown: 1, accepted: 1, notApplicable: 1, muted: 0,
     })
     expect(getVaultAssessmentCheckDetails(reviewed).findings.map(item => item.key)).toEqual([
       'irm.max-apy', 'oracle.liability-quote', 'liquidation.max-discount',
       'deployment.factory', 'scheduled.governance.timelock',
     ])
-    expect(getVaultAssessmentCheckSummary(reviewed)).toBe('1 failed · 1 unknown · 1 accepted · 1 passed')
   })
 
-  it('shows the selected failure classes with V3 sentences and counts other gating rules', () => {
+  it('shows the selected failure classes with V3 sentences and counts every other open finding', () => {
     const view = getVaultCheckFindings(assessment([
       finding('oracle.liability-quote'),
       finding('collateral.0x01.ltv'),
@@ -78,8 +79,8 @@ describe('vault checks presentation', () => {
       'V3 says oracle.liability-quote',
       'V3 says collateral.0x01.ltv',
     ])
-    expect(view.moreCount).toBe(2)
-    expect(view.reviewCount).toBe(4)
+    expect(view.moreCount).toBe(4)
+    expect(view.reviewCount).toBe(6)
   })
 
   it.each([
@@ -116,7 +117,7 @@ describe('vault checks presentation', () => {
     expect(getVaultChecksStatusLine(mixed, 'available')).toBe('Warning · 1 to review')
   })
 
-  it('shows exempted failures as accepted evidence when required checks pass', () => {
+  it('reads a vault with only accepted exceptions as passed', () => {
     const flagged = assessment([
       finding('liquidation.max-discount', { exempted: true }),
       finding('collateral.0x01.ltv', { exempted: true }),
@@ -124,12 +125,8 @@ describe('vault checks presentation', () => {
     ], { checksStatus: 'warning' })
 
     expect(getVaultCheckFindings(flagged).lines).toEqual([])
-    expect(getAcceptedVaultCheckFindings(flagged).map(line => line.text)).toEqual([
-      'V3 says liquidation.max-discount',
-      'V3 says collateral.0x01.ltv',
-    ])
     expect(hasOnlyAcceptedVaultCheckFindings(flagged)).toBe(true)
-    expect(getVaultChecksStatusLine(flagged, 'available', Date.parse('2026-09-29T12:12:00.000Z'))).toBe('Checks passed · checked 12 min ago · 2 accepted exceptions')
+    expect(getVaultChecksStatusLine(flagged, 'available', Date.parse('2026-09-29T12:12:00.000Z'))).toBe('Checks passed · checked 12 min ago')
     expect(hasOnlyAcceptedVaultCheckFindings(assessment([
       finding('liquidation.max-discount', { exempted: true }),
       finding('irm.max-apy'),
@@ -170,6 +167,30 @@ describe('vault checks presentation', () => {
     ])
   })
 
+  it('keeps one line per deprecated collateral and strategy instead of folding them into one rule', () => {
+    const lines = getVaultCheckWarningLines(assessment([
+      finding('strategy.0x01.visible'),
+      finding('collateral.0x02.visible'),
+      finding('collateral.0x03.visible'),
+      finding('collateral.0x03.ltv', { outcome: 'unknown', required: true }),
+      finding('collateral.0x03.ltv'),
+    ]))
+    expect(lines.map(line => [line.key, line.outcome])).toEqual([
+      ['strategy.0x01.visible', 'fail'],
+      ['collateral.0x02.visible', 'fail'],
+      ['collateral.0x03.visible', 'fail'],
+      ['collateral.0x03.ltv', 'fail'],
+    ])
+  })
+
+  it('names why an unknown vault is unknown without calling a labelled vault unlisted', () => {
+    expect(getUnknownVaultCause(undefined)).toBe('This vault is not listed in the published vault labels.')
+    expect(getUnknownVaultCause({ status: 'hidden', reason: 'Deprecated due to low activity.', decidedBy: 'deprecated' })).toBe('This vault is not listed: Deprecated due to low activity.')
+    expect(getUnknownVaultCause({ status: 'pending_review', decidedBy: 'unclaimed' })).toBe('This vault is not listed in the published vault labels.')
+    expect(getUnknownVaultCause({ status: 'pending_review', decidedBy: 'checks' })).toBe('This vault has not been checked yet, so it is not listed.')
+    expect(getUnknownVaultCause({ status: 'warning', reason: 'Deprecated due to low activity.', decidedBy: 'deprecated' })).toBe('This vault is in the published vault labels but could not be verified.')
+  })
+
   it('colours a finding red only when it keeps the vault from being listed', () => {
     expect(getVaultCheckFindingTone(finding('oracle.adapters-recognized', { outcome: 'unknown', required: true }))).toBe('error')
     expect(getVaultCheckFindingTone(finding('oracle.liability-quote', { required: true }))).toBe('error')
@@ -187,6 +208,7 @@ describe('vault checks presentation', () => {
     expect(getVaultChecksCell(assessment([accepted, finding('oracle.liability-route')]))).toEqual({ text: '1 failed', tone: 'warning' })
     expect(getVaultChecksCell(assessment([finding('oracle.liability-route', { outcome: 'unknown' }), passed]))).toEqual({ text: '1 unknown', tone: 'muted' })
     expect(getVaultChecksCell(assessment([finding('oracle.adapters-recognized', { outcome: 'unknown', required: true }), passed]))).toEqual({ text: '1 unknown', tone: 'warning' })
+    expect(getVaultChecksCell(assessment([finding('irm.max-apy'), finding('liquidation.max-discount', { outcome: 'unknown' }), passed]))).toEqual({ text: '1 failed · 1 unknown', tone: 'warning' })
     expect(getVaultChecksCell(assessment([], { assessed: false }))).toEqual({ text: 'Not assessed', tone: 'muted' })
   })
 
@@ -223,6 +245,16 @@ describe('vault checks presentation', () => {
     ])
   })
 
+  it('removes the complete ISO timestamp prefix from an upcoming Earn change', () => {
+    const result = getUpcomingVaultChanges(assessment([
+      finding('scheduled.governance.timelock', {
+        observed: { validAt: '2026-10-06T14:30:00.000Z', pending: '86400' },
+        cause: { code: 'pending', subject: 'vault', summary: 'Pending change, acceptable from 2026-10-06T14:30:00.000Z: timelock update', remedy: null },
+      }),
+    ], { family: 'earn' }))
+    expect(result[0]?.text).toBe('from Oct 6, 2026 · timelock 1 day · timelock update · would not pass the checks')
+  })
+
   it('only makes a form warning for exit and pricing failures', () => {
     expect(getCriticalAssessmentWarning(assessment([finding('oracle.adapters-recognized')]))).toBeNull()
     expect(getCriticalAssessmentWarning(assessment([finding('hooks.zero-or-trusted', {
@@ -249,5 +281,47 @@ describe('vault checks presentation', () => {
     )
     expect(getUnverifiedActionCopy(null, ['Vault A']).description).toContain('Vault A')
     expect(getUnverifiedActionCopy(null, ['Vault A']).description).toContain('phishing attempts')
+  })
+
+  describe('oracle adapter failures reaching the vault', () => {
+    const A = '0x00000000000000000000000000000000000000a1'
+    const B = '0x00000000000000000000000000000000000000a2'
+    const C = '0x00000000000000000000000000000000000000a3'
+    const feed = { key: 'feed-recognized', description: 'The connected price feed is not recognized.', severity: 'medium' }
+    const live = { key: 'quote-liveness', description: 'The quote is stale.', severity: 'medium' }
+    const high = { key: 'pyth-feed-recognized', description: 'The Pyth feed id is not recognized.', severity: 'high' }
+    const adapter = (address: string, checksStatus: 'warning' | 'negative', findings: Array<typeof feed>) => ({ address, checksStatus, findings })
+    const adaptersFinding = (failing: Array<ReturnType<typeof adapter>>) =>
+      finding('oracle.adapters-checks', { observed: { adapters: failing.length, failing } })
+
+    it('warns the vault for a negative adapter, a high-severity check, or an unrecognised feed plus another failure', () => {
+      expect(adapterFailureWarnsVault(adapter(A, 'warning', [feed]))).toBe(false)
+      expect(adapterFailureWarnsVault(adapter(A, 'warning', [live]))).toBe(false)
+      expect(adapterFailureWarnsVault(adapter(A, 'warning', [feed, live]))).toBe(true)
+      expect(adapterFailureWarnsVault(adapter(A, 'warning', [high]))).toBe(true)
+      expect(adapterFailureWarnsVault(adapter(A, 'negative', [live]))).toBe(true)
+    })
+
+    it('keeps a below-threshold adapter failure off the vault: no line, not failed, chip hidden', () => {
+      const muted = assessment([adaptersFinding([adapter(A, 'warning', [feed])]), finding('irm.max-apy', { outcome: 'pass' })], { checksStatus: 'warning' })
+      expect(getVaultCheckWarningLines(muted)).toEqual([])
+      expect(getVaultChecksCell(muted)).toEqual({ text: '1 passed', tone: 'positive' })
+      expect(getVaultAssessmentCheckDetails(muted).counts).toMatchObject({ failed: 0, muted: 1, passed: 1 })
+      expect(hasOnlyAcceptedVaultCheckFindings(muted)).toBe(true)
+      expect(getVaultChecksStatusLine(muted, 'available', Date.parse('2026-09-29T12:12:00.000Z'))).toBe('Checks passed · checked 12 min ago')
+    })
+
+    it('lists one line per adapter that reaches the vault, named by its label and anchored to its Oracles card', () => {
+      const lines = getVaultCheckWarningLines(
+        assessment([adaptersFinding([adapter(A, 'warning', [feed]), adapter(B, 'warning', [feed, live]), adapter(C, 'negative', [live])])]),
+        { adapterLabel: address => address.toLowerCase() === B ? 'Unknown AggregatorV3 Feed' : undefined },
+      )
+      expect(lines.map(line => [line.key, line.text, line.anchor])).toEqual([
+        [`oracle.adapters-checks:${B}`, 'Unknown AggregatorV3 Feed · The connected price feed is not recognized · The quote is stale', `oracle-adapter-${B}`],
+        [`oracle.adapters-checks:${C}`, `${shortenAddress(getAddress(C))} · The quote is stale`, `oracle-adapter-${C}`],
+      ])
+      expect(lines[0]?.parts?.[0]).toEqual({ text: 'Unknown AggregatorV3 Feed', address: getAddress(B) })
+      expect(getVaultChecksCell(assessment([adaptersFinding([adapter(C, 'negative', [live])])]))).toEqual({ text: '1 failed', tone: 'warning' })
+    })
   })
 })

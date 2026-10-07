@@ -25,6 +25,21 @@ describe('operation intent factory', () => {
     expect(intent.subAccounts.every(account => isAddress(account))).toBe(true)
   })
 
+  it('checksums address-shaped planner arguments', () => {
+    const intent = createOperationIntent({
+      kind: 'deposit',
+      planner: 'deposit',
+      args: { vaultAddress: TEST_VAULT.toLowerCase(), assetAddress: TEST_TOKEN.toLowerCase(), amount: 12n },
+      chainId: 1,
+      account: TEST_ACCOUNT,
+      source: 'test',
+      createdAt: 1,
+      intentId: 'intent-lowercase',
+    })
+    expect(intent.planner.args).toEqual({ vaultAddress: TEST_VAULT, assetAddress: TEST_TOKEN, amount: 12n })
+    expect(intent.constraints).toEqual([{ kind: 'exact-input', token: TEST_TOKEN, amount: 12n }])
+  })
+
   it('strips runtime account state and seals a direct planner constraint', () => {
     const intent = createOperationIntent({
       kind: 'deposit',

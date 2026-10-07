@@ -76,6 +76,21 @@ describe('buildProductDescriptors', () => {
     expect(productByVault.get(limitedVault)?.governanceLimited).toBe(true)
     expect(productByVault.get(standardVault)?.governanceLimited).toBe(false)
   })
+
+  it('keeps annotation-only EVK notices and deprecation without inventing a product', () => {
+    const address = '0x0000000000000000000000000000000000000703'
+    const { productByVault, deprecatedSet } = buildProductDescriptors({}, {
+      [address.toLowerCase()]: {
+        deprecated: true, deprecationReason: 'Retired', portfolioNotice: 'Withdraw when possible',
+        tags: ['governance limited'],
+      },
+    })
+    expect(productByVault.get(address)).toMatchObject({
+      slug: null, name: '', portfolioNotice: 'Withdraw when possible',
+      deprecationReason: 'Retired', governanceLimited: true,
+    })
+    expect(deprecatedSet.has(address)).toBe(true)
+  })
 })
 
 describe('SDK escrow classification in public views', () => {

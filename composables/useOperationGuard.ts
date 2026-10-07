@@ -7,6 +7,7 @@ import { useUnverifiedVaultGuard } from '~/composables/guards/useUnverifiedVault
 import { clearOperationMeta, registerOperationBlocker, setOperationMeta, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
 import { clearSdkKeyringCredential, setSdkKeyringCredential } from '~/utils/sdk-keyring'
 import { useGeoBlock } from '~/composables/useGeoBlock'
+import { useSafeWallet } from '~/composables/useSafeWallet'
 import { isVaultKeyring } from '~/utils/eulerLabelsUtils'
 
 let geoGuardSequence = 0
@@ -25,6 +26,16 @@ export const useOperationGuard = (
     else unregisterOperationBlocker(geoBlockerKey)
   }, { immediate: true })
   onUnmounted(() => unregisterOperationBlocker(geoBlockerKey))
+
+  // The approval mode is sealed from the wallet kind at review time; a review
+  // prepared before a slow Safe detection lands would be rejected at signing.
+  const { isSafeWalletResolved } = useSafeWallet()
+  const walletKindBlockerKey = `wallet-kind:${geoBlockerKey}`
+  watch(isSafeWalletResolved, (resolved) => {
+    if (!resolved && options.acquiresExposure !== false) registerOperationBlocker(walletKindBlockerKey, 'Detecting the wallet type…')
+    else unregisterOperationBlocker(walletKindBlockerKey)
+  }, { immediate: true })
+  onUnmounted(() => unregisterOperationBlocker(walletKindBlockerKey))
   const { address: userAddress } = useWagmi()
   const chainId = useChainId()
   const { chainId: appChainId } = useEulerAddresses()

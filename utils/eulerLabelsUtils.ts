@@ -26,10 +26,14 @@ import {
   isEulerLabelVaultNotExplorableBorrow,
   isEulerLabelVaultNotExplorableLend,
   isEulerLabelVaultNoticeSpecific,
+  isEulerLabelVaultRecentlyAdded,
+  isEulerLabelVaultGovernanceLimited,
+  isEulerLabelVaultHighUtilisationWarningSuppressed,
+  isEulerLabelVaultCyclicalNote,
   type EulerLabelAssetPatternRule,
   type EulerEarn,
 } from '@eulerxyz/euler-v2-sdk'
-import { eulerLabelProductEmpty, type EulerLabelEarnVaultEntry, type EulerLabelProduct, type EulerLabelEntity, type EulerLabelPointReward } from '~/entities/euler/labels'
+import { eulerLabelProductEmpty, type EulerLabelProduct, type EulerLabelEntity, type EulerLabelPointReward } from '~/entities/euler/labels'
 import { getCurrentEulerLabelsData, getEulerLabelsSourceData, getEulerLabelWrapPairs } from '~/composables/useEulerLabels'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { matchesDeploymentVaultTag } from '~/utils/public-labels'
@@ -98,31 +102,8 @@ export const getAssetRestricted = (assetAddress: string): string[] | undefined =
 export const getAssetPatternRules = (): EulerLabelAssetPatternRule[] =>
   labels().assetPatternRules
 
-const productHasTag = (product: EulerLabelProduct | undefined, tag: string): boolean =>
-  product?.tags?.includes(tag) ?? false
-
-const vaultOverrideHasTag = (
-  product: EulerLabelProduct | undefined,
-  normalizedVaultAddress: string,
-  tag: string,
-): boolean =>
-  product?.vaultOverrides?.[normalizedVaultAddress]?.tags?.includes(tag) ?? false
-
-const earnEntryHasTag = (entry: EulerLabelEarnVaultEntry | undefined, tag: string): boolean =>
-  entry?.tags?.includes(tag) ?? false
-
-const getEarnEntryByVault = (normalizedVaultAddress: string): EulerLabelEarnVaultEntry | undefined =>
-  labels().earnVaultEntries[normalizedVaultAddress.toLowerCase()] as EulerLabelEarnVaultEntry | undefined
-
-export const isVaultRecentlyAdded = (vaultAddress: string): boolean => {
-  const normalized = normalizeAddress(vaultAddress)
-  const product = getEulerLabelProductByVault(labels(), normalized) as EulerLabelProduct | undefined
-  return (
-    productHasTag(product, 'recently added')
-    || vaultOverrideHasTag(product, normalized, 'recently added')
-    || earnEntryHasTag(getEarnEntryByVault(normalized), 'recently added')
-  )
-}
+export const isVaultRecentlyAdded = (vaultAddress: string): boolean =>
+  isEulerLabelVaultRecentlyAdded(labels(), vaultAddress)
 
 export const normalizeProducts = (data: Record<string, EulerLabelProduct>): { products: Record<string, EulerLabelProduct>, vaultAddresses: string[] } => {
   const normalized: Record<string, EulerLabelProduct> = {}
@@ -158,6 +139,7 @@ export const getVaultDeprecation = (vaultAddress: string): { deprecated: boolean
     deprecated: true,
     reason: (earnDeprecated ? getEulerLabelEarnVaultDeprecationReason(labels(), normalized) : '')
       || product?.vaultOverrides?.[normalized]?.deprecationReason
+      || labels().vaultAnnotations?.[normalized.toLowerCase()]?.deprecationReason
       || product?.deprecationReason
       || 'This vault has been deprecated.',
   }
@@ -205,32 +187,14 @@ export const isProductKeyring = (productKey: string): boolean =>
 export const isVaultAccessControlled = (vaultAddress: string): boolean =>
   isEulerLabelVaultAccessControlled(labels(), vaultAddress)
 
-export const isVaultGovernanceLimited = (vaultAddress: string): boolean => {
-  const normalized = normalizeAddress(vaultAddress)
-  const product = getEulerLabelProductByVault(labels(), normalized) as EulerLabelProduct | undefined
-  return (
-    productHasTag(product, 'governance limited')
-    || vaultOverrideHasTag(product, normalized, 'governance limited')
-  )
-}
+export const isVaultGovernanceLimited = (vaultAddress: string): boolean =>
+  isEulerLabelVaultGovernanceLimited(labels(), vaultAddress)
 
-export const isVaultHighUtilisationWarningSuppressed = (vaultAddress: string): boolean => {
-  const normalized = normalizeAddress(vaultAddress)
-  const product = getEulerLabelProductByVault(labels(), normalized) as EulerLabelProduct | undefined
-  return (
-    productHasTag(product, 'suppress high utilisation warning')
-    || vaultOverrideHasTag(product, normalized, 'suppress high utilisation warning')
-  )
-}
+export const isVaultHighUtilisationWarningSuppressed = (vaultAddress: string): boolean =>
+  isEulerLabelVaultHighUtilisationWarningSuppressed(labels(), vaultAddress)
 
-export const isVaultCyclicalNote = (vaultAddress: string): boolean => {
-  const normalized = normalizeAddress(vaultAddress)
-  const product = getEulerLabelProductByVault(labels(), normalized) as EulerLabelProduct | undefined
-  return (
-    productHasTag(product, 'cyclical note')
-    || vaultOverrideHasTag(product, normalized, 'cyclical note')
-  )
-}
+export const isVaultCyclicalNote = (vaultAddress: string): boolean =>
+  isEulerLabelVaultCyclicalNote(labels(), vaultAddress)
 
 export type EulerLabelEntityVaultLike = {
   address?: string

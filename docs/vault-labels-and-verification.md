@@ -24,11 +24,11 @@ The adapter also reads `/evk/vaults` and `/earn/vaults` with explicit `visibilit
 
 Entity profiles supply hosted logo URLs. A product's `entityId` is its managing entity; `coBrandEntityIds` supplies additional display branding only. Co-brands do not participate in manager ownership, governor verification, or manager-profile market assignment. Neutral escrow inventory rows are not assigned to a product/entity and are not added to the labels-derived verified set.
 
-Lite evaluates live V3 geo policies using `countriesResolved` and cumulative global/chain/product/vault/asset rules. The server embeds a validated geo collection with each snapshot and retains a disk checkpoint for stale-on-error recovery. Mount `GEO_POLICY_CACHE_DIR` on persistent storage for redeploy durability. Hosted snapshots have no GitHub-label dependency. `LABELS_SOURCE=static` supplies the same snapshot from operator-owned files; see [Static labels](./static-labels.md). Production bake/canary remain rollout work. See [Geo-Blocking](./geo-blocking.md).
+Lite evaluates live V3 geo policies using `countriesResolved` and cumulative global/chain/product/vault/asset rules. Geo rules retain their own fetch time and disk checkpoint. A failed labels refresh can reuse label content with newer geo rules; a cached bundle never serves geo rules past their one-day limit. Mount `GEO_POLICY_CACHE_DIR` on persistent storage for redeploy durability. Hosted snapshots have no GitHub-label dependency. `LABELS_SOURCE=static` supplies the same snapshot from operator-owned files; see [Static labels](./static-labels.md). Production bake/canary remain rollout work. See [Geo-Blocking](./geo-blocking.md).
 
 Oracle adapter identity and health assessments come from Data V3 through the SDK and Lite's same-origin V3 proxy. Detail views load an assessment per adapter; discovery loads the paginated chain catalogue. The UI uses V3's explicit `recognized` identity verdict and server-computed `checksStatus`, preserving `unknown` and `not_applicable` finding outcomes.
 
-**Caching and fallback**: The server bundle has a 5-minute chain/version cache, concurrent cold loads share one in-flight fetch, and failures can return a bounded stale bundle. Hosted bundles carry the time of the V3 read, including when served from stale cache. The browser deduplicates chain-scoped loads and rejects superseded responses. Visible tabs check freshness every minute and on focus/visibility changes, requesting a fresh server bundle after five minutes. Same-chain refreshes retain display data and every action stays available while the bundle is younger than a day; V3 verification becomes unavailable one day after the last successful source read, even if the server returns that bundle again, and then every vault reads as unverified behind the app's backend-unavailable notice. The server keeps the last good bundle, verified set and metadata map for that day and refreshes them every five minutes. The public verified-set cache uses the same source timestamp and caps its response-cache lifetime at that deadline. Requests time out after 35 seconds. Current hosted membership overrides cached positive registry flags, so refreshed revocations also update verification guards and verified EVault lists. Escrow perspective trust remains independent. An initial failure leaves labels unavailable with a retry action. Retry requests a fresh bundle and reloads vault discovery after labels recover.
+**Caching and fallback**: The server bundle has a 5-minute chain/version cache, concurrent cold loads share one in-flight fetch, and failures can return a bounded stale bundle while its geo rules remain usable. Hosted bundles carry the time of the V3 read, including when served from stale cache. The browser deduplicates chain-scoped loads and rejects superseded responses. Visible tabs check freshness every minute and on focus/visibility changes, requesting a fresh server bundle after five minutes. Same-chain refreshes retain display data and every action stays available while the bundle is younger than a day; V3 verification becomes unavailable one day after the last successful source read, even if the server returns that bundle again, and then every vault reads as unverified behind the app's backend-unavailable notice. The server keeps the last good bundle, verified set and metadata map for that day and refreshes them every five minutes. Public metadata can retain display text past source expiry, but it drops verified manager attribution at that deadline. The public verified-set cache uses the same source timestamp and caps its response-cache lifetime at that deadline. Requests time out after 35 seconds. Current hosted membership overrides cached positive registry flags, so refreshed revocations also update verification guards and verified EVault lists. Escrow perspective trust remains independent. An initial failure leaves labels unavailable with a retry action. Retry requests a fresh bundle and reloads vault discovery after labels recover.
 
 **Inventory gaps**: The SDK reads direct V3 visibility for labelled vaults absent from the EVK/Earn inventories, with at most eight requests in flight. This covers Securitize labels without inventing a verdict. Effective lend/borrow listing decisions are preserved, so a visible collateral wrapper may remain hidden from lend discovery. Direct-verdict failures fail the aggregate refresh and use the same bounded stale-snapshot behavior described above.
 
@@ -142,7 +142,7 @@ The Earn Governance block shows on-chain owner, curator, guardian, timelock, pen
 | **Securitize vaults** | Address appears in `verifiedVaultAddresses` from labels |
 | **Unknown vaults** | Resolved via subgraph; verified only if in labels |
 
-Registry presence is not Earn verification. `updateEarnVaults` / `refreshVaults` builds `verified` as `curatedAddresses.has(vault.address)` from `useEulerLabels().earnVaults`. On-demand unlisted Earn vaults stay unverified after a refresh that still fetches them. Removing an address from `earn-vaults.json` clears stale verification on the next Earn update — do not copy the prior `verified: true`. Server snapshot hydration can mark snapshot Earn rows verified because that snapshot only includes labeled earn addresses.
+Registry presence is not Earn verification. `updateEarnVaults` / `refreshVaults` builds `verified` as `curatedAddresses.has(vault.address)` from `useEulerLabels().earnVaults`. On-demand unlisted Earn vaults stay unverified after a refresh that still fetches them. When an address is absent from the selected labels snapshot, the next Earn update clears its prior verification rather than copying `verified: true`. Server snapshot hydration can mark snapshot Earn rows verified because that snapshot only includes labeled earn addresses.
 
 ### On-Chain Perspectives
 
@@ -193,6 +193,40 @@ The selected SDK adapter supplies the flag: V3 first with on-chain fallback for 
 For per-address lookups during direct navigation to a not-yet-cached vault, `fetchVaultCategory(address)` checks the SDK escrow verified array first, then asks `vaultMetaService.fetchVaultType` for the vault type.
 
 **Important: labels remain authoritative for which vaults are _shown_.** SDK categorization says "what category each vault is"; normalized Public Labels products and earn-vault entries say "which vaults to include in lists". The two are composed in `useVaults.loadVaults`: labels select the set, categorization picks the right lens per address.
+
+## Cyclical IRM overview
+
+The cyclical Interest Rate Model block is **label-gated**, not IRM-type-gated.
+
+`isVaultCyclicalNote(address)` in `utils/eulerLabelsUtils.ts` is true when the product `tags` or that vault's `vaultOverrides.tags` include `cyclical note`. That helper is what `VaultOverview.vue` uses to swap `VaultOverviewBlockCyclicalIRM` in for the generic IRM block. The same tag participates in these UI gates:
+
+| Surface | Gate |
+|---|---|
+| Overview IRM block | `isVaultCyclicalNote(vault.address)` |
+| `cyclicalNote` type badge | verified **and** the tag |
+| Lend list "cyclical note" badge | the tag and verified vault governance |
+| Borrow list "cyclical note" badge | the borrow vault's tag and verified governance for both vaults in the pair |
+| Discovery graph "cyclical note" badge | the tag, subject to the graph's badge priority |
+| Target-utilisation info warning (`useVaultWarnings`) | the tag, at least 95% utilisation, and a context other than `repay`; repay keeps its standard high/critical warning |
+
+`isCyclicalNoteVault` in `utils/vault/classification.ts` is a different helper: it only inspects `vault.interestRateModel.type` (`FIXED_CYCLICAL_BINARY` = 4 or `FIXED_CYCLICAL_BINARY_MONTHLY` = 5). A vault can have a cyclical IRM on-chain and still render the generic IRM block if the label tag is absent. Do not treat the type number as permission to show cyclical-note UI.
+
+Inside `VaultOverviewBlockCyclicalIRM.vue` the block still hides itself unless the vault has collateral exposure (`hasCollateralExposure`) and a non-zero IRM address. Both IRM variants are then normalised into one `{ primaryRate, secondaryRate, startSec, primaryDurationSec, secondaryDurationSec }` cycle:
+
+| `interestRateModel.type` | Cycle bounds | Date display |
+|---|---|---|
+| `FIXED_CYCLICAL_BINARY` | `startTimestamp` plus `primaryDuration` / `secondaryDuration` | Local timezone |
+| `FIXED_CYCLICAL_BINARY_MONTHLY` | UTC calendar month; `cycleStartDay` must be `1n…31n` or the cycle is `null` | UTC |
+
+The monthly variant clamps a start day past a short month to that month's last day (`Math.min(startDay, daysInMonth)`) so `Date.UTC` cannot roll 31 February into March. That matches the contract.
+
+The live "Now" marker and elapsed-cycle math use:
+
+```ts
+const now = useNow({ scheduler: cb => useIntervalFn(cb, 1_000) })
+```
+
+The custom scheduler updates the clock once per second; VueUse 15's bare `useNow()` is valid and defaults to animation-frame updates. Borrow APYs on the block convert the IRM's 27-decimal per-second rate (`SPY`) with `(1 + spy)^(secondsInYear) - 1`.
 
 ## Discovery Page Filtering
 
@@ -300,6 +334,6 @@ The SDK shares metadata fetching and display mapping between its adapters. Metad
 
 Lite selects the adapter once in its shared server labels loader. The browser, vault snapshots and public APIs use that selection. The metadata-only path applies the existing governor/router/owner checks against the vault's explicit managing entity; an absent manager cannot inherit static Earn trust. Registry verification uses current candidates and entity addresses rather than a cached positive flag. Independent escrow-perspective verification remains applicable.
 
-Metadata-only discovery follows published product `notExplorable` and per-vault `notExplorableLend` / `notExplorableBorrow` flags and normal market filters. Explore product cards are label/market driven; governance checks separately control verified vault lists and verification badges. Deprecation alone does not hide a vault; Earn uses its lend-side flag and product hiding. Published deprecation and display information remains available to direct pages and existing positions. V3 assessment-based platform listing controls are not synthesized for these chains. Errors on normally assessed chains never switch them to metadata-only handling. Static fork mode remains independent.
+Metadata-only discovery follows published product `notExplorable` and per-vault `notExplorableLend` / `notExplorableBorrow` flags and normal market filters. An explicit vault-side `false` overrides a hidden product for that side; a missing flag inherits the product setting. Explore product cards are label/market driven; governance checks separately control verified vault lists and verification badges. Deprecation alone does not hide a vault; Earn uses its lend-side flag before the product setting. Published deprecation, notices and tags remain available for unnamed EVKs without creating a blank display product. V3 assessment-based platform listing controls are not synthesized for these chains. Errors on normally assessed chains never switch them to metadata-only handling. Static fork mode remains independent.
 
 Live labels refreshes reload vault data when membership or discovery eligibility changes; text-only updates use the reactive labels store. This brings newly eligible vaults into the registry without requiring a page reload. Same-chain label refreshes retain already loaded vaults, including unlisted vaults used by open forms; current hosted membership still controls verification. Ordinary loads and chain changes clear the registry. Batch-review account reads request quantitative data explicitly and do not invoke the SDK's default file-based labels service through `populateAll`.

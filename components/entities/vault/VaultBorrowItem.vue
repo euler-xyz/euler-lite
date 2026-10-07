@@ -13,7 +13,7 @@ import { isSecuritizeBorrowPair, type AnyBorrowVaultPair } from '~/types/borrow-
 import { getAddress, zeroAddress } from 'viem'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { areTokenAddressesCorrelatedByTags, getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
-import { getNotListedLine } from '~/utils/vault-assessment/presentation'
+import { getUnknownVaultCause } from '~/utils/vault-assessment/presentation'
 import type { EVault } from '@eulerxyz/euler-v2-sdk'
 
 const { pair, assessmentUi = 'badge' } = defineProps<{ pair: AnyBorrowVaultPair, assessmentUi?: 'badge' | 'field' | 'none' }>()
@@ -173,7 +173,7 @@ const checksColumn = (vault: EVault) => {
     symbol: vault.asset.symbol,
     label: `${vault.asset.symbol} checks`,
     unverified,
-    cause: unverified ? getNotListedLine(verdict?.status, verdict?.reason, verdict?.decidedBy) ?? 'This vault is not listed in the published vault labels.' : null,
+    cause: unverified ? getUnknownVaultCause(verdict) : null,
   }
 }
 const checksColumns = computed(() => {

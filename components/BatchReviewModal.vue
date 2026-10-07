@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { getAddress } from 'viem'
-import { flattenBatchEntries, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { planVaultTargets } from '~/utils/plan-vault-targets'
 import { buildModifiedPositionKeySets, buildRemovedPositionKeySets, filterPositionKeysByOwner, useTxBatch } from '~/composables/useTxBatch'
 import { useTokenSymbolResolver } from '~/composables/useTokenSymbolResolver'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
@@ -57,6 +58,7 @@ const {
   dismissExecutionError,
 } = useTxBatch()
 const executionService = useReviewedExecution()
+const approvalReadIssueCount = computed(() => executionService.approvalReadIssues?.value.length ?? 0)
 const toast = useToast()
 const isExecuting = ref(false)
 const preparedExecution = shallowRef<PreparedExecutionReview | null>(null)
@@ -228,19 +230,16 @@ const unverifiedVaults = computed(() => {
   for (const entry of entries.value) {
     const plan = entryPlans.value[entry.id]
     if (!plan) continue
-    for (const item of plan) {
-      if (item.type !== 'evcBatch') continue
-      for (const bi of flattenBatchEntries(item.items)) {
-        try {
-          const addr = getAddress(bi.targetContract)
-          const vault = getVault(addr) as { shares?: { name?: string }, asset?: { symbol?: string } } | undefined
-          if (vault && !isVerifiedVault(addr)) {
-            const name = vault.shares?.name || vault.asset?.symbol || ''
-            if (name) vaults.set(addr.toLowerCase(), name)
-          }
+    for (const target of planVaultTargets(plan)) {
+      try {
+        const addr = getAddress(target)
+        const vault = getVault(addr) as { shares?: { name?: string }, asset?: { symbol?: string } } | undefined
+        if (vault && !isVerifiedVault(addr)) {
+          const name = vault.shares?.name || vault.asset?.symbol || ''
+          if (name) vaults.set(addr.toLowerCase(), name)
         }
-        catch { /* skip malformed address */ }
       }
+      catch { /* skip malformed address */ }
     }
   }
   return [...vaults].map(([address, name]) => ({ address, name }))
@@ -365,7 +364,7 @@ const hasStaleQuoteEntries = computed(() => entries.value.some(isEntryQuoteStale
 
 // Approvals the user will be asked to sign, decoded from the prepared plan.
 interface ResolvedApproval { type: string, token: string }
-const approvals = ref<Array<{ kind: 'approve' | 'permit', symbol: string }>>([])
+const approvals = ref<Array<{ kind: 'approve' | 'permit', symbol: string, forPermit2: boolean }>>([])
 const isPreparing = ref(false)
 const prepareError = ref('')
 // The prepared plan (with approvals resolved) backs "Copy calldata".
@@ -393,12 +392,17 @@ onMounted(async () => {
     preparedExecution.value = prepared
     preparedPlanRef.value = prepared.previewPlan
     const known = buildKnownSymbols()
-    const out: Array<{ kind: 'approve' | 'permit', symbol: string }> = []
+    const out: Array<{ kind: 'approve' | 'permit', symbol: string, forPermit2: boolean }> = []
     for (const item of prepared.previewPlan) {
       if ((item as { type?: string }).type !== 'requiredApproval') continue
       const resolved = (item as { resolved?: ResolvedApproval[] }).resolved ?? []
+      const permit2Tokens = new Set(resolved.filter(r => r.type === 'permit2').map(r => r.token.toLowerCase()))
       for (const r of resolved) {
-        out.push({ kind: r.type === 'approve' ? 'approve' : 'permit', symbol: resolveSymbol(r.token, known) })
+        out.push({
+          kind: r.type === 'approve' ? 'approve' : 'permit',
+          symbol: resolveSymbol(r.token, known),
+          forPermit2: r.type === 'approve' && permit2Tokens.has(r.token.toLowerCase()),
+        })
       }
     }
     approvals.value = out
@@ -593,7 +597,7 @@ const onCloseRequested = () => {
                 class="!w-16 !h-16"
                 :class="a.kind === 'permit' ? 'text-accent-500' : 'text-content-tertiary'"
               />
-              {{ a.kind === 'permit' ? `Sign permit2 — ${a.symbol}` : `Approve ${a.symbol}` }}
+              {{ a.kind === 'permit' ? `Sign permit2 — ${a.symbol}` : `Approve ${a.symbol}${a.forPermit2 ? ' for Permit2' : ''}` }}
             </span>
             <span class="text-p3 text-content-tertiary">{{ a.kind === 'permit' ? '1 signature' : bundlesApprovals ? 'bundled in batch' : '1 transaction' }}</span>
           </div>
@@ -606,6 +610,13 @@ const onCloseRequested = () => {
         size="compact"
         title="Infinite approval"
         description="You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract that lets you approve once, then sign per-action permissions without new onchain approvals."
+      />
+      <UiAlert
+        v-if="approvalReadIssueCount"
+        variant="warning"
+        size="compact"
+        title="Allowances could not be read"
+        description="The current token allowances could not be read from the network, so an approval is included to be safe. If you approved this token before, this approval may be redundant."
       />
 
       <UiAlert

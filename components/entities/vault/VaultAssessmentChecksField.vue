@@ -29,7 +29,8 @@ const tones = {
 } as const
 const status = computed(() => {
   if (entry.value.status === 'unavailable') return { text: 'Unavailable', ...tones.muted }
-  if (entry.value.status !== 'available' || !entry.value.assessment) return { text: 'Checking…', ...tones.muted }
+  if (entry.value.status !== 'available') return { text: 'Checking…', ...tones.muted }
+  if (!entry.value.assessment) return { text: 'Not assessed', ...tones.muted }
   const cell = getVaultChecksCell(entry.value.assessment)
   const tone = cell.tone === 'warning' && props.errorTone ? 'error' : cell.tone
   return { text: cell.text, ...tones[tone] }
@@ -54,7 +55,9 @@ watch(
     data-id="vault-assessment-checks-field"
     :data-vault-address="address.toLowerCase()"
   >
-    <div class="text-content-tertiary text-p3 mb-4 whitespace-nowrap">{{ label }}</div>
+    <div class="text-content-tertiary text-p3 mb-4 whitespace-nowrap">
+      {{ label }}
+    </div>
     <UiModalPreviewTrigger
       v-if="entry.assessment?.assessed"
       :component="VaultAssessmentChecksModal"

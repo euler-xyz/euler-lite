@@ -158,19 +158,23 @@ const isStale = computed(() => (checkedAt.value ? openedAt.getTime() - checkedAt
           class="flex-shrink-0 w-20 h-20 rounded-full flex items-center justify-center mt-8"
           :class="{
             'bg-success-500': check.outcome === OracleAdapterCheckOutcome.Pass,
-            'bg-error-500': check.outcome === OracleAdapterCheckOutcome.Fail && check.severity === OracleAdapterCheckSeverity.High,
-            'bg-warning-500': check.outcome === OracleAdapterCheckOutcome.Unknown || (check.outcome === OracleAdapterCheckOutcome.Fail && check.severity !== OracleAdapterCheckSeverity.High),
+            'bg-error-500': check.outcome === OracleAdapterCheckOutcome.Fail && check.severity === OracleAdapterCheckSeverity.High && !check.exempted,
+            'bg-warning-500': check.outcome === OracleAdapterCheckOutcome.Unknown || (check.outcome === OracleAdapterCheckOutcome.Fail && (check.severity !== OracleAdapterCheckSeverity.High || check.exempted)),
             'bg-content-muted': check.outcome === OracleAdapterCheckOutcome.NotApplicable,
           }"
         >
           <SvgIcon
-            :name="check.outcome === OracleAdapterCheckOutcome.Pass ? 'check' : check.outcome === OracleAdapterCheckOutcome.Fail ? 'close' : check.outcome === OracleAdapterCheckOutcome.Unknown ? 'warning' : 'info-circle'"
+            :name="check.outcome === OracleAdapterCheckOutcome.Pass ? 'check' : check.outcome === OracleAdapterCheckOutcome.Fail ? (check.exempted ? 'info-circle' : 'close') : check.outcome === OracleAdapterCheckOutcome.Unknown ? 'warning' : 'info-circle'"
             class="!w-10 !h-10 text-white"
           />
         </span>
         <div class="min-w-0">
           <p class="text-p3 font-medium text-content-primary break-words">
             {{ formatOracleCheckTitle(check.id) }}
+            <span
+              v-if="check.exempted"
+              class="ml-4 text-p4 font-normal text-content-tertiary"
+            >Accepted exception</span>
           </p>
           <template
             v-for="line in getCheckLines(check)"

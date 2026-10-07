@@ -47,6 +47,7 @@ const expandIfOnlySection = () => {
 const toggle = () => {
   setOpen(!isOpen.value)
 }
+defineExpose({ setOpen })
 
 onMounted(async () => {
   await nextTick()

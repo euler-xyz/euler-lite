@@ -1,20 +1,62 @@
 import type { VaultAssessment, VaultAssessmentFinding } from '@eulerxyz/euler-v2-sdk'
-import { isAddress } from 'viem'
+import { getAddress, isAddress } from 'viem'
 import type { VaultWarning } from '~/composables/useVaultWarnings'
-import { formatExactAmount } from '~/utils/string-utils'
+import { formatExactAmount, shortenAddress } from '~/utils/string-utils'
 
 export interface VaultCheckLine {
   key: string
   text: string
   outcome: 'fail' | 'unknown'
   parts?: Array<{ text: string, address?: string }>
+  /** Element id of the adapter's card in the Oracles section, for lines that come from one adapter. */
+  anchor?: string
 }
 
-export interface AcceptedVaultCheckLine {
-  key: string
-  text: string
-  parts?: VaultCheckLine['parts']
+export const ORACLE_ADAPTERS_CHECKS_KEY = 'oracle.adapters-checks'
+const ADAPTER_RECOGNITION_CHECKS = new Set([
+  'feed-recognized', 'pyth-feed-recognized', 'chronicle-feed-recognized', 'cross-legs-recognized', 'pendle-pool-recognized', 'custom-adapter-recognized',
+])
+
+export interface AdapterCheckFailure {
+  address: string
+  checksStatus: 'warning' | 'negative'
+  findings: Array<{ key: string, description: string, severity?: string }>
 }
+
+export const getAdapterCheckFailures = (finding: VaultAssessmentFinding): AdapterCheckFailure[] => {
+  if (finding.key !== ORACLE_ADAPTERS_CHECKS_KEY) return []
+  const observed = finding.observed as { failing?: unknown } | null | undefined
+  if (!observed || !Array.isArray(observed.failing)) return []
+  return observed.failing.flatMap((entry): AdapterCheckFailure[] => {
+    if (!entry || typeof entry !== 'object') return []
+    const { address, checksStatus, findings } = entry as Record<string, unknown>
+    if (typeof address !== 'string' || !isAddress(address)) return []
+    const checks = Array.isArray(findings)
+      ? findings.flatMap((item) => {
+          if (!item || typeof item !== 'object') return []
+          const { key, description, severity } = item as Record<string, unknown>
+          if (typeof key !== 'string') return []
+          return [{ key, description: typeof description === 'string' ? description : key, ...(typeof severity === 'string' ? { severity } : {}) }]
+        })
+      : []
+    return [{ address: getAddress(address), checksStatus: checksStatus === 'negative' ? 'negative' : 'warning', findings: checks }]
+  })
+}
+
+/** An adapter reaches the vault when it is negative, fails a high-severity check, or fails feed recognition together with another check; a lone medium failure stays in Oracles. */
+export const adapterFailureWarnsVault = (failure: AdapterCheckFailure): boolean =>
+  failure.checksStatus === 'negative'
+  || failure.findings.some(check => check.severity === 'high')
+  || (failure.findings.some(check => ADAPTER_RECOGNITION_CHECKS.has(check.key)) && failure.findings.length > 1)
+
+export const getWarningAdapterFailures = (finding: VaultAssessmentFinding): AdapterCheckFailure[] =>
+  getAdapterCheckFailures(finding).filter(adapterFailureWarnsVault)
+
+export const isMutedAdapterFinding = (finding: VaultAssessmentFinding): boolean =>
+  finding.key === ORACLE_ADAPTERS_CHECKS_KEY && finding.outcome === 'fail' && !finding.exempted
+  && getWarningAdapterFailures(finding).length === 0
+
+export const oracleAdapterAnchor = (address: string): string => `oracle-adapter-${address.toLowerCase()}`
 
 export interface UpcomingVaultChange {
   key: string
@@ -32,12 +74,6 @@ const isShownRule = (key: string, finding: VaultAssessmentFinding): boolean => {
   if (/^collateral\.[^.]+\.visible$/.test(key)) return true
   return false
 }
-
-const isCountedRule = (key: string): boolean =>
-  /^(deployment|configuration)\./.test(key)
-  || /^market\..+-present$/.test(key)
-  || ['oracle.recognized-router', 'oracle.no-fallback', 'governance.router', 'irm.rate-computation', 'liquidation.cool-off'].includes(key)
-  || /^collateral\.[^.]+\.recognized$/.test(key)
 
 const groupKey = (key: string) => key.replace(/^collateral\.[^.]+\./, 'collateral.*.')
 const ADDRESS_IN_TEXT = /0x[a-fA-F0-9]{40}|0x[a-fA-F0-9]{4,}(?:…|\.{3})[a-fA-F0-9]{4,}/g
@@ -73,12 +109,9 @@ export const getVaultCheckCopyableParts = (text: string, finding: VaultAssessmen
 
 const isOpenFinding = (finding: VaultAssessmentFinding) =>
   (finding.outcome === 'fail' || (finding.outcome === 'unknown' && finding.required)) && !finding.exempted
+  && !isMutedAdapterFinding(finding)
 
-const relevantFinding = (finding: VaultAssessmentFinding) =>
-  isOpenFinding(finding)
-  && !finding.key.startsWith('evidence.')
-  && !finding.key.startsWith('scheduled.')
-  && finding.key !== 'oracle.adapters-recognized'
+const relevantFinding = isOpenFinding
 
 export const getVaultCheckFindings = (assessment: VaultAssessment): { lines: VaultCheckLine[], moreCount: number, reviewCount: number } => {
   const all = [
@@ -101,17 +134,38 @@ export const getVaultCheckFindings = (assessment: VaultAssessment): { lines: Vau
         })
       }
     }
-    else if (isCountedRule(finding.key)) counted.add(groupKey(finding.key))
+    else counted.add(groupKey(finding.key))
   }
   const moreCount = counted.size
   return { lines: [...shown.values()], moreCount, reviewCount: shown.size + moreCount }
 }
 
-/** One line per check the row cell counts as failed or unknown; no rule is left out, or the count and the lines disagree. */
-export const getVaultCheckWarningLines = (assessment: VaultAssessment): VaultCheckLine[] => {
+export interface VaultCheckLineOptions {
+  adapterLabel?: (address: string) => string | undefined
+}
+
+const adapterFailureLines = (finding: VaultAssessmentFinding, options?: VaultCheckLineOptions): VaultCheckLine[] =>
+  getWarningAdapterFailures(finding).map((failure) => {
+    const label = options?.adapterLabel?.(failure.address) ?? shortenAddress(failure.address)
+    const checks = failure.findings.map(check => check.description.replace(/\.$/, '')).join(' · ')
+    return {
+      key: `${finding.key}:${failure.address.toLowerCase()}`,
+      text: `${label} · ${checks}`,
+      outcome: 'fail',
+      parts: [{ text: label, address: failure.address }, { text: ` · ${checks}` }],
+      anchor: oracleAdapterAnchor(failure.address),
+    }
+  })
+
+/** One line per check the row cell counts as failed or unknown, each collateral, strategy and oracle adapter on its own; no finding is left out, or the count and the lines disagree. */
+export const getVaultCheckWarningLines = (assessment: VaultAssessment, options?: VaultCheckLineOptions): VaultCheckLine[] => {
   const lines = new Map<string, VaultCheckLine>()
   for (const finding of [...(assessment.configContext?.findings ?? []), ...(assessment.consistencyContext?.findings ?? [])].filter(isOpenFinding)) {
-    const key = groupKey(finding.key)
+    if (finding.key === ORACLE_ADAPTERS_CHECKS_KEY && finding.outcome === 'fail') {
+      for (const line of adapterFailureLines(finding, options)) lines.set(line.key, line)
+      continue
+    }
+    const key = finding.key
     if (lines.has(key) && !(lines.get(key)?.outcome === 'unknown' && finding.outcome === 'fail')) continue
     const text = finding.outcome === 'unknown' ? finding.cause?.summary || 'Being re-checked' : finding.cause?.summary || finding.description
     const parts = getVaultCheckCopyableParts(text, finding)
@@ -120,59 +174,37 @@ export const getVaultCheckWarningLines = (assessment: VaultAssessment): VaultChe
   return [...lines.values()]
 }
 
-export const getAcceptedVaultCheckFindings = (assessment: VaultAssessment): AcceptedVaultCheckLine[] =>
-  [
-    ...(assessment.configContext?.findings ?? []),
-    ...(assessment.consistencyContext?.findings ?? []),
-  ]
-    .filter(finding => finding.outcome === 'fail' && finding.exempted === true)
-    .map((finding) => {
-      const text = finding.cause?.summary || finding.description
-      const parts = getVaultCheckCopyableParts(text, finding)
-      return { key: finding.key, text, ...(parts ? { parts } : {}) }
-    })
-
 /** Full findings are loaded only for an opened vault, as in Toolbox's detail view. */
 export const getVaultAssessmentCheckDetails = (assessment: VaultAssessment) => {
   const findings = [
     ...(assessment.configContext?.findings ?? []),
     ...(assessment.consistencyContext?.findings ?? []),
   ]
-  const counts = { passed: 0, failed: 0, unknown: 0, accepted: 0, notApplicable: 0 }
+  const counts = { passed: 0, failed: 0, unknown: 0, accepted: 0, notApplicable: 0, muted: 0 }
   for (const finding of findings) {
     if (finding.outcome === 'fail' && finding.exempted) counts.accepted++
+    else if (isMutedAdapterFinding(finding)) counts.muted++
     else if (finding.outcome === 'pass') counts.passed++
     else if (finding.outcome === 'fail') counts.failed++
     else if (finding.outcome === 'unknown') counts.unknown++
     else counts.notApplicable++
   }
   const rank = (finding: VaultAssessmentFinding) => finding.outcome === 'fail'
-    ? finding.exempted ? 2 : 0
+    ? finding.exempted || isMutedAdapterFinding(finding) ? 2 : 0
     : finding.outcome === 'unknown' ? 1 : finding.outcome === 'pass' ? 3 : 4
   return { findings: [...findings].sort((a, b) => rank(a) - rank(b)), counts }
 }
 
-export const getVaultAssessmentCheckSummary = (assessment: VaultAssessment): string => {
-  const { counts } = getVaultAssessmentCheckDetails(assessment)
-  const parts = [
-    counts.failed && `${counts.failed} failed`,
-    counts.unknown && `${counts.unknown} unknown`,
-    counts.accepted && `${counts.accepted} accepted`,
-    counts.passed && `${counts.passed} passed`,
-  ].filter(Boolean)
-  return parts.length ? parts.join(' · ') : counts.notApplicable ? `${counts.notApplicable} N/A` : 'No findings'
-}
-
 export type VaultChecksCell = { text: string, tone: 'positive' | 'warning' | 'muted' }
 
-/** The row cell: failures first, then unknowns, else every passing check with the accepted exceptions counted as passed. */
+/** The checks cell, shaped like the oracle rows: open findings as "X failed · Y unknown", else every passing check with the accepted exceptions counted as passed. */
 export const getVaultChecksCell = (assessment: VaultAssessment): VaultChecksCell => {
   if (!assessment.assessed) return { text: 'Not assessed', tone: 'muted' }
   const { counts, findings } = getVaultAssessmentCheckDetails(assessment)
-  if (counts.failed) return { text: `${counts.failed} failed`, tone: 'warning' }
-  if (counts.unknown) {
+  if (counts.failed || counts.unknown) {
     const blocking = findings.some(finding => finding.outcome === 'unknown' && finding.required && !finding.exempted)
-    return { text: `${counts.unknown} unknown`, tone: blocking ? 'warning' : 'muted' }
+    const text = [counts.failed && `${counts.failed} failed`, counts.unknown && `${counts.unknown} unknown`].filter(Boolean).join(' · ')
+    return { text, tone: counts.failed || blocking ? 'warning' : 'muted' }
   }
   const passed = counts.passed + counts.accepted
   return passed ? { text: `${passed} passed`, tone: 'positive' } : { text: 'No findings', tone: 'muted' }
@@ -194,8 +226,8 @@ export const hasOnlyAcceptedVaultCheckFindings = (assessment: VaultAssessment): 
     ...(assessment.configContext?.findings ?? []),
     ...(assessment.consistencyContext?.findings ?? []),
   ]
-  return findings.some(finding => finding.outcome === 'fail' && finding.exempted === true)
-    && !findings.some(finding => (finding.outcome === 'fail' || (finding.outcome === 'unknown' && finding.required)) && !finding.exempted)
+  return findings.some(finding => (finding.outcome === 'fail' && finding.exempted === true) || isMutedAdapterFinding(finding))
+    && !findings.some(isOpenFinding)
 }
 
 const formatRelativeCheckedAt = (at: string, now: number): string => {
@@ -227,11 +259,7 @@ export const getVaultChecksStatusLine = (
   }
   if (findings.some(finding => finding.outcome === 'unknown')) return 'Being re-checked'
   if (hasOnlyAcceptedVaultCheckFindings(assessment)) {
-    const count = getAcceptedVaultCheckFindings(assessment).length
-    const checksPassed = assessment.configLastCheckedAt
-      ? formatRelativeCheckedAt(assessment.configLastCheckedAt, now)
-      : 'Checks passed'
-    return `${checksPassed} · ${count} accepted exception${count === 1 ? '' : 's'}`
+    return assessment.configLastCheckedAt ? formatRelativeCheckedAt(assessment.configLastCheckedAt, now) : 'Checks passed'
   }
   if (assessment.checksStatus === 'warning' || assessment.checksStatus === 'negative'
     || assessment.configStatus === 'suspended' || assessment.configStatus === 'revoked') return 'Warning'
@@ -294,7 +322,7 @@ export const getUpcomingVaultChanges = (
         : null
       const pending = formatScheduledPending(finding, observed.pending, asset)
       const summary = (finding.cause?.summary || finding.description)
-        .replace(/^Pending change, acceptable from [^:]+:\s*/i, '')
+        .replace(/^Pending change, acceptable from .*?:\s+/i, '')
       const parts = [date ? `from ${date}` : '', pending, summary]
         .filter(Boolean)
       return {
@@ -310,6 +338,14 @@ export const getNotListedLine = (status: string | undefined, reason?: string | n
   if (status === 'pending_review') return 'This vault has not been checked yet, so it is not listed.'
   if (status === 'hidden') return `This vault is not listed${reason ? `: ${reason}` : '.'}${reason && !/[.!?]$/.test(reason) ? '.' : ''}`
   return null
+}
+
+/** The line under an unknown vault's row. A row that exists in the labels is never called "not listed". */
+export const getUnknownVaultCause = (verdict: { status: string, reason?: string | null, decidedBy?: string | null } | undefined): string => {
+  const line = getNotListedLine(verdict?.status, verdict?.reason, verdict?.decidedBy)
+  if (line) return line
+  if (verdict) return 'This vault is in the published vault labels but could not be verified.'
+  return 'This vault is not listed in the published vault labels.'
 }
 
 export const getKnownUnlistedActionNotice = (

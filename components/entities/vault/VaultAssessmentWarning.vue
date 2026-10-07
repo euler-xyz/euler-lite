@@ -75,7 +75,7 @@ const warning = computed(() => {
         name="warning"
         class="!h-14 !w-14"
       />
-      {{ badgeLabel || (verdict?.decidedBy === 'deprecated' ? 'Deprecated' : verdict?.status === 'hidden' ? 'Not listed' : 'Vault checks') }}
+      {{ badgeLabel || (verdict?.decidedBy === 'deprecated' ? 'Deprecated' : verdict?.status === 'hidden' ? 'Not listed' : 'Warning') }}
     </span>
   </UiHoverPreviewTooltip>
 </template>

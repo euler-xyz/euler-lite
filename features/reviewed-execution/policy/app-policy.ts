@@ -10,7 +10,7 @@ import {
   unverifiedVaultAcknowledgementKey,
   type UnverifiedVaultAcknowledgementContext,
 } from './acknowledgements'
-import { getEulerLabelsVersion, useEulerLabels } from '~/composables/useEulerLabels'
+import { getEulerGeoContext, getEulerLabelsVersion, useEulerLabels } from '~/composables/useEulerLabels'
 import { isOperationBlockerKey, operationBlockerEntries } from '~/utils/operationGuardRegistry'
 import { collectPlanningRequirements } from '~/features/reviewed-execution/planning/requirements'
 import { isVaultBlockedByCountry, isVaultRestrictedByCountry, useGeoBlock } from '~/composables/useGeoBlock'
@@ -94,6 +94,10 @@ export const resolveAppPolicy = async (
       || intent.planner.name.includes('migration')
       || intent.planner.name === 'transfer',
     )
+    const hostedGeo = getEulerGeoContext()
+    if ((hardGeoRequired || softGeoRequired) && hostedGeo && hostedGeo.policies === undefined) {
+      throw new Error('Compliance data unavailable. Please retry.')
+    }
     if ((hardGeoRequired || softGeoRequired) && country.value === undefined) {
       throw new Error('Regional availability is still loading')
     }

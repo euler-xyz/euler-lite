@@ -55,4 +55,32 @@ describe('useEulerVaultAssessments', () => {
     expect(await service.loadVaultAssessment(1, ADDRESS, 'evk')).toEqual({ status: 'idle' })
     expect(fetchVaultAssessment).not.toHaveBeenCalled()
   })
+
+  it('keeps the selected chain reactive while an old-chain transaction poll runs', async () => {
+    vi.useFakeTimers()
+    try {
+      let resolveB!: (assessment: { assessed: boolean }) => void
+      fetchVaultAssessment.mockImplementation((chainId: number) => chainId === 2
+        ? new Promise((resolve) => { resolveB = resolve })
+        : Promise.resolve({ assessed: true }))
+      const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
+      const service = useEulerVaultAssessments()
+      await service.loadVaultAssessment(1, ADDRESS, 'evk')
+      const loadingB = service.loadVaultAssessment(2, ADDRESS, 'evk')
+      expect(service.activeChainId.value).toBe(2)
+      expect(Object.values(service.entries.value)[0]?.status).toBe('loading')
+
+      service.refreshAfterOwnTransaction(1, ADDRESS, 'evk')
+      await vi.advanceTimersByTimeAsync(20_000)
+      expect(service.activeChainId.value).toBe(2)
+
+      resolveB({ assessed: true })
+      await loadingB
+      expect(Object.values(service.entries.value)[0]?.status).toBe('available')
+      await vi.advanceTimersByTimeAsync(120_000)
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  })
 })

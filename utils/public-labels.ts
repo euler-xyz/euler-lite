@@ -31,7 +31,7 @@ export type {
 
 export type PublicEulerLabelsData = Omit<SdkPublicEulerLabelsData, 'visibility' | 'managingEntityByVault'>
   & Partial<Pick<SdkPublicEulerLabelsData, 'visibility' | 'managingEntityByVault'>>
-  & { geoContext?: HostedGeoContext, source?: 'v3' | 'v3-metadata' | 'static', sourceFetchedAt?: number, logoBaseUrl?: string, candidateVaultAddresses?: string[], candidateEarnVaultAddresses?: string[], vaultTagAddresses?: Set<string> }
+  & { geoContext?: HostedGeoContext, source?: 'v3' | 'v3-metadata' | 'static', sourceFetchedAt?: number, geoFetchedAt?: number, logoBaseUrl?: string, candidateVaultAddresses?: string[], candidateEarnVaultAddresses?: string[], vaultTagAddresses?: Set<string> }
 
 export const PUBLIC_LABELS_FIXTURE_VERSION = 'v20260804151305236'
 
@@ -67,6 +67,11 @@ export const normalizePublicLabelsData = (chainId: number, source: PublicLabelsS
       override.notExplorableLend = verdict?.explorableLend !== true
       override.notExplorableBorrow = verdict?.explorableBorrow !== true
     }
+  }
+  for (const [address, annotation] of Object.entries(data.vaultAnnotations ?? {})) {
+    const verdict = source.visibility[address]
+    annotation.notExplorableLend = verdict?.explorableLend !== true
+    annotation.notExplorableBorrow = verdict?.explorableBorrow !== true
   }
   for (const [address, entry] of Object.entries(data.earnVaultEntries)) {
     entry.notExplorable = source.visibility[address]?.explorableLend !== true
@@ -109,6 +114,7 @@ export const normalizeLabelsBundle = (chainId: number, bundle: PublicLabelsBundl
   const data = {
     ...normalizeLabelsSource(chainId, bundle),
     sourceFetchedAt: bundle.source === 'static' ? undefined : bundle.sourceFetchedAt,
+    geoFetchedAt: bundle.source === 'static' ? undefined : bundle.geoFetchedAt,
   }
   const tag = bundle.vaultTag?.trim()
   if (!tag) return data

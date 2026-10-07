@@ -107,9 +107,18 @@ export const walletBindingDigest = (binding: WalletBinding): Hash => canonicalDi
   ...(binding.safeAddress ? { safeAddress: getAddress(binding.safeAddress) } : {}),
 }))
 
+const bindingFieldDigest = (binding: WalletBinding, key: keyof WalletBinding): string =>
+  canonicalDigest('wallet-binding-field-v1', toCanonicalValue(binding[key] ?? null))
+
+export const changedWalletBindingFields = (expected: WalletBinding, actual: WalletBinding): string[] => {
+  const keys = new Set([...Object.keys(expected), ...Object.keys(actual)] as Array<keyof WalletBinding>)
+  return [...keys].filter(key => bindingFieldDigest(expected, key) !== bindingFieldDigest(actual, key)).sort()
+}
+
 export const assertExactWalletBinding = (expected: WalletBinding, actual: WalletBinding) => {
   if (walletBindingDigest(expected) !== walletBindingDigest(actual)) {
-    throw new Error('Wallet connection, session, classification, chain, account, or approval mode changed after review')
+    const changed = changedWalletBindingFields(expected, actual)
+    throw new Error(`Wallet binding changed after review${changed.length ? ` (${changed.join(', ')})` : ''}; review the operation again`)
   }
 }
 

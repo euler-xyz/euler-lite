@@ -5,6 +5,7 @@ import { clearDeprecatedDepositAcknowledgements, clearUnverifiedVaultAcknowledge
 import { resolveAppPolicy } from '~/features/reviewed-execution/policy/app-policy'
 import { makeReviewedExecution, TEST_ACCOUNT, TEST_TOKEN, TEST_VAULT } from './fixtures'
 import { makeSwapQuote } from './swap-quote.test-fixture'
+import type { HostedGeoContext } from '~/utils/geo-policies'
 
 const geo = vi.hoisted(() => ({
   labelsReady: { value: true },
@@ -12,6 +13,7 @@ const geo = vi.hoisted(() => ({
   visibility: { value: {} as Record<string, { status: string }> },
   deprecated: new Set<string>(),
   country: { value: 'US' as string | null | undefined },
+  context: undefined as HostedGeoContext | undefined,
   blocked: vi.fn(),
   restricted: vi.fn(),
 }))
@@ -23,6 +25,7 @@ vi.mock('~/composables/useGeoBlock', () => ({
 }))
 
 vi.mock('~/composables/useEulerLabels', () => ({
+  getEulerGeoContext: () => geo.context,
   getEulerLabelsVersion: () => 1,
   useEulerLabels: () => ({ isReady: geo.labelsReady, source: geo.labelsSource, visibility: geo.visibility }),
 }))
@@ -73,6 +76,7 @@ describe('final two-vault swap policy', () => {
     geo.visibility.value = {}
     geo.deprecated.clear()
     geo.country.value = 'US'
+    geo.context = undefined
     geo.blocked.mockReset().mockReturnValue(false)
     geo.restricted.mockReset().mockReturnValue(false)
     verifyVault.mockReset().mockImplementation((vault: { address: string }) => getAddress(vault.address) === TEST_VAULT)
@@ -128,6 +132,15 @@ describe('final two-vault swap policy', () => {
     geo.country.value = null
     await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [intent]))
       .rejects.toThrow('Regional availability could not be determined')
+  })
+
+  it('blocks a new deposit when hosted geo expires while keeping a simple exit available', async () => {
+    geo.context = { chainId: 1, policies: undefined, productByVault: {} }
+    const deposit = createOperationIntent({ kind: 'deposit', planner: 'deposit', args: { vaultAddress: TEST_VAULT, assetAddress: TEST_TOKEN, amount: 1n }, chainId: 1, account: TEST_ACCOUNT, source: 'test', operation: 'lend-deposit', createdAt: 1 })
+    const withdrawal = createOperationIntent({ kind: 'withdraw', planner: 'withdraw', args: { vaultAddress: TEST_VAULT, owner: TEST_ACCOUNT, assets: 1n }, chainId: 1, account: TEST_ACCOUNT, source: 'test', operation: 'lend-withdraw', createdAt: 1 })
+    const requestSet = makeReviewedExecution().requestSet
+    await expect(resolveAppPolicy(requestSet, 100, [deposit])).rejects.toThrow('Compliance data unavailable')
+    await expect(resolveAppPolicy(requestSet, 100, [withdrawal])).resolves.toBeDefined()
   })
 
   it('requires a known region for an outbound migration', async () => {

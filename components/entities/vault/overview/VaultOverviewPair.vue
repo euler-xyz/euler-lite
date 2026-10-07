@@ -1,9 +1,16 @@
 <script setup lang="ts">
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
-import type { SecuritizeCollateralVault, EVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { isSecuritizeCollateralVault, type SecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { getPairBorrowVault, getPairCollateralVault } from '~/utils/borrow-pair'
 
-defineProps<{ pair: AnyBorrowVaultPair | PortfolioBorrowPosition<VaultEntity>, desktopOverview?: boolean, collateralVaults?: (EVault | SecuritizeCollateralVault)[] }>()
+const props = defineProps<{ pair: AnyBorrowVaultPair | PortfolioBorrowPosition<VaultEntity>, desktopOverview?: boolean, collateralVaults?: (EVault | SecuritizeCollateralVault)[] }>()
+
+const checkedVaults = computed(() => {
+  const borrow = getPairBorrowVault(props.pair)
+  const collateral = getPairCollateralVault(props.pair)
+  const target = (vault: EVault) => ({ address: vault.address, symbol: vault.asset.symbol })
+  return isSecuritizeCollateralVault(collateral) ? [target(borrow)] : [target(borrow), target(collateral)]
+})
 </script>
 
 <template>
@@ -26,7 +33,7 @@ defineProps<{ pair: AnyBorrowVaultPair | PortfolioBorrowPosition<VaultEntity>, d
       :default-open="false"
     />
     <VaultOverviewBlockVaultChecks
-      :address="getPairBorrowVault(pair).address"
+      :vaults="checkedVaults"
       :default-open="false"
     />
     <VaultPairEntityDisclosures :pair="pair" />

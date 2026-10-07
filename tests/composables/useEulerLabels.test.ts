@@ -6,11 +6,13 @@ import {
   __setEulerLabelsDataForTest,
   getCurrentEulerLabelsData,
   getEulerLabelsVersion,
+  getEulerGeoContext,
   getEulerLabelWrapPairs,
   useEulerLabels,
 } from '~/composables/useEulerLabels'
 import type { PublicLabelsBundle } from '~/utils/public-labels'
 import { getVaultDeprecation, isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
+import { useGeoBlock } from '~/composables/useGeoBlock'
 
 type Deferred<T> = {
   promise: Promise<T>
@@ -48,7 +50,7 @@ vi.mock('~/composables/useEulerSdk', () => ({
 
 vi.mock('~/utils/public-labels', async importOriginal => ({
   ...await importOriginal<typeof import('~/utils/public-labels')>(),
-  normalizeLabelsBundle: (_chainId: number, bundle: { publicLabels: unknown }) => mocks.normalizePublicLabelsData(_chainId, bundle.publicLabels),
+  normalizeLabelsBundle: (_chainId: number, bundle: { publicLabels: unknown }) => mocks.normalizePublicLabelsData(_chainId, bundle.publicLabels, bundle),
 }))
 
 vi.mock('~/composables/useEulerOracleAdapters', () => ({
@@ -217,6 +219,43 @@ describe('useEulerLabels chain-scoped loading', () => {
     await labels.loadLabels(true)
     expect(labels.isReady.value).toBe(true)
     expect(currentProductKeys()).toEqual(['cached'])
+  })
+
+  it('retains fresh labels but expires geo after a later refresh fails', async () => {
+    vi.useFakeTimers()
+    try {
+      const t0 = 1_000_000
+      vi.setSystemTime(t0)
+      mocks.normalizePublicLabelsData.mockImplementation((_chainId, labels, bundle) => ({
+        ...labels,
+        source: 'v3',
+        sourceFetchedAt: bundle.sourceFetchedAt,
+        geoFetchedAt: bundle.geoFetchedAt,
+        geoContext: { chainId: 1, policies: [], productByVault: {} },
+      }))
+      const labels = useEulerLabels()
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce({ ...bundleFor(labelsFor('initial')), geoFetchedAt: t0 })
+      await labels.loadLabels()
+      expect(useGeoBlock().isPolicyAvailable.value).toBe(true)
+
+      await vi.advanceTimersByTimeAsync(23 * 60 * 60_000)
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce({ ...bundleFor(labelsFor('refreshed')), geoFetchedAt: t0 })
+      await labels.loadLabels(true)
+      expect(currentProductKeys()).toEqual(['refreshed'])
+      expect(getEulerGeoContext()?.policies).toEqual([])
+
+      await vi.advanceTimersByTimeAsync(2 * 60 * 60_000)
+      mocks.fetchPublicLabelsBundle.mockRejectedValueOnce(new Error('geo unavailable'))
+      await labels.loadLabels(true)
+      expect(labels.isReady.value).toBe(true)
+      expect(currentProductKeys()).toEqual(['refreshed'])
+      expect(getEulerGeoContext()?.policies).toBeUndefined()
+      expect(useGeoBlock().isPolicyAvailable.value).toBe(false)
+    }
+    finally {
+      __setEulerLabelsDataForTest()
+      vi.useRealTimers()
+    }
   })
 
   it('keeps checks unavailable during a retry after a failed refresh', async () => {

@@ -9,6 +9,11 @@ import type { HostedGeoContext } from '~/utils/geo-policies'
 import { operationBlockerEntries } from '~/utils/operationGuardRegistry'
 
 const hostedGeo = ref<HostedGeoContext | undefined>()
+const safeWalletResolved = ref(true)
+
+vi.mock('~/composables/useSafeWallet', () => ({
+  useSafeWallet: () => ({ isSafeWallet: ref(false), isSafeWalletResolved: safeWalletResolved }),
+}))
 
 vi.mock('~/composables/useEulerLabels', () => ({ getEulerLabelsVersion: () => 1, getEulerGeoContext: () => hostedGeo.value }))
 vi.mock('~/composables/guards/useTosGuard', () => ({ useTosGuard: () => ({}) }))
@@ -25,7 +30,62 @@ vi.mock('~/composables/useKeyring', () => ({
 }))
 
 describe('operation verification chain', () => {
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    safeWalletResolved.value = true
+  })
+
+  it.each([true, false])('blocks an acquisition=%s while the wallet kind is still being detected', async (acquiresExposure) => {
+    hostedGeo.value = { chainId: 143, policies: [], productByVault: {} }
+    safeWalletResolved.value = false
+    const vault = { address: '0x00000000000000000000000000000000000000a1', chainId: 143 }
+    vi.stubGlobal('useWagmi', () => ({ address: ref(undefined) }))
+    vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(143) }))
+    vi.stubGlobal('useRoute', () => ({ name: 'earn-vault' }))
+    vi.stubGlobal('useEulerLabels', () => ({
+      isReady: ref(true), loadError: ref(undefined), retryLabels: vi.fn(),
+      source: ref('static'), visibility: ref({}),
+    }))
+    vi.stubGlobal('useVaultRegistry', () => ({
+      get: () => ({ type: 'earn', vault }),
+      getOrFetch: async () => vault,
+      registryVersion: ref(1),
+    }))
+    vi.stubGlobal('useVaults', () => ({ isEarnVaultOwnerVerified: () => true }))
+    const config = createConfig({ chains: [mainnet, monad], transports: { 1: http(), 143: http() }, storage: null })
+    const renderer = createRenderer({
+      patchProp: () => undefined,
+      insert: () => undefined,
+      remove: () => undefined,
+      createElement: (type: string) => ({ type }),
+      createText: (text: string) => ({ text }),
+      createComment: (text: string) => ({ text }),
+      setText: () => undefined,
+      setElementText: () => undefined,
+      parentNode: () => null,
+      nextSibling: () => null,
+      insertStaticContent: () => undefined as never,
+    })
+    const app = renderer.createApp({
+      setup() {
+        useOperationGuard([vault.address], { acquiresExposure })
+        return () => h('span')
+      },
+    })
+    app.use(WagmiPlugin, { config, reconnectOnMount: false })
+    app.mount({ type: 'root' })
+    try {
+      await nextTick()
+      const blocked = () => operationBlockerEntries.value.some(([key, message]) => key.startsWith('wallet-kind:') && message === 'Detecting the wallet type…')
+      expect(blocked()).toBe(acquiresExposure)
+      safeWalletResolved.value = true
+      await nextTick()
+      expect(blocked()).toBe(false)
+    }
+    finally {
+      app.unmount()
+    }
+  })
 
   it.each([true, false])('guards missing geo only for acquisition=%s while using the app verification chain', async (acquiresExposure) => {
     hostedGeo.value = { chainId: 143, policies: undefined, productByVault: {} }
