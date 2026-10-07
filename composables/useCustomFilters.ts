@@ -44,12 +44,16 @@ export const useCustomFilters = <T>(
     })
   }
 
+  const usdMetrics = new Set(metrics.filter(metric => metric.unit === 'usd').map(metric => metric.key))
+
   const matchesCustomFilters = (item: T): boolean => {
     const filters = customFilters.value
     if (!filters.length) return true
     return filters.every((f) => {
       const val = getValue(item, f.metric)
-      if (typeof val !== 'number' || !Number.isFinite(val)) return f.includeWhenValueUnavailable === true
+      if (typeof val !== 'number' || !Number.isFinite(val)) {
+        return f.includeWhenValueUnavailable === true || usdMetrics.has(f.metric)
+      }
       return f.operator === 'gt' ? val > f.value : val < f.value
     })
   }
