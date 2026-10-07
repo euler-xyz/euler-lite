@@ -20,6 +20,11 @@ describe('getOracleProviderLogo', () => {
     expect(getOracleProviderLogo('Lido Fundamental')).toBe(imageUrl('lido'))
   })
 
+  it('builds the logo on the configured images host', () => {
+    expect(getOracleProviderLogo('Chainlink', undefined, 'https://images.example'))
+      .toBe('https://images.example/v3/images/oracle-providers/chainlink')
+  })
+
   it('does not infer a logo for an unknown provider', () => {
     expect(getOracleProviderLogo('Unknown provider', 'ChainlinkOracle')).toBeUndefined()
   })

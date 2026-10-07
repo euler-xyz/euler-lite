@@ -49,6 +49,7 @@ cp .env.example .env
 | ------------ | ----------------------------- | ------------------------------------- |
 | `V3_API_URL` | `https://v3.euler.finance`    | Euler V3 upstream used by the server `/api/internal/v3` proxy |
 | `EULER_SDK_V3_API_KEY` | —                  | Optional server-side V3 API key forwarded by `/api/internal/v3` as `X-API-Key` |
+| `V3_IMAGES_URL` or `NUXT_PUBLIC_V3_IMAGES_URL` | `https://v3.euler.finance` | Public https host the browser loads V3 chain and oracle-provider logos from. Unlike `V3_API_URL`, it is sent to the browser. Static builds read `NUXT_PUBLIC_V3_IMAGES_URL` |
 | `SWAP_API_URL` or `NUXT_PUBLIC_SWAP_API_URL` | —           | Euler swap API                        |
 | `PYTH_API_KEY` | — | Server-side API key sent to `https://hermes.pyth.network` as Bearer authentication by `/api/internal/pyth/updates` |
 

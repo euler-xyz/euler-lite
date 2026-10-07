@@ -53,6 +53,15 @@ describe('buildOracleAdapterView', () => {
     expect(view.checksStatus).toBe('positive')
   })
 
+  it('builds the provider logo on the configured images host', () => {
+    const meta: Record<string, OracleAdapterMeta> = {
+      [oracle.toLowerCase()]: assessed({ base: weth, quote: usd, name: 'Chainlink WETH/USD', provider: 'Chainlink' }),
+    }
+
+    expect(buildOracleAdapterView(adapterStep(), meta, 'https://images.example').logo)
+      .toBe('https://images.example/v3/images/oracle-providers/chainlink')
+  })
+
   it('flags an adapter with no curated entry as custom (no onchain-name leak, no logo)', () => {
     const view = buildOracleAdapterView(adapterStep(), {})
 

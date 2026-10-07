@@ -265,7 +265,7 @@ Router recognition comes from `/v3/oracles/routers`, which lists exactly the rou
 
 Explore and vault oracle rows resolve logos through `getOracleProviderLogo` (`entities/oracle-providers.ts`), not local SVG assets.
 
-The URL is always `https://v3.euler.finance/v3/images/oracle-providers/{key}`. That host is `DEFAULT_V3_API_URL`; it does **not** follow `V3_API_URL` / `EULER_SDK_V3_API_URL`. Custom V3 deployments still load logos from production V3. `img-src` already allows `https:` (see [Token List](./token-list.md#csp)).
+The URL is `{V3_IMAGES_URL}/v3/images/oracle-providers/{key}`. `V3_IMAGES_URL` defaults to `https://v3.euler.finance` and reaches the browser as `window.__APP_CONFIG__.v3ImagesUrl`. It does **not** follow `V3_API_URL` / `EULER_SDK_V3_API_URL`, which stay server-side. `img-src` already allows `https:` (see [Token List](./token-list.md#csp)).
 
 Lookup rules:
 

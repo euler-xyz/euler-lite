@@ -1,7 +1,26 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_V3_API_URL, readMerklApiKey, readResolvedV3ApiUrl, readTurtleEarnApiKey, readV3ApiKey, readV3ApiUrl } from '~/utils/api-url-env'
+import { DEFAULT_V3_API_URL, DEFAULT_V3_IMAGES_URL, normalizeV3ImagesUrl, readMerklApiKey, readResolvedV3ApiUrl, readTurtleEarnApiKey, readV3ApiKey, readV3ApiUrl, readV3ImagesUrl } from '~/utils/api-url-env'
 
 describe('api-url-env', () => {
+  it('reads the public V3 images URL separately from the private V3 API URL', () => {
+    expect(DEFAULT_V3_IMAGES_URL).toBe('https://v3.euler.finance')
+    expect(readV3ImagesUrl({})).toBe(DEFAULT_V3_IMAGES_URL)
+    expect(readV3ImagesUrl({ V3_API_URL: 'http://v3-internal:3000' })).toBe(DEFAULT_V3_IMAGES_URL)
+    expect(readV3ImagesUrl({ V3_IMAGES_URL: 'https://images.example/' })).toBe('https://images.example')
+    expect(readV3ImagesUrl({ NUXT_PUBLIC_V3_IMAGES_URL: 'https://public-images.example' })).toBe('https://public-images.example')
+  })
+
+  it('accepts only a plain https image host', () => {
+    expect(normalizeV3ImagesUrl(' https://images.example/base// ')).toBe('https://images.example/base')
+    expect(normalizeV3ImagesUrl('http://localhost:3001')).toBe(DEFAULT_V3_IMAGES_URL)
+    expect(normalizeV3ImagesUrl('https://images.example/?v=2')).toBe(DEFAULT_V3_IMAGES_URL)
+    expect(normalizeV3ImagesUrl('https://images.example/#top')).toBe(DEFAULT_V3_IMAGES_URL)
+    expect(normalizeV3ImagesUrl('https://user:secret@images.example')).toBe(DEFAULT_V3_IMAGES_URL)
+    expect(normalizeV3ImagesUrl('javascript:alert(1)')).toBe(DEFAULT_V3_IMAGES_URL)
+    expect(normalizeV3ImagesUrl('not a url')).toBe(DEFAULT_V3_IMAGES_URL)
+    expect(normalizeV3ImagesUrl(undefined)).toBe(DEFAULT_V3_IMAGES_URL)
+  })
+
   it('ignores non-V3 API URL variables', () => {
     const env = {
       OTHER_API_URL: 'https://example.test',

@@ -176,6 +176,7 @@ export default defineNuxtConfig({
       appUrl: '',
       pythHermesUrl: '',
       v3ApiUrl: '',
+      v3ImagesUrl: '',
       enableV3Backend: '',
       // Adapter chain for the browser "fast" SDK. fallback (default) | onchain | v3.
       // Maps to NUXT_PUBLIC_BROWSER_VAULT_SOURCE.

@@ -11,6 +11,7 @@
 import {
   readBrowserVaultSource,
   readV3ApiUrl,
+  readV3ImagesUrl,
   V3_API_PROXY_URL,
 } from '~/utils/api-url-env'
 import { buildAnnouncementConfig } from '~/utils/announcement-config'
@@ -50,6 +51,7 @@ function readAppConfig() {
     appKitProjectId: env('APPKIT_PROJECT_ID', 'NUXT_PUBLIC_APP_KIT_PROJECT_ID'),
     appUrl: env('NUXT_PUBLIC_APP_URL'),
     v3ApiUrl: V3_API_PROXY_URL,
+    v3ImagesUrl: readV3ImagesUrl(),
     // The client uses this to decide whether the SDK's "fast" instance routes
     // reads via /api/internal/v3 (v3 adapters) or falls back to direct on-chain reads.
     enableV3Backend: !!readV3ApiUrl(),
