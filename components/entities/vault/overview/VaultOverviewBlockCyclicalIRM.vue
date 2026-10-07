@@ -285,6 +285,7 @@ const formatDuration = (seconds: bigint): string => {
   <VaultOverviewAccordionSection
     v-if="hasValidIRM && currentCycle"
     title="Interest rate model"
+    icon="section-interest-rate-model"
     :default-open="defaultOpen"
     content-class="flex flex-col gap-24"
   >

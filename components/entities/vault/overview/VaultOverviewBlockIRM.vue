@@ -617,6 +617,7 @@ watch(isDark, async () => {
   <VaultOverviewAccordionSection
     v-if="hasValidIRM"
     title="Interest rate model"
+    icon="section-interest-rate-model"
     :default-open="defaultOpen"
     :has-actions="!!irmTooltip"
     content-class="flex flex-col gap-16"

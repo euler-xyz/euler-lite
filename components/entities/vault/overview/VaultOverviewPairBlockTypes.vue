@@ -21,6 +21,7 @@ const showVaultTypesSummary = computed(() =>
   <VaultOverviewAccordionSection
     v-if="showVaultTypesSummary"
     title="Vault types"
+    icon="section-vault-types"
     :default-open="defaultOpen"
     content-class="flex flex-col gap-24"
   >

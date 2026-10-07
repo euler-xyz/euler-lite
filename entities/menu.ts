@@ -10,33 +10,33 @@ const allMenuItems: MenuItem[] = [
   {
     name: 'portfolio',
     label: 'Portfolio',
-    icon: 'portfolio-outline',
-    activeIcon: 'portfolio-filled',
+    icon: 'nav-portfolio',
+    activeIcon: 'nav-portfolio-filled',
   },
   {
     name: 'explore',
     label: 'Explore',
     icon: 'nav-explore',
-    activeIcon: 'nav-explore',
+    activeIcon: 'nav-explore-filled',
   },
   {
     name: 'earn',
     label: 'Earn',
     icon: 'nav-earn',
-    activeIcon: 'nav-earn',
+    activeIcon: 'nav-earn-filled',
   },
   {
     name: 'lend',
     label: 'Lend',
     icon: 'nav-lend',
-    activeIcon: 'nav-lend',
+    activeIcon: 'nav-lend-filled',
   },
   {
     name: 'borrow',
     label: 'Borrow',
     sublabel: 'Multiply',
     icon: 'nav-borrow',
-    activeIcon: 'nav-borrow',
+    activeIcon: 'nav-borrow-filled',
   },
 ]
 

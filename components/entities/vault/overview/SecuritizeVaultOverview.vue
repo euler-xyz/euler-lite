@@ -275,6 +275,7 @@ const supplyCapPercentageDisplay = computed(() => {
     <!-- Risk Parameters -->
     <VaultOverviewAccordionSection
       title="Risk parameters"
+      icon="section-risk-parameters"
       :default-open="false"
       content-class="flex flex-col items-start gap-24"
     >
@@ -312,6 +313,7 @@ const supplyCapPercentageDisplay = computed(() => {
     <!-- Addresses -->
     <VaultOverviewAccordionSection
       title="Addresses"
+      icon="section-addresses"
       :default-open="false"
       content-class="flex flex-col items-start gap-24"
     >

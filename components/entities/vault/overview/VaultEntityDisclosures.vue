@@ -18,6 +18,7 @@ const publishedEntities = computed(() => entities.filter(entity =>
   <VaultOverviewAccordionSection
     v-if="publishedEntities.length"
     :title="title"
+    icon="section-curator-details"
     :default-open="false"
     content-class="flex flex-col gap-24"
   >

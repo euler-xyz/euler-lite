@@ -1,0 +1,1 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="10 10 76 76"><mask id="tick"><rect x="10" y="10" width="76" height="76" fill="#fff"/><path d="M35.5 49L44.5 58L61.5 39" fill="none" stroke="#000" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></mask><circle cx="48" cy="48" r="30" fill="currentColor" mask="url(#tick)"/></svg>

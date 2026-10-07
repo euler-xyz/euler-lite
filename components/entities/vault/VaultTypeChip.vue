@@ -51,12 +51,13 @@ const icon = computed(() => {
   switch (type) {
     case 'governed':
     case 'managed':
-      return 'governed'
+      return 'vault-type-governed'
     case 'escrow':
+      return 'vault-type-escrow'
     case 'securitize':
       return 'shield'
     case 'ungoverned':
-      return 'pulse'
+      return 'vault-type-ungoverned'
   }
 
   return 'pulse'

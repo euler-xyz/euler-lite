@@ -94,6 +94,7 @@ watchEffect(() => {
   <VaultOverviewAccordionSection
     v-if="collateralGroups.length"
     :title="sectionTitle"
+    icon="section-collateral-exposure"
     :default-open="defaultOpen"
     content-class="flex flex-col gap-24"
   >

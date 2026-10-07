@@ -79,7 +79,7 @@ onMounted(async () => {
       />
       <SvgIcon
         v-if="icon"
-        :name="icon"
+        :name="isOpen ? `${icon}-filled` : icon"
         class="pointer-events-none relative z-10 !w-24 !h-24 shrink-0 text-accent-600"
         aria-hidden="true"
       />
