@@ -9,6 +9,7 @@ import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createAddressRefreshCoordinator } from '~/utils/address-refresh-coordinator'
 import { logWarn } from '~/utils/errorHandling'
 import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
+import { portfolioPricingGaps } from '~/utils/portfolio-pricing'
 import { createRaceGuard } from '~/utils/race-guard'
 import {
   activeLayerPortfolioRef,
@@ -244,20 +245,25 @@ export const useEulerAccount = () => {
   const totalSuppliedValue = computed(() => usdWadToNumber(portfolio.value?.totalSuppliedValueUsd))
   const totalBorrowedValue = computed(() => usdWadToNumber(portfolio.value?.totalBorrowedValueUsd))
   const netAssetMarketValue = computed(() => usdWadToNumber(portfolio.value?.netAssetValueUsd))
+  const pricingGaps = computed(() => portfolioPricingGaps(depositPositions.value, borrowPositions.value))
   const totalSuppliedValueInfo = computed(() => ({
     total: totalSuppliedValue.value,
-    hasMissingPrices: portfolio.value?.totalSuppliedValueUsd === undefined
-      && (depositPositions.value.length > 0 || borrowPositions.value.length > 0),
+    hasMissingPrices: pricingGaps.value.supplied
+      || (portfolio.value?.totalSuppliedValueUsd === undefined
+        && (depositPositions.value.length > 0 || borrowPositions.value.length > 0)),
   }))
   const totalBorrowedValueInfo = computed(() => ({
     total: totalBorrowedValue.value,
-    hasMissingPrices: portfolio.value?.totalBorrowedValueUsd === undefined
-      && borrowPositions.value.length > 0,
+    hasMissingPrices: pricingGaps.value.borrowed
+      || (portfolio.value?.totalBorrowedValueUsd === undefined
+        && borrowPositions.value.length > 0),
   }))
   const netAssetMarketValueInfo = computed(() => ({
     total: netAssetMarketValue.value,
-    hasMissingPrices: portfolio.value?.netAssetValueUsd === undefined
-      && (depositPositions.value.length > 0 || borrowPositions.value.length > 0),
+    hasMissingPrices: pricingGaps.value.supplied
+      || pricingGaps.value.borrowed
+      || (portfolio.value?.netAssetValueUsd === undefined
+        && (depositPositions.value.length > 0 || borrowPositions.value.length > 0)),
   }))
 
   const getPositionBySubAccountIndex = (subAccountIndex: number): PortfolioBorrowPosition<VaultEntity> | undefined => {
