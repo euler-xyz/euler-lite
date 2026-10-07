@@ -167,7 +167,7 @@ describe('metadata-only verification uses current governance and membership', ()
     vi.stubGlobal('useEulerLabels', useEulerLabels)
     chainId.value = 146
     useVaultRegistry().clear()
-    __setEulerLabelsDataForTest({ source: 'v3-metadata', candidateVaultAddresses: [VAULT],
+    __setEulerLabelsDataForTest({ source: 'v3-metadata', sourceFetchedAt: Date.now(), candidateVaultAddresses: [VAULT],
       managingEntityByVault: { [VAULT.toLowerCase()]: 'manager' },
       entities: { manager: { name: 'Manager', addresses: { [ASSET_ONE]: 'Governor' } } } as never })
   })
@@ -184,6 +184,15 @@ describe('metadata-only verification uses current governance and membership', ()
     expect(registry.isVerifiedVault(VAULT)).toBe(false)
     __setEulerLabelsDataForTest({ ...labels, managingEntityByVault: {} })
     expect(registry.isVerifiedVault(VAULT)).toBe(false)
+  })
+  it('expires hosted verification without expiring independent escrow membership', () => {
+    const registry = useVaultRegistry()
+    registry.set(VAULT, { ...vault(ASSET_ONE), governorAdmin: ASSET_ONE } as never, 'evk')
+    expect(registry.isVerifiedVault(VAULT)).toBe(true)
+    __setEulerLabelsDataForTest({ ...getEulerLabelsSourceData(), sourceFetchedAt: Date.now() - 24 * 60 * 60_000 })
+    expect(registry.isVerifiedVault(VAULT)).toBe(false)
+    registry.setEscrowAddresses([VAULT])
+    expect(registry.isVerifiedVault(VAULT)).toBe(true)
   })
   it('requires router governance and keeps independent escrow verification', () => {
     const registry = useVaultRegistry()

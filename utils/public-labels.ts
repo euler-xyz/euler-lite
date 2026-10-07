@@ -59,6 +59,7 @@ export type PublicLabelsBundle = (HostedLabelsBundle | StaticLabelsBundle) & { v
 /** V3 owns hosted membership, published content and per-side visibility. */
 export const normalizePublicLabelsData = (chainId: number, source: PublicLabelsSource): PublicEulerLabelsData => {
   const data = normalizeSdkPublicLabelsData(chainId, source)
+  const { candidateVaultAddresses, candidateEarnVaultAddresses } = normalizePublicLabelsMetadata(chainId, source)
   for (const product of Object.values(data.products)) {
     for (const address of [...product.vaults, ...(product.deprecatedVaults ?? [])]) {
       const verdict = source.visibility[address.toLowerCase()]
@@ -80,6 +81,8 @@ export const normalizePublicLabelsData = (chainId: number, source: PublicLabelsS
   return {
     ...data,
     source: 'v3',
+    candidateVaultAddresses,
+    candidateEarnVaultAddresses,
     geoContext: {
       chainId,
       policies: data.rawGeoPolicies,
@@ -150,6 +153,17 @@ export const getLabelVaultCandidates = (labels: Pick<PublicEulerLabelsData,
   'source' | 'candidateVaultAddresses' | 'candidateEarnVaultAddresses' | 'verifiedVaultAddresses' | 'earnVaults'>) => ({
   vaults: labels.source === 'v3-metadata' ? labels.candidateVaultAddresses ?? [] : labels.verifiedVaultAddresses,
   earn: labels.source === 'v3-metadata' ? labels.candidateEarnVaultAddresses ?? [] : labels.earnVaults,
+})
+
+/** Non-escrow published inventory is independent of the assessed verification verdict. */
+export const getPublishedVaultCandidates = (labels: Pick<PublicEulerLabelsData,
+  'source' | 'candidateVaultAddresses' | 'candidateEarnVaultAddresses' | 'verifiedVaultAddresses' | 'earnVaults'>) => ({
+  vaults: labels.source === 'v3' || labels.source === 'v3-metadata'
+    ? labels.candidateVaultAddresses ?? []
+    : labels.verifiedVaultAddresses,
+  earn: labels.source === 'v3' || labels.source === 'v3-metadata'
+    ? labels.candidateEarnVaultAddresses ?? []
+    : labels.earnVaults,
 })
 
 /** Reload vault data only when labels change membership or discovery eligibility. */

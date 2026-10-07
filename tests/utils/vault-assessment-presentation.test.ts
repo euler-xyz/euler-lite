@@ -114,7 +114,17 @@ describe('vault checks presentation', () => {
       text: 'V3 says collateral.0x02.ltv',
       outcome: 'fail',
     }])
-    expect(getVaultChecksStatusLine(mixed, 'available')).toBe('Warning · 1 to review')
+    expect(getVaultChecksStatusLine(mixed, 'available')).toBe('Warning · 2 to review')
+  })
+
+  it('counts each collateral failure shown on the vault card', () => {
+    const flagged = assessment([
+      finding('collateral.0x01.ltv'),
+      finding('collateral.0x02.ltv'),
+    ])
+    expect(getVaultCheckWarningLines(flagged)).toHaveLength(2)
+    expect(getVaultChecksCell(flagged).text).toBe('2 failed')
+    expect(getVaultChecksStatusLine(flagged, 'available')).toBe('Warning · 2 to review')
   })
 
   it('reads a vault with only accepted exceptions as passed', () => {
@@ -312,8 +322,9 @@ describe('vault checks presentation', () => {
     })
 
     it('lists one line per adapter that reaches the vault, named by its label and anchored to its Oracles card', () => {
+      const checked = assessment([adaptersFinding([adapter(A, 'warning', [feed]), adapter(B, 'warning', [feed, live]), adapter(C, 'negative', [live])])])
       const lines = getVaultCheckWarningLines(
-        assessment([adaptersFinding([adapter(A, 'warning', [feed]), adapter(B, 'warning', [feed, live]), adapter(C, 'negative', [live])])]),
+        checked,
         { adapterLabel: address => address.toLowerCase() === B ? 'Unknown AggregatorV3 Feed' : undefined },
       )
       expect(lines.map(line => [line.key, line.text, line.anchor])).toEqual([
@@ -321,6 +332,8 @@ describe('vault checks presentation', () => {
         [`oracle.adapters-checks:${C}`, `${shortenAddress(getAddress(C))} · The quote is stale`, `oracle-adapter-${C}`],
       ])
       expect(lines[0]?.parts?.[0]).toEqual({ text: 'Unknown AggregatorV3 Feed', address: getAddress(B) })
+      expect(getVaultChecksStatusLine(checked, 'available')).toBe('Warning · 1 to review')
+      expect(getVaultChecksCell(checked).text).toBe('1 failed')
       expect(getVaultChecksCell(assessment([adaptersFinding([adapter(C, 'negative', [live])])]))).toEqual({ text: '1 failed', tone: 'warning' })
     })
   })

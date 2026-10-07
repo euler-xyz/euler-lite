@@ -1,5 +1,6 @@
 import { getEulerLabelsSourceData } from '~/composables/useEulerLabels'
 import { getLabelVaultCandidates } from '~/utils/public-labels'
+import { isLabelsSnapshotUsable } from '~/utils/labels-freshness'
 import { getHostedEntityKeys, isVaultGovernorVerified, isEarnVaultOwnerVerified } from '~/utils/vault/governor-verification'
 import type { EulerEarn, SecuritizeCollateralVault, EVault, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { resolveEVaultCategory } from '~/utils/vault/escrow-category'
@@ -269,6 +270,7 @@ const isVerifiedVault = (address: string): boolean => {
   const labels = getEulerLabelsSourceData()
   if (labels.source === 'v3-metadata') {
     if (isKnownEscrowAddress(normalized)) return true
+    if (!isReady.value || !isLabelsSnapshotUsable(labels.sourceFetchedAt)) return false
     const entry = get(normalized)
     const candidates = getLabelVaultCandidates(labels)
     if (!entry || ![...candidates.vaults, ...candidates.earn].some(addr => normalizeAddress(addr) === normalized)) return false

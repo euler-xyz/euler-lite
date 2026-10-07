@@ -1,7 +1,7 @@
 import { getAddress } from 'viem'
 import { describe, expect, it } from 'vitest'
 import { getEulerLabelProductBrandEntityKeys } from '@eulerxyz/euler-v2-sdk/public-labels'
-import { normalizeLabelsBundle, getLabelVaultCandidates, getLabelsVaultLoadKey, normalizePublicLabelsData } from '~/utils/public-labels'
+import { normalizeLabelsBundle, getLabelVaultCandidates, getPublishedVaultCandidates, getLabelsVaultLoadKey, normalizePublicLabelsData } from '~/utils/public-labels'
 import { ASSESSMENT_ONLY_EARN, ASSESSMENT_ONLY_EVK, KPK_VAULT, NEUTRAL_ESCROW, VERIFICATION_ONLY_EVK, VERIFICATION_ONLY_EARN, publicLabelsFixture } from '~/tests/fixtures/public-labels-v20260804151305236'
 
 describe('V3-only label normalization', () => {
@@ -23,6 +23,9 @@ describe('V3-only label normalization', () => {
     const data = normalizePublicLabelsData(1, { ...publicLabelsFixture, visibility })
     expect(data.verifiedVaultAddresses).toEqual([])
     expect(data.earnVaults).toEqual([])
+    expect(getLabelVaultCandidates(data).vaults).toEqual([])
+    expect(getPublishedVaultCandidates(data).vaults).toContain(getAddress(KPK_VAULT))
+    expect(getPublishedVaultCandidates(data).earn).toContain(getAddress(VERIFICATION_ONLY_EARN))
     expect(data.products['kpk-securitize'].vaultOverrides?.[getAddress(KPK_VAULT)]?.notExplorableLend).toBe(true)
     expect(data.notExplorableEarnVaults.has(VERIFICATION_ONLY_EARN.toLowerCase())).toBe(true)
   })

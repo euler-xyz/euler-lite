@@ -18,6 +18,7 @@ const props = defineProps<{
   asset?: { decimals: number, symbol?: string }
   symbol?: string
 }>()
+const route = useRoute()
 const { chainId } = useEulerAddresses()
 const nowMs = useActivityNowMs()
 const { vaultAssessments, loadVaultAssessment, getVaultAssessmentEntry, oracleAdapters, loadOracleAdapters } = useEulerLabels()
@@ -170,7 +171,7 @@ watch(
           <template v-else>{{ finding.text }}</template>
           <NuxtLink
             v-if="finding.anchor && hasAnchor(finding.anchor)"
-            :to="{ hash: `#${finding.anchor}` }"
+            :to="{ query: route.query, hash: `#${finding.anchor}` }"
             class="ml-6 whitespace-nowrap text-accent-600 underline decoration-dotted hover:text-accent-500"
           >Show in Oracles</NuxtLink>
         </span>

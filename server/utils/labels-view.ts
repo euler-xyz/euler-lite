@@ -1,4 +1,4 @@
-import { getLabelVaultCandidates, type PublicEulerLabelsData } from '~/utils/public-labels'
+import { getPublishedVaultCandidates, type PublicEulerLabelsData } from '~/utils/public-labels'
 /**
  * Per-chain "labels view" shared by /api/public/is-known and
  * /api/public/metadata. It keeps Lite's public API/cache policy in the app,
@@ -256,16 +256,14 @@ async function buildSnapshot(
   const escrowAddresses = new Set<Address>(
     uniqueAddresses(await sdk.eVaultService.fetchVerifiedVaultAddresses(chainId, [StandardEVaultPerspectives.ESCROW])),
   )
-  const candidates = uniqueAddresses([
-    ...getLabelVaultCandidates(labels).vaults,
-    ...getLabelVaultCandidates(labels).earn,
-  ])
+  const published = getPublishedVaultCandidates(labels)
+  const candidates = uniqueAddresses([...published.vaults, ...published.earn])
 
   const types = candidates.length > 0
     ? await sdk.vaultMetaService.fetchVaultTypes(chainId, candidates)
     : {}
 
-  const earnSet = new Set(uniqueAddresses(getLabelVaultCandidates(labels).earn).map(addr => addr.toLowerCase()))
+  const earnSet = new Set(uniqueAddresses(published.earn).map(addr => addr.toLowerCase()))
   const evkAddresses: Address[] = []
   const securitizeAddresses: Address[] = []
   const earnAddresses: Address[] = []

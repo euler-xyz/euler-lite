@@ -14,6 +14,17 @@ const viewAt = (sourceFetchedAt: number) => ({
   publishedVerifiedAddresses: new Set([VAULT]),
 }) as never
 
+const metadataViewAt = (sourceFetchedAt: number) => ({
+  labelsSource: 'v3-metadata',
+  sourceFetchedAt,
+  escrowAddresses: new Set(),
+  snapshot: { evkVaults: [{ address: VAULT, verified: true, governorAdmin: VAULT }], securitizeVaults: [], earnVaults: [] },
+  verificationLabels: {
+    getDeclaredEntityKeys: () => ['curator'],
+    hasEntityAddress: (_key: string, address: string) => address === VAULT,
+  },
+}) as never
+
 afterEach(() => {
   vi.useRealTimers()
   vi.resetModules()
@@ -52,6 +63,23 @@ describe('public verified set freshness', () => {
     vi.mocked(buildLabelsView).mockRejectedValue(new Error('upstream down'))
     vi.setSystemTime(fetchedAt + 6 * 60 * 60_000)
     expect((await getVerifiedAddressSet(1)).has(VAULT)).toBe(true)
+    vi.setSystemTime(fetchedAt + DAY_MS + 1)
+    await expect(getVerifiedAddressSet(1)).rejects.toBeInstanceOf(VerificationUnavailableError)
+  })
+
+  it('expires metadata-only verification from the original source read, not the latest derived refresh', async () => {
+    vi.useFakeTimers()
+    const fetchedAt = new Date('2026-09-30T12:00:00Z').getTime()
+    vi.setSystemTime(fetchedAt)
+    vi.mocked(buildLabelsView).mockResolvedValue(metadataViewAt(fetchedAt))
+    const { refreshVerifiedAddressSet, getVerifiedAddressSet, getVerifiedAddressSnapshot, getVerifiedAddressCacheControl, VerificationUnavailableError } = await import('~/server/utils/verified-vaults')
+    expect((await refreshVerifiedAddressSet(1)).has(VAULT)).toBe(true)
+
+    vi.setSystemTime(fetchedAt + 23 * 60 * 60_000)
+    expect((await refreshVerifiedAddressSet(1)).has(VAULT)).toBe(true)
+    expect(getVerifiedAddressCacheControl(await getVerifiedAddressSnapshot(1), fetchedAt + DAY_MS - 20_000)).toBe('public, max-age=19, stale-while-revalidate=0')
+
+    vi.mocked(buildLabelsView).mockRejectedValue(new Error('upstream down'))
     vi.setSystemTime(fetchedAt + DAY_MS + 1)
     await expect(getVerifiedAddressSet(1)).rejects.toBeInstanceOf(VerificationUnavailableError)
   })

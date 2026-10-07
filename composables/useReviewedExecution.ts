@@ -251,6 +251,7 @@ export const useReviewedExecution = () => {
     options: PrepareReviewedExecutionOptions,
     readOnly: boolean,
   ): Promise<PreparedExecutionReview> => {
+    approvalReadIssues.value = []
     validateIntentSet(intents)
     const expectedIntentPlans = options.expectedIntentPlans?.map(expected => ({ ...expected }))
     const publisher = options.generation ?? new GenerationPublisher()
@@ -380,6 +381,7 @@ export const useReviewedExecution = () => {
         return sdk.executionService.processPlanPlugins(plan, account, binding.chainId, rehydratePluginPrefetch(prefetched))
       },
       async resolveApprovals(plan, binding) {
+        approvalReadIssues.value = []
         const assets = approvalAssetsWithSpenders(plan)
         if (!assets.length) return plan
         const { wallet, allowanceIssues } = await fetchWalletForApprovals(
