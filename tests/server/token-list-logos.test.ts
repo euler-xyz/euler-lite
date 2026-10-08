@@ -77,8 +77,15 @@ describe('preferFallbackLogos', () => {
     expect(b.logoURI).toBe('https://uni.example/b.png')
   })
 
-  it('drops the logo so the app shows initials when no list has one', () => {
-    const [c] = preferFallbackLogos([token(C, { hasLogo: false })], [defillama, uniswap])
+  it('keeps the V3 logo when V3 has no image and no other list has one', () => {
+    const withoutImage = token(C, { hasLogo: false })
+    const [c] = preferFallbackLogos([withoutImage], [defillama, uniswap])
+
+    expect(c.logoURI).toBe(withoutImage.logoURI)
+  })
+
+  it('returns no logo when neither V3 nor any other list has one', () => {
+    const [c] = preferFallbackLogos([token(C, { hasLogo: false, logoURI: undefined })], [defillama, uniswap])
 
     expect(c).not.toHaveProperty('logoURI')
   })

@@ -32,7 +32,8 @@ export const replaceV3LogoFlags = (
 }
 
 // V3 sets logoURI on every token, so only `hasLogo: false` says the image is
-// missing; an absent flag (older V3) keeps the V3 logo.
+// missing; an absent flag (older V3) keeps the V3 logo. Without an image V3's
+// logoURI still serves a fallback, so it stays the last choice.
 export const preferFallbackLogos = <T extends TokenLogoEntry>(
   primary: readonly T[],
   fallbacks: readonly (readonly TokenLogoEntry[])[],
@@ -47,7 +48,9 @@ export const preferFallbackLogos = <T extends TokenLogoEntry>(
 
   return primary.map((token) => {
     const { hasLogo, logoURI, ...rest } = token
-    const logo = hasLogo === false ? fallbackLogos.get(tokenKey(token.chainId, token.address)) : logoURI
+    const logo = hasLogo === false
+      ? fallbackLogos.get(tokenKey(token.chainId, token.address)) ?? logoURI
+      : logoURI
     return logo ? { ...rest, logoURI: logo } : rest
   })
 }

@@ -40,7 +40,7 @@ All four sources run concurrently via `Promise.allSettled`. Each fetcher has its
 
 **Deduplication**: tokens are merged with the Euler SDK token list taking priority. If the same `chainId:address` appears in multiple sources, the higher-priority entry wins. This ensures Euler metadata (name, symbol, decimals, logo URL) takes precedence over supplemental sources.
 
-**Missing V3 logos**: V3 sets `logoURI` on every token and marks tokens without a managed image with `hasLogo: false`. For those tokens the merged entry takes the DefiLlama logo, else the Uniswap logo, else no logo, so the app shows initials. An older V3 response without `hasLogo` keeps the V3 logo. The flag itself is not passed on to the browser.
+**Missing V3 logos**: V3 sets `logoURI` on every token and marks tokens without a managed image with `hasLogo: false`. For those tokens the merged entry takes the DefiLlama logo, else the Uniswap logo, else the V3 `logoURI`, which still serves a fallback image. If an image fails to load, the app shows initials. An older V3 response without `hasLogo` keeps the V3 logo. The flag itself is not passed on to the browser.
 
 **Error contract**:
 
