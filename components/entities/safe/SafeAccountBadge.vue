@@ -20,6 +20,7 @@ const ariaLabel = computed(() => {
   const { threshold, owners } = safeInfo.value
   return `Safe multisig: ${threshold} of ${owners.length} owner threshold`
 })
+const isIconActive = ref(false)
 </script>
 
 <template>
@@ -29,10 +30,14 @@ const ariaLabel = computed(() => {
     :text="tooltipText"
     :aria-label="ariaLabel"
   >
-    <span class="flex items-center gap-4 text-content-secondary">
+    <span
+      class="flex items-center gap-4 text-content-secondary"
+      @mouseenter="isIconActive = true"
+      @mouseleave="isIconActive = false"
+    >
       <SvgIcon
         class="!w-14 !h-14"
-        name="safe"
+        :name="isIconActive ? 'badge-safe-account-filled' : 'badge-safe-account'"
       />
       <span class="text-p5">({{ safeInfo.threshold }}/{{ safeInfo.owners.length }})</span>
     </span>

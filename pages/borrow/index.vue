@@ -626,13 +626,13 @@ const clearBorrowFilters = () => {
           class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
           :options="[
             { label: 'Active', icon: 'sparks' },
-            { label: 'Liquidity', icon: 'wallet' },
-            { label: 'Total Borrowed', icon: 'borrow-outline' },
-            { label: 'Utilization', icon: 'pulse' },
-            { label: 'Supply APY', icon: 'percent' },
-            { label: 'Borrow APY', icon: 'percent' },
-            { label: 'Net APY', icon: 'percent' },
-            { label: 'Max ROE', icon: 'percent' },
+            { label: 'Liquidity', icon: 'sort-liquidity' },
+            { label: 'Total Borrowed', icon: 'sort-total-borrowed' },
+            { label: 'Utilization', icon: 'sort-utilization' },
+            { label: 'Supply APY', icon: 'sort-apy' },
+            { label: 'Borrow APY', icon: 'sort-apy' },
+            { label: 'Net APY', icon: 'sort-apy' },
+            { label: 'Max ROE', icon: 'sort-roe' },
           ]"
           :disable-dir="sortBy === 'Active'"
           title="Sorting type"
@@ -646,7 +646,8 @@ const clearBorrowFilters = () => {
           placeholder="Curator"
           title="Curator"
           modal-input-placeholder="Search curator"
-          icon="shield"
+          icon="filter-curator"
+          active-icon="filter-curator-filled"
         />
         <UiSelect
           v-if="enableEntityBranding"
@@ -669,7 +670,8 @@ const clearBorrowFilters = () => {
           placeholder="Collateral asset"
           title="Collateral asset"
           modal-input-placeholder="Search asset"
-          icon="wallet"
+          icon="filter-asset"
+          active-icon="filter-asset-filled"
           show-selected-options
         />
         <UiSelect
@@ -681,7 +683,8 @@ const clearBorrowFilters = () => {
           placeholder="Debt asset"
           title="Debt asset"
           modal-input-placeholder="Search asset"
-          icon="wallet"
+          icon="filter-asset"
+          active-icon="filter-asset-filled"
           show-selected-options
         />
         <UiCustomFilterChips

@@ -15,6 +15,7 @@ const props = defineProps<{
 }>()
 
 const modal = useModal()
+const isIconHovered = ref(false)
 
 const open = () => {
   modal.open(VaultSortTypeModal, {
@@ -44,9 +45,11 @@ const toggleDir = (e: Event) => {
     :data-current-sort="model"
     :data-sort-dir="dir"
     @click="open"
+    @mouseenter="isIconHovered = true"
+    @mouseleave="isIconHovered = false"
   >
     <UiIcon
-      name="sort"
+      :name="isIconHovered ? 'sort-filled' : 'sort'"
       class="!w-16 !h-16 text-content-tertiary"
     />
     <span class="whitespace-nowrap overflow-hidden text-ellipsis">{{ placeholder }}</span>

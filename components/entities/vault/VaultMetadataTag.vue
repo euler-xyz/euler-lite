@@ -2,6 +2,7 @@
 const {
   as = 'span',
   icon,
+  activeIcon,
   label,
   tone = 'neutral',
   size = 'small',
@@ -11,6 +12,7 @@ const {
 } = defineProps<{
   as?: 'button' | 'span'
   icon: string
+  activeIcon?: string
   label: string
   tone?: 'neutral' | 'governance' | 'accent' | 'warn' | 'danger'
   size?: 'small' | 'large'
@@ -20,6 +22,7 @@ const {
 }>()
 
 const emit = defineEmits<{ click: [event: MouseEvent | KeyboardEvent] }>()
+const isIconActive = ref(false)
 
 const onKeydown = (event: KeyboardEvent) => {
   if (as === 'button') return
@@ -52,9 +55,13 @@ const onKeydown = (event: KeyboardEvent) => {
       ]"
       @click="$emit('click', $event)"
       @keydown="onKeydown"
+      @mouseenter="isIconActive = true"
+      @mouseleave="isIconActive = false"
+      @focusin="isIconActive = true"
+      @focusout="isIconActive = false"
     >
       <SvgIcon
-        :name="icon"
+        :name="activeIcon && isIconActive ? activeIcon : icon"
         class="vault-metadata-tag__icon"
       />
       <span class="vault-metadata-tag__label">{{ label }}</span>
@@ -82,9 +89,13 @@ const onKeydown = (event: KeyboardEvent) => {
     ]"
     @click="$emit('click', $event)"
     @keydown="onKeydown"
+    @mouseenter="isIconActive = true"
+    @mouseleave="isIconActive = false"
+    @focusin="isIconActive = true"
+    @focusout="isIconActive = false"
   >
     <SvgIcon
-      :name="icon"
+      :name="activeIcon && isIconActive ? activeIcon : icon"
       class="vault-metadata-tag__icon"
     />
     <span class="vault-metadata-tag__label">{{ label }}</span>

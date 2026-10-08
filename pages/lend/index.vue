@@ -326,9 +326,9 @@ const clearLendFilters = () => {
           v-model="sortBy"
           v-model:dir="sortDir"
           :options="[
-            { label: 'Total Supply', icon: 'lend-outline' },
-            { label: 'Utilization', icon: 'pulse' },
-            { label: 'Supply APY', icon: 'percent' },
+            { label: 'Total Supply', icon: 'sort-total-supply' },
+            { label: 'Utilization', icon: 'sort-utilization' },
+            { label: 'Supply APY', icon: 'sort-apy' },
           ]"
           title="Sorting type"
         />
@@ -340,7 +340,8 @@ const clearLendFilters = () => {
           placeholder="Curator"
           title="Curator"
           modal-input-placeholder="Search curator"
-          icon="shield"
+          icon="filter-curator"
+          active-icon="filter-curator-filled"
         />
         <UiSelect
           v-if="enableEntityBranding"
@@ -360,7 +361,8 @@ const clearLendFilters = () => {
           placeholder="Asset"
           title="Asset"
           modal-input-placeholder="Search asset"
-          icon="wallet"
+          icon="filter-asset"
+          active-icon="filter-asset-filled"
         />
         <UiCustomFilterChips
           :filters="customFilters"
