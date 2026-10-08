@@ -46,6 +46,20 @@ describe('withNativeTokenEntry', () => {
     expect(tokens.get(zeroAddress)?.logoURI).toBe('https://logos.example/eth.png')
   })
 
+  it('fills tags on a native entry the list already has without them', () => {
+    const listed: TokenListEntry = { chainId: 1, address: zeroAddress, name: 'Ether', symbol: 'ETH', decimals: 18 }
+    const tokens = withNativeTokenEntry(byAddress([WETH, listed]), 1, ETH)
+
+    expect(tokens.get(zeroAddress)?.tags).toEqual(['eth'])
+  })
+
+  it('keeps native tags the list already provides', () => {
+    const listed: TokenListEntry = { chainId: 1, address: zeroAddress, name: 'Ether', symbol: 'ETH', decimals: 18, tags: ['native'] }
+    const tokens = withNativeTokenEntry(byAddress([WETH, listed]), 1, ETH)
+
+    expect(tokens.get(zeroAddress)?.tags).toEqual(['native'])
+  })
+
   it('omits the logo when the wrapped native has none', () => {
     const { logoURI: _logo, ...unlogged } = WETH
     const tokens = withNativeTokenEntry(byAddress([unlogged]), 1, ETH)

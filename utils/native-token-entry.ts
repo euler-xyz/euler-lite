@@ -27,6 +27,7 @@ export const withNativeTokenEntry = (
 
   const listed = tokens.get(zeroAddress)
   const logoURI = listed?.logoURI ?? wrapped.logoURI
+  const tags = listed?.tags?.length ? listed.tags : wrapped.tags
   result.set(zeroAddress, {
     ...(listed ?? {
       chainId,
@@ -34,9 +35,9 @@ export const withNativeTokenEntry = (
       name: nativeCurrency.name,
       symbol: nativeCurrency.symbol,
       decimals: nativeCurrency.decimals,
-      ...(wrapped.tags?.length ? { tags: wrapped.tags } : {}),
     }),
     ...(logoURI ? { logoURI } : {}),
+    ...(tags?.length ? { tags } : {}),
   })
   return result
 }
