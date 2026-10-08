@@ -365,7 +365,8 @@ const clearExploreFilters = () => {
           placeholder="Market"
           title="Market"
           modal-input-placeholder="Search market"
-          icon="bank"
+          icon="market"
+          active-icon="market-filled"
         />
         <UiSelect
           :key="`assets-${chainId}`"
