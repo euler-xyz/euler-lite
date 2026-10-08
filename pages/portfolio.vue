@@ -187,6 +187,9 @@ const netAssetValueDisplay = computed(() => {
   if (total === 0 && hasMissingPrices) return '—'
   return formatCompactUsdValue(total)
 })
+const netAssetValuePricingText = computed(() => totalBorrowedValueInfo.value.hasMissingPrices
+  ? 'Some positions have no USD price, so this value leaves them out. Debt left out can make this value look higher than it is.'
+  : 'Some positions have no USD price, so this value leaves them out.')
 
 const updatePositions = async (
   options: { portfolioSource?: 'fast' | 'fresh', preemptPortfolio?: boolean } = {},
@@ -356,7 +359,7 @@ watch(showAllLabelEntries, (showAll) => {
             <UiHoverPreviewTooltip
               v-if="netAssetValueInfo.hasMissingPrices"
               title="Partial pricing"
-              text="Some assets in your portfolio have no USD price, so this value leaves them out."
+              :text="netAssetValuePricingText"
               placement="bottom-end"
               icon-class="text-warning-500"
             />
