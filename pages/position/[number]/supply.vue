@@ -61,6 +61,7 @@ const isNativeWrap = computed(() => {
 
 const activeBalance = computed(() => (needsSwap.value || isNativeWrap.value) ? selectedAssetBalance.value : balance.value)
 const activeAsset = computed(() => selectedAsset.value ?? form.asset.value)
+const directCollateralDecimals = computed(() => !needsSwap.value && !spendingBlocked.value ? selectedAsset.value?.decimals : undefined)
 
 const form = useCollateralForm({
   mode: 'supply',
@@ -72,7 +73,7 @@ const form = useCollateralForm({
 
   computePriceFixed: (_pos, borrowVault, collateralVault) => {
     const collateralPrice = borrowVault && collateralVault
-      ? getCollateralOraclePrice(borrowVault, collateralVault)
+      ? getCollateralOraclePrice(borrowVault, collateralVault, directCollateralDecimals.value)
       : undefined
     const borrowPrice = borrowVault ? getAssetOraclePrice(borrowVault) : undefined
     return FixedPoint.fromValue(conservativePriceRatio(collateralPrice, borrowPrice), 18)
@@ -83,7 +84,7 @@ const form = useCollateralForm({
     if (healthValue === undefined) return undefined
     const health = nanoToValue(healthValue, 18)
     if (health < 1) return undefined
-    const cp = borrowVault && collateralVault ? getCollateralOraclePrice(borrowVault, collateralVault) : undefined
+    const cp = borrowVault && collateralVault ? getCollateralOraclePrice(borrowVault, collateralVault, directCollateralDecimals.value) : undefined
     const bp = borrowVault ? getAssetOraclePrice(borrowVault) : undefined
     const ratio = nanoToValue(conservativePriceRatio(cp, bp), 18)
     if (!ratio) return undefined
@@ -91,7 +92,7 @@ const form = useCollateralForm({
   },
 
   validateEstimate: ({ amountFixed, needsSwap: isSwap }) => {
-    if (!isSwap && !isNativeWrap.value && balanceFixed.value.lt(amountFixed)) {
+    if (!isSwap && !isNativeWrap.value && balance.value < amountFixed.value) {
       throw new Error('Not enough balance')
     }
     if ((isSwap || isNativeWrap.value) && selectedAssetBalance.value < valueToNano(form.amount.value, selectedAsset.value?.decimals)) {
@@ -240,7 +241,6 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   return undefined
 })
 
-const balanceFixed = computed(() => FixedPoint.fromValue(balance.value, form.collateralVault.value?.asset.decimals || 18))
 const assets = computed(() => [form.asset.value].filter((v): v is VaultAsset => !!v))
 const pairAssetsLabel = usePositionPairLabel(form.position)
 const { name } = useEulerProductOfVault(computed(() => form.collateralVault.value?.address || ''))

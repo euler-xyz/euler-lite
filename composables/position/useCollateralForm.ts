@@ -294,6 +294,9 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   }
 
   const currentYieldContext = shallowRef<CurrentYieldContext | null>(null)
+  // Populated after the caller finishes constructing `form`, because its
+  // effective asset getter may close over that variable.
+  const currentSupplyDecimals = ref<number | undefined>()
   const clearProjectedYieldEstimate = () => {
     estimateNetAPY.value = null
     projectedYieldDetails.value = null
@@ -370,6 +373,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
   watchEffect(async () => {
     const gen = currentNetApyGuard.next()
+    const supplyDecimals = currentSupplyDecimals.value
     void rewardsVersion.value
     void enableIntrinsicApy.value
     asyncEstimatesGuard.next()
@@ -393,7 +397,13 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
     try {
       const [collateralSnapshot, borrowedUsd] = await Promise.all([
-        getCollateralApySnapshot(currentPosition, currentBorrowVault),
+        getCollateralApySnapshot(currentPosition, currentBorrowVault, supplyDecimals === undefined || supplyDecimals === collateralVault.value.asset.decimals
+          ? undefined
+          : { deltas: [{
+              vaultAddress: collateralVault.value.address,
+              assetsDelta: 0n,
+              assetDecimals: supplyDecimals,
+            }] }),
         getAssetUsdValueForEstimate(currentPosition.borrowed ?? 0n, currentBorrowVault, 'off-chain'),
       ])
       if (currentNetApyGuard.isStale(gen)) return
@@ -471,17 +481,20 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     const amountOut = BigInt(swapEffectiveQuote.value.amountOut || 0)
     return amountOut > 0n ? amountOut : 0n
   })
+  const directSupplyAssetDecimals = computed(() =>
+    options.mode === 'supply' && !options.needsSwap.value && !options.inputBlocked?.value
+      ? options.effectiveAsset.value?.decimals
+      : undefined,
+  )
   const amountFixed = computed(() => {
-    const decimals = options.mode === 'supply' && swapCollateralDeltaNano.value === null
-      ? options.effectiveAsset.value?.decimals ?? collateralVault.value?.asset.decimals
-      : collateralVault.value?.asset.decimals
+    const decimals = directSupplyAssetDecimals.value ?? collateralVault.value?.asset.decimals
     return FixedPoint.fromValue(
       swapCollateralDeltaNano.value ?? valueToNano(amount.value || '0', decimals),
       Number(decimals),
     )
   })
   const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, borrowVault.value?.shares.decimals || 18))
-  const suppliedFixed = computed(() => FixedPoint.fromValue(collateralAssets.value, collateralVault.value?.asset.decimals || 18))
+  const suppliedFixed = computed(() => FixedPoint.fromValue(collateralAssets.value, directSupplyAssetDecimals.value ?? collateralVault.value?.asset.decimals ?? 18))
   const priceFixed = computed(() => {
     if (!position.value) return FixedPoint.fromValue(0n, 18)
     return options.computePriceFixed(position.value, borrowVault.value, collateralVault.value)
@@ -834,6 +847,10 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
         clearProjectedYieldEstimate()
         return
       }
+      if (options.mode === 'supply' && options.inputBlocked?.value) {
+        clearProjectedYieldEstimate()
+        return
+      }
       const evault = estimateCollateralVault
       const quotedCollateralDelta = swapCollateralDeltaNano.value
       if (
@@ -858,6 +875,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
           deltas: [{
             vaultAddress: evault.address,
             assetsDelta: cashDelta,
+            assetDecimals: directSupplyAssetDecimals.value,
             projectRates: true,
           }],
         }),
@@ -1161,11 +1179,16 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   // is still tied to the component lifecycle and auto-disposed on unmount.
   const scope = getCurrentScope()
   void Promise.resolve().then(() => {
-    const register = () => watch(
-      [collateralVault, borrowVault, () => options.effectiveAsset.value, () => options.getSwapOutputAsset()],
-      primeFormSlotHints,
-      { immediate: true },
-    )
+    const register = () => {
+      watch(
+        [collateralVault, borrowVault, () => options.effectiveAsset.value, () => options.getSwapOutputAsset()],
+        primeFormSlotHints,
+        { immediate: true },
+      )
+      watch(directSupplyAssetDecimals, (decimals) => {
+        currentSupplyDecimals.value = decimals
+      }, { immediate: true })
+    }
     if (scope) scope.run(register)
     else register()
   })

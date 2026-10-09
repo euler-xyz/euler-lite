@@ -9,7 +9,7 @@ const { getProjectedRatesBatch, getCollateralUsdValue, getOrFetch } = vi.hoisted
     supplyAPY: 8n * 10n ** 25n,
     borrowAPY: 0n,
   }))),
-  getCollateralUsdValue: vi.fn(async (assets: bigint) => Number(assets)),
+  getCollateralUsdValue: vi.fn(async (...[assets]: Parameters<typeof import('~/utils/sdk-prices')['getCollateralUsdValue']>) => Number(assets)),
   getOrFetch: vi.fn(),
 }))
 
@@ -50,6 +50,7 @@ const makePosition = (collateralVaults = [VAULT_A, VAULT_B]) => ({
 describe('usePositionCollateralApy', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    getCollateralUsdValue.mockImplementation(async (assets: bigint) => Number(assets))
     activeLayerVaultsRef.value = {}
     getOrFetch.mockImplementation(async (address: string) => ({
       [VAULT_A.toLowerCase()]: vaultA,
@@ -101,6 +102,35 @@ describe('usePositionCollateralApy', () => {
     ])
     expect(snapshot.collateralAddresses).toEqual([VAULT_A, VAULT_B])
     expect(snapshot.isComplete).toBe(true)
+  })
+
+  it('prices a verified collateral delta in its true units without changing other vaults', async () => {
+    const { getCollateralUsdValue: actualUsdValue } = await vi.importActual<typeof import('~/utils/sdk-prices')>('~/utils/sdk-prices')
+    getCollateralUsdValue.mockImplementation(actualUsdValue)
+    const pricedLiabilityVault = {
+      ...liabilityVault,
+      collaterals: [
+        { address: VAULT_A, marketPriceUsd: 10n ** 18n },
+        { address: VAULT_B, marketPriceUsd: 10n ** 18n },
+      ],
+    } as unknown as EVault
+    const position = {
+      ...makePosition(),
+      supplied: 100n * 10n ** 17n,
+      collaterals: [
+        { vaultAddress: VAULT_A, vault: vaultA, assets: 100n * 10n ** 17n },
+        { vaultAddress: VAULT_B, vault: vaultB, assets: 10n * 10n ** 18n },
+      ],
+    } as unknown as PortfolioBorrowPosition<VaultEntity>
+    const { getCollateralApySnapshot } = usePositionCollateralApy()
+    const snapshot = await getCollateralApySnapshot(position, pricedLiabilityVault, {
+      deltas: [{ vaultAddress: VAULT_A, assetsDelta: 50n * 10n ** 17n, assetDecimals: 17 }],
+    })
+
+    expect(snapshot.isComplete).toBe(true)
+    expect(snapshot.entries.map(entry => entry.supplyUsd)).toEqual([150, 10])
+    expect(snapshot.supplyUsd).toBe(160)
+    expect(snapshot.weightedSupplyApy).toBeCloseTo((150 * 6 + 10 * 11) / 160)
   })
 
   it('projects a vault cash change without changing the position assets', async () => {

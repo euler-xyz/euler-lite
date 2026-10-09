@@ -16,6 +16,7 @@ import { activeLayerVaultsRef, useLayeredVaults } from '~/composables/useLayered
 interface CollateralApyDelta {
   vaultAddress: string
   assetsDelta: bigint
+  assetDecimals?: number
   cashDelta?: bigint
   projectRates?: boolean
 }
@@ -57,6 +58,7 @@ interface CollateralApyEntry {
   vault: VaultEntity
   assets: bigint
   delta: bigint
+  assetDecimals?: number
   cashDelta: bigint
   projectRates: boolean | undefined
 }
@@ -164,6 +166,7 @@ export const usePositionCollateralApy = () => {
           vault,
           assets: nextAssets > 0n ? nextAssets : 0n,
           delta,
+          assetDecimals: deltaByAddress.get(address)?.assetDecimals,
           cashDelta: deltaByAddress.get(address)?.cashDelta ?? delta,
           projectRates: deltaByAddress.get(address)?.projectRates,
         }
@@ -215,7 +218,7 @@ export const usePositionCollateralApy = () => {
       const valued = await Promise.all(entries.map(async (entry) => {
         const supplyUsd = entry.assets === 0n
           ? 0
-          : await getCollateralUsdValue(entry.assets, liabilityVault, entry.vault, 'off-chain')
+          : await getCollateralUsdValue(entry.assets, liabilityVault, entry.vault, 'off-chain', entry.assetDecimals)
         if (supplyUsd === undefined || !Number.isFinite(supplyUsd) || (entry.assets > 0n && supplyUsd <= 0)) return null
         const currentRaw = getVaultSupplyApy(entry.vault)
         const projected = projectedByAddress.get(entry.address)
