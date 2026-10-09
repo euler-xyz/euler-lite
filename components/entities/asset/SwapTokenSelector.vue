@@ -253,6 +253,9 @@ const handleSelectCustomToken = () => {
           icon="search"
           clearable
         />
+        <p class="mt-8 text-p5 text-content-tertiary">
+          Token names and symbols can be misleading. Check the contract address before selecting.
+        </p>
       </div>
       <div
         class="flex-1 min-h-0 overflow-auto styled-scrollbar"

@@ -104,6 +104,8 @@ Pair-level Net APY and Max ROE screens use the same compounded helper for consis
 
 `composables/useUserSettings.ts` defines `enableIntrinsicApy: boolean` (default `true`). The toggle lives in `components/entities/settings/SettingsModal.vue`. Every call site that displays intrinsic APY reads the flag and passes it into the helper, so toggling off reverts displays to base APY without rebuilding the registry.
 
+The sibling Settings flag is `enableRewardsApy` (default `true`): it zeros reward yield in headlines and projected totals without touching claimable reward rows. `composables/useApyVisibility.ts` applies both flags to an SDK breakdown. Spy-mode viewer rules (do not fall back to the connected wallet while a spy address is still verifying) are in [Projected Yield → APY visibility](./projected-yield.md#apy-visibility-and-viewer-address).
+
 ## Lite override proxy
 
 `GET|HEAD /api/internal/proxy/intrinsic-apy-overrides?chainId=` is the Lite-owned overlay for assets V3 does not yet cover. It is not the shared `external-proxy.ts` forwarder: the handler aggregates a fixed set of origin URLs and returns `IntrinsicApyOverrideRow[]`.

@@ -84,6 +84,21 @@ describe('useSwapQuotesParallel', () => {
     }))
   })
 
+  it('rejects invalid spending metadata before display even without gas estimation', async () => {
+    getSwapProviders.mockResolvedValue(['router', 'cow'])
+    getSwapQuotes.mockResolvedValue([makeUsdcOutQuote('2000000')])
+    const validateQuote = vi.fn(() => {
+      throw new Error('Quote units mismatch')
+    })
+    const quotes = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max', includeCowSwap: true, validateQuote })
+    await quotes.requestQuotes(requestParams)
+    await flushPromises()
+    expect(quotes.sortedQuoteCards.value).toEqual([])
+    expect(quotes.effectiveQuote.value).toBeNull()
+    expect(validateQuote).toHaveBeenCalledTimes(2)
+    expect(getTokenUsdValueMock).not.toHaveBeenCalled()
+  })
+
   it('keeps effectiveQuote stable when selecting the current best provider', async () => {
     const firstQuote = makeQuote('100', '200')
     getSwapProviders.mockResolvedValue(['first'])

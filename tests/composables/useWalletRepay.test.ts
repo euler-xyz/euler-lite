@@ -27,6 +27,7 @@ const { USER, borrowVault, collateralVault, planAccount, getCollateralApySnapsho
   }
 })
 const rewardsVersion = ref(0)
+const planRepayFromWallet = vi.fn(async () => ({ type: 'plan' }) as unknown as TransactionPlan)
 
 vi.mock('#components', () => ({ OperationReviewModal: {} }))
 vi.mock('~/components/ui/composables/useModal', () => ({
@@ -92,7 +93,7 @@ describe('useWalletRepay projected Net APY', () => {
     vi.stubGlobal('watchEffect', watchEffect)
     vi.stubGlobal('useDebounceFn', (fn: unknown) => fn)
     vi.stubGlobal('useEulerTx', () => ({
-      planRepayFromWallet: vi.fn(async () => ({ type: 'plan' }) as unknown as TransactionPlan),
+      planRepayFromWallet,
       executePlan: vi.fn(),
     }))
     vi.stubGlobal('usePlanAccount', () => ({ account: shallowRef(planAccount) }))
@@ -121,10 +122,50 @@ describe('useWalletRepay projected Net APY', () => {
     vi.restoreAllMocks()
   })
 
+  it('uses verified decimals for direct repay amount, Max, and plan input', async () => {
+    const verifiedAsset = { ...borrowVault.asset, decimals: 6 }
+    const repay = useWalletRepay({
+      position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>({ ...position, borrowed: 2_000_000_000n } as PortfolioBorrowPosition<VaultEntity>),
+      borrowVault: computed(() => borrowVault),
+      spendingAsset: computed(() => verifiedAsset),
+      collateralVault: computed(() => collateralVault),
+      formTab: ref('wallet'),
+      walletBalance: ref(1_500_000_000n),
+      plan: ref(null),
+      isSubmitting: ref(false),
+      isPreparing: ref(false),
+      clearSimulationError: vi.fn(),
+      runSimulation: vi.fn(async () => true),
+      netAPY: ref(1),
+      collateralSupplyApy: computed(() => 5),
+      borrowApy: computed(() => 5),
+      collateralSupplyRewardApy: computed(() => 0),
+      borrowRewardApy: computed(() => 0),
+      oraclePriceRatio: computed(() => 1),
+    })
+
+    repay.onSourceMax()
+    expect(repay.amount.value).toBe('1500')
+    getCollateralApySnapshot.mockClear()
+    getAssetUsdValueForEstimate.mockClear()
+    repay.amount.value = '1.25'
+    await vi.waitFor(() => expect(getCollateralApySnapshot).toHaveBeenCalledTimes(2))
+    expect(getCollateralApySnapshot).toHaveBeenLastCalledWith(
+      expect.anything(),
+      borrowVault,
+      { liabilityRateDelta: { cashDelta: 1_250_000n, borrowsDelta: -1_250_000n } },
+    )
+    expect(getAssetUsdValueForEstimate).toHaveBeenNthCalledWith(1, 2_000_000_000n, borrowVault, 'off-chain', 6)
+    expect(getAssetUsdValueForEstimate).toHaveBeenNthCalledWith(2, 1_998_750_000n, borrowVault, 'off-chain', 6)
+    await repay.submit()
+    expect(planRepayFromWallet).toHaveBeenCalledWith(expect.objectContaining({ liabilityAmount: 1_250_000n }))
+  })
+
   it('clears an earlier Net APY estimate when the next projection rejects', async () => {
     const repay = useWalletRepay({
       position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position),
       borrowVault: computed(() => borrowVault),
+      spendingAsset: computed(() => borrowVault.asset),
       collateralVault: computed(() => collateralVault),
       formTab: ref('wallet'),
       walletBalance: ref(1_000n * 10n ** 18n),
@@ -166,6 +207,7 @@ describe('useWalletRepay projected Net APY', () => {
     const repay = useWalletRepay({
       position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position),
       borrowVault: computed(() => borrowVault),
+      spendingAsset: computed(() => borrowVault.asset),
       collateralVault: computed(() => collateralVault),
       formTab: ref('wallet'),
       walletBalance: ref(1_000n * 10n ** 18n),
@@ -198,6 +240,7 @@ describe('useWalletRepay projected Net APY', () => {
     const repay = useWalletRepay({
       position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position),
       borrowVault: computed(() => borrowVault),
+      spendingAsset: computed(() => borrowVault.asset),
       collateralVault: computed(() => collateralVault),
       formTab: ref('wallet'),
       walletBalance: ref(1_000n * 10n ** 18n),
@@ -242,6 +285,7 @@ describe('useWalletRepay projected Net APY', () => {
     const repay = useWalletRepay({
       position: positionRef,
       borrowVault: computed(() => borrowVault),
+      spendingAsset: computed(() => borrowVault.asset),
       collateralVault: computed(() => collateralVault),
       formTab: ref('wallet'),
       walletBalance: ref(1_000n * 10n ** 18n),

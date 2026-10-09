@@ -1,4 +1,6 @@
 import type { VaultAsset } from '~/types/asset'
+import { useVerifiedSpendingAsset } from '~/composables/useVerifiedSpendingAsset'
+import { assertSpendingQuoteAsset } from '~/utils/spending-quote'
 import type { CollateralOption } from '~/types/collateral-option'
 import { isEVault, type Account, type EVault, type IHasVaultAddress, type PortfolioSavingsPosition, type TransactionPlan, SwapperMode, type SwapQuote, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { areProjectedRatesComplete, getProjectedRatesBatch, getPositionMultiplier, type ProjectedRates, type ProjectedRatesRequest } from '~/utils/vault/apy'
@@ -161,6 +163,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     selectProvider: selectBorrowSwapQuote,
   } = useSwapQuotesParallel({
     amountField: 'amountOut',
+    validateQuote: quote => validateSpendingQuote(quote),
     compare: 'max',
     buildTxPlanForQuote: (quote, _provider, context) => buildSwapBorrowPlanFromQuote(quote, context.account),
     createIntentsForQuote: (quote) => {
@@ -239,16 +242,48 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const liquidationPrice = ref<number | undefined>()
 
   // Swap state
-  const borrowSelectedAsset = ref<VaultAsset | undefined>()
+  const spending = useVerifiedSpendingAsset(() => {
+    collateralAmount.value = ''
+    borrowAmount.value = ''
+    clearBorrowSimulationError()
+    resetBorrowSwapQuoteState()
+  })
+  const borrowSelectedAsset = spending.asset
+  const validateSpendingQuote = (quote: SwapQuote) => {
+    const asset = borrowSelectedAsset.value
+    if (!asset) throw new Error('Token decimals are not verified')
+    assertSpendingQuoteAsset(quote, asset, isNativeCurrencyAddress(asset.address) ? resolveWrappedNativeAddress(chainId.value!) : undefined)
+  }
   // Pay-with balance from the central wallet entity (custom tokens fed in by
   // useCustomTokenResolver) — reactive + layer-aware.
   const borrowSelectedAssetBalance = computed(() => borrowSelectedAsset.value?.address ? getBalance(borrowSelectedAsset.value.address as Address) : 0n)
   const borrowSwapAssetUsdPrice = ref<number | undefined>()
 
+  const borrowNeedsSwap = computed(() => {
+    if (!borrowSelectedAsset.value || !collateralVault.value) return false
+    // Swap-and-borrow ends with verifyAmountMinAndSkim which calls skim() on the
+    // collateral vault — securitize vaults don't implement skim, so the swap
+    // path is structurally unsupported here.
+    if (isSecuritizeCollateral.value) return false
+    try {
+      if (isNativeOfWrapped(borrowSelectedAsset.value.address, collateralVault.value.asset.address, chainId.value!)) return false
+      return getAddress(borrowSelectedAsset.value.address) !== getAddress(collateralVault.value.asset.address)
+    }
+    catch {
+      return false
+    }
+  })
+
   // --- Computed: prices ---
   const priceFixed = computed(() => {
-    const collateralPrice = borrowVault.value && collateralVault.value
-      ? getCollateralOraclePrice(borrowVault.value, collateralVault.value)
+    const directWalletCollateral = !isSavingCollateral.value && !borrowNeedsSwap.value
+    const verifiedDecimals = directWalletCollateral ? borrowSelectedAsset.value?.decimals : undefined
+    const collateralPrice = (!directWalletCollateral || verifiedDecimals !== undefined) && borrowVault.value && collateralVault.value
+      ? getCollateralOraclePrice(
+          borrowVault.value,
+          collateralVault.value,
+          verifiedDecimals,
+        )
       : undefined
     const borrowPrice = borrowVault.value ? getAssetOraclePrice(borrowVault.value) : undefined
     return FixedPoint.fromValue(conservativePriceRatio(collateralPrice, borrowPrice), 18)
@@ -283,8 +318,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
   // --- Computed: math ---
   const collateralAmountFixed = computed(() => FixedPoint.fromValue(
-    valueToNano(collateralAmount.value || '0', collateralVault.value?.asset.decimals),
-    Number(collateralVault.value?.asset.decimals),
+    valueToNano(collateralAmount.value || '0', borrowActiveAssetDecimals.value),
+    Number(borrowActiveAssetDecimals.value),
   ))
   const borrowAmountFixed = computed(() => FixedPoint.fromValue(
     valueToNano(borrowAmount.value || '0', borrowVault.value?.asset.decimals),
@@ -305,21 +340,6 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     return balance.value
   })
 
-  const borrowNeedsSwap = computed(() => {
-    if (!borrowSelectedAsset.value || !collateralVault.value) return false
-    // Swap-and-borrow ends with verifyAmountMinAndSkim which calls skim() on the
-    // collateral vault — securitize vaults don't implement skim, so the swap
-    // path is structurally unsupported here.
-    if (isSecuritizeCollateral.value) return false
-    try {
-      if (isNativeOfWrapped(borrowSelectedAsset.value.address, collateralVault.value.asset.address, chainId.value!)) return false
-      return getAddress(borrowSelectedAsset.value.address) !== getAddress(collateralVault.value.asset.address)
-    }
-    catch {
-      return false
-    }
-  })
-
   const isBorrowNativeWrap = computed(() => {
     if (!borrowSelectedAsset.value || !collateralVault.value) return false
     return isNativeOfWrapped(borrowSelectedAsset.value.address, collateralVault.value.asset.address, chainId.value!)
@@ -331,7 +351,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   })
 
   const borrowActiveAssetDecimals = computed(() => {
-    if ((borrowNeedsSwap.value || isBorrowNativeWrap.value) && borrowSelectedAsset.value) return borrowSelectedAsset.value.decimals
+    if (!isSavingCollateral.value && borrowSelectedAsset.value) return borrowSelectedAsset.value.decimals
     return collateralVault.value?.asset?.decimals
   })
 
@@ -409,11 +429,14 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     const { tags, disabled } = getVaultTags(vaultAddr)
     const decimals = collateralVault.value?.asset.decimals
     const assetAddress = collateralVault.value?.asset.address
+    const walletDecimals = borrowSelectedAsset.value?.address.toLowerCase() === assetAddress?.toLowerCase()
+      ? borrowSelectedAsset.value.decimals
+      : decimals
 
     const opts: CollateralOption[] = [
       {
         type: 'wallet',
-        amount: nanoToValue(balance.value, decimals),
+        amount: nanoToValue(balance.value, walletDecimals),
         price: walletCollateralPriceUsd.value,
         apy: collateralSupplyApyWithRewards.value,
         assetAddress,
@@ -494,6 +517,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   })
 
   const isSubmitDisabled = computed(() => {
+    if (!isSavingCollateral.value && spending.isBlocked.value) return true
     if (!isConnected.value && !isSpyMode.value) return false
     if (findBlockingDisabledOp(borrowPlannedOps.value)) return true
     if (isSavingCollateral.value && !savingCollateral.value) return true
@@ -691,9 +715,15 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       if (asyncEstimatesGuard.isStale(gen)) return
 
       // When swapping, use the quote output amount (collateral-vault-asset denominated)
+      const directDecimals = isSavingCollateral.value
+        ? collateral.asset.decimals
+        : borrowSelectedAsset.value?.decimals ?? collateral.asset.decimals
+      const directWalletCollateralDecimals = !isSavingCollateral.value && !borrowNeedsSwap.value
+        ? borrowSelectedAsset.value?.decimals
+        : undefined
       const collateralAmountNano = borrowNeedsSwap.value
         ? borrowSwapEffectiveQuote.value ? BigInt(borrowSwapEffectiveQuote.value.amountOut || 0) : 0n
-        : valueToNano(collateralAmount.value || '0', collateral.asset.decimals)
+        : valueToNano(collateralAmount.value || '0', directDecimals)
       const collateralCashDelta = isSavingCollateral.value && !borrowNeedsSwap.value ? 0n : collateralAmountNano
       const savingsSourceAddress = normalizeAddress(savingCollateral.value?.subAccount)
       const normalizedTargetSubAccountAddress = normalizeAddress(targetSubAccountAddress)
@@ -763,7 +793,12 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       const [projectedRates, collateralUsdValues, borrowUsdValue] = await Promise.all([
         getProjectedRatesBatch(projectionRequests),
         Promise.all(collateralLegs.map(leg =>
-          getAssetUsdValueForEstimate(leg.assets, leg.vault, 'off-chain'))),
+          getAssetUsdValueForEstimate(
+            leg.assets,
+            leg.vault,
+            'off-chain',
+            leg.address === selectedCollateralAddress ? directWalletCollateralDecimals : undefined,
+          ))),
         getAssetUsdValueForEstimate(nextBorrowed, borrow, 'off-chain'),
       ])
       if (asyncEstimatesGuard.isStale(gen)) return
@@ -921,6 +956,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     if (isNative && !wrappedAddress) {
       throw new Error('Wrapped native token not found')
     }
+    assertSpendingQuoteAsset(quote, borrowSelectedAsset.value, wrappedAddress)
     const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrowVault.value.shares.decimals)
     const subAccount = await resolvePendingSubAccount()
     const subAccountSnapshotApplied = await ensureBorrowSubAccountSnapshot(account, subAccount as Address)
@@ -957,6 +993,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       const inputAmount = valueToNano(snap.collateralAmount || '0', snap.selectedAsset.decimals)
       const wrappedAddress = isNative ? resolveWrappedNativeAddress(snap.chainId) : null
       if (isNative && !wrappedAddress) throw new Error('Wrapped native token not found')
+      assertSpendingQuoteAsset(snap.quote, snap.selectedAsset, wrappedAddress)
       const borrowAmountNano = valueToNano(snap.borrowAmount || '0', snap.borrowVault.shares.decimals)
       return planSwapAndBorrow({
         swapQuote: snap.quote,
@@ -976,12 +1013,15 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
     // Standard borrow (fresh-deposit or savings-sourced collateral; collateral
     // amount may be 0 for a pure borrow against an earlier batch step's collateral).
-    let collateralAmountForPlan = FixedPoint.fromValue(
-      valueToNano(snap.collateralAmount || '0', snap.collateralVault.asset.decimals),
-      Number(snap.collateralVault.asset.decimals),
-    ).toFormat({ decimals: Number(snap.collateralVault.shares.decimals) }).value
+    if (!snap.isSavingCollateral && !snap.selectedAsset) throw new Error('Token decimals are not verified')
+    const sourceDecimals = snap.isSavingCollateral ? snap.collateralVault.asset.decimals : snap.selectedAsset!.decimals
+    let collateralAmountForPlan = valueToNano(snap.collateralAmount || '0', sourceDecimals)
     if (snap.isSavingCollateral) {
       if (!snap.savingCollateral) throw new Error('Savings position not found')
+      collateralAmountForPlan = FixedPoint.fromValue(
+        collateralAmountForPlan,
+        Number(sourceDecimals),
+      ).toFormat({ decimals: Number(snap.collateralVault.shares.decimals) }).value
       collateralAmountForPlan = snap.savingCollateral.assets === collateralAmountForPlan
         ? snap.savingCollateral.shares
         : snap.collateralVault.convertToShares(collateralAmountForPlan)
@@ -1034,6 +1074,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       const inputAmount = valueToNano(snap.collateralAmount || '0', snap.selectedAsset.decimals)
       const wrappedAddress = isNative ? resolveWrappedNativeAddress(snap.chainId) : null
       if (isNative && !wrappedAddress) throw new Error('Wrapped native token not found')
+      assertSpendingQuoteAsset(snap.quote, snap.selectedAsset, wrappedAddress)
       return createCapturedIntent({
         kind: 'borrow',
         planner: 'swap-and-borrow',
@@ -1054,12 +1095,15 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       })
     }
 
-    let collateralAmount = FixedPoint.fromValue(
-      valueToNano(snap.collateralAmount || '0', snap.collateralVault.asset.decimals),
-      Number(snap.collateralVault.asset.decimals),
-    ).toFormat({ decimals: Number(snap.collateralVault.shares.decimals) }).value
+    if (!snap.isSavingCollateral && !snap.selectedAsset) throw new Error('Token decimals are not verified')
+    const sourceDecimals = snap.isSavingCollateral ? snap.collateralVault.asset.decimals : snap.selectedAsset!.decimals
+    let collateralAmount = valueToNano(snap.collateralAmount || '0', sourceDecimals)
     if (snap.isSavingCollateral) {
       if (!snap.savingCollateral) throw new Error('Savings position not found')
+      collateralAmount = FixedPoint.fromValue(
+        collateralAmount,
+        Number(sourceDecimals),
+      ).toFormat({ decimals: Number(snap.collateralVault.shares.decimals) }).value
       collateralAmount = snap.savingCollateral.assets === collateralAmount
         ? snap.savingCollateral.shares
         : snap.collateralVault.convertToShares(collateralAmount)
@@ -1092,6 +1136,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   }
 
   const captureBorrowFormSnapshot = (): BorrowFormSnapshot => {
+    if (!isSavingCollateral.value && spending.isBlocked.value) throw new Error('Token decimals are not verified')
     if (!collateralVault.value || !borrowVault.value) throw new Error('Borrow vaults are not loaded')
     return {
       chainId: chainId.value!,
@@ -1114,6 +1159,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   ): BorrowBatchSnapshot => ({ subAccount, ...formSnapshot })
 
   const submit = async () => {
+    if (!isSavingCollateral.value && spending.isBlocked.value) return
     if (isOperationBlocked.value) return
     if (isPreparing.value || isGeoBlocked.value || isBorrowRestricted.value || isBorrowSwapRestricted.value || isBorrowPayWithBlocked.value) return
     isPreparing.value = true
@@ -1259,6 +1305,8 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   )
 
   // --- Watchers ---
+  watch([collateralVault, chainId], ([vault]) => spending.setDefaultAsset(vault?.asset), { immediate: true })
+
   watch(ltv, () => {
     updateSyncEstimates()
   })
@@ -1374,6 +1422,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   }
 
   return {
+    spending,
     // Form state
     ltv,
     borrowAmount,
