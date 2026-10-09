@@ -17,7 +17,13 @@ import {
 const { error } = useToast()
 const { isSpyMode } = useSpyMode()
 const { getTokenByAddress } = useTokenList()
-const { buildUnlockREULPlan, reulTokenContractAddress, eulTokenContractAddress, refreshLocks } = useREULLocks()
+const {
+  buildUnlockREULPlan,
+  reulTokenContractAddress,
+  eulTokenContractAddress,
+  refreshLocks,
+  getLatestBlockTimestamp,
+} = useREULLocks()
 const { entryCount, clearBatch } = useTxBatch()
 const { create: createIntent } = useOperationIntentFactory()
 const { capture: captureReviewState } = useExecutionReview()
@@ -44,7 +50,9 @@ const walletChangeTokenSymbol = computed(() =>
 const walletChangeTokenDecimals = computed(() => eulToken.value?.decimals ?? reulToken.value?.decimals ?? 18)
 const isBatchActive = computed(() => entryCount.value > 0)
 const now = useNow({ scheduler: cb => useIntervalFn(cb, POLL_INTERVAL_60S_MS) })
-const isLockOpen = computed(() => isREULLockOpen(item.timestamp, now.value.getTime()))
+const isLockOpen = computed(() =>
+  isREULLockOpen(item.timestamp, BigInt(Math.floor(now.value.getTime() / 1000))),
+)
 const lockClosedAt = computed(() =>
   DateTime.fromSeconds(Number(getREULLockClosedAt(item.timestamp)), { zone: 'utc' }).toFormat('MMMM dd, HH:mm'),
 )
@@ -124,15 +132,18 @@ const onUnlockClick = async () => {
     error('Clear the current batch before unlocking rEUL')
     return
   }
-  if (isREULLockOpen(item.timestamp)) {
-    error(`Early unlock for this rEUL lock opens ${lockClosedAt.value} UTC`)
-    return
-  }
 
   if (isPreparing.value) return
   isPreparing.value = true
   try {
     await ensureWalletOnSiteChain()
+
+    // Chain time must be read before the quote refresh so the quoted lock can
+    // no longer receive deliveries.
+    if (isREULLockOpen(item.timestamp, await getLatestBlockTimestamp())) {
+      error(`Early unlock for this rEUL lock opens ${lockClosedAt.value} UTC`)
+      return
+    }
 
     const validation = await refreshREULLockReview(item, () => refreshLocks(true))
     if (validation.status !== 'fresh') {

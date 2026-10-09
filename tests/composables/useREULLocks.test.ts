@@ -23,11 +23,15 @@ const importUseREULLocks = async (wallet: {
   const fetchLocks = vi.fn(async () => [lock])
   const unlockPlan = { kind: 'reul-unlock', steps: [] }
   const buildUnlockPlan = vi.fn(async () => unlockPlan)
+  const getBlock = vi.fn(async () => ({ timestamp: 1_791_331_200n }))
 
   const sdk = {
     reulLockService: {
       fetchLocks,
       buildUnlockPlan,
+    },
+    providerService: {
+      getProvider: () => ({ getBlock }),
     },
   }
   vi.doMock('~/composables/useEulerSdk', () => ({
@@ -67,6 +71,7 @@ const importUseREULLocks = async (wallet: {
     ...module,
     fetchLocks,
     buildUnlockPlan,
+    getBlock,
     unlockPlan,
     lock,
     unmountCallbacks,
@@ -127,15 +132,16 @@ describe('useREULLocks', () => {
     })
   })
 
-  it('rejects remainder loss for a lock that can still receive deliveries', async () => {
+  it('rejects remainder loss for a lock that can still receive deliveries by chain time', async () => {
     const lockDay = 1_791_331_200n
     vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(Number(lockDay + 86_400n) * 1000)
-    const { useREULLocks, buildUnlockPlan } = await importUseREULLocks({
+    vi.setSystemTime(Number(lockDay + 3n * 86_400n) * 1000)
+    const { useREULLocks, buildUnlockPlan, getBlock } = await importUseREULLocks({
       connected: true,
       address: owner,
       chainId: 1,
     })
+    getBlock.mockResolvedValue({ timestamp: lockDay + 86_400n })
 
     let locks: ReturnType<typeof useREULLocks> | undefined
     scope = effectScope()
@@ -155,6 +161,25 @@ describe('useREULLocks', () => {
       lockTimestamp: lockDay - 86_400n,
       allowRemainderLoss: true,
     }))
+  })
+
+  it('fails to build an unlock plan when chain time is unavailable', async () => {
+    const { useREULLocks, buildUnlockPlan, getBlock } = await importUseREULLocks({
+      connected: true,
+      address: owner,
+      chainId: 1,
+    })
+    getBlock.mockRejectedValue(new Error('rpc down'))
+
+    let locks: ReturnType<typeof useREULLocks> | undefined
+    scope = effectScope()
+    scope.run(() => {
+      locks = useREULLocks()
+    })
+
+    if (!locks) throw new Error('useREULLocks did not initialize')
+    await expect(locks.buildUnlockREULPlan([123n])).rejects.toThrow('rpc down')
+    expect(buildUnlockPlan).not.toHaveBeenCalled()
   })
 
   it('removes stale rows while a required post-transaction refresh is pending', async () => {

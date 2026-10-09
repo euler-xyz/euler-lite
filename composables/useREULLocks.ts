@@ -157,6 +157,17 @@ export const useREULLocks = () => {
     }
   })
 
+  const getLatestBlockTimestamp = async (): Promise<bigint> => {
+    const chainId = selectedChainId.value
+    if (!chainId) {
+      throw new Error('Chain not connected')
+    }
+
+    const sdk = await getEulerSdkForChain(chainId)
+    const block = await sdk.providerService.getProvider(chainId).getBlock()
+    return block.timestamp
+  }
+
   const buildUnlockREULPlan = async (lockTimestamps: bigint[]): Promise<TransactionPlan> => {
     if (!wagmiAddress.value) {
       throw new Error('Wallet not connected')
@@ -168,13 +179,14 @@ export const useREULLocks = () => {
 
     const lockTimestamp = lockTimestamps[0] as bigint
     const sdk = await getEulerSdkForChain(chainId)
+    const chainTimestamp = await getLatestBlockTimestamp()
     return sdk.reulLockService.buildUnlockPlan({
       chainId,
       account: wagmiAddress.value as Address,
       lockTimestamp,
       // The contract takes no maximum loss, so a lock that can still grow must
       // revert on any remainder rather than burn more than was reviewed.
-      allowRemainderLoss: !isREULLockOpen(lockTimestamp),
+      allowRemainderLoss: !isREULLockOpen(lockTimestamp, chainTimestamp),
       rEulAddress: reulTokenContractAddress.value
         ? (reulTokenContractAddress.value as Address)
         : undefined,
@@ -188,6 +200,7 @@ export const useREULLocks = () => {
     eulTokenContractAddress,
     loadREULLocksInfo: (address: string, isInitial?: boolean) => loadREULLocksInfo(address, isInitial),
     refreshLocks,
+    getLatestBlockTimestamp,
     buildUnlockREULPlan,
   }
 }
