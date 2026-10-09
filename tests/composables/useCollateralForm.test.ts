@@ -567,6 +567,46 @@ describe('useCollateralForm', () => {
     expect(form.amountFixed.value.value).toBe(2n * 10n ** 18n)
   })
 
+  it('direct supply: verified decimals govern existing collateral, health, and projected USD units', async () => {
+    const verifiedCollateral = { ...wethAsset, decimals: 17 } as VaultAsset
+    const validateEstimate = vi.fn()
+    const form = makeForm({
+      needsSwap: computed(() => false),
+      effectiveAsset: computed(() => verifiedCollateral),
+      effectiveBalance: computed(() => 500n * 10n ** 17n),
+      validateEstimate,
+    })
+    await flush()
+
+    form.amount.value = '50'
+    await flush()
+
+    expect(form.amountFixed.value.value).toBe(50n * 10n ** 17n)
+    expect(mocks.getCollateralApySnapshot).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      { deltas: [{
+        vaultAddress: COLLATERAL_VAULT,
+        assetsDelta: 0n,
+        assetDecimals: 17,
+      }] },
+    )
+    expect(validateEstimate).toHaveBeenLastCalledWith(expect.objectContaining({
+      collateralValue: FixedPoint.fromValue(150n * 10n ** 18n, 18),
+    }))
+    expect(Number(form.estimateHealth.value) / 1e18).toBeCloseTo(0.0258, 4)
+    expect(mocks.getCollateralApySnapshot).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      { deltas: [{
+        vaultAddress: COLLATERAL_VAULT,
+        assetsDelta: 50n * 10n ** 17n,
+        assetDecimals: 17,
+        projectRates: true,
+      }] },
+    )
+  })
+
   it('withdraw with swap-out: amount stays collateral-denominated, quote is ignored', async () => {
     const swapApi = await getSwapApi()
     const form = makeForm({

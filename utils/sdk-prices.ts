@@ -262,11 +262,12 @@ export const getCollateralUsdValue = async (
   liabilityVault: EVault | LiabilityPricedVault | null | undefined,
   collateralVault: ERC4626Vault | PriceableCollateralVault | null | undefined,
   source: PriceSource = 'off-chain',
+  amountDecimals?: number,
 ): Promise<number | undefined> => {
   if (!collateralVault) return undefined
   return tokenAmountToUsdValue(
     amount,
-    collateralVault.asset.decimals,
+    amountDecimals ?? collateralVault.asset.decimals,
     await getCollateralUsdPrice(liabilityVault, collateralVault, source),
   )
 }

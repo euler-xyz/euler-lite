@@ -50,6 +50,27 @@ describe('sdk-prices', () => {
     } as ERC4626Vault))
   })
 
+  it('corrects the tenfold oracle overpricing for 17 actual versus 18 cached decimals', () => {
+    const oraclePriceRaw = {
+      amountIn: ONE_18,
+      amountOutMid: ONE_18,
+      amountOutAsk: ONE_18,
+      amountOutBid: ONE_18,
+    }
+    const liabilityVault = {
+      unitOfAccount: { decimals: 18 },
+      collaterals: [{ address: addressB, oraclePriceRaw }],
+    } as unknown as EVault
+    const collateralVault = {
+      address: addressB,
+      asset: { decimals: 18 },
+      convertToShares: (assets: bigint) => assets * 10n,
+    } as unknown as ERC4626Vault
+
+    expect(getCollateralOraclePrice(liabilityVault, collateralVault)?.amountOutMid).toBe(10n * ONE_18)
+    expect(getCollateralOraclePrice(liabilityVault, collateralVault, 17)?.amountOutMid).toBe(ONE_18)
+  })
+
   it('uses the vault marketPriceUsd field for off-chain asset pricing', async () => {
     const vault = {
       address: addressA,
@@ -131,6 +152,20 @@ describe('sdk-prices', () => {
       amountOutBid: 3n * ONE_18,
     })
     await expect(getCollateralUsdValue(2n * ONE_18, liabilityVault, collateralVault, 'off-chain')).resolves.toBe(6)
+  })
+
+  it('values a verified 17-decimal collateral amount despite stale 18-decimal metadata', async () => {
+    const liabilityVault = {
+      collaterals: [{ address: addressB, marketPriceUsd: ONE_18 }],
+    }
+    const collateralVault = {
+      address: addressB,
+      asset: { decimals: 18, symbol: 'COLL' },
+    }
+    const amount = 50n * 10n ** 17n
+
+    await expect(getCollateralUsdValue(amount, liabilityVault, collateralVault, 'off-chain')).resolves.toBe(5)
+    await expect(getCollateralUsdValue(amount, liabilityVault, collateralVault, 'off-chain', 17)).resolves.toBe(50)
   })
 
   it('converts SDK risk prices to USD for on-chain price display', async () => {
