@@ -386,7 +386,7 @@ const btnLabel = computed(() => {
 const reulUnlockDisclaimerText = computed(() => {
   if (type !== 'reul-unlock' || !reulUnlockInfo) return
 
-  return `This action will unlock ${formatNumber(reulUnlockInfo.unlockableAmount, 6)} EUL, and ${formatNumber(reulUnlockInfo.amountToBeBurned, 6)} EUL will be permanently burned. To fully redeem your EUL rewards, you must wait for the 6-month vesting period to complete (${reulUnlockInfo.daysUntilMaturity} days remaining, maturity date: ${reulUnlockInfo.maturityDate}).`
+  return `This action will unlock ${formatNumber(reulUnlockInfo.unlockableAmount, 6)} EUL, and up to ${formatNumber(reulUnlockInfo.amountToBeBurned, 6)} EUL will be permanently burned. To fully redeem your EUL rewards, you must wait for the 6-month vesting period to complete (${reulUnlockInfo.daysUntilMaturity} days remaining, maturity date: ${reulUnlockInfo.maturityDate}).`
 })
 
 const disclaimerText = computed(() => {

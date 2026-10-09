@@ -151,6 +151,12 @@ Submit blockers remain the operation-eligibility gate. Wallet screening happens 
 
 See the SDK side: [plugins.md](https://github.com/euler-xyz/euler-sdks/blob/main/packages/euler-v2-sdk/docs/plugins.md).
 
+### rEUL early unlocks
+
+The deployed rEUL `withdrawToByLockTimestamp(account, lockTimestamp, allowRemainderLoss)` has no maximum-loss argument, and rEUL adds every distributor delivery to the lock keyed by the current UTC day. A lock from an earlier day can only shrink, and its vested share only grows, so its quoted remainder bounds any later execution.
+
+Before review, `RewardUnlockItem.vue` reads the lock and the block timestamp from one block (`useREULLocks().readLockSnapshot`). An early unlock (nonzero remainder) proceeds only when `lockTimestamp + 1 day <= blockTimestamp` (`isREULLockClosed` in `entities/reul.ts`); today's lock shows a disabled action until 00:00 UTC. The quote's block timestamp is stored in the intent as `quoteBlockTimestamp`, and `buildUnlockREULPlan` derives `allowRemainderLoss` from it, so the final compiler builds today's lock with `false` and the contract reverts on any remainder. The browser clock only drives the disabled-button hint. A failed snapshot read fails closed.
+
 ## Review Display
 
 `components/entities/operation/OperationReviewModal.vue` is presentation-only. Its reviewed execution wrapper supplies the already prepared preview and opaque binding. The modal uses:

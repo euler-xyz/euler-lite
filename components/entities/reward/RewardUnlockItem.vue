@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { DateTime } from 'luxon'
 import { useToast } from '~/components/ui/composables/useToast'
-import type { REULLock } from '~/entities/reul'
+import { isREULLockClosed, REUL_LOCK_DAY_SECONDS, type REULLock } from '~/entities/reul'
 import { logWarn } from '~/utils/errorHandling'
 import { getTxErrorMessage } from '~/utils/tx-errors'
 import { formatNumber } from '~/utils/string-utils'
@@ -16,7 +16,7 @@ import {
 const { error } = useToast()
 const { isSpyMode } = useSpyMode()
 const { getTokenByAddress } = useTokenList()
-const { buildUnlockREULPlan, reulTokenContractAddress, eulTokenContractAddress, refreshLocks } = useREULLocks()
+const { buildUnlockREULPlan, reulTokenContractAddress, eulTokenContractAddress, refreshLocks, readLockSnapshot } = useREULLocks()
 const { entryCount, clearBatch } = useTxBatch()
 const { create: createIntent } = useOperationIntentFactory()
 const { capture: captureReviewState } = useExecutionReview()
@@ -42,7 +42,16 @@ const walletChangeTokenSymbol = computed(() =>
 )
 const walletChangeTokenDecimals = computed(() => eulToken.value?.decimals ?? reulToken.value?.decimals ?? 18)
 const isBatchActive = computed(() => entryCount.value > 0)
-const hasRemainderLoss = computed(() => item.amountToBeBurned > 0n)
+// Display hint from the browser clock. onUnlockClick re-checks against chain
+// time from the lock snapshot before any review opens.
+const now = useNow({ scheduler: cb => useIntervalFn(cb, 60_000) })
+const isOpenLock = computed(() =>
+  item.amountToBeBurned > 0n
+  && !isREULLockClosed(item.timestamp, BigInt(Math.floor(now.value.getTime() / 1000))),
+)
+const lockClosesAt = computed(() =>
+  DateTime.fromSeconds(Number(item.timestamp + REUL_LOCK_DAY_SECONDS), { zone: 'utc' }).toFormat('MMMM dd, HH:mm'),
+)
 
 const unlockableAmount = computed(() => {
   return nanoToValue(item.unlockableAmount, reulToken.value?.decimals)
@@ -125,7 +134,10 @@ const onUnlockClick = async () => {
   try {
     await ensureWalletOnSiteChain()
 
-    const validation = await refreshREULLockReview(item, () => refreshLocks(true))
+    const [validation] = await Promise.all([
+      refreshREULLockReview(item, () => readLockSnapshot(item.timestamp)),
+      refreshLocks(true),
+    ])
     if (validation.status !== 'fresh') {
       showReviewRefreshError(validation.status)
       return
@@ -135,8 +147,10 @@ const onUnlockClick = async () => {
       return
     }
     const reviewedLock = validation.lock
-    if (reviewedLock.amountToBeBurned > 0n) {
-      error('Early rEUL unlocks are temporarily unavailable')
+    // Rewards delivered today still land in today's lock, so it cannot be
+    // early-unlocked until chain time passes the end of its UTC day.
+    if (reviewedLock.amountToBeBurned > 0n && !isREULLockClosed(reviewedLock.timestamp, validation.blockTimestamp)) {
+      error('Early unlock for this rEUL lock opens at 00:00 UTC')
       return
     }
     const tokenAddress = reulTokenContractAddress.value
@@ -148,6 +162,7 @@ const onUnlockClick = async () => {
         lockTimestamps: [Number(reviewedLock.timestamp)],
         lockAmounts: [reviewedLock.amount],
         remainderLossMaximum: reviewedLock.amountToBeBurned,
+        quoteBlockTimestamp: Number(validation.blockTimestamp),
       },
       constraints: [{ kind: 'remainder-loss', token: tokenAddress as Address, maximumLoss: reviewedLock.amountToBeBurned }],
       source: 'components/entities/reward/RewardUnlockItem.vue',
@@ -166,7 +181,7 @@ const onUnlockClick = async () => {
 
     const preparation = await prepareREULUnlockPlan(
       reviewedLock,
-      lock => buildUnlockREULPlan([lock.timestamp]),
+      lock => buildUnlockREULPlan([lock.timestamp], validation.blockTimestamp),
       runSimulation,
     )
     if (preparation.status === 'build-failed') {
@@ -265,17 +280,18 @@ const onUnlockClick = async () => {
         <UiButton
           rounded
           :loading="isUnlocking || isPreparing"
-          :disabled="isSpyMode || isBatchActive || hasRemainderLoss"
+          :disabled="isSpyMode || isBatchActive || isOpenLock"
           @click="onUnlockClick"
         >
           Unlock
         </UiButton>
       </div>
       <p
-        v-if="hasRemainderLoss"
+        v-if="isOpenLock"
         class="mt-8 text-center text-p3 text-content-tertiary"
+        data-testid="reul-unlock-open-lock"
       >
-        Early rEUL unlocks are temporarily unavailable. Your locked EUL will continue vesting.
+        Rewards received today are still being added to this lock. Early unlock opens {{ lockClosesAt }} UTC.
       </p>
       <p
         v-if="isBatchActive"

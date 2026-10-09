@@ -1,11 +1,11 @@
-import type { REULLock } from '~/entities/reul'
+import type { REULLock, REULLockSnapshot } from '~/entities/reul'
 import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 
 export type REULLockReviewValidation
-  = { status: 'fresh', lock: REULLock }
+  = { status: 'fresh', lock: REULLock, blockTimestamp: bigint }
     | { status: 'changed' | 'missing' | 'unavailable' }
 
-type RefreshREULLocks = () => Promise<REULLock[] | null>
+type ReadREULLockSnapshot = () => Promise<REULLockSnapshot | null>
 
 export type REULUnlockPlanPreparation
   = { status: 'ready', plan: TransactionPlan }
@@ -31,13 +31,13 @@ export const prepareREULUnlockPlan = async (
 
 export const refreshREULLockReview = async (
   reviewedLock: REULLock,
-  refreshLocks: RefreshREULLocks,
+  readSnapshot: ReadREULLockSnapshot,
 ): Promise<REULLockReviewValidation> => {
-  const refreshedLocks = await refreshLocks()
-  if (!refreshedLocks) return { status: 'unavailable' }
+  const snapshot = await readSnapshot()
+  if (!snapshot) return { status: 'unavailable' }
 
-  const currentLock = refreshedLocks.find(lock => lock.timestamp === reviewedLock.timestamp)
-  if (!currentLock) return { status: 'missing' }
+  const currentLock = snapshot.lock
+  if (!currentLock || currentLock.timestamp !== reviewedLock.timestamp) return { status: 'missing' }
 
   if (
     currentLock.amount !== reviewedLock.amount
@@ -47,5 +47,5 @@ export const refreshREULLockReview = async (
     return { status: 'changed' }
   }
 
-  return { status: 'fresh', lock: currentLock }
+  return { status: 'fresh', lock: currentLock, blockTimestamp: snapshot.blockTimestamp }
 }

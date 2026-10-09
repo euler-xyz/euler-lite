@@ -165,7 +165,7 @@ const reulIntent: OperationIntent = {
   subAccounts: [ACCOUNT],
   planner: {
     name: 'reul-unlock',
-    args: { lockTimestamps: [1], lockAmounts: [10n], remainderLossMaximum: 0n },
+    args: { lockTimestamps: [1], lockAmounts: [10n], remainderLossMaximum: 0n, quoteBlockTimestamp: 86_401 },
   },
   constraints: [{ kind: 'remainder-loss', token: REUL, maximumLoss: 0n }],
   metadata: { createdAt: 1, source: 'test', operation: 'test' },

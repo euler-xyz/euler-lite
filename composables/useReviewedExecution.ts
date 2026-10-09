@@ -327,7 +327,7 @@ export const useReviewedExecution = () => {
           return lock
         })
         if (selected.length !== timestamps.length) throw new Error('rEUL lock selection changed')
-        return buildUnlockREULPlan(timestamps.map(BigInt))
+        return buildUnlockREULPlan(timestamps.map(BigInt), BigInt(intent.planner.args.quoteBlockTimestamp as unknown as number))
       },
       async compileCrossProtocolMigration(intent, context) {
         return compileCrossProtocolMigrationIntent({
@@ -554,7 +554,7 @@ export const useReviewedExecution = () => {
       },
       async compileREULUnlock(intent) {
         const timestamps = intent.planner.args.lockTimestamps as unknown as readonly number[]
-        return buildUnlockREULPlan(timestamps.map(BigInt))
+        return buildUnlockREULPlan(timestamps.map(BigInt), BigInt(intent.planner.args.quoteBlockTimestamp as unknown as number))
       },
       async compileCrossProtocolMigration(intent, context) {
         return compileCrossProtocolMigrationIntent({

@@ -268,7 +268,7 @@ const reulUnlockWarnings = computed<Array<{ id: string, description: string }>>(
     const info = review.reulUnlockInfo
     return [{
       id: entry.id,
-      description: `This batch includes an rEUL unlock that will unlock ${formatNumber(info.unlockableAmount, 6)} EUL, and ${formatNumber(info.amountToBeBurned, 6)} EUL will be permanently burned. To fully redeem your EUL rewards, wait for the 6-month vesting period to complete (${info.daysUntilMaturity} days remaining, maturity date: ${info.maturityDate}).`,
+      description: `This batch includes an rEUL unlock that will unlock ${formatNumber(info.unlockableAmount, 6)} EUL, and up to ${formatNumber(info.amountToBeBurned, 6)} EUL will be permanently burned. To fully redeem your EUL rewards, wait for the 6-month vesting period to complete (${info.daysUntilMaturity} days remaining, maturity date: ${info.maturityDate}).`,
     }]
   }),
 )

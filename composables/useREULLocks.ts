@@ -1,6 +1,6 @@
-import type { Address } from 'viem'
+import { parseAbi, type Address } from 'viem'
 import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
-import type { REULLock } from '~/entities/reul'
+import { isREULLockClosed, type REULLock, type REULLockSnapshot } from '~/entities/reul'
 import { getEulerSdkForChain } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
 import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
@@ -13,6 +13,11 @@ const locks: Ref<REULLock[]> = ref([])
 let interval: NodeJS.Timeout | null = null
 const pollConsumers = new Map<symbol, () => void>()
 const lockGuard = createRaceGuard()
+
+const reulLockSnapshotAbi = parseAbi([
+  'function getLockedAmountByLockTimestamp(address account, uint256 lockTimestamp) view returns (uint256)',
+  'function getWithdrawAmountsByLockTimestamp(address account, uint256 lockTimestamp) view returns (uint256, uint256)',
+])
 
 export const useREULLocks = () => {
   const consumerId = Symbol('reul-locks-consumer')
@@ -157,7 +162,54 @@ export const useREULLocks = () => {
     }
   })
 
-  const buildUnlockREULPlan = async (lockTimestamps: bigint[]): Promise<TransactionPlan> => {
+  // Reads one lock and the block it was read at from the same chain state, so
+  // the unlock quote and the lock-day check cannot straddle UTC midnight.
+  const readLockSnapshot = async (lockTimestamp: bigint): Promise<REULLockSnapshot | null> => {
+    const account = wagmiAddress.value as Address | undefined
+    const chainId = selectedChainId.value
+    const rEulAddress = reulTokenContractAddress.value as Address
+    if (!account || !chainId || !rEulAddress) return null
+
+    try {
+      const sdk = await getEulerSdkForChain(chainId)
+      const provider = sdk.providerService.getProvider(chainId)
+      const block = await provider.getBlock({ blockTag: 'latest' })
+      if (block.number === null) return null
+      const blockNumber = block.number
+      const [amount, [unlockableAmount, amountToBeBurned]] = await Promise.all([
+        provider.readContract({
+          address: rEulAddress,
+          abi: reulLockSnapshotAbi,
+          functionName: 'getLockedAmountByLockTimestamp',
+          args: [account, lockTimestamp],
+          blockNumber,
+          authorizationList: undefined,
+        }),
+        provider.readContract({
+          address: rEulAddress,
+          abi: reulLockSnapshotAbi,
+          functionName: 'getWithdrawAmountsByLockTimestamp',
+          args: [account, lockTimestamp],
+          blockNumber,
+          authorizationList: undefined,
+        }),
+      ])
+      return {
+        blockNumber,
+        blockTimestamp: block.timestamp,
+        lock: amount === 0n ? null : { timestamp: lockTimestamp, amount, unlockableAmount, amountToBeBurned },
+      }
+    }
+    catch (e) {
+      logWarn('reulLocks/readLockSnapshot', e)
+      return null
+    }
+  }
+
+  const buildUnlockREULPlan = async (
+    lockTimestamps: bigint[],
+    quoteBlockTimestamp: bigint | undefined,
+  ): Promise<TransactionPlan> => {
     if (!wagmiAddress.value) {
       throw new Error('Wallet not connected')
     }
@@ -171,9 +223,13 @@ export const useREULLocks = () => {
       chainId,
       account: wagmiAddress.value as Address,
       lockTimestamp: lockTimestamps[0] as bigint,
-      // The deployed rEUL contract has no maximum-loss argument. Reject any
-      // nonzero remainder so the signed call cannot forfeit unreviewed EUL.
-      allowRemainderLoss: false,
+      // The deployed rEUL contract has no maximum-loss argument. A remainder
+      // loss is only allowed for locks whose day had already ended at the
+      // reviewed quote; those locks cannot grow, so the reviewed remainder
+      // bounds the executed one. Today's lock is built with false and reverts
+      // on-chain if any remainder would be forfeited.
+      allowRemainderLoss: lockTimestamps.length > 0
+        && lockTimestamps.every(timestamp => isREULLockClosed(timestamp, quoteBlockTimestamp)),
       rEulAddress: reulTokenContractAddress.value
         ? (reulTokenContractAddress.value as Address)
         : undefined,
@@ -187,6 +243,7 @@ export const useREULLocks = () => {
     eulTokenContractAddress,
     loadREULLocksInfo: (address: string, isInitial?: boolean) => loadREULLocksInfo(address, isInitial),
     refreshLocks,
+    readLockSnapshot,
     buildUnlockREULPlan,
   }
 }

@@ -257,7 +257,7 @@ const PLANNER_ARGUMENT_KEYS: Readonly<Record<PlannerName, readonly string[]>> = 
   'cleanup': ['subAccount'],
   'cross-protocol-migration': ['direction', 'connectorId', 'owner', 'positionRef', 'target', 'source', 'externalTarget', 'collateralSwapQuote', 'debtSwapQuote', 'deadline', 'validateEulerVaults', 'removeAuthorizationAfterMigration', 'cleanupEulerPosition', 'operationName', 'authorizationKind', 'authorizationEvidenceDigest'],
   'reward-claim': ['claimIds', 'provider', 'rewardsDigest'],
-  'reul-unlock': ['lockTimestamps', 'lockAmounts', 'remainderLossMaximum'],
+  'reul-unlock': ['lockTimestamps', 'lockAmounts', 'remainderLossMaximum', 'quoteBlockTimestamp'],
 }
 
 const REQUIRED_PLANNER_ARGUMENT_KEYS: Readonly<Record<PlannerName, readonly string[]>> = {
@@ -285,7 +285,7 @@ const REQUIRED_PLANNER_ARGUMENT_KEYS: Readonly<Record<PlannerName, readonly stri
   'cleanup': ['subAccount'],
   'cross-protocol-migration': ['direction', 'connectorId', 'owner', 'positionRef', 'deadline', 'authorizationEvidenceDigest'],
   'reward-claim': ['claimIds', 'provider', 'rewardsDigest'],
-  'reul-unlock': ['lockTimestamps', 'lockAmounts', 'remainderLossMaximum'],
+  'reul-unlock': ['lockTimestamps', 'lockAmounts', 'remainderLossMaximum', 'quoteBlockTimestamp'],
 }
 
 const ADDRESS_ARGUMENT_KEYS = new Set([
@@ -359,6 +359,7 @@ const assertPlannerArgs = (planner: Record<string, unknown>) => {
     planner.args.lockTimestamps.forEach((entry, index) => assertSafeInteger(entry, `intent.planner.args.lockTimestamps[${index}]`))
     planner.args.lockAmounts.forEach((entry, index) => assertBigInt(entry, `intent.planner.args.lockAmounts[${index}]`))
     if (planner.args.lockTimestamps.length !== planner.args.lockAmounts.length || planner.args.lockTimestamps.length === 0) throw new Error('rEUL lock identities and amounts must align')
+    assertSafeInteger(planner.args.quoteBlockTimestamp, 'intent.planner.args.quoteBlockTimestamp', 1)
   }
 }
 

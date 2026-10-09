@@ -22,12 +22,18 @@ const importUseREULLocks = async (wallet: {
   }
   const fetchLocks = vi.fn(async () => [lock])
   const unlockPlan = { kind: 'reul-unlock', steps: [] }
-  const buildUnlockPlan = vi.fn(async () => unlockPlan)
+  const buildUnlockPlan = vi.fn(async (_args: { allowRemainderLoss: boolean }) => unlockPlan)
+  const getBlock = vi.fn(async () => ({ number: 500n, timestamp: 1_772_300_000n }))
+  const readContract = vi.fn(async ({ functionName }: { functionName: string }): Promise<bigint | bigint[]> =>
+    functionName === 'getLockedAmountByLockTimestamp' ? 100n : [30n, 70n])
 
   const sdk = {
     reulLockService: {
       fetchLocks,
       buildUnlockPlan,
+    },
+    providerService: {
+      getProvider: vi.fn(() => ({ getBlock, readContract })),
     },
   }
   vi.doMock('~/composables/useEulerSdk', () => ({
@@ -67,6 +73,8 @@ const importUseREULLocks = async (wallet: {
     ...module,
     fetchLocks,
     buildUnlockPlan,
+    getBlock,
+    readContract,
     unlockPlan,
     lock,
     unmountCallbacks,
@@ -103,28 +111,86 @@ describe('useREULLocks', () => {
     expect(locks?.isLocksLoading.value).toBe(false)
   })
 
-  it('builds unlock plans through the SDK default EVC path', async () => {
-    const { useREULLocks, buildUnlockPlan, unlockPlan } = await importUseREULLocks({
-      connected: true,
-      address: owner,
-      chainId: 1,
-    })
+  const lockDay = 1_772_150_400n
+  const dayEnd = lockDay + 86_400n
 
-    let locks: ReturnType<typeof useREULLocks> | undefined
+  const connectedLocks = async () => {
+    const module = await importUseREULLocks({ connected: true, address: owner, chainId: 1 })
+    let locks: ReturnType<typeof module.useREULLocks> | undefined
     scope = effectScope()
     scope.run(() => {
-      locks = useREULLocks()
+      locks = module.useREULLocks()
     })
-
     if (!locks) throw new Error('useREULLocks did not initialize')
-    await expect(locks.buildUnlockREULPlan([123n])).resolves.toBe(unlockPlan)
+    return { ...module, locks }
+  }
+
+  it('builds unlock plans through the SDK default EVC path', async () => {
+    const { locks, buildUnlockPlan, unlockPlan } = await connectedLocks()
+
+    await expect(locks.buildUnlockREULPlan([lockDay], dayEnd)).resolves.toBe(unlockPlan)
     expect(buildUnlockPlan).toHaveBeenCalledWith({
       chainId: 1,
       account: owner,
-      lockTimestamp: 123n,
-      allowRemainderLoss: false,
+      lockTimestamp: lockDay,
+      allowRemainderLoss: true,
       rEulAddress: reulAddress,
     })
+  })
+
+  it.each([
+    ['one second before the lock day ends', dayEnd - 1n, false],
+    ['exactly when the lock day ends', dayEnd, true],
+    ['after the lock day ends', dayEnd + 1n, true],
+    ['without a quote timestamp', undefined, false],
+  ])('derives allowRemainderLoss from the quote %s', async (_label, quoteTimestamp, expected) => {
+    const { locks, buildUnlockPlan } = await connectedLocks()
+
+    await locks.buildUnlockREULPlan([lockDay], quoteTimestamp)
+    expect(buildUnlockPlan).toHaveBeenCalledWith(expect.objectContaining({ allowRemainderLoss: expected }))
+  })
+
+  it('ignores the browser clock when deriving allowRemainderLoss', async () => {
+    const { locks, buildUnlockPlan } = await connectedLocks()
+
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(Number(dayEnd + 30n * 86_400n) * 1000)
+    await locks.buildUnlockREULPlan([lockDay], dayEnd - 1n)
+    vi.setSystemTime(Number(lockDay - 30n * 86_400n) * 1000)
+    await locks.buildUnlockREULPlan([lockDay], dayEnd)
+
+    expect(buildUnlockPlan.mock.calls.map(([args]) => args.allowRemainderLoss))
+      .toEqual([false, true])
+  })
+
+  it('reads the lock quote and block timestamp from one block', async () => {
+    const { locks, getBlock, readContract } = await connectedLocks()
+
+    await expect(locks.readLockSnapshot(lockDay)).resolves.toEqual({
+      blockNumber: 500n,
+      blockTimestamp: 1_772_300_000n,
+      lock: { timestamp: lockDay, amount: 100n, unlockableAmount: 30n, amountToBeBurned: 70n },
+    })
+    expect(getBlock).toHaveBeenCalledWith({ blockTag: 'latest' })
+    expect(readContract).toHaveBeenCalledTimes(2)
+    for (const [call] of readContract.mock.calls) {
+      expect(call).toMatchObject({ address: reulAddress, args: [owner, lockDay], blockNumber: 500n })
+    }
+  })
+
+  it('fails closed when the lock snapshot cannot be read', async () => {
+    const { locks, getBlock } = await connectedLocks()
+    getBlock.mockRejectedValueOnce(new Error('rpc down'))
+
+    await expect(locks.readLockSnapshot(lockDay)).resolves.toBeNull()
+  })
+
+  it('reports a removed lock as missing in the snapshot', async () => {
+    const { locks, readContract } = await connectedLocks()
+    readContract.mockImplementation(async ({ functionName }: { functionName: string }) =>
+      functionName === 'getLockedAmountByLockTimestamp' ? 0n : [0n, 0n])
+
+    await expect(locks.readLockSnapshot(lockDay)).resolves.toMatchObject({ lock: null })
   })
 
   it('removes stale rows while a required post-transaction refresh is pending', async () => {
