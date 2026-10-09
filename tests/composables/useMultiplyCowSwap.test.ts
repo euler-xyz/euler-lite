@@ -23,12 +23,13 @@ vi.mock('~/entities/cowswap', async original => ({
 
 const address = '0x0000000000000000000000000000000000000001'
 const subAccount = '0x0000000000000000000000000000000000000002'
-const createForm = (deposit: string, output: string, cap: bigint, decimals: number) => {
+const createForm = (deposit: string, output: string, cap: bigint, decimals: number, supplyAsset?: { decimals: number } | null) => {
   const vault = { address, asset: { address, decimals }, caps: { supplyCap: cap }, totalShares: parseUnits('900', decimals), totalAssets: parseUnits('900', decimals) } as unknown as EVault
+  const verifiedAsset = supplyAsset === null ? undefined : { ...vault.asset, ...supplyAsset }
   const quote = { amountOut: parseUnits(output, decimals).toString(), accountIn: subAccount, accountOut: subAccount } as unknown as SwapQuote
   const outputAmount = ref(output)
   const options = {
-    multiplySupplyVault: computed(() => vault), multiplyLongVault: computed(() => vault), multiplyShortVault: computed(() => vault),
+    multiplySupplyVault: computed(() => vault), multiplySupplyAsset: computed(() => verifiedAsset), multiplyLongVault: computed(() => vault), multiplyShortVault: computed(() => vault),
     multiplyInputAmount: ref(deposit), multiplyDebtAmountNano: computed(() => 1n), multiplyErrorText: computed(() => null),
     multiplySelectedQuote: computed(() => quote), multiplySelectedProvider: computed(() => null), multiplyEffectiveQuote: computed(() => quote),
     account: computed(() => ({})), multiplySlippage: ref(0.5),
@@ -51,6 +52,25 @@ beforeEach(() => {
   vi.stubGlobal('useEulerAccount', () => ({ refreshAllPositions: vi.fn() }))
 })
 afterEach(() => vi.unstubAllGlobals())
+
+describe('CoW multiply collateral decimals', () => {
+  it('parses the collateral amount with the verified spending asset, not the vault registry asset', async () => {
+    // Registry says 18 decimals, chain says 6. The cap is sized in the vault's units.
+    await createForm('60', '20', maxUint256, 18, { decimals: 6 }).submitCowSwapMultiply()
+
+    expect(mocks.showReview).toHaveBeenCalledOnce()
+    const review = mocks.showReview.mock.calls[0][1]
+    expect(review.executeParams.collateralAmount).toBe(parseUnits('60', 6))
+    expect(review.executeParams.collateralAsset).toBe(address)
+  })
+
+  it('does not open a CoW order while the spending asset is unverified', async () => {
+    await createForm('60', '20', maxUint256, 6, null).submitCowSwapMultiply()
+
+    expect(mocks.showReview).not.toHaveBeenCalled()
+    expect(mocks.getNewSubAccount).not.toHaveBeenCalled()
+  })
+})
 
 describe('CoW multiply supply capacity', () => {
   it.each([6, 18])('blocks the combined deposits exceeding remaining capacity (%i decimals)', async (decimals) => {

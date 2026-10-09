@@ -1245,6 +1245,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     multiplyEffectiveQuoteFetchedAt: computed(() => multiplyEffectiveQuoteFetchedAt.value),
     multiplySlippage,
     multiplySupplyVault: computed(() => multiplySupplyVault.value),
+    multiplySupplyAsset,
     multiplyLongVault,
     multiplyShortVault,
     multiplySupplyProduct: computed(() => multiplySupplyProduct),

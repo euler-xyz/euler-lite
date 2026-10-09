@@ -2,6 +2,7 @@ import type { Ref, ComputedRef } from 'vue'
 import { erc20Abi, formatUnits, maxUint256, type Address } from 'viem'
 import type { EVault, SwapQuote, Account, IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
 import type { CowSwapOpenPositionExecuteParams } from '~/composables/cowswap'
+import type { VaultAsset } from '~/types/asset'
 import { logWarn } from '~/utils/errorHandling'
 import type { DisplayStep } from '~/utils/stepDecoding'
 import {
@@ -27,6 +28,9 @@ interface UseMultiplyCowSwapOptions {
   multiplyEffectiveQuoteFetchedAt: ComputedRef<number | null>
   multiplySlippage: Readonly<Ref<number>>
   multiplySupplyVault: ComputedRef<EVault | undefined>
+  // The asset `multiplyInputAmount` is denominated in: the on-chain verified
+  // spending token for wallet collateral. Undefined while unverified.
+  multiplySupplyAsset: ComputedRef<VaultAsset | undefined>
   multiplyLongVault: ComputedRef<EVault | undefined>
   multiplyShortVault: ComputedRef<EVault | undefined>
   multiplySupplyProduct: ComputedRef<{ name: string }>
@@ -93,7 +97,8 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     const supplyVault = options.multiplySupplyVault.value
     const longVault = options.multiplyLongVault.value
     const shortVault = options.multiplyShortVault.value
-    if (!supplyVault || !longVault || !shortVault) return
+    const collateralAsset = options.multiplySupplyAsset.value
+    if (!supplyVault || !longVault || !shortVault || !collateralAsset) return
     if (!options.multiplyInputAmount.value || options.multiplyDebtAmountNano.value <= 0n) return
     if (options.multiplyErrorText.value) return
 
@@ -102,7 +107,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
 
     const swapOutputAmount = trimTrailingZeros(formatUnits(BigInt(quote.amountOut || '0'), Number(longVault.asset.decimals)))
     const supplyAmount = options.multiplyInputAmount.value
-    const supplyAmountNano = valueToNano(supplyAmount || '0', supplyVault.asset.decimals)
+    const supplyAmountNano = valueToNano(supplyAmount || '0', collateralAsset.decimals)
 
     // The multiply form requires the collateral and long vault to match.
     // Count both the initial deposit and swap output against its supply cap
@@ -175,7 +180,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
       account: account as Account<IHasVaultAddress>,
       collateralVault: supplyVault.address as Address,
       collateralAmount: supplyAmountNano,
-      collateralAsset: supplyVault.asset.address as Address,
+      collateralAsset: collateralAsset.address as Address,
       swapQuote: quote,
       slippage: options.multiplySlippage.value,
       validTo,
@@ -189,7 +194,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
       if (client) {
         const chainConfig = getCowSwapChainConfig(chainId)
         collateralAllowance = await client.readContract({
-          address: supplyVault.asset.address as Address,
+          address: collateralAsset.address as Address,
           abi: erc20Abi,
           functionName: 'allowance',
           authorizationList: undefined,
@@ -211,7 +216,6 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
       // Fall through — show approval steps by default.
     }
 
-    const collateralAsset = supplyVault.asset
     const borrowAsset = shortVault.asset
     const borrowAmountStr = trimTrailingZeros(formatUnits(sellAmount, Number(borrowAsset.decimals)))
     const swapOutMinAmount = trimTrailingZeros(
@@ -222,7 +226,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     let idx = 1
     const collateralApproval = buildApprovalSignSteps({
       chainId,
-      tokenAddress: supplyVault.asset.address as Address,
+      tokenAddress: collateralAsset.address as Address,
       currentAllowance: collateralAllowance,
       requiredAmount: supplyAmountNano,
       label: 'Approve for deposit',
