@@ -51,11 +51,11 @@ watch(
 <template>
   <div
     v-if="canShow"
-    class="flex flex-col"
+    class="flex min-w-0 flex-col"
     data-id="vault-assessment-checks-field"
     :data-vault-address="address.toLowerCase()"
   >
-    <div class="text-content-tertiary text-p3 mb-4 whitespace-nowrap">
+    <div class="max-w-full text-content-tertiary text-p3 mb-4 break-words">
       {{ label }}
     </div>
     <UiModalPreviewTrigger
