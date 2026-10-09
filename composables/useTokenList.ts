@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { getAddress, zeroAddress } from 'viem'
+import { getAddress } from 'viem'
 import type { VaultAsset } from '~/types/asset'
 
 import { logWarn } from '~/utils/errorHandling'
@@ -7,6 +7,7 @@ import { CACHE_TTL_5MIN_MS } from '~/entities/tuning-constants'
 import { getChainById } from '~/entities/chainRegistry'
 import { createRaceGuard } from '~/utils/race-guard'
 import { normalizeTokenCategoryTags } from '~/utils/token-categories'
+import { withNativeTokenEntry } from '~/utils/native-token-entry'
 
 export interface TokenListEntry {
   chainId: number
@@ -53,30 +54,7 @@ const filterByChain = (chainId: number) => {
       // skip invalid addresses
     }
   }
-  // Include native currency at address zero only when the wrapped native token is in the list
-  const chain = getChainById(chainId)
-  const nativeSymbol = chain?.nativeCurrency?.symbol
-  const wrappedSymbol = nativeSymbol ? `W${nativeSymbol}`.toUpperCase() : null
-  const hasWrappedNative = wrappedSymbol
-    && [...filtered.values()].find(t => t.symbol.toUpperCase() === wrappedSymbol)
-
-  if (hasWrappedNative) {
-    if (!filtered.has(zeroAddress)) {
-      filtered.set(zeroAddress, {
-        chainId,
-        address: zeroAddress,
-        name: chain!.nativeCurrency.name,
-        symbol: chain!.nativeCurrency.symbol,
-        decimals: chain!.nativeCurrency.decimals,
-        ...(hasWrappedNative.tags?.length ? { tags: hasWrappedNative.tags } : {}),
-      })
-    }
-  }
-  else {
-    filtered.delete(zeroAddress)
-  }
-
-  tokenMap.value = filtered
+  tokenMap.value = withNativeTokenEntry(filtered, chainId, getChainById(chainId)?.nativeCurrency)
 }
 
 const loadTokenList = async (forceRefresh = false) => {

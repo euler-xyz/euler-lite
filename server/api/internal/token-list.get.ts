@@ -7,6 +7,7 @@ import { reportStatus } from '~/server/utils/log'
 import { MERKL_API_BASE_URL } from '~/entities/constants'
 import { buildEulerSDK, type EulerSDK, type TokenListItem } from '@eulerxyz/euler-v2-sdk'
 import { readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-url-env'
+import { preferFallbackLogos, replaceV3LogoFlags } from '~/server/utils/token-list-logos'
 
 const CACHE_TTL_MS = 300_000
 const DEFILLAMA_DEFAULT_URL = 'https://d3g10bzo9rdluh.cloudfront.net'
@@ -18,6 +19,7 @@ interface TokenEntry {
   symbol: string
   decimals: number
   logoURI?: string
+  hasLogo?: boolean
   tags?: string[]
 }
 
@@ -53,6 +55,7 @@ const mergedCache = createTtlCache<TokenEntry[]>({ ttlMs: CACHE_TTL_MS, maxEntri
 const mergedInFlight = createInFlightDedup<string, TokenEntry[]>()
 
 let sdkPromise: Promise<EulerSDK> | undefined
+let v3LogoFlags: ReadonlyMap<string, boolean> = new Map()
 
 type TokenListPage = TokenListItem[] | {
   data?: TokenListItem[]
@@ -110,14 +113,19 @@ const getSdk = () => {
     },
   }).then((sdk) => {
     const tokenlistService = sdk.tokenlistService as ConfigurableTokenlistService
-    tokenlistService.setQueryTokenList?.((url: string) => queryEulerSdkTokenList(url, v3ApiKey))
+    tokenlistService.setQueryTokenList?.(async (url: string) => {
+      const items = await queryEulerSdkTokenList(url, v3ApiKey)
+      v3LogoFlags = replaceV3LogoFlags(v3LogoFlags, items)
+      return items
+    })
     return sdk
   })
   return sdkPromise
 }
 
-const toTokenEntry = (token: TokenListItem): TokenEntry => {
+const toTokenEntry = (token: TokenListItem, logoFlags: ReadonlyMap<string, boolean>): TokenEntry => {
   const tags = (token as TokenListItemWithTags).tags
+  const hasLogo = logoFlags.get(`${token.chainId}:${token.address.toLowerCase()}`)
   return {
     chainId: token.chainId,
     address: token.address,
@@ -125,6 +133,7 @@ const toTokenEntry = (token: TokenListItem): TokenEntry => {
     symbol: token.symbol,
     decimals: token.decimals,
     logoURI: token.logoURI || undefined,
+    ...(hasLogo !== undefined ? { hasLogo } : {}),
     ...(tags?.length ? { tags } : {}),
   }
 }
@@ -143,7 +152,7 @@ function refreshEulerSdkTokenList(chainId: number): Promise<TokenEntry[]> {
 
   return eulerInFlight.run(key, () => getSdk()
     .then(async (sdk) => {
-      const tokens = (await sdk.tokenlistService.loadTokenlist(chainId)).map(toTokenEntry)
+      const tokens = (await sdk.tokenlistService.loadTokenlist(chainId)).map(token => toTokenEntry(token, v3LogoFlags))
       eulerSdkCache.set(key, tokens)
       reportStatus('token-list', `euler-sdk:${chainId}`, 'ok')
       return tokens
@@ -318,7 +327,7 @@ const mergeSources = (
   // without overriding authoritative metadata for tokens (like EUL) that
   // are in multiple lists.
   return deduplicateTokens(
-    euler,
+    preferFallbackLogos(euler, [defillama, uniswap]),
     deduplicateTokens(defillama, deduplicateTokens(uniswap, merkl)),
   )
 }

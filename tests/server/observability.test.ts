@@ -1,5 +1,81 @@
 import { describe, expect, it } from 'vitest'
-import { safeErrorLogFields, safePathTemplate, safeUrlLogFields, searchKeys, summarizeSdkIssue, urlHost } from '~/server/utils/observability'
+import { buildVaultAssetLookup, hashIdentifier, safeErrorLogFields, safePathTemplate, safeUrlLogFields, searchKeys, summarizeSdkIssue, urlHost } from '~/server/utils/observability'
+
+const VAULT = '0x0000000000000000000000000000000000000a01'
+const COLLATERAL = '0x0000000000000000000000000000000000000a02'
+const ASSET = '0x0000000000000000000000000000000000000b01'
+const ACCOUNT = '0x00000000000000000000000000000000000c0ffe'
+
+describe('SDK issue locations in logs', () => {
+  const assetForVault = buildVaultAssetLookup([
+    { address: VAULT.toUpperCase().replace('0X', '0x'), asset: { address: ASSET, symbol: 'USDC' } },
+    { address: '0x0000000000000000000000000000000000000a03', asset: { symbol: 'NOADDR' } },
+    null,
+  ])
+
+  it('names the asset behind a vault price failure', () => {
+    const summary = summarizeSdkIssue({
+      code: 'SOURCE_UNAVAILABLE',
+      severity: 'error',
+      message: 'Failed to get asset USD price.',
+      source: 'priceService',
+      locations: [
+        { owner: { kind: 'vault', chainId: 1, address: VAULT }, path: '$.marketPriceUsd' },
+        { owner: { kind: 'asset', chainId: 1, address: ASSET }, path: '$' },
+        { owner: { kind: 'vaultCollateral', chainId: 1, vault: VAULT, collateral: COLLATERAL }, path: '$.marketPriceUsd' },
+      ],
+    }, assetForVault)
+
+    expect(summary.locations).toEqual([
+      { kind: 'vault', chainId: 1, vault: VAULT, asset: ASSET, assetSymbol: 'USDC', path: '$.marketPriceUsd' },
+      { kind: 'asset', chainId: 1, asset: ASSET, path: '$' },
+      { kind: 'vaultCollateral', chainId: 1, vault: VAULT, collateral: COLLATERAL, path: '$.marketPriceUsd' },
+    ])
+    expect(summary.message).toBe('Failed to get asset USD price.')
+  })
+
+  it('hashes account addresses and drops service ids', () => {
+    const summary = summarizeSdkIssue({
+      code: 'SOURCE_UNAVAILABLE',
+      locations: [
+        { owner: { kind: 'accountPosition', chainId: 1, account: ACCOUNT, vault: VAULT }, path: '$.suppliedValueUsd' },
+        { owner: { kind: 'service', service: 'pricing', chainId: 1, id: 'secret-id' }, path: '$' },
+      ],
+    }, assetForVault)
+
+    expect(summary.locations).toEqual([
+      { kind: 'accountPosition', chainId: 1, vault: VAULT, asset: ASSET, assetSymbol: 'USDC', account: hashIdentifier(ACCOUNT), path: '$.suppliedValueUsd' },
+      { kind: 'service', chainId: 1, service: 'pricing', path: '$' },
+    ])
+    expect(JSON.stringify(summary)).not.toContain('c0ffe')
+    expect(JSON.stringify(summary)).not.toContain('secret-id')
+  })
+
+  it('caps the logged locations and reports how many there were', () => {
+    const locations = Array.from({ length: 7 }, (_, index) => ({
+      owner: { kind: 'asset', chainId: 1, address: `0x${(index + 1).toString(16).padStart(40, '0')}` },
+      path: '$',
+    }))
+    const summary = summarizeSdkIssue({ code: 'SOURCE_UNAVAILABLE', locations })
+
+    expect(summary.locations).toHaveLength(5)
+    expect(summary.locationCount).toBe(7)
+  })
+
+  it('skips malformed locations and fields', () => {
+    const summary = summarizeSdkIssue({
+      code: 'SOURCE_UNAVAILABLE',
+      locations: [
+        null,
+        { path: '$' },
+        { owner: { kind: 'asset', chainId: 1, address: 'not-an-address' }, path: 42 },
+        { owner: { kind: 'mystery', chainId: 1 } },
+      ],
+    })
+
+    expect(summary).toEqual({ code: 'SOURCE_UNAVAILABLE', locations: [{ kind: 'asset', chainId: 1 }] })
+  })
+})
 
 describe('server observability helpers', () => {
   it('summarizes SDK issues without raw nested diagnostics', () => {

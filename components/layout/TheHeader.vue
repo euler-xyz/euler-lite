@@ -8,15 +8,19 @@ import {
 } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { type MenuItem, getMenuItems } from '~/entities/menu'
+import { getChainById } from '~/entities/chainRegistry'
 import { getChainLogoUrl } from '~/utils/chain-logo'
+import { v3ChainLogoUrl } from '~/utils/v3-images'
 
 // Wallet connect modal (lazy-initializes AppKit on first call)
 const { connect } = useWagmi()
 
-// Wagmi account info
 const { address, isConnected } = useWagmi()
 const { chainId, allowedChainIds } = useEulerAddresses()
-const chainLogoSrc = computed(() => getChainLogoUrl(chainId.value))
+const { v3ImagesUrl } = useEnvConfig()
+const chainLogoSrc = computed(() => v3ChainLogoUrl(chainId.value, v3ImagesUrl))
+const fallbackChainLogoSrc = computed(() => getChainLogoUrl(chainId.value))
+const chainName = computed(() => getChainById(chainId.value)?.name ?? String(chainId.value))
 const { isSpyMode, spyShortAddress } = useSpyMode()
 const modal = useModal()
 const route = useRoute()
@@ -245,7 +249,8 @@ onClickOutside(wrapperRef, () => {
       >
         <BaseAvatar
           :src="chainLogoSrc"
-          :label="String(chainId)"
+          :fallback-src="fallbackChainLogoSrc"
+          :label="chainName"
         />
       </UiButton>
       <div
@@ -256,7 +261,8 @@ onClickOutside(wrapperRef, () => {
         <div class="ui-button__wrap">
           <BaseAvatar
             :src="chainLogoSrc"
-            :label="String(chainId)"
+            :fallback-src="fallbackChainLogoSrc"
+            :label="chainName"
           />
         </div>
       </div>

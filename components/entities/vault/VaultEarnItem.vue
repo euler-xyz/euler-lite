@@ -173,6 +173,7 @@ const prices = ref<{ totalSupply: string, liquidity: string, walletBalance: stri
   liquidity: '-',
   walletBalance: '-',
 })
+const isSupplyUnpriced = ref(false)
 
 watchEffect(async () => {
   const walletBal = balance.value
@@ -186,6 +187,7 @@ watchEffect(async () => {
     liquidity: liquidityResult.hasPrice ? formatCompactUsdValue(liquidityResult.usdValue) : liquidityResult.display,
     walletBalance: walletResult.hasPrice ? formatCompactUsdValue(walletResult.usdValue) : walletResult.display,
   }
+  isSupplyUnpriced.value = !supplyResult.hasPrice
 })
 
 const statsGridCols = computed(() => {
@@ -346,7 +348,13 @@ const supplyApyModalData = computed(() => ({
         >-</div>
       </div>
       <div class="flex-1 flex flex-col items-center mobile:items-start">
-        <div class="text-content-tertiary text-p3 mb-4">Total supply</div>
+        <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
+          Total supply
+          <VaultNoUsdPriceHint
+            v-if="isSupplyUnpriced"
+            placement="top-start"
+          />
+        </div>
         <div
           class="text-p2 text-content-primary"
           data-id="data-point"

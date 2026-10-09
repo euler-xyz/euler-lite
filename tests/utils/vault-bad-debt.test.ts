@@ -45,4 +45,61 @@ describe('vault bad debt helpers', () => {
     expect(formatBadDebtOverviewValue(entry, undefined)).toBe('$125')
     expect(formatBadDebtHint(entry, 500)).toContain('25% of total borrows')
   })
+
+  it('reads the unpriced share of bad debt when the row reports it', () => {
+    const entry = buildBadDebtCache([row({ unpricedBadDebtUsd: 40, unpricedCollateralCount: 3 })]).values().next().value!
+
+    expect(entry.pricing).toEqual({ status: 'reported', unpricedUsd: 40, unpricedCollateralCount: 3 })
+    expect(formatBadDebtHint(entry, 500)).toContain('$40 of the bad debt is from 3 collateral positions with no price (valued at $0)')
+  })
+
+  it('names one collateral position in the singular', () => {
+    const entry = buildBadDebtCache([row({ unpricedBadDebtUsd: 40, unpricedCollateralCount: 1 })]).values().next().value!
+
+    expect(formatBadDebtHint(entry, 500)).toContain('is from 1 collateral position with no price')
+  })
+
+  it('treats a reported zero as fully priced', () => {
+    const entry = buildBadDebtCache([row({ unpricedBadDebtUsd: 0, unpricedCollateralCount: 0 })]).values().next().value!
+
+    expect(entry.pricing).toEqual({ status: 'reported', unpricedUsd: 0, unpricedCollateralCount: 0 })
+    expect(formatBadDebtHint(entry, 500)).toContain('all collateral priced')
+  })
+
+  it('says unpriced collateral was not reported when the fields are missing or null', () => {
+    const missingBoth = buildBadDebtCache([row()]).values().next().value!
+    const missingCount = buildBadDebtCache([row({ unpricedBadDebtUsd: 0 })]).values().next().value!
+    const nullBoth = buildBadDebtCache([row({ unpricedBadDebtUsd: null, unpricedCollateralCount: null })]).values().next().value!
+
+    expect(missingBoth.pricing).toEqual({ status: 'not-reported' })
+    expect(missingCount.pricing).toEqual({ status: 'not-reported' })
+    expect(nullBoth.pricing).toEqual({ status: 'not-reported' })
+    expect(formatBadDebtHint(missingBoth, 500)).toContain('no data on unpriced collateral')
+    expect(formatBadDebtHint(missingBoth, 500)).not.toContain('all collateral priced')
+  })
+
+  it('marks inconsistent price coverage as invalid without dropping the bad debt', () => {
+    const cases = [
+      row({ unpricedBadDebtUsd: 150.01, unpricedCollateralCount: 1 }),
+      row({ unpricedBadDebtUsd: -1, unpricedCollateralCount: 1 }),
+      row({ unpricedBadDebtUsd: Number.NaN, unpricedCollateralCount: 1 }),
+      row({ unpricedBadDebtUsd: 10, unpricedCollateralCount: 1.5 }),
+      row({ unpricedBadDebtUsd: 10, unpricedCollateralCount: -1 }),
+      row({ unpricedBadDebtUsd: '10' as unknown as number, unpricedCollateralCount: 1 }),
+      row({ unpricedBadDebtUsd: 40, unpricedCollateralCount: 0 }),
+      row({ unpricedBadDebtUsd: 0, unpricedCollateralCount: 2 }),
+    ]
+    for (const input of cases) {
+      const entry = buildBadDebtCache([input]).values().next().value!
+      expect(entry.badDebtUsd).toBe(150)
+      expect(entry.pricing).toEqual({ status: 'invalid' })
+      expect(formatBadDebtHint(entry, 500)).toContain('unpriced collateral data is invalid')
+    }
+  })
+
+  it('accepts float dust above the bad debt as reported', () => {
+    const entry = buildBadDebtCache([row({ unpricedBadDebtUsd: 150 + 1e-12, unpricedCollateralCount: 2 })]).values().next().value!
+
+    expect(entry.pricing.status).toBe('reported')
+  })
 })

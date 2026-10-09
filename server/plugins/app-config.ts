@@ -16,8 +16,16 @@ import {
 import { buildAnnouncementConfig } from '~/utils/announcement-config'
 import { edgeProvidesVpnEvidence, parseEdgeProvider } from '~/utils/edge-presets'
 import { escapeScriptJson } from '~/server/utils/escape-script-json'
+import { createV3ImagesBaseSource } from '~/server/utils/v3-images-base'
 
 export { escapeScriptJson }
+
+const BOOT_READ_WAIT_MS = 1_000
+
+const delay = (ms: number) => new Promise<void>((resolve) => {
+  const timer = setTimeout(resolve, ms)
+  timer.unref?.()
+})
 
 const DEFAULTS = {
   appTitle: 'Euler Lite',
@@ -127,10 +135,17 @@ function injectSocialImage(html: { head: string[] }, socialImageUrl: string) {
 
 export default defineNitroPlugin((nitroApp) => {
   const appConfig = readAppConfig()
-  const scriptTag = `<script>window.__APP_CONFIG__=${escapeScriptJson(JSON.stringify(appConfig))}</script>`
+  const v3ImagesBase = createV3ImagesBaseSource()
+  // Prerendered pages are static, so they must not bake in a value read at build time.
+  const bootRead = import.meta.prerender
+    ? Promise.resolve()
+    : Promise.race([v3ImagesBase.start(), delay(BOOT_READ_WAIT_MS)])
+  nitroApp.hooks.hook('close', () => v3ImagesBase.stop())
 
-  nitroApp.hooks.hook('render:html', (html) => {
-    html.head.push(scriptTag)
+  nitroApp.hooks.hook('render:html', async (html) => {
+    await bootRead
+    const config = { ...appConfig, v3ImagesUrl: v3ImagesBase.get() }
+    html.head.push(`<script>window.__APP_CONFIG__=${escapeScriptJson(JSON.stringify(config))}</script>`)
     patchMeta(html, appConfig)
     injectSocialImage(html, appConfig.socialImageUrl)
   })

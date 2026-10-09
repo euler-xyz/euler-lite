@@ -3,7 +3,7 @@ import { effectScope, nextTick, ref, type EffectScope } from 'vue'
 
 const owner = '0x1000000000000000000000000000000000000000'
 
-const importUseEulerAccount = async () => {
+const importUseEulerAccount = async (visibleOverrides: Record<string, unknown> = {}) => {
   vi.resetModules()
 
   const fetchPortfolio = vi.fn(async () => ({
@@ -28,6 +28,7 @@ const importUseEulerAccount = async () => {
     netAssetValueUsd: 30,
     roe: 1,
     netApy: 0.5,
+    ...visibleOverrides,
   }))
   const sdk = {
     portfolioService: {
@@ -121,5 +122,51 @@ describe('useEulerAccount', () => {
     expect(account?.borrowPositions.value).toEqual(['all-borrow'])
     expect(account?.depositPositions.value).toEqual(['all-saving'])
     expect(account?.totalSuppliedValue.value).toBe(100)
+  }, 20_000)
+
+  it('flags partial pricing when one position in view has no price', async () => {
+    const priced = (suppliedValueUsd: number) => ({ assets: 10n, shares: 10n, suppliedValueUsd })
+    const { useEulerAccount, buildPortfolio } = await importUseEulerAccount({
+      savings: [priced(20), { assets: 10n, shares: 10n, suppliedValueUsd: undefined }],
+      borrows: [
+        { borrowed: 5n, borrow: { borrowedValueUsd: 10 }, collaterals: [priced(40)] },
+        { borrowed: 3n, borrow: { borrowedValueUsd: undefined }, collaterals: [priced(30)] },
+      ],
+      totalSuppliedValueUsd: 90,
+      totalBorrowedValueUsd: 10,
+      netAssetValueUsd: 80,
+    })
+
+    let account: ReturnType<typeof useEulerAccount> | undefined
+    scope = effectScope()
+    scope.run(() => {
+      account = useEulerAccount()
+    })
+
+    await vi.waitFor(() => expect(buildPortfolio).toHaveBeenCalledTimes(1))
+    expect(account?.totalSuppliedValueInfo.value).toEqual({ total: 90, hasMissingPrices: true })
+    expect(account?.totalBorrowedValueInfo.value).toEqual({ total: 10, hasMissingPrices: true })
+    expect(account?.netAssetMarketValueInfo.value).toEqual({ total: 80, hasMissingPrices: true })
+  }, 20_000)
+
+  it('does not flag partial pricing when every position in view is priced', async () => {
+    const { useEulerAccount, buildPortfolio } = await importUseEulerAccount({
+      savings: [{ assets: 10n, shares: 10n, suppliedValueUsd: 20 }],
+      borrows: [{ borrowed: 5n, borrow: { borrowedValueUsd: 10 }, collaterals: [{ assets: 10n, shares: 10n, suppliedValueUsd: 40 }] }],
+      totalSuppliedValueUsd: 60,
+      totalBorrowedValueUsd: 10,
+      netAssetValueUsd: 50,
+    })
+
+    let account: ReturnType<typeof useEulerAccount> | undefined
+    scope = effectScope()
+    scope.run(() => {
+      account = useEulerAccount()
+    })
+
+    await vi.waitFor(() => expect(buildPortfolio).toHaveBeenCalledTimes(1))
+    expect(account?.totalSuppliedValueInfo.value.hasMissingPrices).toBe(false)
+    expect(account?.totalBorrowedValueInfo.value.hasMissingPrices).toBe(false)
+    expect(account?.netAssetMarketValueInfo.value.hasMissingPrices).toBe(false)
   }, 20_000)
 })

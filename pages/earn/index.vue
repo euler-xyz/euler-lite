@@ -5,7 +5,7 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 
-import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
+import { getAssetUsdValueForEstimate } from '~/utils/sdk-prices'
 import { getProductByVault, applyVaultOverrides, getEntitiesByEarnVault, isVaultRecentlyAdded, isVaultDeprecated, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
@@ -86,11 +86,11 @@ const fetchEarnPrices = useDebounceFn(async () => {
     await Promise.all(
       vaults.map(async (vault) => {
         const [totalSupply, liquidity] = await Promise.all([
-          getAssetUsdValueOrZero(vault.totalAssets, vault, 'off-chain'),
-          getAssetUsdValueOrZero(vault.availableAssets, vault, 'off-chain'),
+          getAssetUsdValueForEstimate(vault.totalAssets, vault, 'off-chain'),
+          getAssetUsdValueForEstimate(vault.availableAssets, vault, 'off-chain'),
         ])
-        totalSupplyValues.set(vault.address, totalSupply)
-        liquidityValues.set(vault.address, liquidity)
+        if (totalSupply !== undefined) totalSupplyValues.set(vault.address, totalSupply)
+        if (liquidity !== undefined) liquidityValues.set(vault.address, liquidity)
       }),
     )
     if (loadId !== priceLoadId) return
@@ -133,8 +133,8 @@ const {
     { key: 'liquidity', label: 'Available liquidity', shortLabel: 'Avail. liquidity', unit: 'usd' },
   ],
   (vault, metric) => {
-    if (metric === 'totalSupply') return vaultTotalSupplyUsd.value.get(vault.address) ?? 0
-    if (metric === 'liquidity') return vaultLiquidityUsd.value.get(vault.address) ?? 0
+    if (metric === 'totalSupply') return vaultTotalSupplyUsd.value.get(vault.address)
+    if (metric === 'liquidity') return vaultLiquidityUsd.value.get(vault.address)
     return 0
   },
 )
