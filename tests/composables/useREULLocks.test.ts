@@ -127,6 +127,36 @@ describe('useREULLocks', () => {
     })
   })
 
+  it('rejects remainder loss for a lock that can still receive deliveries', async () => {
+    const lockDay = 1_791_331_200n
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(Number(lockDay + 86_400n) * 1000)
+    const { useREULLocks, buildUnlockPlan } = await importUseREULLocks({
+      connected: true,
+      address: owner,
+      chainId: 1,
+    })
+
+    let locks: ReturnType<typeof useREULLocks> | undefined
+    scope = effectScope()
+    scope.run(() => {
+      locks = useREULLocks()
+    })
+
+    if (!locks) throw new Error('useREULLocks did not initialize')
+    await locks.buildUnlockREULPlan([lockDay])
+    expect(buildUnlockPlan).toHaveBeenLastCalledWith(expect.objectContaining({
+      lockTimestamp: lockDay,
+      allowRemainderLoss: false,
+    }))
+
+    await locks.buildUnlockREULPlan([lockDay - 86_400n])
+    expect(buildUnlockPlan).toHaveBeenLastCalledWith(expect.objectContaining({
+      lockTimestamp: lockDay - 86_400n,
+      allowRemainderLoss: true,
+    }))
+  })
+
   it('removes stale rows while a required post-transaction refresh is pending', async () => {
     const { useREULLocks, fetchLocks, lock } = await importUseREULLocks()
 

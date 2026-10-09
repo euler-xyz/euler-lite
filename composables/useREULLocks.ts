@@ -1,6 +1,6 @@
 import type { Address } from 'viem'
 import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
-import type { REULLock } from '~/entities/reul'
+import { isREULLockOpen, type REULLock } from '~/entities/reul'
 import { getEulerSdkForChain } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
 import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
@@ -166,14 +166,15 @@ export const useREULLocks = () => {
       throw new Error('Chain not connected')
     }
 
+    const lockTimestamp = lockTimestamps[0] as bigint
     const sdk = await getEulerSdkForChain(chainId)
     return sdk.reulLockService.buildUnlockPlan({
       chainId,
       account: wagmiAddress.value as Address,
-      lockTimestamp: lockTimestamps[0] as bigint,
-      // Early unlocks can burn the unvested remainder; the review UI displays
-      // that loss before building this explicitly opted-in plan.
-      allowRemainderLoss: true,
+      lockTimestamp,
+      // The contract takes no maximum loss, so a lock that can still grow must
+      // revert on any remainder rather than burn more than was reviewed.
+      allowRemainderLoss: !isREULLockOpen(lockTimestamp),
       rEulAddress: reulTokenContractAddress.value
         ? (reulTokenContractAddress.value as Address)
         : undefined,
