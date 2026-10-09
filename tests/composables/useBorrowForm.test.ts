@@ -535,6 +535,26 @@ describe('useBorrowForm savings collateral', () => {
     }))
   })
 
+  it('resolves the reviewed supplying asset for batch adds the same way as submit', async () => {
+    const collateralVault = { ...vault, asset: { ...vault.asset, decimals: 18 } } as EVault
+    mocks.resolveTokenDecimals.mockResolvedValue(6)
+    const form = makeForm(shallowRef([]), shallowRef(makePair(collateralVault)))
+    await vi.waitFor(() => expect(form.borrowSelectedAsset.value?.decimals).toBe(6))
+    form.collateralAmount.value = '1.25'
+    form.borrowAmount.value = '1'
+
+    // The batch page builds its review from the captured snapshot, not from submit().
+    const direct = form.captureBorrowSnapshot(SUB_ACCOUNT_A as Address)
+    expect(direct.isSavingCollateral).toBe(false)
+    expect(form.reviewSupplyingAsset(direct)).toEqual(expect.objectContaining({ address: vault.asset.address, decimals: 6 }))
+
+    const verified = direct.selectedAsset!
+    expect(form.reviewSupplyingAsset({ ...direct, isSavingCollateral: true })).toBe(collateralVault.asset)
+    const otherToken = { ...verified, address: '0x0000000000000000000000000000000000000099' as const }
+    expect(form.reviewSupplyingAsset({ ...direct, selectedAsset: otherToken })).toBe(collateralVault.asset)
+    expect(form.reviewSupplyingAsset({ ...direct, selectedAsset: { ...verified, address: verified.address.toUpperCase().replace('0X', '0x') as Address } })).toEqual(expect.objectContaining({ decimals: 6 }))
+  })
+
   it('keeps the reviewed savings source bound to the borrow intent during preparation', async () => {
     const form = makeForm(shallowRef([
       makeSavingsPosition(SUB_ACCOUNT_A, 100n, 90n),
