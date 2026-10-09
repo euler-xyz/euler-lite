@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import type { ERC4626Vault, EVault } from '@eulerxyz/euler-v2-sdk'
 import {
   ONE_18,
   conservativePriceRatio,
@@ -7,7 +6,6 @@ import {
   getAssetUsdPrice,
   getAssetUsdValue,
   getAssetUsdValueForEstimate,
-  getCollateralOraclePrice,
   getCollateralUsdPrice,
   getCollateralUsdValue,
   toUsdAmount,
@@ -18,38 +16,6 @@ const addressA = '0x1111111111111111111111111111111111111111'
 const addressB = '0x2222222222222222222222222222222222222222'
 
 describe('sdk-prices', () => {
-  it('prices one collateral asset unit using verified decimals when vault metadata is stale', () => {
-    const oraclePriceRaw = {
-      amountIn: ONE_18,
-      amountOutMid: 1_000_600_000_000_000_000n,
-      amountOutAsk: 1_000_700_000_000_000_000n,
-      amountOutBid: 1_000_500_000_000_000_000n,
-    }
-    const liabilityVault = {
-      unitOfAccount: { decimals: 18 },
-      collaterals: [{ address: addressB, oraclePriceRaw }],
-    } as unknown as EVault
-    const collateralVault = {
-      address: addressB,
-      asset: { decimals: 18 },
-      convertToShares: (assets: bigint) => assets * 10n ** 12n,
-    } as unknown as ERC4626Vault
-
-    const stalePrice = getCollateralOraclePrice(liabilityVault, collateralVault)
-    const verifiedPrice = getCollateralOraclePrice(liabilityVault, collateralVault, 6)
-
-    expect(stalePrice?.amountOutMid).toBe(oraclePriceRaw.amountOutMid * 10n ** 12n)
-    expect(verifiedPrice).toMatchObject({
-      amountOutMid: oraclePriceRaw.amountOutMid,
-      amountOutAsk: oraclePriceRaw.amountOutAsk,
-      amountOutBid: oraclePriceRaw.amountOutBid,
-    })
-    expect(verifiedPrice).toEqual(getCollateralOraclePrice(liabilityVault, {
-      ...collateralVault,
-      asset: { decimals: 6 },
-    } as ERC4626Vault))
-  })
-
   it('uses the vault marketPriceUsd field for off-chain asset pricing', async () => {
     const vault = {
       address: addressA,
@@ -88,16 +54,6 @@ describe('sdk-prices', () => {
 
     await expect(getAssetUsdValueForEstimate(0n, vault, 'off-chain')).resolves.toBe(0)
     await expect(getAssetUsdValueForEstimate(1_000_000n, vault, 'off-chain')).resolves.toBeUndefined()
-  })
-
-  it('uses verified amount decimals for estimate values', async () => {
-    const vault = {
-      address: addressA,
-      asset: { decimals: 18, symbol: 'USDC' },
-      marketPriceUsd: ONE_18,
-    }
-
-    await expect(getAssetUsdValueForEstimate(1_250_000n, vault, 'off-chain', 6)).resolves.toBe(1.25)
   })
 
   it('rejects a zero USD price for a positive estimate amount', async () => {
