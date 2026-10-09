@@ -307,6 +307,7 @@ const isMultiplyCowSwapSelected = computed(() =>
 )
 const canAddMultiplyToBatch = computed(() => {
   if (isGeoBlocked.value || isMultiplyRestricted.value) return false
+  if (multiply.isMultiplySpendingBlocked.value) return false
   if (multiply.multiplyDebtAmountNano.value <= 0n) return false
   if (!multiply.multiplySupplyVault.value || !multiply.multiplyLongVault.value || !multiply.multiplyShortVault.value) return false
   if (multiply.multiplyIsSameAsset.value) return true
@@ -318,13 +319,15 @@ const addMultiplyToBatch = async () => {
     const supplyVault = multiply.multiplySupplyVault.value
     const longVault = multiply.multiplyLongVault.value
     const shortVault = multiply.multiplyShortVault.value
-    if (!supplyVault || !longVault || !shortVault) return
+    const supplyAsset = multiply.multiplySupplyAsset.value
+    if (!supplyVault || !longVault || !shortVault || !supplyAsset) return
     const subAccount = (await resolvePendingSubAccount()) as Address
     const sameAsset = multiply.multiplyIsSameAsset.value
     const saving = multiply.multiplySavingPosition.value
     const snap: MultiplyBatchSnapshot = {
       subAccount,
       supplyVault: supplyVault as EVault,
+      supplyAsset,
       longVault: longVault as EVault,
       shortVault: shortVault as EVault,
       inputAmount: multiply.multiplyInputAmount.value,
@@ -338,7 +341,7 @@ const addMultiplyToBatch = async () => {
     const quoteIntents = snap.quote
       ? multiply.multiplyQuoteCardsSorted.value.find(card => card.quote === snap.quote)?.intents
       : undefined
-    await addBatchEntry({ intent: multiply.createMultiplyIntent(snap), preparedIntent: quoteIntents?.[0], label: `Multiply → ${longVault.asset.symbol}`, subAccount, sourceSubAccount: snap.isSavingCollateral ? snap.savingFrom : undefined, multiply: true, review: { type: 'borrow', asset: shortVault.asset, amount: formatUnits(snap.debtAmount, Number(shortVault.asset.decimals)), supplyingAssetForBorrow: supplyVault.asset, supplyingAmount: snap.inputAmount, swapToAsset: longVault.asset, ...captureSwapReview(snap.quote, SwapperMode.EXACT_IN), quoteFetchedAt: sameAsset ? null : multiply.multiplyEffectiveQuoteFetchedAt.value } })
+    await addBatchEntry({ intent: multiply.createMultiplyIntent(snap), preparedIntent: quoteIntents?.[0], label: `Multiply → ${longVault.asset.symbol}`, subAccount, sourceSubAccount: snap.isSavingCollateral ? snap.savingFrom : undefined, multiply: true, review: { type: 'borrow', asset: shortVault.asset, amount: formatUnits(snap.debtAmount, Number(shortVault.asset.decimals)), supplyingAssetForBorrow: supplyAsset, supplyingAmount: snap.inputAmount, swapToAsset: longVault.asset, ...captureSwapReview(snap.quote, SwapperMode.EXACT_IN), quoteFetchedAt: sameAsset ? null : multiply.multiplyEffectiveQuoteFetchedAt.value } })
     redirectAfterAdd('/portfolio', { subAccount })
   })
 }
@@ -889,16 +892,23 @@ watch(
                       v-model="multiply.multiplyInputAmount.value"
                       :desc="multiply.multiplySupplyProduct.name"
                       :label="`Supply ${multiply.multiplySupplyVault.value.asset.symbol}`"
-                      :asset="multiply.multiplySupplyVault.value.asset"
+                      :asset="multiply.multiplySupplyAsset.value ?? multiply.multiplySupplyVault.value.asset"
                       :vault="multiply.multiplySupplyVault.value"
                       :balance="multiply.multiplyBalance.value"
                       :collateral-options="multiply.multiplyCollateralOptions.value"
                       :selected-source="multiply.isMultiplySavingCollateral.value ? 'saving' : 'wallet'"
                       :selected-sub-account="multiply.multiplySelectedSavingSubAccount.value"
                       :selected-vault-address="multiply.multiplySupplyVault.value?.address"
-                      maxable
+                      :maxable="!multiply.isMultiplySpendingBlocked.value"
+                      :readonly="multiply.isMultiplySpendingBlocked.value"
                       @input="multiply.onMultiplyInput"
                       @change-collateral="multiply.onMultiplyCollateralChange"
+                    />
+
+                    <SpendingAssetStatus
+                      :loading="!multiply.isMultiplySavingCollateral.value && multiply.spending.isLoading.value"
+                      :error="!multiply.isMultiplySavingCollateral.value ? multiply.spending.error.value : null"
+                      @retry="multiply.spending.retry"
                     />
 
                     <UiRange

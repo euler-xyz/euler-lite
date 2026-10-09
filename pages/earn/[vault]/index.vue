@@ -8,6 +8,7 @@ import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBl
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
 import { formatNumber } from '~/utils/string-utils'
 import { isNativeCurrencyAddress } from '~/utils/native-currency'
+import { useVerifiedSpendingAsset } from '~/composables/useVerifiedSpendingAsset'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -55,6 +56,14 @@ const amount = ref('')
 const plan = ref<TransactionPlan | null>(null)
 const vault: Ref<EulerEarn | undefined> = ref(undefined)
 const asset: Ref<VaultAsset | undefined> = ref(undefined)
+// The deposit is signed with on-chain verified decimals. The cached vault asset
+// only seeds the selection and labels the page.
+const spending = useVerifiedSpendingAsset(() => {
+  amount.value = ''
+  clearSimulationError()
+})
+const { asset: depositAsset, isBlocked: spendingBlocked, isLoading: spendingLoading, error: spendingError } = spending
+const depositAmountNano = computed(() => depositAsset.value ? valueToNano(amount.value || '0', depositAsset.value.decimals) : 0n)
 const estimateSupplyAPY = ref(0)
 const earnVaultMarketLabel = computed(() => unref(name) || vault.value?.shares.name || '')
 // Wallet balance from the central (layer-aware) wallet entity — reactive, no
@@ -133,7 +142,7 @@ onUnmounted(() => {
 })
 
 const errorText = computed(() => {
-  if (balance.value < valueToNano(amount.value, asset.value?.decimals)) {
+  if (balance.value < depositAmountNano.value) {
     return 'Not enough balance'
   }
   return null
@@ -141,7 +150,8 @@ const errorText = computed(() => {
 const assets = computed(() => [asset.value!])
 const isSubmitDisabled = computed(() => {
   if (!isConnected.value && !isSpyMode.value) return false
-  return balance.value < valueToNano(amount.value, asset.value?.decimals)
+  if (spendingBlocked.value) return true
+  return balance.value < depositAmountNano.value
     || isLoading.value || !(+amount.value)
 })
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vaultAddress))
@@ -163,16 +173,16 @@ const submit = async () => {
   if (isPreparing.value || isGeoBlocked.value) return
   isPreparing.value = true
   try {
-    if (!asset.value?.address) {
+    const capturedAsset = depositAsset.value
+    if (!capturedAsset?.address) {
       return
     }
 
     const capturedAmount = amount.value
-    const capturedAsset = asset.value
     const plannerArgs = {
       vaultAddress: vaultAddress as Address,
-      assetAddress: asset.value.address as Address,
-      amount: valueToNano(capturedAmount || '0', asset.value.decimals),
+      assetAddress: capturedAsset.address as Address,
+      amount: valueToNano(capturedAmount || '0', capturedAsset.decimals),
     }
     const intent = createIntent({
       kind: 'deposit',
@@ -221,12 +231,13 @@ const submit = async () => {
     isPreparing.value = false
   }
 }
-const canAddToBatch = computed(() => !!(+amount.value) && !isGeoBlocked.value)
+const canAddToBatch = computed(() => !!(+amount.value) && !isGeoBlocked.value && !spendingBlocked.value)
 const addToBatch = async () => {
-  if (!asset.value?.address || !canAddToBatch.value) return
-  const assetAddr = asset.value.address as Address
-  const amt = valueToNano(amount.value, asset.value.decimals)
-  const label = `Earn deposit ${amount.value} ${asset.value.symbol}`
+  const depositAssetSnapshot = depositAsset.value
+  if (!depositAssetSnapshot?.address || !canAddToBatch.value) return
+  const assetAddr = depositAssetSnapshot.address as Address
+  const amt = valueToNano(amount.value, depositAssetSnapshot.decimals)
+  const label = `Earn deposit ${amount.value} ${depositAssetSnapshot.symbol}`
   const intent = createIntent({
     kind: 'deposit',
     planner: 'deposit',
@@ -236,7 +247,7 @@ const addToBatch = async () => {
   await addBatchEntry({
     intent,
     label,
-    review: { type: 'supply', asset: asset.value, amount: amount.value, marketLabel: earnVaultMarketLabel.value },
+    review: { type: 'supply', asset: depositAssetSnapshot, amount: amount.value, marketLabel: earnVaultMarketLabel.value },
   })
   amount.value = ''
   redirectAfterAdd('/portfolio/saving', { subAccount: address.value, vault: vaultAddress })
@@ -265,6 +276,8 @@ const supplyApyModalData = computed(() => ({
     rewardVaultAddress: vaultAddress,
   },
 }))
+
+watch([asset, chainId], ([vaultAsset]) => spending.setDefaultAsset(vaultAsset), { immediate: true })
 
 watch(amount, () => {
   clearSimulationError()
@@ -364,10 +377,16 @@ watch(amount, () => {
               v-model="amount"
               label="Supply amount"
               :desc="name"
-              :asset="asset"
+              :asset="depositAsset ?? asset"
               :vault="vault"
               :balance="balance"
-              maxable
+              :maxable="!spendingBlocked"
+              :readonly="spendingBlocked"
+            />
+            <SpendingAssetStatus
+              :loading="spendingLoading"
+              :error="spendingError"
+              @retry="spending.retry"
             />
 
             <UiAlert

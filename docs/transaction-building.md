@@ -205,6 +205,10 @@ Wired into:
 
 `noBalanceOverride: true` is only safe when the operation either doesn't consume wallet ERC20 (collateral-swap repay, debt swap) or the form already gates submit on wallet balance (multiply, borrow, lend deposit, wallet-swap repay's EXACT_IN). Withdraw mode on `useCollateralForm` keeps the override but skips the balance branch by binding `noBalanceOverride` to `mode === 'supply'`.
 
+### Verified spending decimals
+
+Every form that parses a typed amount into a wallet ERC20 transfer (`lend` deposit and its pay-with token, `borrow` wallet collateral and pay-with token, wallet `repay`, `earn` deposit, and wallet-funded `multiply` collateral) resolves the selected token's `decimals` on chain through `useVerifiedSpendingAsset` before the amount is parsed, balance-checked, planned, or shown in review. The cached vault registry asset only seeds the selection; while the read is pending or failed the input is read-only, Max is hidden, submit and add-to-batch are disabled, and `SpendingAssetStatus` offers a retry. Paths that move vault shares (savings collateral, position-funded repay) keep the vault asset metadata and are never blocked by the read. `useMultiplyForm` exposes the resolved token as `multiplySupplyAsset` and carries it in `MultiplyBatchSnapshot.supplyAsset`, so batch rebuilds and the review's supplying row use the same decimals the plan signed.
+
 `primeSlotHintsFor` is owner-/spender-agnostic. The SDK also memoises results in a module-scope `slotHintsCache` keyed on chain id + token. Lite additionally mirrors resolved hints into a chain-scoped registry (`composables/batchPrefetchState.ts`) so form pages and the batch cart share probes even when they do not share one SDK module cache across separately bundled call paths.
 
 Pass `background: true` for speculative page-load priming (lend/earn vault forms). Background primes still warm the local ref + registry, but they do **not** increment `useStateOverrideResolution().isResolvingStateOverrideHints`, so submit / add-to-batch stay usable while a cold probe runs. A miss only means the simulator falls back to `eth_createAccessList` discovery.

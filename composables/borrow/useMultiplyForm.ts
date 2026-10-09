@@ -41,6 +41,8 @@ import {
   type ProjectedYieldRateLine,
 } from '~/utils/projected-yield'
 import { getLayeredVault } from '~/composables/useLayeredVaults'
+import { useVerifiedSpendingAsset } from '~/composables/useVerifiedSpendingAsset'
+import type { VaultAsset } from '~/types/asset'
 
 // Snapshot of all multiply inputs captured at "add to batch" time. The batch
 // re-simulates asynchronously (after the form may reset), so the plan must be
@@ -51,6 +53,9 @@ export interface MultiplyBatchSnapshot {
   longVault: EVault
   shortVault: EVault
   inputAmount: string
+  // `inputAmount` is parsed with this metadata: the verified spending token for
+  // wallet-funded collateral, the vault asset for savings collateral.
+  supplyAsset: VaultAsset
   debtAmount: bigint
   isSavingCollateral: boolean
   savingFrom?: Address
@@ -129,6 +134,18 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   // Supply-asset wallet balance from the central wallet entity — reactive + layer-aware.
   const multiplyAssetBalance = computed(() => multiplySupplyVault.value?.asset.address ? getBalance(multiplySupplyVault.value.asset.address as Address) : 0n)
   const isMultiplySavingCollateral = ref(false)
+  // Wallet-funded collateral is signed in on-chain verified decimals. Savings
+  // collateral moves vault shares and keeps the cached vault asset metadata.
+  const spending = useVerifiedSpendingAsset(() => {
+    multiplyInputAmount.value = ''
+    clearMultiplySimulationError()
+    resetMultiplyQuoteState()
+  })
+  const multiplySupplyAsset = computed<VaultAsset | undefined>(() =>
+    isMultiplySavingCollateral.value ? multiplySupplyVault.value?.asset : spending.asset.value,
+  )
+  const isMultiplySpendingBlocked = computed(() => !isMultiplySavingCollateral.value && spending.isBlocked.value)
+  const multiplySupplyDecimals = computed(() => multiplySupplyAsset.value?.decimals)
   // Sub-account of the savings position the user picked from the collateral
   // options modal. Without this, two savings positions of the same vault on
   // different sub-accounts look identical to `depositPositions.find(...)` and
@@ -173,9 +190,11 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value || !quote.accountIn) {
         throw new Error('Multiply inputs are not loaded')
       }
+      if (!multiplySupplyAsset.value) throw new Error('Token decimals are not verified')
       return [createMultiplyIntent({
         subAccount: getAddress(quote.accountIn),
         supplyVault: multiplySupplyVault.value,
+        supplyAsset: multiplySupplyAsset.value,
         longVault: multiplyLongVault.value,
         shortVault: multiplyShortVault.value,
         inputAmount: multiplyInputAmount.value,
@@ -201,7 +220,9 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     }
     const debtAmount = multiplyDebtAmountNano.value
     if (debtAmount <= 0n) throw new Error('Debt amount not set')
-    const supplyAmountNano = valueToNano(multiplyInputAmount.value || '0', multiplySupplyVault.value.asset.decimals)
+    const supplyAsset = multiplySupplyAsset.value
+    if (!supplyAsset) throw new Error('Token decimals are not verified')
+    const supplyAmountNano = valueToNano(multiplyInputAmount.value || '0', supplyAsset.decimals)
     let supplySharesAmount: bigint | undefined
     if (isMultiplySavingCollateral.value && multiplySavingPosition.value) {
       supplySharesAmount = multiplySavingPosition.value.assets === supplyAmountNano
@@ -237,7 +258,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   // non-CoW quote (gated at the call site). New position ⇒ a fresh sub-account.
   const buildMultiplyPlan = async (snap: MultiplyBatchSnapshot, account = planAccount.value): Promise<TransactionPlan> => {
     const subAccount = snap.subAccount
-    const supplyAmountNano = valueToNano(snap.inputAmount || '0', snap.supplyVault.asset.decimals)
+    const supplyAmountNano = valueToNano(snap.inputAmount || '0', snap.supplyAsset.decimals)
     let supplyShares: bigint | undefined
     if (snap.isSavingCollateral && snap.savingFrom) {
       supplyShares = snap.savingAssets === supplyAmountNano
@@ -268,7 +289,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     snap: MultiplyBatchSnapshot,
     createCapturedIntent = createIntent,
   ) => {
-    const supplyAmountNano = valueToNano(snap.inputAmount || '0', snap.supplyVault.asset.decimals)
+    const supplyAmountNano = valueToNano(snap.inputAmount || '0', snap.supplyAsset.decimals)
     let supplyShares: bigint | undefined
     if (snap.isSavingCollateral && snap.savingFrom) {
       supplyShares = snap.savingAssets === supplyAmountNano
@@ -346,9 +367,11 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     if (!multiplySupplyVault.value || !multiplyShortVault.value) return 0n
     if (!multiplyInputAmount.value || multiplier.value <= 1) return 0n
 
+    const supplyDecimals = multiplySupplyDecimals.value
+    if (supplyDecimals === undefined) return 0n
     let suppliedCollateral: bigint
     try {
-      suppliedCollateral = valueToNano(multiplyInputAmount.value, multiplySupplyVault.value.asset.decimals)
+      suppliedCollateral = valueToNano(multiplyInputAmount.value, supplyDecimals)
     }
     catch {
       return 0n
@@ -387,9 +410,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const multiplyMinMultiplier = computed(() => computeMinMultiplier(multiplyMaxMultiplier.value))
 
   const multiplySupplyAmountNano = computed(() => {
-    if (!multiplySupplyVault.value || !multiplyInputAmount.value) return 0n
+    const supplyDecimals = multiplySupplyDecimals.value
+    if (!multiplySupplyVault.value || !multiplyInputAmount.value || supplyDecimals === undefined) return 0n
     try {
-      return valueToNano(multiplyInputAmount.value, multiplySupplyVault.value.asset.decimals)
+      return valueToNano(multiplyInputAmount.value, supplyDecimals)
     }
     catch {
       return 0n
@@ -955,7 +979,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   // --- Validation ---
   const multiplyErrorText = computed(() => {
     if (!multiplySupplyVault.value || !multiplyShortVault.value) return null
-    if (multiplyBalance.value < valueToNano(multiplyInputAmount.value, multiplySupplyVault.value.asset.decimals)) {
+    if (multiplyBalance.value < multiplySupplyAmountNano.value) {
       return 'Not enough balance'
     }
     if (multiplyDebtAmountNano.value > 0n && multiplyShortVault.value.availableLiquidity < multiplyDebtAmountNano.value) {
@@ -1021,6 +1045,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     if (!isConnected.value && !isSpyMode.value) return false
     if (findBlockingDisabledOp(multiplyPlannedOps.value)) return true
     if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) return true
+    if (isMultiplySpendingBlocked.value) return true
     if (!multiplyInputAmount.value || multiplyDebtAmountNano.value <= 0n) return true
     if (multiplyErrorText.value) return true
     if (isPendingSubAccountLoading.value) return true
@@ -1108,7 +1133,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           deadline: quoteDeadline,
           collateralVault: multiplySupplyVault.value.address as Address,
           borrowVault: multiplyShortVault.value.address as Address,
-          collateralAmount: valueToNano(multiplyInputAmount.value || '0', multiplySupplyVault.value.asset.decimals),
+          collateralAmount: multiplySupplyAmountNano.value,
           borrowAmount: debtAmount,
         },
         chainConfig.openPositionWrapper,
@@ -1147,15 +1172,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       multiplyShortAmount.value = ''
       return
     }
-    let baseNano: bigint
-    try {
-      baseNano = valueToNano(multiplyInputAmount.value, multiplySupplyVault.value.asset.decimals)
-    }
-    catch {
-      multiplyLongAmount.value = ''
-      multiplyShortAmount.value = ''
-      return
-    }
+    const baseNano = multiplySupplyAmountNano.value
     if (!baseNano) {
       multiplyLongAmount.value = ''
       multiplyShortAmount.value = ''
@@ -1266,6 +1283,8 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       if (!multiplySupplyVault.value || !multiplyLongVault.value || !multiplyShortVault.value) return
       if (!multiplyInputAmount.value || multiplyDebtAmountNano.value <= 0n) return
       if (multiplyErrorText.value) return
+      const supplyAssetSnapshot = multiplySupplyAsset.value
+      if (!supplyAssetSnapshot) return
 
       const supplyVaultSnapshot = multiplySupplyVault.value
       const longVaultSnapshot = multiplyLongVault.value
@@ -1280,7 +1299,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       const quoteFetchedAt = multiplyEffectiveQuoteFetchedAt.value
       const selectedQuoteCardSnapshot = multiplySelectedQuoteCard.value
       const createSubmitIntent = captureIntentFactory()
-      const supplyAmountNano = valueToNano(inputAmountSnapshot || '0', supplyVaultSnapshot.asset.decimals)
+      const supplyAmountNano = valueToNano(inputAmountSnapshot || '0', supplyAssetSnapshot.decimals)
       let supplySharesAmount: bigint | undefined
       if (isSavingCollateralSnapshot) {
         if (!savingPositionSnapshot) {
@@ -1328,6 +1347,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       const snapshot: MultiplyBatchSnapshot = {
         subAccount: subAccount as Address,
         supplyVault: supplyVaultSnapshot,
+        supplyAsset: supplyAssetSnapshot,
         longVault: longVaultSnapshot,
         shortVault: shortVaultSnapshot,
         inputAmount: inputAmountSnapshot,
@@ -1350,7 +1370,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
           asset: shortVaultSnapshot.asset,
           amount: shortAmountSnapshot || formatUnits(debtAmount, Number(shortVaultSnapshot.asset.decimals)),
           quoteFetchedAt: quote ? quoteFetchedAt : null,
-          supplyingAssetForBorrow: supplyVaultSnapshot.asset,
+          supplyingAssetForBorrow: supplyAssetSnapshot,
           supplyingAmount: inputAmountSnapshot,
           swapToAsset: quote ? longVaultSnapshot.asset : undefined,
           swapToAmount: quote ? longAmountSnapshot : undefined,
@@ -1494,6 +1514,14 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     { immediate: true },
   )
 
+  // Seed the wallet spending token from the selected collateral vault. Savings
+  // collateral never reads it, but the seed keeps a later wallet switch verified.
+  watch(
+    [() => multiplySupplyVault.value?.asset, chainId],
+    ([supplyAsset]) => spending.setDefaultAsset(supplyAsset),
+    { immediate: true, flush: 'sync' },
+  )
+
   watch(multiplySelectedQuote, () => {
     clearMultiplySimulationError()
   })
@@ -1533,6 +1561,9 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     multiplyAssetBalance,
     isMultiplySavingCollateral,
     multiplySelectedSavingSubAccount,
+    multiplySupplyAsset,
+    isMultiplySpendingBlocked,
+    spending,
     isMultiplySubmitting,
     isMultiplyPreparing,
     multiplyPlan,
