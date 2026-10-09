@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { DateTime } from 'luxon'
 import { useToast } from '~/components/ui/composables/useToast'
-import type { REULLock } from '~/entities/reul'
+import { getREULLockClosedAt, isREULLockOpen, type REULLock } from '~/entities/reul'
+import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 import { logWarn } from '~/utils/errorHandling'
 import { getTxErrorMessage } from '~/utils/tx-errors'
 import { formatNumber } from '~/utils/string-utils'
@@ -16,7 +17,13 @@ import {
 const { error } = useToast()
 const { isSpyMode } = useSpyMode()
 const { getTokenByAddress } = useTokenList()
-const { buildUnlockREULPlan, reulTokenContractAddress, eulTokenContractAddress, refreshLocks } = useREULLocks()
+const {
+  buildUnlockREULPlan,
+  reulTokenContractAddress,
+  eulTokenContractAddress,
+  refreshLocks,
+  getLatestBlockTimestamp,
+} = useREULLocks()
 const { entryCount, clearBatch } = useTxBatch()
 const { create: createIntent } = useOperationIntentFactory()
 const { capture: captureReviewState } = useExecutionReview()
@@ -42,6 +49,13 @@ const walletChangeTokenSymbol = computed(() =>
 )
 const walletChangeTokenDecimals = computed(() => eulToken.value?.decimals ?? reulToken.value?.decimals ?? 18)
 const isBatchActive = computed(() => entryCount.value > 0)
+const now = useNow({ scheduler: cb => useIntervalFn(cb, POLL_INTERVAL_60S_MS) })
+const isLockOpen = computed(() =>
+  isREULLockOpen(item.timestamp, BigInt(Math.floor(now.value.getTime() / 1000))),
+)
+const lockClosedAt = computed(() =>
+  DateTime.fromSeconds(Number(getREULLockClosedAt(item.timestamp)), { zone: 'utc' }).toFormat('MMMM dd, HH:mm'),
+)
 
 const unlockableAmount = computed(() => {
   return nanoToValue(item.unlockableAmount, reulToken.value?.decimals)
@@ -123,6 +137,16 @@ const onUnlockClick = async () => {
   isPreparing.value = true
   try {
     await ensureWalletOnSiteChain()
+
+    // Chain time must be read before the quote refresh so the quoted lock can
+    // no longer receive deliveries. Known and accepted: the two reads can hit
+    // different RPC nodes, so in the first seconds after UTC midnight a lagging
+    // node can quote the lock before its last delivery. Closing that gap would
+    // need block-pinned reads outside the SDK.
+    if (isREULLockOpen(item.timestamp, await getLatestBlockTimestamp())) {
+      error(`Early unlock for this rEUL lock opens ${lockClosedAt.value} UTC`)
+      return
+    }
 
     const validation = await refreshREULLockReview(item, () => refreshLocks(true))
     if (validation.status !== 'fresh') {
@@ -260,12 +284,19 @@ const onUnlockClick = async () => {
         <UiButton
           rounded
           :loading="isUnlocking || isPreparing"
-          :disabled="isSpyMode || isBatchActive"
+          :disabled="isSpyMode || isBatchActive || isLockOpen"
           @click="onUnlockClick"
         >
           Unlock
         </UiButton>
       </div>
+      <p
+        v-if="isLockOpen"
+        class="mt-8 text-center text-p3 text-content-tertiary"
+        data-testid="reul-unlock-open-lock"
+      >
+        Rewards received today are still being added to this lock. Early unlock opens {{ lockClosedAt }} UTC.
+      </p>
       <p
         v-if="isBatchActive"
         class="mt-8 text-center text-p3 text-content-tertiary"

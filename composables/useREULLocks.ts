@@ -1,6 +1,6 @@
 import type { Address } from 'viem'
 import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
-import type { REULLock } from '~/entities/reul'
+import { isREULLockOpen, type REULLock } from '~/entities/reul'
 import { getEulerSdkForChain } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
 import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
@@ -157,6 +157,17 @@ export const useREULLocks = () => {
     }
   })
 
+  const getLatestBlockTimestamp = async (): Promise<bigint> => {
+    const chainId = selectedChainId.value
+    if (!chainId) {
+      throw new Error('Chain not connected')
+    }
+
+    const sdk = await getEulerSdkForChain(chainId)
+    const block = await sdk.providerService.getProvider(chainId).getBlock()
+    return block.timestamp
+  }
+
   const buildUnlockREULPlan = async (lockTimestamps: bigint[]): Promise<TransactionPlan> => {
     if (!wagmiAddress.value) {
       throw new Error('Wallet not connected')
@@ -166,14 +177,16 @@ export const useREULLocks = () => {
       throw new Error('Chain not connected')
     }
 
+    const lockTimestamp = lockTimestamps[0] as bigint
     const sdk = await getEulerSdkForChain(chainId)
+    const chainTimestamp = await getLatestBlockTimestamp()
     return sdk.reulLockService.buildUnlockPlan({
       chainId,
       account: wagmiAddress.value as Address,
-      lockTimestamp: lockTimestamps[0] as bigint,
-      // Early unlocks can burn the unvested remainder; the review UI displays
-      // that loss before building this explicitly opted-in plan.
-      allowRemainderLoss: true,
+      lockTimestamp,
+      // The contract takes no maximum loss, so a lock that can still grow must
+      // revert on any remainder rather than burn more than was reviewed.
+      allowRemainderLoss: !isREULLockOpen(lockTimestamp, chainTimestamp),
       rEulAddress: reulTokenContractAddress.value
         ? (reulTokenContractAddress.value as Address)
         : undefined,
@@ -187,6 +200,7 @@ export const useREULLocks = () => {
     eulTokenContractAddress,
     loadREULLocksInfo: (address: string, isInitial?: boolean) => loadREULLocksInfo(address, isInitial),
     refreshLocks,
+    getLatestBlockTimestamp,
     buildUnlockREULPlan,
   }
 }
