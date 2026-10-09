@@ -2,6 +2,7 @@
 import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { getVaultHookTarget } from '~/utils/vault-hooks'
 import { isVaultBorrowable } from '~/utils/vault/classification'
+import { getAssessmentSafeEvidence, getRouterGovernorEvidence } from '~/utils/vault-assessment/evidence'
 
 const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
 
@@ -17,7 +18,13 @@ const oracleRouterAddress = computed(() =>
   vault.oracle.name === 'EulerRouter' ? vault.oracle.oracle : null,
 )
 
-const { governor: oracleGovernor } = useOracleRouterGovernor(oracleRouterAddress)
+const { assessment, fallbackReady } = useVaultAssessmentEvidence(() => vault.address, 'evk')
+const routerGovernorEvidence = computed(() => getRouterGovernorEvidence(assessment.value))
+const { governor: rpcOracleGovernor } = useOracleRouterGovernor(oracleRouterAddress, () => fallbackReady.value && routerGovernorEvidence.value === undefined)
+const oracleGovernor = computed(() => routerGovernorEvidence.value ?? rpcOracleGovernor.value)
+const safeEvidence = (address: string) => assessment.value || fallbackReady.value
+  ? getAssessmentSafeEvidence(assessment.value, address)
+  : null
 
 const vaultAddresesInfo = computed(() => {
   const baseAddresses: Array<{ title: string, address?: string, checkSafe?: boolean }> = [
@@ -122,6 +129,7 @@ const vaultAddresesInfo = computed(() => {
       <VaultOverviewAddressValue
         :address="infoItem.address"
         :check-safe="infoItem.checkSafe"
+        :safe-evidence="infoItem.checkSafe ? safeEvidence(infoItem.address) : undefined"
       />
     </VaultOverviewLabelValue>
   </VaultOverviewAccordionSection>

@@ -2,7 +2,6 @@
 import type { PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
-import { isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import { getCollateralOraclePrice, getAssetOraclePrice, formatAssetValue } from '~/utils/sdk-prices'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatSignificant, formatCompactUsdValue, compactNumber } from '~/utils/string-utils'
@@ -42,7 +41,6 @@ const { getSupplyRewardApy, getBorrowRewardApy, getLoopingRewardApy, getSupplyRe
 // Gate multiply metrics on this pair's borrow LTV, not vault-level borrowability.
 const showMultiplySection = computed(() => (pairBorrowLTV.value ?? 0) > 0)
 const isRestricted = computed(() => isAnyVaultBlockedByCountry(collateralVault.value.address, borrowVault.value.address))
-const isDeprecated = computed(() => isVaultDeprecated(collateralVault.value.address) || isVaultDeprecated(borrowVault.value.address))
 
 const collateralRewardAPY = computed(() => getSupplyRewardApy(collateralVault.value.address))
 const borrowRewardAPY = computed(() => getBorrowRewardApy(borrowVault.value.address, collateralVault.value.address))
@@ -175,34 +173,15 @@ const rampDownModalData = computed(() => ({
     :default-open="defaultOpen"
     content-class="flex flex-col gap-20"
   >
-    <div
-      v-if="isDeprecated"
-      class="w-full rounded-12 p-16 bg-warning-100 text-warning-500"
-    >
-      <div class="flex items-center gap-8">
-        <SvgIcon
-          name="warning"
-          class="!w-20 !h-20 flex-shrink-0"
-        />
-        <p class="text-p3 text-warning-500">
-          One or more vaults in this pair have been deprecated.
-        </p>
-      </div>
-    </div>
-    <div
+    <VaultDeprecationBanner :addresses="[collateralVault.address, borrowVault.address]" />
+    <VaultPublicNotice :addresses="[collateralVault.address, borrowVault.address]" />
+    <UiAlert
       v-if="isRestricted"
-      class="w-full rounded-12 p-16 bg-warning-100 text-warning-500"
-    >
-      <div class="flex items-center gap-8">
-        <SvgIcon
-          name="warning"
-          class="!w-20 !h-20 flex-shrink-0"
-        />
-        <p class="text-p3 text-warning-500">
-          This vault is not available in your region.
-        </p>
-      </div>
-    </div>
+      title="Region restricted"
+      description="This vault is not available in your region."
+      variant="warning"
+      size="compact"
+    />
     <div class="flex flex-col gap-12">
       <div class="grid grid-cols-2 gap-x-32 gap-y-20">
         <VaultOverviewLabelValue label="Price">

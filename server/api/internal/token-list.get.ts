@@ -7,6 +7,8 @@ import { reportStatus } from '~/server/utils/log'
 import { MERKL_API_BASE_URL } from '~/entities/constants'
 import { buildEulerSDK, type EulerSDK, type TokenListItem } from '@eulerxyz/euler-v2-sdk'
 import { readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-url-env'
+import { LiteEulerLabelsService } from '~/utils/sdk-labels'
+import { getPublicLabelsBundle } from '~/server/utils/public-labels-source'
 
 const CACHE_TTL_MS = 300_000
 const DEFILLAMA_DEFAULT_URL = 'https://d3g10bzo9rdluh.cloudfront.net'
@@ -108,6 +110,7 @@ const getSdk = () => {
       tokenlistApiBaseUrl: v3ApiUrl,
       ...(v3ApiKey ? { v3ApiKey } : {}),
     },
+    servicesOverrides: { eulerLabelsService: new LiteEulerLabelsService(getPublicLabelsBundle) },
   }).then((sdk) => {
     const tokenlistService = sdk.tokenlistService as ConfigurableTokenlistService
     tokenlistService.setQueryTokenList?.((url: string) => queryEulerSdkTokenList(url, v3ApiKey))

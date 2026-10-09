@@ -42,8 +42,9 @@ import {
   type VaultDataSource,
 } from '~/utils/api-url-env'
 import { parseChainIds } from '~/utils/parseChainIds'
+import { LiteEulerLabelsService } from '~/utils/sdk-labels'
+import { getPublicLabelsBundle } from './public-labels-source'
 import { resolveRpcUrl } from './rpc'
-import { resolveLabelsBaseUrl } from './labels-base-url'
 import { TURTLE_EARN_API_URL } from './turtle-proxy'
 import { createServerProviderService } from './server-provider-service'
 
@@ -107,7 +108,6 @@ const buildServerSdkConfig = (chainId: number): EulerSDKConfig & { rpcUrls: Reco
   return {
     rpcUrls: { [chainId]: rpcUrl },
     v3ApiUrl,
-    eulerLabelsBaseUrl: resolveLabelsBaseUrl(),
     tokenlistApiBaseUrl: v3ApiUrl,
     ...(v3ApiKey ? { v3ApiKey } : {}),
     ...resolveServerTurtleRewardsConfig(),
@@ -125,7 +125,10 @@ export const getServerSdk = (chainId: number): Promise<EulerSDK> => {
   const providerService = createServerProviderService(config.rpcUrls, new ProviderService(config.rpcUrls))
   const promise = buildEulerSDK({
     config,
-    servicesOverrides: { providerService },
+    servicesOverrides: {
+      providerService,
+      eulerLabelsService: new LiteEulerLabelsService(getPublicLabelsBundle),
+    },
   }).catch((err) => {
     if (sdkByChain.get(chainId) === promise) sdkByChain.delete(chainId)
     throw err

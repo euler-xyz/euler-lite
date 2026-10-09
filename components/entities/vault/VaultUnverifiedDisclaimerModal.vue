@@ -1,9 +1,13 @@
 <script setup lang="ts">
+import { getUnverifiedActionCopy } from '~/utils/vault-assessment/presentation'
+
 const emits = defineEmits(['close'])
-const { cancelAction, acceptAction } = defineProps<{
+const { cancelAction, acceptAction, unlistedNotice } = defineProps<{
   cancelAction?: () => void
   acceptAction?: () => void
+  unlistedNotice?: string | null
 }>()
+const actionCopy = computed(() => getUnverifiedActionCopy(unlistedNotice))
 
 const handleAccept = () => {
   acceptAction?.()
@@ -24,13 +28,10 @@ const handleCancel = () => {
   >
     <div class="flex flex-col gap-12 text-content-primary mb-24">
       <h4 class="text-white text-h4">
-        Are you sure you want to interact with the unverified vault?
+        {{ actionCopy.title }}
       </h4>
       <p class="pb-8">
-        Proceeding with this unknown and unverified vault may pose security risks. Such vaults could potentially be used for phishing attempts.
-      </p>
-      <p>
-        Please ensure you trust the source before continuing.
+        {{ actionCopy.description }}
       </p>
     </div>
     <div class="flex gap-8">

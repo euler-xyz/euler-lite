@@ -9,6 +9,7 @@ import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo }
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { VaultApyModal, UiModalPreviewTrigger } from '#components'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
+import { zeroAddress } from 'viem'
 
 const { isConnected } = useWagmi()
 const { vault } = defineProps<{ vault: SecuritizeCollateralVault }>()
@@ -16,13 +17,14 @@ const { vault } = defineProps<{ vault: SecuritizeCollateralVault }>()
 const vaultAddress = computed(() => vault.address)
 const product = useEulerProductOfVault(vaultAddress)
 const { enableEntityBranding } = useDeployConfig()
-const { isVaultGovernorVerified } = useVaults()
+const { isSecuritizeGovernorVerified } = useVaults()
 const { isVerifiedVault } = useVaultRegistry()
-// SecuritizeCollateralVault has governorAdmin, safe to cast for entity lookup
+// Entity lookup accepts the shared vault shape; Securitize verification uses its governor field.
 const entities = useEulerEntitiesOfVault(vault as unknown as EVault)
 
 const isUnverified = computed(() => !isVerifiedVault(vault.address))
-const isGovernorVerified = computed(() => isVaultGovernorVerified(vault as unknown as EVault))
+const isGovernorVerified = computed(() => isSecuritizeGovernorVerified(vault))
+const isUngoverned = computed(() => vault.governor?.toLowerCase() === zeroAddress)
 const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
 const entityName = computed(() => {
   if (!isGovernorVerified.value || entities.length === 0) return ''
@@ -120,9 +122,16 @@ watchEffect(async () => {
           <VaultDisplayName
             :name="displayName"
             :is-unverified="isUnverified"
+            :addresses="[vault.address]"
           />
           <GovernanceLimitedBadge v-if="isGovernanceLimited" />
           <RestrictedBadge v-if="isGeoBlocked" />
+          <VaultDeprecatedBadge :addresses="[vault.address]" />
+          <VaultAssessmentWarning
+            :address="vault.address"
+            :family="null"
+            hide-deprecated
+          />
         </div>
         <div
           class="text-h5 text-content-primary"
@@ -184,7 +193,13 @@ watchEffect(async () => {
       >
         <div class="text-content-tertiary text-p3 mb-4">Curator</div>
         <div
-          v-if="!isGovernorVerified"
+          v-if="isUngoverned"
+          class="text-p2 text-content-primary"
+        >
+          Ungoverned
+        </div>
+        <div
+          v-else-if="!isGovernorVerified"
           class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
         >
           <SvgIcon
@@ -198,18 +213,22 @@ watchEffect(async () => {
           class="flex items-center gap-6"
           :class="{ 'opacity-20': isGovernanceLimited }"
         >
-          <BaseAvatar
-            class="icon--20"
-            :label="entityName"
-            :src="entityLogos"
-          />
-          <span
-            class="text-p2 text-content-primary truncate"
-            data-id="data-point"
-            :data-key="vault.address.toLowerCase()"
-            data-field="curator"
-            :data-value="entityName"
-          >{{ entityName }}</span>
+          <VaultEntityDisclosureTooltip :entities="entities">
+            <span class="inline-flex min-w-0 items-center gap-6">
+              <BaseAvatar
+                class="icon--20"
+                :label="entityName"
+                :src="entityLogos"
+              />
+              <span
+                class="text-p2 text-content-primary truncate"
+                data-id="data-point"
+                :data-key="vault.address.toLowerCase()"
+                data-field="curator"
+                :data-value="entityName"
+              >{{ entityName }}</span>
+            </span>
+          </VaultEntityDisclosureTooltip>
         </div>
         <div
           v-else
@@ -261,7 +280,13 @@ watchEffect(async () => {
         </div>
         <div class="flex gap-8 justify-end items-center text-right flex-1">
           <div
-            v-if="!isGovernorVerified"
+            v-if="isUngoverned"
+            class="text-p2 text-content-primary"
+          >
+            Ungoverned
+          </div>
+          <div
+            v-else-if="!isGovernorVerified"
             class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
           >
             <SvgIcon

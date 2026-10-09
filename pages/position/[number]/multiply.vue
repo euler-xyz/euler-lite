@@ -153,7 +153,9 @@ function createMultiplyIntent(quote?: SwapQuote) {
   })
 }
 
-useOperationGuard(computed(() => [multiplySupplyVault.value?.address, multiplyLongVault.value?.address, multiplyShortVault.value?.address].filter(Boolean)))
+useOperationGuard(computed(() => [multiplySupplyVault.value?.address, multiplyLongVault.value?.address, multiplyShortVault.value?.address].filter(Boolean)), {
+  depositedVaultAddresses: computed(() => [multiplyLongVault.value?.address].filter(Boolean)),
+})
 const positionRoeCollateralVaults = computed(() =>
   resolvePositionRoeCollateralVaults(position.value, multiplyLongVault.value),
 )

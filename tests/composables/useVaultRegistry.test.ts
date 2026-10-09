@@ -1,3 +1,4 @@
+import { __setEulerLabelsDataForTest, useEulerLabels, getEulerLabelsSourceData } from '~/composables/useEulerLabels'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import { getAddress } from 'viem'
@@ -28,6 +29,8 @@ const vault = (asset: string) => ({
 describe('useVaultRegistry chain-scoped identity', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    __setEulerLabelsDataForTest()
+    vi.stubGlobal('useEulerLabels', useEulerLabels)
     vi.stubGlobal('useEulerAddresses', () => ({ chainId }))
     chainId.value = undefined
     useVaultRegistry().clear()
@@ -155,5 +158,81 @@ describe('useVaultRegistry chain-scoped identity', () => {
       asset: { address: ASSET_ONE },
     })
     expect(fetchVaultCategoryMock).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('metadata-only verification uses current governance and membership', () => {
+  beforeEach(() => {
+    vi.stubGlobal('useEulerAddresses', () => ({ chainId }))
+    vi.stubGlobal('useEulerLabels', useEulerLabels)
+    chainId.value = 146
+    useVaultRegistry().clear()
+    __setEulerLabelsDataForTest({ source: 'v3-metadata', sourceFetchedAt: Date.now(), candidateVaultAddresses: [VAULT],
+      managingEntityByVault: { [VAULT.toLowerCase()]: 'manager' },
+      entities: { manager: { name: 'Manager', addresses: { [ASSET_ONE]: 'Governor' } } } as never })
+  })
+  it('rejects mismatches and revokes cached positives when addresses or membership change', () => {
+    const registry = useVaultRegistry()
+    registry.set(VAULT, { ...vault(ASSET_ONE), governorAdmin: ASSET_TWO } as never, 'evk', { verified: true })
+    expect(registry.isVerifiedVault(VAULT)).toBe(false)
+    registry.set(VAULT, { ...vault(ASSET_ONE), governorAdmin: ASSET_ONE } as never, 'evk', { verified: true })
+    expect(registry.isVerifiedVault(VAULT)).toBe(true)
+    const labels = getEulerLabelsSourceData()
+    __setEulerLabelsDataForTest({ ...labels, entities: {} })
+    expect(registry.isVerifiedVault(VAULT)).toBe(false)
+    __setEulerLabelsDataForTest({ ...labels, candidateVaultAddresses: [] })
+    expect(registry.isVerifiedVault(VAULT)).toBe(false)
+    __setEulerLabelsDataForTest({ ...labels, managingEntityByVault: {} })
+    expect(registry.isVerifiedVault(VAULT)).toBe(false)
+  })
+  it('expires hosted verification without expiring independent escrow membership', () => {
+    const registry = useVaultRegistry()
+    registry.set(VAULT, { ...vault(ASSET_ONE), governorAdmin: ASSET_ONE } as never, 'evk')
+    expect(registry.isVerifiedVault(VAULT)).toBe(true)
+    __setEulerLabelsDataForTest({ ...getEulerLabelsSourceData(), sourceFetchedAt: Date.now() - 24 * 60 * 60_000 })
+    expect(registry.isVerifiedVault(VAULT)).toBe(false)
+    registry.setEscrowAddresses([VAULT])
+    expect(registry.isVerifiedVault(VAULT)).toBe(true)
+  })
+  it('requires router governance and keeps independent escrow verification', () => {
+    const registry = useVaultRegistry()
+    registry.set(VAULT, { ...vault(ASSET_ONE), governorAdmin: ASSET_ONE, oracle: { name: 'EulerRouter' } } as never, 'evk')
+    expect(registry.isVerifiedVault(VAULT)).toBe(false)
+    registry.set(VAULT, { ...vault(ASSET_ONE), governorAdmin: ASSET_ONE, oracle: { name: 'EulerRouter' }, eulerRouterGovernor: ASSET_ONE } as never, 'evk')
+    expect(registry.isVerifiedVault(VAULT)).toBe(true)
+    __setEulerLabelsDataForTest({ source: 'v3-metadata' })
+    registry.set(VAULT, { ...vault(ASSET_ONE), isEscrow: true } as never, 'evk', { verified: false })
+    expect(registry.isVerifiedVault(VAULT)).toBe(false)
+    registry.setEscrowAddresses([VAULT])
+    expect(registry.isVerifiedVault(VAULT)).toBe(true)
+  })
+  it('checks Earn owners and rejects an absent manager', () => {
+    const registry = useVaultRegistry()
+    const labels = getEulerLabelsSourceData()
+    __setEulerLabelsDataForTest({ ...labels, candidateVaultAddresses: [], candidateEarnVaultAddresses: [VAULT] })
+    registry.set(VAULT, { ...vault(ASSET_ONE), governance: { owner: ASSET_TWO } } as never, 'earn')
+    expect(registry.isVerifiedVault(VAULT)).toBe(false)
+    registry.set(VAULT, { ...vault(ASSET_ONE), governance: { owner: ASSET_ONE } } as never, 'earn')
+    expect(registry.isVerifiedVault(VAULT)).toBe(true)
+    __setEulerLabelsDataForTest({ ...getEulerLabelsSourceData(), managingEntityByVault: {} })
+    expect(registry.isVerifiedVault(VAULT)).toBe(false)
+  })
+})
+
+describe('V3 verification expiry', () => {
+  it('expires the hosted verdict while preserving independent escrow trust', () => {
+    vi.stubGlobal('useEulerAddresses', () => ({ chainId }))
+    vi.stubGlobal('useEulerLabels', useEulerLabels)
+    chainId.value = 1
+    const registry = useVaultRegistry()
+    registry.clear()
+    __setEulerLabelsDataForTest({ source: 'v3', verifiedVaultAddresses: [VAULT] })
+    registry.set(VAULT, vault(ASSET_ONE) as never, 'evk')
+    expect(registry.isVerifiedVault(VAULT)).toBe(true)
+
+    useEulerLabels().isReady.value = false
+    expect(registry.isVerifiedVault(VAULT)).toBe(false)
+    registry.setEscrowAddresses([VAULT])
+    expect(registry.isVerifiedVault(VAULT)).toBe(true)
   })
 })

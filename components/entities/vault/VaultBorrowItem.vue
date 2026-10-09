@@ -5,16 +5,18 @@ import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { getVaultAvailableLiquidity, getVaultUtilization } from '~/utils/vault-display'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { isVaultGovernanceLimited, isVaultRecentlyAdded, isVaultKeyring, isVaultCyclicalNote, getUniqueEntitiesByVaults } from '~/utils/eulerLabelsUtils'
+import { isVaultGovernanceLimited, isVaultRecentlyAdded, isVaultKeyring, isVaultCyclicalNote, getUniqueEntitiesByVaults, getVaultDeprecation } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { VaultApyModal, VaultMaxRoeModal, VaultNetApyPairModal, UiModalPreviewTrigger } from '#components'
 import { isSecuritizeBorrowPair, type AnyBorrowVaultPair } from '~/types/borrow-pair'
-import { getAddress } from 'viem'
+import { getAddress, zeroAddress } from 'viem'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { areTokenAddressesCorrelatedByTags, getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
+import { getUnknownVaultCause } from '~/utils/vault-assessment/presentation'
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 
-const { pair } = defineProps<{ pair: AnyBorrowVaultPair }>()
+const { pair, assessmentUi = 'badge' } = defineProps<{ pair: AnyBorrowVaultPair, assessmentUi?: 'badge' | 'field' | 'none' }>()
 const { enableEntityBranding } = useDeployConfig()
 const { isVaultGovernorVerified, isSecuritizeGovernorVerified } = useVaults()
 const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
@@ -28,9 +30,14 @@ const isAnyGovernorUnverified = computed(() => {
     : !isVaultGovernorVerified(pair.collateral)
   return borrowUnverified || collateralUnverified
 })
+const isPairUngoverned = computed(() => pair.borrow.governorAdmin?.toLowerCase() === zeroAddress
+  && (isSecuritizeBorrowPair(pair)
+    ? pair.collateral.governor?.toLowerCase() === zeroAddress
+    : pair.collateral.governorAdmin?.toLowerCase() === zeroAddress))
 
+const pairEntities = computed(() => getUniqueEntitiesByVaults([pair.collateral, pair.borrow]))
 const entityDisplay = computed(() => {
-  const all = getUniqueEntitiesByVaults([pair.collateral, pair.borrow])
+  const all = pairEntities.value
   if (all.length === 0) return { name: '', logos: [] }
   const name = all.length === 1
     ? all[0].name
@@ -84,13 +91,8 @@ const isRecentlyAdded = computed(() => isVaultRecentlyAdded(pair.collateral.addr
 const isKeyring = computed(() => isVaultKeyring(pair.collateral.address) || isVaultKeyring(pair.borrow.address))
 const isCyclicalNote = computed(() => isVaultCyclicalNote(pair.borrow.address))
 
-const isAnyDeprecated = computed(() => {
-  const collateralAddr = getAddress(pair.collateral.address)
-  const borrowAddr = getAddress(pair.borrow.address)
-  const collateralDeprecated = collateralProduct.deprecatedVaults?.includes(collateralAddr) ?? false
-  const borrowDeprecated = borrowProduct.deprecatedVaults?.includes(borrowAddr) ?? false
-  return collateralDeprecated || borrowDeprecated
-})
+const isAnyDeprecated = computed(() => getVaultDeprecation(pair.collateral.address).deprecated
+  || getVaultDeprecation(pair.borrow.address).deprecated)
 
 const pairName = computed(() => {
   // Handle escrow collateral specially
@@ -160,6 +162,25 @@ const showMaxRoe = computed(() =>
     getTokenCategoryTags,
   ),
 )
+const { source: labelsSourceKind, isReady: labelsReady, isVaultAssessmentAvailableForChain, visibility: labelsVisibility } = useEulerLabels()
+const checksColumn = (vault: EVault) => {
+  const unverified = !isVerifiedVault(vault.address)
+  const verdict = labelsVisibility.value?.[vault.address.toLowerCase()]
+  return {
+    address: vault.address,
+    chainId: vault.chainId,
+    family: 'evk' as const,
+    symbol: vault.asset.symbol,
+    label: `${vault.asset.symbol} checks`,
+    unverified,
+    cause: unverified ? getUnknownVaultCause(verdict) : null,
+  }
+}
+const checksColumns = computed(() => {
+  if (assessmentUi !== 'field' || labelsSourceKind.value !== 'v3' || !labelsReady.value || !isVaultAssessmentAvailableForChain(pair.borrow.chainId)) return []
+  return isSecuritizeBorrowPair(pair) ? [checksColumn(pair.borrow)] : [checksColumn(pair.borrow), checksColumn(pair.collateral)]
+})
+const pairGridTemplate = computed(() => `140px repeat(${(showMaxRoe.value ? 4 : 3) + checksColumns.value.length}, 112px)`)
 const correlatedBadgeTitle = computed(() => {
   const category = getTokenAddressesCorrelationCategoryLabel(
     [pair.collateral.asset.address, pair.borrow.asset.address],
@@ -290,6 +311,7 @@ const linkPath = computed(() => ({
             <VaultDisplayName
               :name="pairName"
               :is-unverified="isAnyUnverified"
+              :addresses="[pair.collateral.address, pair.borrow.address]"
             />
             <RecentlyAddedBadge
               v-if="isRecentlyAdded"
@@ -306,16 +328,20 @@ const linkPath = computed(() => ({
               v-else-if="isGeoRestricted"
               variant="restricted"
             />
-            <span
-              v-if="isAnyDeprecated"
-              class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-            >
-              <SvgIcon
-                name="warning"
-                class="!w-14 !h-14"
-              />
-              Deprecated
-            </span>
+            <VaultDeprecatedBadge :addresses="[pair.collateral.address, pair.borrow.address]" />
+            <VaultAssessmentWarning
+              :address="pair.collateral.address"
+              :family="isSecuritizeBorrowPair(pair) ? null : 'evk'"
+              :hide-deprecated="isAnyDeprecated"
+              :hide-checks="assessmentUi !== 'badge'"
+              badge-label="Collateral warning"
+            />
+            <VaultAssessmentWarning
+              :address="pair.borrow.address"
+              :hide-deprecated="isAnyDeprecated"
+              :hide-checks="assessmentUi !== 'badge'"
+              badge-label="Borrow warning"
+            />
           </div>
           <div
             class="text-h5 text-content-primary flex flex-wrap items-center gap-8 min-w-0"
@@ -367,6 +393,11 @@ const linkPath = computed(() => ({
             data-field="borrow-apy"
             :data-value="borrowApyWithRewards"
           >
+            <VaultPoints
+              class="mr-4"
+              :vault="pair.borrow"
+              campaign-type="borrow"
+            />
             <UiModalPreviewTrigger
               v-if="hasBorrowApyRewards"
               :component="VaultApyModal"
@@ -451,7 +482,13 @@ const linkPath = computed(() => ({
       >
         <div class="text-content-tertiary text-p3 mb-4">Curator</div>
         <div
-          v-if="isAnyGovernorUnverified"
+          v-if="isPairUngoverned"
+          class="text-p2 text-content-primary"
+        >
+          Ungoverned
+        </div>
+        <div
+          v-else-if="isAnyGovernorUnverified"
           class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
         >
           <SvgIcon
@@ -465,18 +502,22 @@ const linkPath = computed(() => ({
           class="flex items-center gap-6"
           :class="{ 'opacity-20': isAnyGovernanceLimited }"
         >
-          <BaseAvatar
-            class="icon--20"
-            :label="entityDisplay.name"
-            :src="entityDisplay.logos"
-          />
-          <span
-            class="text-p2 text-content-primary truncate"
-            data-id="data-point"
-            :data-key="pairKey"
-            data-field="curator"
-            :data-value="entityDisplay.name"
-          >{{ entityDisplay.name }}</span>
+          <VaultEntityDisclosureTooltip :entities="pairEntities">
+            <span class="inline-flex min-w-0 items-center gap-6">
+              <BaseAvatar
+                class="icon--20"
+                :label="entityDisplay.name"
+                :src="entityDisplay.logos"
+              />
+              <span
+                class="text-p2 text-content-primary truncate"
+                data-id="data-point"
+                :data-key="pairKey"
+                data-field="curator"
+                :data-value="entityDisplay.name"
+              >{{ entityDisplay.name }}</span>
+            </span>
+          </VaultEntityDisclosureTooltip>
         </div>
         <div
           v-else
@@ -485,7 +526,7 @@ const linkPath = computed(() => ({
       </div>
       <div
         class="ml-auto grid justify-end gap-x-20 pr-16 mobile:contents"
-        :class="showMaxRoe ? 'grid-cols-[140px_repeat(4,112px)]' : 'grid-cols-[140px_repeat(3,112px)]'"
+        :style="{ gridTemplateColumns: pairGridTemplate }"
       >
         <div
           class="py-12 pb-12 text-right mobile:!p-0"
@@ -622,8 +663,24 @@ const linkPath = computed(() => ({
             </div>
           </div>
         </div>
+        <VaultAssessmentChecksField
+          v-for="column in checksColumns"
+          :key="column.address"
+          class="py-12 pb-12 items-end text-right mobile:!hidden"
+          :address="column.address"
+          :chain-id="column.chainId"
+          :family="column.family"
+          :label="column.label"
+          :error-tone="column.unverified"
+        />
       </div>
     </div>
+    <VaultAssessmentWarningLines
+      v-if="checksColumns.length"
+      class="col-span-full"
+      :vaults="checksColumns"
+      show-symbol
+    />
 
     <!-- Mobile expanded stats -->
     <div class="hidden mobile:flex mobile:flex-col gap-12 py-12 px-16 pb-16">
@@ -652,7 +709,13 @@ const linkPath = computed(() => ({
         </div>
         <div class="flex gap-8 justify-end items-center text-right flex-1">
           <div
-            v-if="isAnyGovernorUnverified"
+            v-if="isPairUngoverned"
+            class="text-p2 text-content-primary"
+          >
+            Ungoverned
+          </div>
+          <div
+            v-else-if="isAnyGovernorUnverified"
             class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
           >
             <SvgIcon

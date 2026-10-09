@@ -1,25 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, nextTick, ref, type EffectScope } from 'vue'
+import type { AccountFetchOptions } from '@eulerxyz/euler-v2-sdk'
 
 const owner = '0x1000000000000000000000000000000000000000'
 
 const importUseEulerAccount = async () => {
   vi.resetModules()
 
-  const fetchPortfolio = vi.fn(async () => ({
+  const fetchAccount = vi.fn(async (_chainId: number, _owner: string, _options?: AccountFetchOptions) => ({
     errors: [],
     result: {
-      account: { owner },
-      borrows: ['all-borrow'],
-      savings: ['all-saving'],
-      totalSuppliedValueUsd: 100,
-      totalBorrowedValueUsd: 25,
-      netAssetValueUsd: 75,
-      roe: 3,
-      netApy: 2,
+      owner,
     },
   }))
-  const buildPortfolio = vi.fn(() => ({
+  const allPortfolio = {
+    account: { owner },
+    borrows: ['all-borrow'],
+    savings: ['all-saving'],
+    totalSuppliedValueUsd: 100,
+    totalBorrowedValueUsd: 25,
+    netAssetValueUsd: 75,
+    roe: 3,
+    netApy: 2,
+  }
+  const visiblePortfolio = {
     account: { owner },
     borrows: ['visible-borrow'],
     savings: [],
@@ -28,10 +32,13 @@ const importUseEulerAccount = async () => {
     netAssetValueUsd: 30,
     roe: 1,
     netApy: 0.5,
-  }))
+  }
+  const buildPortfolio = vi.fn()
+    .mockReturnValueOnce(allPortfolio)
+    .mockReturnValueOnce(visiblePortfolio)
   const sdk = {
+    accountService: { fetchAccount },
     portfolioService: {
-      fetchPortfolio,
       buildPortfolio,
     },
   }
@@ -77,7 +84,7 @@ const importUseEulerAccount = async () => {
   const module = await import('~/composables/useEulerAccount')
   return {
     ...module,
-    fetchPortfolio,
+    fetchAccount,
     buildPortfolio,
   }
 }
@@ -96,7 +103,7 @@ describe('useEulerAccount', () => {
   })
 
   it('switches show-all locally without refetching the account', async () => {
-    const { useEulerAccount, fetchPortfolio, buildPortfolio } = await importUseEulerAccount()
+    const { useEulerAccount, fetchAccount, buildPortfolio } = await importUseEulerAccount()
 
     let account: ReturnType<typeof useEulerAccount> | undefined
     scope = effectScope()
@@ -104,9 +111,21 @@ describe('useEulerAccount', () => {
       account = useEulerAccount()
     })
 
-    await vi.waitFor(() => expect(fetchPortfolio).toHaveBeenCalledTimes(1))
-    expect(buildPortfolio).toHaveBeenCalledTimes(1)
-    expect(fetchPortfolio.mock.calls[0]).toHaveLength(2)
+    await vi.waitFor(() => expect(fetchAccount).toHaveBeenCalledTimes(1))
+    expect(buildPortfolio).toHaveBeenCalledTimes(2)
+    expect(fetchAccount.mock.calls[0]?.[2]).toMatchObject({
+      populateVaults: true,
+      populateMarketPrices: true,
+      populateUserRewards: true,
+      vaultFetchOptions: {
+        populateMarketPrices: true,
+        populateCollaterals: true,
+        populateRewards: true,
+        populateIntrinsicApy: true,
+      },
+    })
+    expect(fetchAccount.mock.calls[0]?.[2]).not.toHaveProperty('populateAll')
+    expect(fetchAccount.mock.calls[0]?.[2]?.vaultFetchOptions).not.toHaveProperty('populateLabels')
     expect(account?.borrowPositions.value).toEqual(['visible-borrow'])
     expect(account?.depositPositions.value).toEqual([])
     expect(account?.hiddenBorrowCount.value).toBe(0)
@@ -116,8 +135,8 @@ describe('useEulerAccount', () => {
     account!.isShowAllPositions.value = true
     await nextTick()
 
-    expect(fetchPortfolio).toHaveBeenCalledTimes(1)
-    expect(buildPortfolio).toHaveBeenCalledTimes(1)
+    expect(fetchAccount).toHaveBeenCalledTimes(1)
+    expect(buildPortfolio).toHaveBeenCalledTimes(2)
     expect(account?.borrowPositions.value).toEqual(['all-borrow'])
     expect(account?.depositPositions.value).toEqual(['all-saving'])
     expect(account?.totalSuppliedValue.value).toBe(100)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { SecuritizeCollateralVault, EVault, EulerEarn } from '@eulerxyz/euler-v2-sdk'
+import { isEulerEarn, isSecuritizeCollateralVault, type SecuritizeCollateralVault, type EVault, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
@@ -39,16 +39,6 @@ const displayName = computed(() => {
 const pairVaultAddress = computed(() => pairVault ? normalizeAddress(pairVault.address) : '')
 const pairProduct = useEulerProductOfVault(pairVaultAddress)
 
-const isVaultDeprecated = computed(() => {
-  const addr = vaultAddress.value
-  return product.deprecatedVaults?.includes(addr) ?? false
-})
-const isPairVaultDeprecated = computed(() => {
-  if (!pairVault) return false
-  const addr = pairVaultAddress.value
-  return pairProduct.deprecatedVaults?.includes(addr) ?? false
-})
-const isDeprecated = computed(() => isVaultDeprecated.value || isPairVaultDeprecated.value)
 const isRestricted = computed(() => {
   const addresses: string[] = []
   if (vault?.address) addresses.push(vault.address)
@@ -125,36 +115,31 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
           <VaultDisplayName
             :name="pairVault ? displayLabel : displayName"
             :is-unverified="(!!vault && !isVerifiedVault(vault.address)) || !!(pairVault && !isVerifiedVault(pairVault.address))"
+            :addresses="[vault.address, ...(pairVault ? [pairVault.address] : [])]"
           />
         </span>
-        <span
-          v-if="isDeprecated"
-          class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-        >
-          <SvgIcon
-            name="warning"
-            class="!w-14 !h-14"
-          />
-          Deprecated
-        </span>
-        <UiHoverPreviewTooltip
-          v-if="isRestricted"
-          title="Region restricted"
-          text="This vault is not available in your region"
-          placement="top-start"
-        >
-          <span
-            class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-          >
-            <SvgIcon
-              name="warning"
-              class="!w-14 !h-14"
-            />
-            Restricted
-          </span>
-        </UiHoverPreviewTooltip>
+        <VaultDeprecatedBadge :addresses="[vault.address, ...(pairVault ? [pairVault.address] : [])]" />
+        <VaultAssessmentWarning
+          :address="vault.address"
+          :family="isEulerEarn(vault) ? 'earn' : isSecuritizeCollateralVault(vault) ? null : 'evk'"
+          hide-deprecated
+          :badge-label="pairVault ? 'Collateral warning' : undefined"
+        />
+        <VaultAssessmentWarning
+          v-if="pairVault"
+          :address="pairVault.address"
+          hide-deprecated
+          badge-label="Borrow warning"
+        />
+        <RestrictedBadge v-if="isRestricted" />
         <slot />
       </div>
+
+      <VaultVisibilityNotice :address="vault.address" />
+      <VaultVisibilityNotice
+        v-if="pairVault"
+        :address="pairVault.address"
+      />
 
       <p
         class="flex flex-wrap items-center gap-8 font-semibold text-content-primary min-w-0"

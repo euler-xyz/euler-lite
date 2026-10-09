@@ -1,7 +1,8 @@
+import { getPublishedVaultCandidates, type PublicEulerLabelsData } from '~/utils/public-labels'
 /**
  * Per-chain "labels view" shared by /api/public/is-known and
  * /api/public/metadata. It keeps Lite's public API/cache policy in the app,
- * but sources normalized labels and vault entities through the SDK.
+ * and reads normalized label content from the shared Public Labels V3 source.
  */
 import {
   StandardEVaultPerspectives,
@@ -10,6 +11,7 @@ import {
   type EulerLabelEarnVaultEntry,
   type EulerLabelEntity,
   type EulerLabelProduct,
+  type EulerLabelVaultAnnotation,
   type EulerLabelsData,
   type EulerSDK,
   type EVault,
@@ -23,7 +25,8 @@ import { logger } from './logger'
 import { summarizeSdkIssue } from './observability'
 import { getServerSdk } from './sdk-server'
 import { isSdkErrorDiagnostic } from './sdk-diagnostics'
-import type { VerificationLabels } from '~/utils/vault/governor-verification'
+import { getPublicEulerLabelsData } from './public-labels-source'
+import { getHostedEntityKeys, type VerificationLabels } from '~/utils/vault/governor-verification'
 import { resolveEulerRouterGovernors } from '~/utils/vault/euler-router-governance'
 import { resolveEVaultCategory } from '~/utils/vault/escrow-category'
 import { governableGovernorAbi } from '~/abis/oracle'
@@ -66,19 +69,23 @@ interface TokenListEntry {
 }
 
 export interface ProductDescriptor {
-  slug: string
+  slug: string | null
   name: string
   description: string | null
   portfolioNotice: string | null
   deprecationReason: string | null
   governanceLimited: boolean
-  forceUnverified: boolean
   entityKeys: string[]
   vaultOverrides: Record<string, VaultOverride>
 }
 
 export interface LabelsView {
   chainId: number
+  labelsSource?: PublicEulerLabelsData['source']
+  sourceFetchedAt?: number
+  publishedVerifiedAddresses: Set<Address>
+  managingEntityByVault: Record<string, string>
+  logoBaseUrl?: string
   snapshot: ChainVaultsSnapshot
   productByVault: Map<Address, ProductDescriptor>
   deprecatedSet: Set<Address>
@@ -143,7 +150,7 @@ export async function fetchTokenList(chainId: number): Promise<TokenListEntry[]>
   return Array.isArray(data?.tokens) ? data.tokens : []
 }
 
-export function buildProductDescriptors(products: Record<string, ProductEntryFull>): {
+export function buildProductDescriptors(products: Record<string, ProductEntryFull>, annotations: Record<string, EulerLabelVaultAnnotation> = {}): {
   productByVault: Map<Address, ProductDescriptor>
   deprecatedSet: Set<Address>
 } {
@@ -160,13 +167,12 @@ export function buildProductDescriptors(products: Record<string, ProductEntryFul
       }
     }
     const desc: ProductDescriptor = {
-      slug,
+      slug: product.isStandalone ? null : slug,
       name: strOrEmpty(product.name),
       description: strOrNull(product.description),
       portfolioNotice: strOrNull(product.portfolioNotice),
       deprecationReason: strOrNull(product.deprecationReason),
       governanceLimited: hasTag(product.tags, 'governance limited'),
-      forceUnverified: strOrNull(product.deprecationReason)?.toLowerCase().includes('unrecognized entity') === true,
       entityKeys: declaredKeysOf(product.entity),
       vaultOverrides: overrides,
     }
@@ -185,6 +191,22 @@ export function buildProductDescriptors(products: Record<string, ProductEntryFul
         deprecatedSet.add(addr)
       }
     }
+  }
+  for (const [rawAddress, annotation] of Object.entries(annotations)) {
+    const address = tryChecksum(rawAddress)
+    if (!address || productByVault.has(address)) continue
+    if (!annotation.deprecated && !annotation.deprecationReason && !annotation.portfolioNotice && !annotation.tags?.length) continue
+    productByVault.set(address, {
+      slug: null,
+      name: '',
+      description: null,
+      portfolioNotice: strOrNull(annotation.portfolioNotice),
+      deprecationReason: strOrNull(annotation.deprecationReason),
+      governanceLimited: hasTag(annotation.tags, 'governance limited'),
+      entityKeys: [],
+      vaultOverrides: { [address]: annotation },
+    })
+    if (annotation.deprecated) deprecatedSet.add(address)
   }
   return { productByVault, deprecatedSet }
 }
@@ -229,21 +251,19 @@ function withVaultMetadata<T extends object>(
 async function buildSnapshot(
   chainId: number,
   sdk: EulerSDK,
-  labels: EulerLabelsData,
+  labels: PublicEulerLabelsData,
 ): Promise<{ snapshot: ChainVaultsSnapshot, escrowAddresses: Set<Address> }> {
   const escrowAddresses = new Set<Address>(
     uniqueAddresses(await sdk.eVaultService.fetchVerifiedVaultAddresses(chainId, [StandardEVaultPerspectives.ESCROW])),
   )
-  const candidates = uniqueAddresses([
-    ...labels.verifiedVaultAddresses,
-    ...labels.earnVaults,
-  ])
+  const published = getPublishedVaultCandidates(labels)
+  const candidates = uniqueAddresses([...published.vaults, ...published.earn])
 
   const types = candidates.length > 0
     ? await sdk.vaultMetaService.fetchVaultTypes(chainId, candidates)
     : {}
 
-  const earnSet = new Set(uniqueAddresses(labels.earnVaults).map(addr => addr.toLowerCase()))
+  const earnSet = new Set(uniqueAddresses(published.earn).map(addr => addr.toLowerCase()))
   const evkAddresses: Address[] = []
   const securitizeAddresses: Address[] = []
   const earnAddresses: Address[] = []
@@ -344,7 +364,7 @@ async function buildSnapshot(
 async function assembleLabelsView(chainId: number): Promise<LabelsView> {
   const sdk = await getSdk(chainId)
   const [labels, tokens] = await Promise.allSettled([
-    sdk.eulerLabelsService.fetchEulerLabelsData(chainId),
+    getPublicEulerLabelsData(chainId),
     fetchTokenList(chainId),
   ])
 
@@ -354,7 +374,7 @@ async function assembleLabelsView(chainId: number): Promise<LabelsView> {
   }
 
   const { snapshot, escrowAddresses } = await buildSnapshot(chainId, sdk, labels.value)
-  const { productByVault, deprecatedSet } = buildProductDescriptors(labels.value.products as Record<string, ProductEntryFull>)
+  const { productByVault, deprecatedSet } = buildProductDescriptors(labels.value.products as Record<string, ProductEntryFull>, labels.value.vaultAnnotations)
   const { earnByAddr, deprecatedEarnSet } = buildEarnEntryMap(labels.value)
 
   const tokenLogos = tokens.status === 'fulfilled'
@@ -369,6 +389,8 @@ async function assembleLabelsView(chainId: number): Promise<LabelsView> {
 
   const verificationLabels: VerificationLabels = {
     getDeclaredEntityKeys: (addr) => {
+      const hostedKeys = getHostedEntityKeys(labels.value, addr)
+      if (hostedKeys !== undefined) return hostedKeys
       const checksum = tryChecksum(addr)
       if (!checksum) return undefined
       return productByVault.get(checksum)?.entityKeys
@@ -378,6 +400,14 @@ async function assembleLabelsView(chainId: number): Promise<LabelsView> {
 
   return {
     chainId,
+    labelsSource: labels.value.source,
+    sourceFetchedAt: labels.value.sourceFetchedAt,
+    publishedVerifiedAddresses: new Set(uniqueAddresses([
+      ...labels.value.verifiedVaultAddresses,
+      ...labels.value.earnVaults,
+    ])),
+    managingEntityByVault: labels.value.managingEntityByVault ?? {},
+    logoBaseUrl: labels.value.logoBaseUrl,
     snapshot,
     productByVault,
     deprecatedSet,

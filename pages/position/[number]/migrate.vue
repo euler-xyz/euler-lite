@@ -437,7 +437,7 @@ const noTargetsFound = computed(() =>
 const { tosGuard, unverifiedVaultGuard } = useOperationGuard(computed(() => [
   sourceDebtVault.value?.address,
   sourceCollateralVault.value?.address,
-].filter(Boolean)))
+].filter(Boolean)), { acquiresExposure: false })
 
 function continueAfterRequiredAcknowledgments(action: () => Promise<void>) {
   if (tosGuard.isTermsRequired && !tosGuard.tosLoadFailed) {
@@ -457,6 +457,7 @@ function continueAfterRequiredAcknowledgments(action: () => Promise<void>) {
   if (unverifiedVaultGuard.isAcknowledgmentRequired) {
     modal.open(VaultUnverifiedDisclaimerModal, {
       props: {
+        unlistedNotice: unverifiedVaultGuard.unlistedNotice,
         acceptAction: () => {
           unverifiedVaultGuard.acknowledgeRisk()
           void nextTick(() => continueAfterRequiredAcknowledgments(action))

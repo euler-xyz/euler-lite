@@ -5,7 +5,7 @@ import { flip, offset, shift, useFloating } from '@floating-ui/vue'
 import { isOperationBlocked, isOperationBlockerKey, operationBlockerEntries, operationBlockReason } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonVariant } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
-import { AcknowledgeTermsModal, VaultUnverifiedDisclaimerModal } from '#components'
+import { AcknowledgeTermsModal, VaultDeprecatedDepositModal, VaultUnverifiedDisclaimerModal } from '#components'
 import type { KeyringFlowState, CredentialData } from '~/composables/useKeyring'
 import type { TosGuardState } from '~/composables/guards/useTosGuard'
 import type { UnverifiedVaultGuardState } from '~/composables/guards/useUnverifiedVaultGuard'
@@ -56,8 +56,7 @@ const modal = useModal()
 // op to it) first. The "Add to batch" button next to this one stays enabled.
 const isBatchActive = computed(() => entryCount.value > 0)
 // When a batch is queued and the user could otherwise execute directly, the
-// batch state takes over the button area (ahead of the keyring/TOS/unverified
-// gateways, which are all just pre-steps to a direct execute).
+// batch state takes over the button area after vault consent is resolved.
 const batchBlocksDirect = computed(() =>
   isBatchActive.value && hasActiveSession.value && !needToSwitchChain.value,
 )
@@ -164,13 +163,27 @@ const showTosFlow = computed(() =>
 const showUnverifiedVaultFlow = computed(() =>
   !showKeyringFlow.value && !showTosFlow.value && unverifiedVaultGuard?.isAcknowledgmentRequired === true,
 )
+const showDeprecatedDepositFlow = computed(() =>
+  !showKeyringFlow.value && !showTosFlow.value && !showUnverifiedVaultFlow.value
+  && unverifiedVaultGuard?.isDeprecatedDepositAcknowledgmentRequired === true,
+)
 
 const openUnverifiedVaultModal = () => {
   modal.open(VaultUnverifiedDisclaimerModal, {
     props: {
+      unlistedNotice: unverifiedVaultGuard?.unlistedNotice,
       acceptAction: () => {
         unverifiedVaultGuard?.acknowledgeRisk()
       },
+    },
+  })
+}
+
+const openDeprecatedDepositModal = () => {
+  modal.open(VaultDeprecatedDepositModal, {
+    props: {
+      reason: unverifiedVaultGuard?.deprecatedDepositNotice,
+      acceptAction: () => unverifiedVaultGuard?.acknowledgeDeprecatedDeposit(),
     },
   })
 }
@@ -298,6 +311,26 @@ const handleAddToBatch = () => {
           Retry verification
         </UiButton>
       </template>
+      <!-- Vault consent stays reachable with a queued batch; after acceptance,
+           the Add to batch action takes over this button area. -->
+      <template v-else-if="showUnverifiedVaultFlow">
+        <UiButton
+          size="large"
+          variant="red"
+          @click="openUnverifiedVaultModal"
+        >
+          {{ unverifiedVaultGuard?.unlistedNotice ? 'Review listing status' : 'Acknowledge Unverified Vault Risk' }}
+        </UiButton>
+      </template>
+      <template v-else-if="showDeprecatedDepositFlow">
+        <UiButton
+          size="large"
+          variant="red"
+          @click="openDeprecatedDepositModal"
+        >
+          Acknowledge Deprecated Vault
+        </UiButton>
+      </template>
       <template v-else-if="batchBlocksDirect && supportsBatch">
         <UiButton
           size="large"
@@ -359,17 +392,6 @@ const handleAddToBatch = () => {
           @click="openTermsModal"
         >
           Accept Terms Of Use
-        </UiButton>
-      </template>
-
-      <!-- Unverified vault acknowledgment flow -->
-      <template v-else-if="showUnverifiedVaultFlow">
-        <UiButton
-          size="large"
-          variant="red"
-          @click="openUnverifiedVaultModal"
-        >
-          Acknowledge Unverified Vault Risk
         </UiButton>
       </template>
 

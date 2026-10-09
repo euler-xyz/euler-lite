@@ -14,7 +14,6 @@ const GET_ONLY_PATHS = new Set([
   '/v3/earn/vaults',
   '/v3/evk/vaults',
   '/v3/evk/vaults/bad-debt',
-  '/v3/evk/vaults/open-interest',
   '/v3/evk/vaults/open-interest/by-collateral',
   '/v3/liquidations',
   '/v3/oracles/adapter-assessments',
@@ -25,6 +24,7 @@ const GET_ONLY_PATHS = new Set([
 ])
 
 const GET_ONLY_PATH_PATTERNS = [
+  /^\/v3\/(?:evk|earn)\/vaults\/[1-9][0-9]{0,15}\/0x[a-fA-F0-9]{40}\/assessment$/,
   /^\/v3\/accounts\/[^/]+\/positions$/,
   /^\/v3\/activity\/accounts\/0x[a-fA-F0-9]{40}\/events$/,
   /^\/v3\/activity\/vaults\/[1-9][0-9]{0,15}\/0x[a-fA-F0-9]{40}\/events$/,
@@ -182,17 +182,6 @@ export function buildV3ProxyLogFields(requestUrl: URL): Record<string, string> {
     fields.v3VaultKind = parts[1]
     fields.v3ChainId = parts[3]
     fields.v3VaultAddress = parts[4]
-  }
-
-  if (
-    parts.length === 4
-    && parts[0] === 'v3'
-    && parts[1] === 'evk'
-    && parts[2] === 'vaults'
-    && parts[3] === 'open-interest'
-  ) {
-    const vaultAddress = cleanParam(requestUrl.searchParams.get('vault'), ADDRESS_RE)
-    if (vaultAddress != null) fields.v3VaultAddress = vaultAddress
   }
 
   if (parts.length === 2 && parts[0] === 'v3' && parts[1] === 'liquidations') {

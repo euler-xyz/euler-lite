@@ -10,13 +10,14 @@ Certain Euler vaults are configured with a **hook target** contract that interce
 
 ### Detection: Labels
 
-Keyring vaults are flagged via the labels system (`products.json`):
+Keyring vaults are flagged through Public Labels `tags` on the vault. Lite emits
+a product-level tag only when every assigned vault carries the same tag:
 
 ```jsonc
 {
-  "private-market": {
+  "product": {
     "name": "Private Market",
-    "tags": ["keyring"],       // All vaults in this product require keyring
+    "tags": ["keyring"],       // Derived only when every product vault has the tag
     "vaults": ["0x1234..."],
     "vaultOverrides": {
       "0x5678...": {

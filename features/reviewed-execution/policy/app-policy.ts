@@ -5,14 +5,18 @@ import type { OperationIntent } from '../domain/intents'
 import { buildReviewedPolicy, collectPolicyRequirements, type PolicyResultInput } from './engine'
 import {
   hasUnverifiedVaultAcknowledgement,
+  hasDeprecatedDepositAcknowledgement,
+  deprecatedDepositAcknowledgementKey,
   unverifiedVaultAcknowledgementKey,
   type UnverifiedVaultAcknowledgementContext,
 } from './acknowledgements'
-import { getEulerLabelsVersion, useEulerLabels } from '~/composables/useEulerLabels'
+import { getEulerGeoContext, getEulerLabelsVersion, useEulerLabels } from '~/composables/useEulerLabels'
 import { isOperationBlockerKey, operationBlockerEntries } from '~/utils/operationGuardRegistry'
 import { collectPlanningRequirements } from '~/features/reviewed-execution/planning/requirements'
 import { isVaultBlockedByCountry, isVaultRestrictedByCountry, useGeoBlock } from '~/composables/useGeoBlock'
 import type { EulerEarn, EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import { getVaultDeprecation } from '~/utils/eulerLabelsUtils'
+import { depositTargetVaults } from '~/utils/vault-action-targets'
 
 const allowed = (version: string, now: number, expiresAt?: number): PolicyState => ({
   state: 'allowed',
@@ -26,12 +30,17 @@ const addressOfSubject = (subject: string): Address | undefined => {
   return isAddress(value) ? getAddress(value) : undefined
 }
 
+const isExitWithoutAcquisition = (intent: OperationIntent): boolean =>
+  ['withdraw', 'redeem', 'withdraw-and-swap', 'redeem-and-swap', 'repay-from-wallet', 'repay-from-deposit', 'repay-with-swap', 'swap-and-repay', 'cleanup', 'reward-claim', 'reul-unlock'].includes(intent.planner.name)
+  || (intent.planner.name === 'cross-protocol-migration' && intent.planner.args.direction === 'euler-to-external')
+
 /** Resolve handoff policy evidence for the exact reviewed request set. */
 export const resolveAppPolicy = async (
   requestSet: ReviewedRequestSet,
   now = Date.now(),
   intents?: readonly OperationIntent[],
 ): Promise<Readonly<ReviewedPolicy>> => {
+  const onlyExits = Boolean(intents?.length && intents.every(isExitWithoutAcquisition))
   const expiresAt = now + 5 * 60_000
   const { get, getOrFetch, getVault, isVerifiedVault } = useVaultRegistry()
   const { getTokenByAddress } = useTokenList()
@@ -71,7 +80,7 @@ export const resolveAppPolicy = async (
       exactVaults.push({ address, vault: entry.vault as EVault | EulerEarn | SecuritizeCollateralVault, type: entry.type })
     }
 
-    if (requirements.vaults.length && !useEulerLabels().isReady.value) {
+    if (requirements.vaults.length && !useEulerLabels().isReady.value && !onlyExits) {
       throw new Error('Vault verification is unavailable')
     }
 
@@ -85,6 +94,10 @@ export const resolveAppPolicy = async (
       || intent.planner.name.includes('migration')
       || intent.planner.name === 'transfer',
     )
+    const hostedGeo = getEulerGeoContext()
+    if ((hardGeoRequired || softGeoRequired) && hostedGeo && hostedGeo.policies === undefined) {
+      throw new Error('Compliance data unavailable. Please retry.')
+    }
     if ((hardGeoRequired || softGeoRequired) && country.value === undefined) {
       throw new Error('Regional availability is still loading')
     }
@@ -100,6 +113,7 @@ export const resolveAppPolicy = async (
   }
 
   const canonicallyVerified = (entry: NonNullable<typeof exactVaults>[number]) => {
+    if (!useEulerLabels().isReady.value) return false
     const { isVaultGovernorVerified, isSecuritizeGovernorVerified, isEarnVaultOwnerVerified } = useVaults()
     if (entry.type === 'earn') return isEarnVaultOwnerVerified(entry.vault as EulerEarn)
     if (entry.type === 'securitize') return isSecuritizeGovernorVerified(entry.vault as SecuritizeCollateralVault)
@@ -142,18 +156,36 @@ export const resolveAppPolicy = async (
         const acknowledgementKeys = (requiredContexts ?? []).map(unverifiedVaultAcknowledgementKey).sort()
         version = `unverified:${canonicalDigest('unverified-vault-acknowledgements-v1', toCanonicalValue(acknowledgementKeys))}`
       }
+      else if (requirement.concern === 'deprecated-deposit-acknowledgement') {
+        const requiredContexts = intentsByOperation && useEulerLabels().isReady.value
+          ? [...intentsByOperation.entries()]
+              .flatMap(([operation, operationIntents]): UnverifiedVaultAcknowledgementContext[] => operationIntents.map(intent => ({
+                chainId: requestSet.wallet.chainId,
+                account: requestSet.wallet.account,
+                operation,
+                vaults: depositTargetVaults(intent)
+                  .filter(address => getVaultDeprecation(address).deprecated),
+              })))
+              .filter(context => context.vaults.length > 0)
+          : []
+        if (requiredContexts.some(context => !hasDeprecatedDepositAcknowledgement(context))) {
+          throw new Error('Deprecated vault deposit acknowledgement does not cover the execution')
+        }
+        const keys = [...new Set(requiredContexts.map(deprecatedDepositAcknowledgementKey))].sort()
+        version = `deprecated-deposit:${canonicalDigest('deprecated-deposit-acknowledgements-v1', toCanonicalValue(keys))}`
+      }
     }
     else if (requirement.subject.startsWith('vault-or-contract:')) {
       const address = addressOfSubject(requirement.subject)
       if (!address) throw new Error('Vault/contract policy subject is malformed')
       const vault = getVault(address)
-      if ((vault || vaultLabelSubjects.has(address)) && !useEulerLabels().isReady.value) {
+      if ((vault || vaultLabelSubjects.has(address)) && !useEulerLabels().isReady.value && !onlyExits) {
         throw new Error('Vault verification is unavailable')
       }
       if (vault) {
         if (!vault.asset?.address || !vault.type) throw new Error(`Vault metadata is incomplete for ${address}`)
-        if (!labelsVersion) throw new Error('Euler labels policy metadata is unavailable')
-        version = `vault:${vault.type}:${vault.asset.address}:${labelsVersion}`
+        if (!labelsVersion && !onlyExits) throw new Error('Euler labels policy metadata is unavailable')
+        version = `vault:${vault.type}:${vault.asset.address}:${useEulerLabels().isReady.value ? labelsVersion : 'unavailable-exit'}`
       }
       else version = `effect-target:${address}`
     }

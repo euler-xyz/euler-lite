@@ -519,6 +519,7 @@ onMounted(() => {
                 <VaultItem
                   v-if="isEVault(vault)"
                   :vault="vault"
+                  assessment-ui="field"
                 />
                 <SecuritizeVaultItem
                   v-else
@@ -724,6 +725,7 @@ onMounted(() => {
                           <VaultItem
                             v-if="isEVault(vault)"
                             :vault="vault"
+                            assessment-ui="none"
                           />
                           <SecuritizeVaultItem
                             v-else
@@ -741,7 +743,10 @@ onMounted(() => {
                         v-for="pair in getMatrixHeaderBorrowPairs(market)"
                         :key="`header-borrow-${pair.collateral.address}-${pair.borrow.address}`"
                       >
-                        <VaultBorrowItem :pair="pair" />
+                        <VaultBorrowItem
+                          :pair="pair"
+                          assessment-ui="none"
+                        />
                       </template>
                     </div>
                   </template>
@@ -780,6 +785,7 @@ onMounted(() => {
                           <VaultItem
                             v-if="isEVault(lendVault)"
                             :vault="lendVault"
+                            assessment-ui="none"
                           />
                           <SecuritizeVaultItem
                             v-else
@@ -796,7 +802,10 @@ onMounted(() => {
                           <h4 class="text-p3 font-medium text-content-secondary">
                             Borrow
                           </h4>
-                          <VaultBorrowItem :pair="pair" />
+                          <VaultBorrowItem
+                            :pair="pair"
+                            assessment-ui="none"
+                          />
                         </template>
                       </template>
                     </div>
@@ -817,6 +826,7 @@ onMounted(() => {
                         <VaultItem
                           v-if="isEVault(vault)"
                           :vault="vault"
+                          assessment-ui="field"
                         />
                         <SecuritizeVaultItem
                           v-else
@@ -834,7 +844,10 @@ onMounted(() => {
                       v-for="pair in getGraphBorrowPairs(market)"
                       :key="`graph-borrow-${pair.collateral.address}-${pair.borrow.address}`"
                     >
-                      <VaultBorrowItem :pair="pair" />
+                      <VaultBorrowItem
+                        :pair="pair"
+                        assessment-ui="field"
+                      />
                     </template>
 
                     <template v-if="getGraphSelectedVault(market) && !getGraphBorrowPairs(market).length">

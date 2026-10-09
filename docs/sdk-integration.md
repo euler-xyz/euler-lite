@@ -82,7 +82,7 @@ On a cache miss, `buildInstance({ backend, buildQuery })` does:
 
 1. Resolves `rpcUrls` from `useEulerAddresses()`. RPC routes through `/api/internal/rpc/<chainId>`, absolute on the server and relative on the client.
 2. Builds the static config (see below). For `backend === 'fast'` it picks one of `fallbackAdapterConfig` / `onchainAdapterConfig` / `v3AdapterConfig` from `browserVaultSource`; for `backend === 'onchain'` it forces `onchainAdapterConfig`.
-3. Calls `buildEulerSDK({ config, buildQuery, plugins: [createPythPlugin(...), createKeyringPlugin(...), createLiteTosPlugin()], servicesOverrides: { intrinsicApyService } })`. The override wraps V3 intrinsic APY with Lite rows from `/api/internal/proxy/intrinsic-apy-overrides` — see [Intrinsic APY](./intrinsic-apy.md#lite-override-proxy). The server snapshot SDK does not install this wrapper.
+3. Calls `buildEulerSDK({ config, buildQuery, plugins: [createPythPlugin(...), createKeyringPlugin(...), createLiteTosPlugin()], servicesOverrides: { intrinsicApyService, eulerLabelsService } })`. The intrinsic APY override wraps V3 data with Lite rows from `/api/internal/proxy/intrinsic-apy-overrides` — see [Intrinsic APY](./intrinsic-apy.md#lite-override-proxy). The labels override reads `/api/internal/public-labels`, which selects V3 or a configured fork's static labels on the server. SDK label population therefore uses Lite's selected source. The server snapshot SDK does not install the intrinsic APY wrapper.
 4. Wires app-side proxy callbacks via `configureAppProxies` for SDK services that do not natively use the shared V3 base, currently the ABI service. Oracle assessment and router queries use the SDK's native V3 methods and `/api/internal/v3/...` allowlist.
 
 If `buildEulerSDK` rejects, the map entry is cleared so the next caller retries instead of being stuck on a poisoned promise.
@@ -125,7 +125,6 @@ The server-side snapshot builder has its own independent `SERVER_VAULT_CACHE_SOU
 | `eulerInterfacesBranch` | `EULER_SDK_EULER_INTERFACES_BRANCH` (`master`) | Branch selection for the euler-interfaces manifests (browser ABI fetches themselves go through the proxy below) |
 | `deploymentsUrl` | `/api/internal/euler-chains` | Local proxy |
 | ABI fetches (`setQueryABI` in `configureAppProxies`) | `/api/internal/abis/{contract}` | Runtime ABI proxy (`AccountLens`/`VaultLens`/`UtilsLens` allowlist) |
-| `eulerLabelsBaseUrl` | `/api/internal/labels` | Path-shape labels endpoint (see [server-side caching](./server-side-caching.md)) |
 | `rewardsMerklApiUrl` | `/api/internal/proxy/merkl` | Merkl proxy |
 | `rewardsFuulApiUrl` | `/api/internal/proxy/fuul` | Fuul proxy |
 | `rewardsBrevisApiUrl` | `/api/internal/proxy/incentra/sdk/v1/eulerCampaigns` | Incentra/Brevis proxy |

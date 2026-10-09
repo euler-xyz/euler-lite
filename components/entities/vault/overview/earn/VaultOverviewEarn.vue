@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
+import { getEntitiesByEarnVault } from '~/utils/eulerLabelsUtils'
 
 const emits = defineEmits<{
   'vault-click': [address: string]
 }>()
 const { vault } = defineProps<{ vault: EulerEarn, desktopOverview?: boolean }>()
+const entities = computed(() => getEntitiesByEarnVault(vault))
+const { isEarnVaultOwnerVerified } = useVaults()
+const isVerified = computed(() => isEarnVaultOwnerVerified(vault))
 </script>
 
 <template>
@@ -39,6 +43,13 @@ const { vault } = defineProps<{ vault: EulerEarn, desktopOverview?: boolean }>()
       @vault-click="(address: string) => emits('vault-click', address)"
     />
 
+    <VaultOverviewBlockVaultChecks
+      :address="vault.address"
+      :asset="vault.asset"
+      family="earn"
+      :default-open="false"
+    />
+
     <VaultOverviewEarnBlockManagement
       :vault="vault"
       :default-open="false"
@@ -47,6 +58,11 @@ const { vault } = defineProps<{ vault: EulerEarn, desktopOverview?: boolean }>()
     <VaultOverviewEarnBlockAddresses
       :vault="vault"
       :default-open="false"
+    />
+
+    <VaultEntityDisclosures
+      v-if="isVerified"
+      :entities="entities"
     />
   </div>
 </template>

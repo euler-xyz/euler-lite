@@ -145,9 +145,6 @@ export default defineNuxtConfig({
       // Absolute URL to an image used for social share previews (og:image /
       // twitter:image). Empty default so forks don't inherit our branding.
       configSocialImageUrl: '',
-      configLabelsRepo: 'euler-xyz/euler-labels',
-      configLabelsRepoBranch: 'master',
-      configLabelsBaseUrl: '',
       configEulerChainsUrl: '',
       // Feature flags: enabled by default. Set to 'false' to disable.
       configEnableEntityBranding: '',
@@ -305,7 +302,7 @@ export default defineNuxtConfig({
           'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
         },
       },
-      '/api/internal/labels/**': {
+      '/api/internal/public-labels': {
         headers: {
           'CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
           'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',

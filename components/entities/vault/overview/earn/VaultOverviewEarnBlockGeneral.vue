@@ -5,8 +5,7 @@ import { getAddress } from 'viem'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerEntitiesOfEarnVault, useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
-import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
-import { isEarnVaultDeprecated, getEarnVaultDeprecationReason, getEarnVaultDescription } from '~/utils/eulerLabelsUtils'
+import { getEarnVaultDescription } from '~/utils/eulerLabelsUtils'
 import { autoLink } from '~/utils/autoLink'
 
 const { vault, defaultOpen = true } = defineProps<{ vault: EulerEarn, defaultOpen?: boolean }>()
@@ -16,18 +15,9 @@ const { isEarnVaultOwnerVerified } = useVaults()
 const vaultAddress = computed(() => getAddress(vault.address))
 const product = useEulerProductOfVault(vaultAddress)
 const entities = useEulerEntitiesOfEarnVault(vault)
+const isKnownUnlisted = useKnownUnlistedVault(() => vault.address)
 const isOwnerVerified = computed(() => isEarnVaultOwnerVerified(vault))
 const earnDescription = computed(() => getEarnVaultDescription(vault.address))
-
-const isDeprecated = computed(() => {
-  return isEarnVaultDeprecated(vault.address)
-    || (product.deprecatedVaults?.includes(vaultAddress.value) ?? false)
-})
-const deprecationReason = computed(() => {
-  if (!isDeprecated.value) return ''
-  return getEarnVaultDeprecationReason(vault.address) || product.deprecationReason || ''
-})
-const isRestricted = computed(() => isVaultBlockedByCountry(vault.address))
 
 const priceDisplay = ref('-')
 
@@ -51,25 +41,12 @@ const feeDisplay = computed(() => {
     :default-open="defaultOpen"
     content-class="flex flex-col gap-20"
   >
-    <VaultDeprecationBanner
-      v-if="isDeprecated"
-      :reason="deprecationReason"
+    <VaultDeprecationBanner :addresses="[vault.address]" />
+    <VaultPublicNotice
+      :addresses="[vault.address]"
+      family="earn"
     />
-    <div
-      v-if="isRestricted"
-      class="w-full rounded-12 p-16 bg-warning-100 text-warning-500"
-    >
-      <div class="flex items-center gap-8">
-        <SvgIcon
-          name="warning"
-          class="!w-20 !h-20 flex-shrink-0"
-        />
-        <p class="text-p3 text-warning-500">
-          This vault is not available in your region.
-        </p>
-      </div>
-    </div>
-    <!-- eslint-disable vue/no-v-html -- trusted label content -->
+    <!-- eslint-disable vue/no-v-html -- autoLink escapes label text before adding links -->
     <p
       v-if="earnDescription"
       class="text-p2 text-content-secondary auto-link"
@@ -121,21 +98,30 @@ const feeDisplay = computed(() => {
           </div>
         </div>
         <VaultTypeChip
-          v-else
+          v-else-if="!isKnownUnlisted"
           :vault="vault"
           type="unknown"
           nudge
           class="w-fit"
         />
+        <span
+          v-else
+          class="text-p2 text-content-tertiary"
+        >-</span>
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue
         v-if="enableVaultTypeDisplay"
         label="Vault type"
       >
         <VaultTypeBadges
+          v-if="!isKnownUnlisted"
           :vault="vault"
           nudge
         />
+        <span
+          v-else
+          class="text-p2 text-content-tertiary"
+        >-</span>
       </VaultOverviewLabelValue>
     </div>
   </VaultOverviewAccordionSection>

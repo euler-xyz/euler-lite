@@ -1,19 +1,12 @@
 <script setup lang="ts">
-import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
+import { getEulerLabelPointLogo } from '~/entities/euler/labels'
 
 defineEmits(['close'])
-const { pointName, pointLogo } = defineProps<{
+const { pointName, pointLogo, campaignType = 'deposit' } = defineProps<{
   pointName: string
   pointLogo: string
+  campaignType?: 'deposit' | 'borrow'
 }>()
-
-const onLogoError = (event: Event) => {
-  const img = event.target as HTMLImageElement
-  if (!img.dataset.triedFallback) {
-    img.dataset.triedFallback = 'true'
-    img.src = getEulerLabelEntityLogo(pointLogo)
-  }
-}
 
 const escapeHtml = (unsafe: string): string => {
   return unsafe
@@ -67,15 +60,13 @@ const formattedPointName = computed(() => convertMarkdownLinks(pointName))
     @close="$emit('close')"
   >
     <div class="flex items-center gap-12">
-      <span class="text-p2">Supply earns</span>
-      <img
-        :src="`/entities/${pointLogo}`"
-        alt="Point logo"
-        referrerpolicy="no-referrer"
-        class="w-20 h-20 rounded-full"
-        @error="onLogoError"
-      >
-      <!-- eslint-disable vue/no-v-html -- trusted label content -->
+      <span class="text-p2">{{ campaignType === 'borrow' ? 'Borrowing earns' : 'Supply earns' }}</span>
+      <BaseAvatar
+        :src="getEulerLabelPointLogo(pointLogo)"
+        :label="pointName"
+        class="icon--20 rounded-full"
+      />
+      <!-- eslint-disable vue/no-v-html -- formattedPointName escapes campaign text before adding links -->
       <span
         class="text-p2"
         v-html="formattedPointName"

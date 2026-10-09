@@ -53,6 +53,12 @@ const assessment = (address = KNOWN_ADAPTER) => ({
     outcome: 'unknown',
     severity: 'medium',
     description: 'Quote result is inconclusive',
+  }, {
+    key: 'quote-price-consistency',
+    outcome: 'fail',
+    severity: 'high',
+    description: 'Fixed rate by design',
+    exempted: true,
   }],
   summary: { passed: 0, failed: 0, unknown: 1, notApplicable: 0 },
   policyId: 'oracle-adapter-policy',
@@ -88,6 +94,7 @@ describe('useEulerOracleAdapters', () => {
       policyVersion: 3,
     })
     expect(known?.checks[0]?.outcome).toBe('unknown')
+    expect(known?.checks[1]?.exempted).toBe(true)
 
     const refreshed = await loadOracleAdapter(1, KNOWN_ADAPTER)
     expect(refreshed).toMatchObject({ checksStatus: 'negative', policyVersion: 4 })
