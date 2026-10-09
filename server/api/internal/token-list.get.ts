@@ -1,5 +1,7 @@
 import { createError, getQuery, setResponseHeader } from 'h3'
+import { isAddress, zeroAddress, type Address } from 'viem'
 import { createRateLimiter } from '~/server/utils/rate-limit'
+import { getServerSdk } from '~/server/utils/sdk-server'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { createInFlightDedup } from '~/server/utils/in-flight'
@@ -323,6 +325,57 @@ const mergeSources = (
   )
 }
 
+// Read once per token per server process. null: no contract or no decimals(), so the token is dropped.
+const onchainDecimals = new Map<string, number | null>()
+
+const decimalsKey = (chainId: number, address: string) => `${chainId}:${address.toLowerCase()}`
+
+// Matched by name because the SDK bundles its own viem. RawContractError marks a failed call inside a
+// successful multicall; RPC failures (often -32603, which viem also reports as a revert) never carry it.
+const isMissingDecimals = (err: unknown): boolean => {
+  for (let e: unknown = err; e instanceof Error; e = e.cause) {
+    if (e.name === 'RawContractError' || e.name === 'ContractFunctionZeroDataError') return true
+  }
+  return false
+}
+
+async function readMissingDecimals(chainId: number, tokens: TokenEntry[]): Promise<void> {
+  const missing = tokens.filter(t => t.address !== zeroAddress && !onchainDecimals.has(decimalsKey(chainId, t.address)))
+  if (!missing.length) return
+  try {
+    const { tokenlistService } = await getServerSdk(chainId)
+    const resolveDecimals = tokenlistService.resolveTokenDecimals?.bind(tokenlistService)
+    if (!resolveDecimals) throw new Error('SDK token decimals resolver unavailable')
+    await Promise.all(missing.map(async (token) => {
+      const key = decimalsKey(chainId, token.address)
+      try {
+        onchainDecimals.set(key, await resolveDecimals(chainId, token.address as Address))
+      }
+      catch (err: unknown) {
+        if (isMissingDecimals(err)) onchainDecimals.set(key, null)
+      }
+    }))
+    const unread = missing.filter(t => !onchainDecimals.has(decimalsKey(chainId, t.address))).length
+    reportStatus('token-list', `decimals:${chainId}`, unread ? 'unread' : 'ok',
+      unread ? `${unread} token decimals unread for chain ${chainId}, retrying on the next build` : undefined)
+  }
+  catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    reportStatus('token-list', `decimals:${chainId}`, `failed:${msg}`,
+      `Token decimals read failed for chain ${chainId}: ${msg}`)
+  }
+}
+
+async function applyOnchainDecimals(chainId: number, tokens: TokenEntry[]): Promise<TokenEntry[]> {
+  const chainTokens = tokens.filter(t => t.chainId === chainId && isAddress(t.address))
+  await readMissingDecimals(chainId, chainTokens)
+  return chainTokens.flatMap((token) => {
+    const decimals = onchainDecimals.get(decimalsKey(chainId, token.address))
+    if (decimals === null) return []
+    return decimals === undefined ? [token] : [{ ...token, decimals }]
+  })
+}
+
 const buildMergedTokens = async (chainId: number): Promise<TokenEntry[]> => {
   // Fetch all four sources concurrently. Each fetcher has its own cache,
   // in-flight dedup, and stale-fallback (via allSettled so one failure
@@ -334,7 +387,7 @@ const buildMergedTokens = async (chainId: number): Promise<TokenEntry[]> => {
     fetchDefillama(chainId),
     fetchMerkl(chainId),
   ])
-  return mergeSources(eulerResult, uniswapResult, defillamaResult, merklResult)
+  return applyOnchainDecimals(chainId, mergeSources(eulerResult, uniswapResult, defillamaResult, merklResult))
 }
 
 /**
@@ -356,7 +409,7 @@ export function refreshTokenList(chainId: number): Promise<TokenEntry[]> {
       refreshDefillama(chainId),
       refreshMerkl(chainId),
     ])
-    const merged = mergeSources(results[0], results[1], results[2], results[3])
+    const merged = await applyOnchainDecimals(chainId, mergeSources(results[0], results[1], results[2], results[3]))
     if (merged.length > 0) mergedCache.set(key, merged)
     return merged
   })

@@ -19,6 +19,9 @@ Server (server/api/internal/token-list.get.ts)
   v
 Merge with deduplicateTokens()
 Priority: Euler SDK > DefiLlama > Uniswap > Merkl reward-tokens
+  |
+  v
+Keep the requested chain, read decimals() once per token per server process
 ```
 
 ## Server Endpoint
@@ -38,7 +41,9 @@ All four sources run concurrently via `Promise.allSettled`. Each fetcher has its
 
 **Startup warming**: `server/plugins/warm-cache.ts` calls `refreshTokenList(chainId)` directly every 5 minutes for each enabled chain. The direct refresh bypasses the handler's fresh-cache short-circuit and always fetches all four sources + rebuilds the merged cache, so the entry is rewritten while the previous one is still serving live traffic. User requests arriving during a refresh continue to read the still-fresh previous entry from `mergedCache`. Warming runs fire-and-forget (Nitro's node-server preset doesn't await plugin promises), so caches are typically hot within ~5 s of boot; users arriving before that pay the usual cold-upstream latency.
 
-**Deduplication**: tokens are merged with the Euler SDK token list taking priority. If the same `chainId:address` appears in multiple sources, the higher-priority entry wins. This ensures Euler metadata (name, symbol, decimals, logo URL) takes precedence over supplemental sources.
+**Deduplication**: tokens are merged with the Euler SDK token list taking priority. If the same `chainId:address` appears in multiple sources, the higher-priority entry wins. This ensures Euler metadata (name, symbol, logo URL) takes precedence over supplemental sources.
+
+**Decimals**: the response holds only the requested chain's tokens, and each token's decimals come from its contract through the server SDK (`tokenlistService.resolveTokenDecimals`). A token is read once per server process. Tokens with no contract or no `decimals()` are left out, and tokens whose read failed keep their list decimals until a later build reads them. The native currency entry at the zero address is not read.
 
 **Error contract**:
 
