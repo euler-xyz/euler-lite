@@ -1158,6 +1158,18 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     formSnapshot: BorrowFormSnapshot = captureBorrowFormSnapshot(),
   ): BorrowBatchSnapshot => ({ subAccount, ...formSnapshot })
 
+  // The review decodes the collateral deposit with this asset's decimals, so it must
+  // be the verified wallet token whenever that token is what the plan signs with.
+  // Savings collateral and any other pay-with token keep the vault asset's units.
+  const reviewSupplyingAsset = (
+    snapshot: Pick<BorrowBatchSnapshot, 'isSavingCollateral' | 'selectedAsset' | 'collateralVault'>,
+  ): VaultAsset =>
+    !snapshot.isSavingCollateral
+    && snapshot.selectedAsset
+    && snapshot.selectedAsset.address.toLowerCase() === snapshot.collateralVault.asset.address.toLowerCase()
+      ? snapshot.selectedAsset
+      : snapshot.collateralVault.asset
+
   const submit = async () => {
     if (!isSavingCollateral.value && spending.isBlocked.value) return
     if (isOperationBlocked.value) return
@@ -1241,7 +1253,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
           type: 'borrow',
           asset: snapshot.borrowVault.asset,
           amount: snapshot.borrowAmount,
-          supplyingAssetForBorrow: snapshot.collateralVault.asset,
+          supplyingAssetForBorrow: reviewSupplyingAsset(snapshot),
           supplyingAmount: snapshot.collateralAmount,
           subAccount: snapshot.subAccount,
           sourceSubAccount: snapshot.isSavingCollateral ? snapshot.savingCollateral?.subAccount : undefined,
@@ -1510,6 +1522,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     submit,
     buildBorrowPlan, // Batch
     captureBorrowSnapshot,
+    reviewSupplyingAsset,
     createBorrowIntent,
     updateEstimates: () => {
       updateSyncEstimates()
