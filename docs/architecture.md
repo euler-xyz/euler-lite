@@ -390,7 +390,7 @@ The Nuxt server layer (`server/api/`) proxies requests to external services (RPC
 | Batch | Max 100 items; empty batches are `400`. |
 | Method | Not in the allowlist → `403 Method not allowed`. |
 | Upstream | 30 s timeout → `504`; fetch failure → `502`. Response body is the upstream text. |
-| Rate limit | 10,000 units / 60 s; a batch of N costs N. |
+| Rate limit | 10,000 units / 60 s; each HTTP request costs 1, including a batch of up to 100 JSON-RPC items. |
 
 **Public-RPC fallback can mask a 403.** `plugins/00.wagmi.ts` builds a viem `fallback` of `[/api/internal/rpc/{chainId}, ...network.rpcUrls.default.http]` with `retryCount: 0`. If the proxy rejects a method, the public URL may still succeed, so a missing allowlist entry can look fine in the browser while the proxy log shows `method-not-allowed`. Add the method to `ALLOWED_METHODS` (only if it is a read/simulation call) rather than relying on the fallback. Both legs use `{ batchSize: 100, wait: 100 }`.
 
@@ -398,7 +398,7 @@ The Nuxt server layer (`server/api/`) proxies requests to external services (RPC
 
 The app includes a built-in per-IP rate limiter as a defense-in-depth measure. Default budgets per 60-second window:
 
-- **RPC proxy**: 10,000 units (batch of N costs N)
+- **RPC proxy**: 10,000 units (one unit per HTTP request, including batches)
 - **All other proxies**: 1,000 requests (token list, Pyth updates, labels, euler chains, intrinsic APY, TOS, V3)
 - **Tenderly simulate**: 10 requests
 - **Address screening**: 10 requests
