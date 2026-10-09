@@ -249,8 +249,10 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       if (borrowedFixed.value.lt(amountFixed.value)) {
         throw new Error('Repay amount exceeds outstanding debt')
       }
-      // Use on-chain LTV to derive total collateral value (multi-collateral aware)
-      const totalValue = getTotalCollateralValue(position.value!)
+      // Use on-chain LTV to derive total collateral value (multi-collateral aware).
+      // Read the debt in the same verified units as borrowedFixed / amountFixed so
+      // the projected LTV ratio stays unit-consistent when cached share decimals are stale.
+      const totalValue = getTotalCollateralValue(position.value!, verifiedAsset.value.decimals)
       const collateralValueFl = totalValue !== null
         ? totalValue
         : suppliedFixed.value.mul(priceFixed.value).toUnsafeFloat()

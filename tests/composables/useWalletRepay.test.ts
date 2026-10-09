@@ -2,6 +2,7 @@ import { computed, ref, shallowRef, watch, watchEffect } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Account, EVault, IHasVaultAddress, PortfolioBorrowPosition, TransactionPlan, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { useWalletRepay } from '~/composables/repay/useWalletRepay'
+import { getTotalCollateralValue } from '~/utils/position-estimates'
 
 const { USER, borrowVault, collateralVault, planAccount, getCollateralApySnapshot, getNetAPYFromWeightedSupplySnapshot, getAssetUsdValueForEstimate } = vi.hoisted(() => {
   const USER = '0x0000000000000000000000000000000000000001' as `0x${string}`
@@ -120,6 +121,50 @@ describe('useWalletRepay projected Net APY', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
+  })
+
+  it.each([17, 6])('projects LTV in verified %i-decimal debt units when cached share decimals are 18', async (decimals) => {
+    // The real helper normalizes position.borrowed; the default mock hides any unit mismatch.
+    const actual = await vi.importActual<typeof import('~/utils/position-estimates')>('~/utils/position-estimates')
+    vi.mocked(getTotalCollateralValue).mockImplementation(actual.getTotalCollateralValue)
+    try {
+      const unit = 10n ** BigInt(decimals)
+      const verifiedAsset = { ...borrowVault.asset, decimals }
+      const repay = useWalletRepay({
+        position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>({
+          ...position,
+          borrowed: 2_000n * unit,
+          userLTV: 2n * 10n ** 17n,
+        } as PortfolioBorrowPosition<VaultEntity>),
+        borrowVault: computed(() => borrowVault),
+        spendingAsset: computed(() => verifiedAsset),
+        collateralVault: computed(() => collateralVault),
+        formTab: ref('wallet'),
+        walletBalance: ref(1_000n * unit),
+        plan: ref(null),
+        isSubmitting: ref(false),
+        isPreparing: ref(false),
+        clearSimulationError: vi.fn(),
+        runSimulation: vi.fn(async () => true),
+        netAPY: ref(1),
+        collateralSupplyApy: computed(() => 5),
+        borrowApy: computed(() => 5),
+        collateralSupplyRewardApy: computed(() => 0),
+        borrowRewardApy: computed(() => 0),
+        oraclePriceRatio: computed(() => 1),
+      })
+
+      repay.amount.value = '500'
+      await vi.waitFor(() => expect(repay.projectedYieldDetails.value).not.toBeNull())
+      expect(repay.estimatesError.value).toBe('')
+      expect(getTotalCollateralValue).toHaveBeenLastCalledWith(expect.anything(), decimals)
+      // 2,000 debt at 20% LTV → 10,000 collateral; repaying 500 leaves 1,500 → 15%.
+      expect(Number(repay.estimateUserLTV.value) / 1e18).toBeCloseTo(15, 6)
+      expect(repay.isSubmitDisabled.value).toBe(false)
+    }
+    finally {
+      vi.mocked(getTotalCollateralValue).mockImplementation(() => 10_000)
+    }
   })
 
   it('uses verified decimals for direct repay amount, Max, and plan input', async () => {

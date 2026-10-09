@@ -7,11 +7,18 @@ import { nanoToValue } from '~/utils/crypto-utils'
  * on-chain userLTV and borrowed amount. This accounts for ALL collaterals, not
  * just the primary one.
  *
+ * `borrowedDecimals` sets the units `position.borrowed` is read in. Callers that
+ * compare the result against amounts built from verified on-chain decimals must
+ * pass those same decimals, otherwise the ratio is off by the decimal gap when the
+ * cached share metadata is stale. Defaults to the borrow vault's share decimals.
+ *
  * Returns null if the position has no borrow or LTV is zero.
  */
-export function getTotalCollateralValue(position: PortfolioBorrowPosition<VaultEntity>): number | null {
-  const borrowVault = position.borrowVault
-  const borrowed = nanoToValue(position.borrowed, borrowVault?.shares.decimals || 18)
+export function getTotalCollateralValue(
+  position: PortfolioBorrowPosition<VaultEntity>,
+  borrowedDecimals: number | bigint = position.borrowVault?.shares.decimals || 18,
+): number | null {
+  const borrowed = nanoToValue(position.borrowed, Number(borrowedDecimals))
   const userLtvValue = position.userLTV ?? position.currentLTV
   if (userLtvValue === undefined) return null
   const userLtv = nanoToValue(userLtvValue, 18)
