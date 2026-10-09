@@ -36,7 +36,7 @@ export function sortSelectableTokens<T extends SelectableToken>(options: T[]): T
 }
 
 // Narrows the list for the picker:
-// - any mode + search: match symbol / name / address.
+// - any mode + search: match symbol / name / address, with stronger matches first.
 // - input ("Pay with") + no search: only tokens the user holds.
 // - output ("Receive as") + no search: the full list, unchanged — relevant
 //   tokens are bubbled to the top by sortSelectableTokens, nothing is hidden.
@@ -47,11 +47,22 @@ export function filterSelectableTokens<T extends SelectableToken>(
 ): T[] {
   const query = searchQuery.trim().toLowerCase()
   if (query) {
-    return options.filter(opt =>
-      opt.asset.symbol.toLowerCase().includes(query)
-      || opt.asset.name.toLowerCase().includes(query)
-      || opt.asset.address.toLowerCase().includes(query),
-    )
+    const matchRank = (opt: T): number => {
+      const symbol = opt.asset.symbol.toLowerCase()
+      const name = opt.asset.name.toLowerCase()
+      const address = opt.asset.address.toLowerCase()
+      if (symbol === query || address === query) return 0
+      if (symbol.startsWith(query)) return 1
+      if (name === query) return 2
+      if (name.startsWith(query)) return 3
+      if (symbol.includes(query) || name.includes(query) || address.includes(query)) return 4
+      return 5
+    }
+    return options
+      .map((option, index) => ({ option, index, rank: matchRank(option) }))
+      .filter(({ rank }) => rank < 5)
+      .sort((a, b) => a.rank - b.rank || a.index - b.index)
+      .map(({ option }) => option)
   }
   if (mode === 'input') {
     return options.filter(opt => opt.balance > 0n)

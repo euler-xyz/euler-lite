@@ -26,10 +26,12 @@ import {
   type ProjectedYieldDetails,
 } from '~/utils/projected-yield'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
+import type { VaultAsset } from '~/types/asset'
 
 interface UseWalletRepayOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
   borrowVault: ComputedRef<EVault | undefined>
+  spendingAsset: ComputedRef<VaultAsset | undefined>
   collateralVault: ComputedRef<EVault | SecuritizeCollateralVault | undefined>
   formTab: Ref<string>
   walletBalance: Ref<bigint>
@@ -50,6 +52,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   const {
     position,
     borrowVault,
+    spendingAsset,
     collateralVault,
     formTab,
     walletBalance,
@@ -95,12 +98,19 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   const estimateHealth = computed(() => hasEstimate.value ? _estimateHealth.value : (position.value ? position.value.healthFactor ?? 0n : 0n))
   const estimatesError = ref('')
   const isEstimatesLoading = ref(false)
+  const verifiedAsset = computed(() => {
+    const selected = spendingAsset.value
+    const liability = borrowVault.value?.asset
+    return selected && liability && selected.address.toLowerCase() === liability.address.toLowerCase()
+      ? selected
+      : undefined
+  })
 
   const amountFixed = computed(() => FixedPoint.fromValue(
-    valueToNano(amount.value || '0', borrowVault.value?.asset.decimals),
-    Number(borrowVault.value?.asset.decimals),
+    valueToNano(amount.value || '0', verifiedAsset.value?.decimals ?? 18),
+    verifiedAsset.value?.decimals ?? 18,
   ))
-  const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, borrowVault.value?.shares.decimals || 18))
+  const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, verifiedAsset.value?.decimals ?? borrowVault.value?.shares.decimals ?? 18))
   const suppliedFixed = computed(() => FixedPoint.fromValue(position.value?.supplied || 0n, collateralVault.value?.shares.decimals || 18))
   const priceFixed = computed(() => {
     const ratio = oraclePriceRatio.value
@@ -129,8 +139,8 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   const walletRepayPlannedOps = computed<PlannedOp[]>(() => {
     const steps: PlannedOp[] = []
     if (borrowVault.value) steps.push({ vault: borrowVault.value, op: OP_REPAY })
-    const amountNano = borrowVault.value
-      ? valueToNano(amount.value || '0', borrowVault.value.asset.decimals)
+    const amountNano = verifiedAsset.value
+      ? valueToNano(amount.value || '0', verifiedAsset.value.decimals)
       : 0n
     const currentDebt = position.value?.borrowed ?? 0n
     // Treat as full repay if the amount meets or exceeds the snapshot debt, or if
@@ -158,18 +168,21 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
 
   const isSubmitDisabled = computed(() => {
     if (!isConnected.value && !isSpyMode.value) return true
+    if (!verifiedAsset.value) return true
     if (findBlockingDisabledOp(walletRepayPlannedOps.value)) return true
     return !(+amount.value) || !!estimatesError.value || isEstimatesLoading.value
   })
 
   const submit = async () => {
-    if (isPreparing.value || isSubmitting.value || !position.value || !borrowVault.value || !collateralVault.value) {
+    if (isPreparing.value || isSubmitting.value || !position.value || !borrowVault.value || !collateralVault.value || !verifiedAsset.value) {
       return
     }
 
     isPreparing.value = true
     try {
-      const amountNano = valueToNano(amount.value || '0', borrowVault.value.asset.decimals)
+      const directAsset = verifiedAsset.value
+      if (!directAsset) return
+      const amountNano = valueToNano(amount.value || '0', directAsset.decimals)
       const currentDebt = position.value.borrowed || 0n
       const shouldFullRepay = amountNano >= currentDebt || walletRepayPercent.value >= 100
       const args = {
@@ -190,7 +203,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
         presentationKind: 'repay',
         review: {
           type: 'repay',
-          asset: borrowVault.value.asset,
+          asset: directAsset,
           amount: amount.value,
           subAccount: args.receiver,
           hasBorrows: currentDebt > 0n,
@@ -228,9 +241,9 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     clearSimulationError()
     estimatesError.value = ''
     hasEstimate.value = false
-    if (!position.value || !collateralVault.value || !borrowVault.value || !(+amount.value > 0)) return false
+    if (!position.value || !collateralVault.value || !borrowVault.value || !verifiedAsset.value || !(+amount.value > 0)) return false
     try {
-      if (walletBalance.value < valueToNano(amount.value, borrowVault.value.shares.decimals)) {
+      if (walletBalance.value < valueToNano(amount.value, verifiedAsset.value.decimals)) {
         throw new Error('Not enough balance')
       }
       if (borrowedFixed.value.lt(amountFixed.value)) {
@@ -279,15 +292,16 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     const currentPosition = position.value
     const currentCollateralVault = collateralVault.value
     const currentBorrowVault = borrowVault.value
+    const currentVerifiedAsset = verifiedAsset.value
     const currentBorrowApy = borrowApy.value
     _estimateNetAPY.value = null
     projectedYieldDetails.value = null
-    if (!currentPosition || !currentCollateralVault || !currentBorrowVault) {
+    if (!currentPosition || !currentCollateralVault || !currentBorrowVault || !currentVerifiedAsset) {
       isEstimatesLoading.value = false
       return
     }
     try {
-      const repayNano = valueToNano(amount.value, currentBorrowVault.shares.decimals)
+      const repayNano = valueToNano(amount.value, currentVerifiedAsset.decimals)
       const remainingBorrow = (currentPosition.borrowed || 0n) - repayNano
 
       const [currentCollateralSnapshot, nextCollateralSnapshot, currentBorrowUsd, borrowUsd] = await Promise.all([
@@ -298,8 +312,8 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
             borrowsDelta: -repayNano,
           },
         }),
-        getAssetUsdValueForEstimate(currentPosition.borrowed || 0n, currentBorrowVault, 'off-chain'),
-        getAssetUsdValueForEstimate(remainingBorrow > 0n ? remainingBorrow : 0n, currentBorrowVault, 'off-chain'),
+        getAssetUsdValueForEstimate(currentPosition.borrowed || 0n, currentBorrowVault, 'off-chain', currentVerifiedAsset.decimals),
+        getAssetUsdValueForEstimate(remainingBorrow > 0n ? remainingBorrow : 0n, currentBorrowVault, 'off-chain', currentVerifiedAsset.decimals),
       ])
 
       if (asyncEstimatesGuard.isStale(gen)) return
@@ -432,7 +446,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
 
   const onWalletRepayPercentInput = () => {
     clearSimulationError()
-    if (!borrowVault.value || !position.value) {
+    if (!verifiedAsset.value || !position.value) {
       amount.value = ''
       walletRepayPercent.value = 0
       return
@@ -443,7 +457,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       return
     }
     const amountNano = percentToAmountNano(walletRepayPercent.value, currentDebt)
-    amount.value = trimTrailingZeros(formatUnits(amountNano, Number(borrowVault.value.asset.decimals)))
+    amount.value = trimTrailingZeros(formatUnits(amountNano, Number(verifiedAsset.value.decimals)))
   }
 
   // Max on source input: clamp to current debt so clicking Max on wallet
@@ -451,10 +465,10 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   // `amount` syncs walletRepayPercent and triggers estimates.
   const onSourceMax = () => {
     clearSimulationError()
-    if (!borrowVault.value || !position.value) return
+    if (!verifiedAsset.value || !position.value) return
     const currentDebt = position.value.borrowed || 0n
     const cap = walletBalance.value < currentDebt ? walletBalance.value : currentDebt
-    amount.value = trimTrailingZeros(formatUnits(cap, Number(borrowVault.value.asset.decimals)))
+    amount.value = trimTrailingZeros(formatUnits(cap, Number(verifiedAsset.value.decimals)))
   }
 
   // Watch amount changes: sync percent slider + trigger estimates
@@ -465,12 +479,12 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     clearSimulationError()
     if (formTab.value !== 'wallet') return
 
-    if (position.value && borrowVault.value) {
+    if (position.value && verifiedAsset.value) {
       const currentDebt = position.value.borrowed || 0n
       if (currentDebt > 0n) {
         let amountNano: bigint
         try {
-          amountNano = valueToNano(amount.value || '0', borrowVault.value.asset.decimals)
+          amountNano = valueToNano(amount.value || '0', verifiedAsset.value.decimals)
         }
         catch {
           amountNano = 0n
@@ -497,6 +511,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   watch([
     position,
     borrowVault,
+    verifiedAsset,
     collateralVault,
     borrowApy,
     () => position.value?.borrowed,
@@ -534,6 +549,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
   }
 
   return {
+    verifiedAsset,
     amount,
     walletRepayPercent,
     estimateNetAPY,

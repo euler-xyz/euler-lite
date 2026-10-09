@@ -2,6 +2,8 @@ import { getPositionMultiplier } from '~/utils/vault/apy'
 import { isEVault, SwapperMode, type EVault, type SecuritizeCollateralVault, type PortfolioBorrowPosition, type SwapQuote, type VaultEntity, type TransactionPlan, type SimulationStateOverrideOptions } from '@eulerxyz/euler-v2-sdk'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import type { VaultAsset } from '~/types/asset'
+import { useVerifiedSpendingAsset } from '~/composables/useVerifiedSpendingAsset'
+import { assertSpendingQuoteAsset } from '~/utils/spending-quote'
 import { getAssetUsdValueForEstimate, getTokenUsdValue } from '~/utils/sdk-prices'
 import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
 import { valueToNano } from '~/utils/crypto-utils'
@@ -106,7 +108,20 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 
   // --- State ---
-  const selectedAsset = ref<VaultAsset | undefined>()
+  const spending = useVerifiedSpendingAsset(() => {
+    amount.value = ''
+    debtAmount.value = ''
+    debtPercent.value = 0
+    clearSimulationError()
+    quotes.reset()
+    resetDerivedState()
+  })
+  const selectedAsset = spending.asset
+  const validateSpendingQuote = (quote: SwapQuote) => {
+    const asset = selectedAsset.value
+    if (!asset) throw new Error('Token decimals are not verified')
+    assertSpendingQuoteAsset(quote, asset, isNativeCurrencyAddress(asset.address) ? resolveWrappedNativeAddress(chainId.value!) : undefined)
+  }
   // Pay-with balance from the central wallet entity (custom tokens are fed into
   // it by useCustomTokenResolver), reactive + layer-aware.
   const selectedAssetBalance = computed(() => selectedAsset.value?.address ? getBalance(selectedAsset.value.address as Address) : 0n)
@@ -119,6 +134,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   // --- Swap quotes (dual-direction) ---
   const quotes = useSwapRepayQuotes({
     direction,
+    validateQuote: validateSpendingQuote,
     buildTxPlanForQuote: (quote, _provider, context) => buildRepayPlan(quote, context.account),
     createIntentsForQuote: quote => [createRepayIntent(quote)],
     prefetchPluginData: (plan, account, intents) => prefetchPluginData(plan, { account, intents }),
@@ -336,6 +352,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   })
 
   const isSubmitDisabled = computed(() => {
+    if (spending.isBlocked.value) return true
     if (!isConnected.value && !isSpyMode.value) return true
     if (findBlockingDisabledOp(walletSwapRepayPlannedOps.value)) return true
     if (direction.value === SwapperMode.EXACT_IN && !(+amount.value)) return true
@@ -806,6 +823,10 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     borrowVault.value?.asset.address.toLowerCase() ?? '',
   ].join('|'))
 
+  watch([borrowVault, chainId], ([vault]) => {
+    spending.setDefaultAsset(vault?.asset)
+  }, { immediate: true })
+
   watch(quoteContextKey, () => {
     resetDerivedState()
     quotes.reset()
@@ -901,6 +922,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     if (isNative && !wrappedAddress) {
       throw new Error('Wrapped native token not found')
     }
+    assertSpendingQuoteAsset(swapQuote, repaymentAsset, wrappedAddress)
     const repayAll = snapshot.isFullRepay ?? isFullRepay.value
 
     return planSwapAndRepay({
@@ -935,6 +957,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
     const isNative = isNativeCurrencyAddress(repaymentAsset.address)
     const wrappedAddress = isNative ? resolveWrappedNativeAddress(snapshot.chainId ?? chainId.value!) : null
     if (isNative && !wrappedAddress) throw new Error('Wrapped native token not found')
+    assertSpendingQuoteAsset(swapQuote, repaymentAsset, wrappedAddress)
     const repayAll = snapshot.isFullRepay ?? isFullRepay.value
     return createIntent({
       kind: 'repay',
@@ -958,6 +981,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
   // --- Submit ---
   const submit = async () => {
+    if (spending.isBlocked.value) return
     if (isPreparing.value || isSubmitting.value || !position.value || !borrowVault.value || !collateralVault.value) {
       return
     }
@@ -1058,6 +1082,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
 
   return {
     // State
+    spending,
     selectedAsset,
     selectedAssetBalance,
     isUnknownSwapToken,

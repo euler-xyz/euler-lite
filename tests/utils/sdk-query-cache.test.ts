@@ -80,6 +80,19 @@ describe('sdkBuildQuery', () => {
     expect(query).toHaveBeenCalledTimes(1)
   })
 
+  it('bypasses both success and failure caches when the SDK supplies a null key', async () => {
+    const query = vi.fn()
+      .mockRejectedValueOnce(new Error('RPC unavailable'))
+      .mockResolvedValueOnce(6)
+      .mockResolvedValueOnce(8)
+    const wrapped = sdkBuildQuery('queryTokenDecimals', query, {}, { getCacheKey: () => null })
+
+    await expect(wrapped()).rejects.toThrow('RPC unavailable')
+    await expect(wrapped()).resolves.toBe(6)
+    await expect(wrapped()).resolves.toBe(8)
+    expect(query).toHaveBeenCalledTimes(3)
+  })
+
   it('throws instead of bypassing the cache for non-serializable arguments', async () => {
     const circular: Record<string, unknown> = {}
     circular.self = circular

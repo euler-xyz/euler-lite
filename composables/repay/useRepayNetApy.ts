@@ -10,17 +10,20 @@ import { getVaultBorrowApy, getVaultSupplyApy } from '~/utils/vault-display'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { createRaceGuard } from '~/utils/race-guard'
 import { logWarn } from '~/utils/errorHandling'
+import type { VaultAsset } from '~/types/asset'
 
 interface UseRepayNetApyOptions {
   position: Ref<PortfolioBorrowPosition<VaultEntity> | undefined>
   borrowVault: Ref<EVault | undefined>
   collateralVault: Ref<EVault | SecuritizeCollateralVault | undefined>
+  verifiedSpendingAsset: Ref<VaultAsset | undefined>
 }
 
 export const useRepayNetApy = ({
   position,
   borrowVault,
   collateralVault,
+  verifiedSpendingAsset,
 }: UseRepayNetApyOptions) => {
   const {
     version: rewardsVersion,
@@ -63,6 +66,7 @@ export const useRepayNetApy = ({
     const currentPosition = position.value
     const currentCollateralVault = collateralVault.value
     const currentBorrowVault = borrowVault.value
+    const currentVerifiedAsset = verifiedSpendingAsset.value
     const currentCollateralSupplyApy = collateralSupplyApy.value
     const currentBorrowApy = borrowApy.value
     const currentCollateralSupplyRewardApy = collateralSupplyRewardApy.value
@@ -70,10 +74,14 @@ export const useRepayNetApy = ({
 
     if (!currentPosition || !currentCollateralVault || !currentBorrowVault) return
 
+    const debtDecimals = currentVerifiedAsset?.address.toLowerCase() === currentBorrowVault.asset.address.toLowerCase()
+      ? currentVerifiedAsset.decimals
+      : undefined
+
     try {
       const [collateralSnapshot, borrowUsd] = await Promise.all([
         getCollateralApySnapshot(currentPosition, currentBorrowVault),
-        getAssetUsdValueForEstimate(currentPosition.borrowed ?? 0n, currentBorrowVault, 'off-chain'),
+        getAssetUsdValueForEstimate(currentPosition.borrowed ?? 0n, currentBorrowVault, 'off-chain', debtDecimals),
       ])
       if (guard.isStale(gen)) return
       if (borrowUsd === undefined) return
