@@ -45,6 +45,7 @@ const swapVerifierAbi = parseAbi([
   'function transferBalanceFromSender(address token,uint256 maxAmount,address to)',
 ])
 const vaultAbi = parseAbi([
+  'function deposit(uint256 assets,address receiver)',
   'function withdraw(uint256 assets,address receiver,address owner)',
   'function redeem(uint256 shares,address receiver,address owner)',
   'function borrow(uint256 assets,address receiver)',
@@ -264,6 +265,62 @@ const disableController = () => encodeFunctionData({
   abi: evcAbi,
   functionName: 'disableController',
   args: [],
+})
+
+describe('buildTransactionPlanDisplaySteps verified spending decimals', () => {
+  const staleGetVault: VaultLookup = (address) => {
+    const vault = getVault(address)
+    return vault?.asset.address.toLowerCase() === usdcAsset.toLowerCase()
+      ? { asset: { ...vault.asset, decimals: 18 } }
+      : vault
+  }
+  const deposit = (amount: bigint) => encodeFunctionData({ abi: vaultAbi, functionName: 'deposit', args: [amount, account] })
+  const repay = (amount: bigint) => encodeFunctionData({ abi: vaultAbi, functionName: 'repay', args: [amount, account] })
+  const borrow = (amount: bigint) => encodeFunctionData({ abi: vaultAbi, functionName: 'borrow', args: [amount, account] })
+  const steps = (items: EVCBatchItem[], context: StepDecodingContext) => buildTransactionPlanDisplaySteps(
+    [{ type: 'evcBatch', items }] satisfies TransactionPlan,
+    context,
+    staleGetVault,
+    getLogoUrl,
+  )
+
+  it('shows the signed direct-supply amount in verified units without changing another asset', () => {
+    const rows = steps([
+      batchItem(deposit(1_250_000n), usdcVault),
+      batchItem(deposit(2n * 10n ** 18n), wethVault),
+    ], { type: 'supply', asset: { symbol: 'USDC', address: usdcAsset, decimals: 6 }, amount: '1.25' })
+
+    expect(rows.map(row => [row.label, row.assetInfo?.amount])).toEqual([
+      ['Supply', '1.25'],
+      ['Supply', '2'],
+    ])
+  })
+
+  it('shows the signed direct-repay amount in verified units', () => {
+    const rows = steps([batchItem(repay(1_250_000n), usdcVault)], {
+      type: 'repay', asset: { symbol: 'USDC', address: usdcAsset, decimals: 6 }, amount: '1.25',
+    })
+
+    expect(rows[0]).toMatchObject({ label: 'Repay', assetInfo: { symbol: 'USDC', amount: '1.25' } })
+  })
+
+  it('uses the verified direct-borrow collateral asset only for its supply row', () => {
+    const rows = steps([
+      batchItem(deposit(1_250_000n), usdcVault),
+      batchItem(borrow(10n ** 18n), wethVault),
+    ], {
+      type: 'borrow',
+      asset: { symbol: 'WETH', address: wethAsset, decimals: 18 },
+      amount: '1',
+      supplyingAssetForBorrow: { symbol: 'USDC', address: usdcAsset, decimals: 6 },
+      supplyingAmount: '1.25',
+    })
+
+    expect(rows.map(row => [row.label, row.assetInfo?.amount])).toEqual([
+      ['Supply', '1.25'],
+      ['Borrow', '1'],
+    ])
+  })
 })
 
 describe('buildTransactionPlanDisplaySteps approval rows', () => {

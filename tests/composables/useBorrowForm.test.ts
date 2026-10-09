@@ -516,6 +516,25 @@ describe('useBorrowForm savings collateral', () => {
     expect(mocks.openReview).toHaveBeenCalled()
   })
 
+  it('passes verified direct-wallet collateral decimals into the review', async () => {
+    const collateralVault = { ...vault, asset: { ...vault.asset, decimals: 18 } } as EVault
+    mocks.resolveTokenDecimals.mockResolvedValue(6)
+    const form = makeForm(shallowRef([]), shallowRef(makePair(collateralVault)))
+    mocks.planBorrow.mockResolvedValue([{ type: 'evcBatch', items: [] }])
+    mocks.runSimulation.mockResolvedValue(true)
+
+    await vi.waitFor(() => expect(form.borrowSelectedAsset.value?.decimals).toBe(6))
+    form.collateralAmount.value = '1.25'
+    form.borrowAmount.value = '1'
+    await form.submit()
+
+    expect(mocks.openReview).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      review: expect.objectContaining({
+        supplyingAssetForBorrow: expect.objectContaining({ address: vault.asset.address, decimals: 6 }),
+      }),
+    }))
+  })
+
   it('keeps the reviewed savings source bound to the borrow intent during preparation', async () => {
     const form = makeForm(shallowRef([
       makeSavingsPosition(SUB_ACCOUNT_A, 100n, 90n),

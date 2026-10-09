@@ -1241,7 +1241,11 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
           type: 'borrow',
           asset: snapshot.borrowVault.asset,
           amount: snapshot.borrowAmount,
-          supplyingAssetForBorrow: snapshot.collateralVault.asset,
+          supplyingAssetForBorrow: !snapshot.isSavingCollateral
+            && snapshot.selectedAsset
+            && getAddress(snapshot.selectedAsset.address) === getAddress(snapshot.collateralVault.asset.address)
+            ? snapshot.selectedAsset
+            : snapshot.collateralVault.asset,
           supplyingAmount: snapshot.collateralAmount,
           subAccount: snapshot.subAccount,
           sourceSubAccount: snapshot.isSavingCollateral ? snapshot.savingCollateral?.subAccount : undefined,

@@ -405,6 +405,7 @@ const resolveAmountFromCalldata = (
   data: string,
   targetContract: string,
   getVault: VaultLookup,
+  amountAsset?: StepKnownAsset,
 ): { decoded: boolean, amount?: string, isMax?: boolean } => {
   const selector = data.slice(0, 10).toLowerCase() as `0x${string}`
   const raw = decodeFirstUint256(data)
@@ -416,8 +417,11 @@ const resolveAmountFromCalldata = (
 
   try {
     const vault = getVault(getAddress(targetContract))
-    if (vault?.asset?.decimals) {
-      return { decoded: true, amount: formatUnits(raw, Number(vault.asset.decimals)) }
+    if (vault?.asset) {
+      const decimals = amountAsset?.decimals !== undefined && sameAddress(amountAsset.address, vault.asset.address)
+        ? amountAsset.decimals
+        : vault.asset.decimals
+      if (decimals !== undefined) return { decoded: true, amount: formatUnits(raw, Number(decimals)) }
     }
   }
   catch { /* ignore */ }
@@ -1013,7 +1017,12 @@ const resolveBatchItemAssetInfo = (
     try {
       const targetVault = getVault(getAddress(targetContract))
       if (targetVault?.asset) {
-        const resolved = resolveAmountFromCalldata(data, targetContract, getVault)
+        const spendingAsset = ctx.type === 'supply'
+          ? ctx.asset
+          : ctx.type === 'borrow'
+            ? ctx.supplyingAssetForBorrow
+            : undefined
+        const resolved = resolveAmountFromCalldata(data, targetContract, getVault, spendingAsset)
         const amount = resolved.isMax
           ? 'remaining'
           : resolved.decoded && resolved.amount
@@ -1090,7 +1099,8 @@ const resolveBatchItemAssetInfo = (
   if (label === 'Borrow' || label === 'Repay') {
     const vaultAsset = getVaultAssetInfo(data, targetContract, getVault)
     const base = vaultAsset || { symbol: ctx.asset.symbol, address: ctx.asset.address }
-    const resolved = resolveAmountFromCalldata(data, targetContract, getVault)
+    const resolved = resolveAmountFromCalldata(data, targetContract, getVault,
+      label === 'Repay' && ctx.type === 'repay' ? ctx.asset : undefined)
     const amount = resolved.isMax
       ? 'max'
       : resolved.decoded && resolved.amount
