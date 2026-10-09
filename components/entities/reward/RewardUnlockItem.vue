@@ -139,7 +139,10 @@ const onUnlockClick = async () => {
     await ensureWalletOnSiteChain()
 
     // Chain time must be read before the quote refresh so the quoted lock can
-    // no longer receive deliveries.
+    // no longer receive deliveries. Known and accepted: the two reads can hit
+    // different RPC nodes, so in the first seconds after UTC midnight a lagging
+    // node can quote the lock before its last delivery. Closing that gap would
+    // need block-pinned reads outside the SDK.
     if (isREULLockOpen(item.timestamp, await getLatestBlockTimestamp())) {
       error(`Early unlock for this rEUL lock opens ${lockClosedAt.value} UTC`)
       return

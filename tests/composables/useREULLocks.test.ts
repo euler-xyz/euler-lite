@@ -141,7 +141,7 @@ describe('useREULLocks', () => {
       address: owner,
       chainId: 1,
     })
-    getBlock.mockResolvedValue({ timestamp: lockDay + 86_400n })
+    getBlock.mockResolvedValue({ timestamp: lockDay + 86_399n })
 
     let locks: ReturnType<typeof useREULLocks> | undefined
     scope = effectScope()
