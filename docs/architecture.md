@@ -235,9 +235,9 @@ The wire payload uses the bigint codec at `utils/snapshot-codec.ts`: bigints ser
 
 ### Reward campaign and claim pipeline
 
-Reward APRs and account claimable rewards are SDK-owned data. Lite reads reward campaigns through SDK-populated vault entities and reads claimable user rewards from `portfolio.account.userRewards`. Claim plans are built through `sdk.rewardsService.buildClaimPlan(s)` and executed as SDK `TransactionPlan` items through `useEulerTx()`.
+Reward APRs and account claimable rewards are SDK-owned data. Lite reads reward campaigns through SDK-populated vault entities and reads claimable user rewards from `portfolio.account.userRewards`. Claim plans are built through `sdk.rewardsService.buildClaimPlan` (`composables/useSdkRewards.ts`) and submitted as reviewed-execution `reward-claim` intents. `useEulerTx()` is planning and simulation only — see [Reviewed Execution Inventory](./reviewed-execution-inventory.md) and [Transaction Building](./transaction-building.md).
 
-The SDK's default rewards adapter reads V3 reward APIs and uses direct provider reads where V3 does not expose claim-specific helper data. Lite's provider feature flags are passed into SDK config as `rewardsEnableMerkl`, `rewardsEnableBrevis`, and `rewardsEnableFuul` only when a provider is disabled. Display formatting, provider labels, sorting, and transaction review remain in Lite.
+The SDK's default rewards adapter reads V3 reward APIs and uses direct provider reads where V3 does not expose claim-specific helper data. Lite's provider feature flags are passed into SDK config as `rewardsEnableMerkl`, `rewardsEnableBrevis`, `rewardsEnableFuul`, and `rewardsEnableTurtle` only when a provider is disabled. Display formatting, provider labels, sorting, the Settings **Rewards** toggle (`enableRewardsApy`), and transaction review remain in Lite. Display-toggle and spy-mode viewer rules are in [Projected Yield](./projected-yield.md#apy-visibility-and-viewer-address); claim snapshots are in [SDK Integration](./sdk-integration.md#reward-token-decimals).
 
 ## 🔍 Explore Page & Market Discovery
 
@@ -368,9 +368,31 @@ The Nuxt server layer (`server/api/`) proxies requests to external services (RPC
 | **CORS** (`server/middleware/cors.ts`) | Restricts API access to configured origins |
 | **Body size limits** (`server/middleware/body-limit.ts`) | Caps request payloads (1 MB RPC, 2 MB Tenderly) |
 | **Geo-blocking** (`server/middleware/geo-gate.ts`) | Blocks sanctioned countries via the edge-provided country (`getEdgeContext`); fails closed (HTTP 451) if a geo-capable edge leaves the country undetermined outside dev |
-| **RPC method whitelist** (`server/api/internal/rpc/[chainId].ts`) | Only 15 safe read-only methods are proxied |
+| **RPC method allowlist** (`server/api/internal/rpc/[chainId].ts`) | JSON-RPC 2.0 POST proxy; read/simulation methods only (see below) |
 | **Rate limiting** (`server/utils/rate-limit.ts`) | Per-IP cost-based budgets (see below); fails closed (HTTP 403) if the edge provides no trusted client identity in prod |
 | **Swap quote contract validation** (`@eulerxyz/euler-v2-sdk` `swapService`) | Validates each fetched quote's swapper and verifier addresses against the chain's canonical deployment allowlist |
+
+#### JSON-RPC proxy
+
+`POST /api/internal/rpc/{chainId}` forwards JSON-RPC 2.0 to the matching `RPC_URL_<chainId>`. Browser SDK and wagmi transports use it; `getServerSdk` talks to `RPC_URL_*` directly and does **not** go through this proxy.
+
+`ALLOWED_METHODS` in `server/api/internal/rpc/[chainId].ts`:
+
+`eth_call`, `eth_estimateGas`, `eth_createAccessList`, `eth_getTransactionReceipt`, `eth_getTransactionByHash`, `eth_blockNumber`, `eth_getBlockByNumber`, `eth_getBalance`, `eth_getCode`, `eth_getLogs`, `eth_chainId`, `eth_gasPrice`, `eth_maxPriorityFeePerGas`, `eth_feeHistory`, `eth_getTransactionCount`, `net_version`.
+
+`eth_createAccessList` is required for SDK state-override simulation: `fetchErc20SlotHints` / `primeSlotHintsFor` discover ERC-20 allowance and balance slots so later simulate/estimate calls can skip that probe. See [Transaction Building → Simulation Performance Tuning](./transaction-building.md#simulation-performance-tuning). Wallet writes never use this proxy; they go through the connected wallet provider.
+
+| Constraint | Behavior |
+|---|---|
+| HTTP | POST only (`405` otherwise). |
+| Chain | Integer `chainId` with a configured `RPC_URL_<chainId>`; otherwise `400` / `404`. |
+| Envelope | JSON-RPC 2.0 objects with an `id`. Notifications (no `id`) are rejected. |
+| Batch | Max 100 items; empty batches are `400`. |
+| Method | Not in the allowlist → `403 Method not allowed`. |
+| Upstream | 30 s timeout → `504`; fetch failure → `502`. Response body is the upstream text. |
+| Rate limit | 10,000 units / 60 s; a batch of N costs N. |
+
+**Public-RPC fallback can mask a 403.** `plugins/00.wagmi.ts` builds a viem `fallback` of `[/api/internal/rpc/{chainId}, ...network.rpcUrls.default.http]` with `retryCount: 0`. If the proxy rejects a method, the public URL may still succeed, so a missing allowlist entry can look fine in the browser while the proxy log shows `method-not-allowed`. Add the method to `ALLOWED_METHODS` (only if it is a read/simulation call) rather than relying on the fallback. Both legs use `{ batchSize: 100, wait: 100 }`.
 
 #### Rate Limiting
 

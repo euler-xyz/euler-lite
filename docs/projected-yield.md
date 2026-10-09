@@ -137,7 +137,7 @@ rewards   = (S × supply reward APY + B × borrow reward APY
 total     = lending + borrowing + intrinsic + rewards
 ```
 
-APY inputs are percentage values, not decimal fractions. Call sites pass intrinsic components after compounding them with the corresponding market rate through `withProjectedVaultIntrinsicApy()` or the equivalent intrinsic helper. The per-user `enableIntrinsicApy` setting is respected while the snapshot is built.
+APY inputs are percentage values, not decimal fractions. Call sites pass intrinsic components after compounding them with the corresponding market rate through `withProjectedVaultIntrinsicApy()` or the equivalent intrinsic helper. The per-user `enableIntrinsicApy` and `enableRewardsApy` settings are applied while the snapshot and headline totals are built — see [APY visibility](#apy-visibility-and-viewer-address).
 
 Non-finite inputs return `null`. A zero or negative denominator returns a zero breakdown. Callers that need to distinguish missing data must do so before invoking the helper.
 
@@ -174,6 +174,29 @@ Whitelist / blacklist membership (`isCampaignEligibleForAddress`) still filters 
 
 Do not invent requirement copy in Lite. If the provider cannot describe the criteria, keep the incomplete-information label rather than guessing.
 
+## APY visibility and viewer address
+
+Headline APYs, option lists, and projected-yield totals share two Lite-side filters that the SDK does not know about. Both default **on** and live in Settings (`components/entities/settings/SettingsModal.vue`), persisted by `composables/useUserSettings.ts`.
+
+| Setting | Default | Effect when off |
+|---|---|---|
+| `enableIntrinsicApy` | `true` | Intrinsic helpers return zero (or the unaugmented `baseApy`). Documented in [Intrinsic APY](./intrinsic-apy.md#user-toggle). |
+| `enableRewardsApy` | `true` | Reward APY buckets and APY campaign lists are empty / zeroed. Claimable portfolio reward rows (`useSdkRewards`) stay listed — this toggle only hides reward **yield** from rates. |
+
+`composables/useApyVisibility.ts` is the shared breakdown consumer: it zeros `intrinsicApy` and/or `rewards` on an SDK `YieldApyBreakdown` and recomputes `total`. Call sites that build their own totals (collateral option lists, Max ROE, Earn cards) must pass both flags; toggling Rewards off must not leave a rewards contribution in `total`.
+
+`composables/useRewardsApy.ts` additionally drops campaigns whose provider is disabled in deploy config (`enableMerkl` / `enableIncentra` / `enableFuul` / `enableTurtle`). A user can have Rewards display on and still see no Turtle APR when `NUXT_PUBLIC_CONFIG_ENABLE_TURTLE` is `false`.
+
+### Viewer address (spy mode)
+
+Both composables read `useEffectiveAddress()`. Spy mode wins over the connected wallet, but **only after EVC owner verification**:
+
+- No spy context → connected wallet, or `undefined` when disconnected. Discovery still shows headline APR to visitors (`getActiveCampaigns` eligibility is a no-op without a viewer).
+- Spy candidate pending (`isSpyResolving`) → `effectiveAddress` is empty. Do **not** fall back to the connected wallet; that would apply the wrong user's whitelist/blacklist. `tests/composables/useEffectiveAddress.test.ts` pins this.
+- Spy verified → the spied owner.
+
+`useApyVisibility().viewer` is that address (or `undefined`) and is what SDK breakdown helpers use for reward eligibility.
+
 ## Adding a Projection to a Form
 
 1. Define current and after-state token amounts as `bigint`; do not derive utilization deltas from rounded display values.
@@ -197,6 +220,8 @@ Current consumers include lend deposit/withdraw/swap, borrow and borrow-more, mu
 - **Headline and modal differ:** derive both from the same `ProjectedYieldState`; do not recalculate the headline with a separate APY helper.
 - **Rewards look duplicated:** campaign identity must include the vault and `rewardCampaignKey()`, which includes action and collateral qualification.
 - **Eligibility notice missing or stale:** labels come from `eligibilityRequirementsStatus`, not from parsing `eligibilityRequirements`. An after-state `none` must drop a before-state warning (`mergeProjectedRewardCampaigns` deletes the field).
+- **Rewards still in the headline after toggling Rewards off:** the call site is not going through `useApyVisibility` / not passing `enableRewardsApy`. Zero the rewards bucket locally; do not expect the SDK breakdown to honor the Settings flag.
+- **Spy review shows the connected wallet's reward APR:** `effectiveAddress` must stay empty while `isSpyResolving` is true. Do not substitute `useWagmi().address` as a fallback.
 
 ## Tests
 
@@ -205,4 +230,6 @@ Current consumers include lend deposit/withdraw/swap, borrow and borrow-more, mu
 - `tests/utils/projected-yield.test.ts` — metric denominators, campaign transitions, reward indicators, and eligibility-label merge
 - `tests/entities/reward-campaign.test.ts` — `none` / `complete` / `incomplete` notice mapping
 - `tests/composables/useLayeredVaults.test.ts` — simulated-vault precedence
+- `tests/composables/useEffectiveAddress.test.ts` — spy-pending viewer does not fall back to the connected wallet
+- `tests/composables/useRewardsApy.test.ts` — multi-collateral borrow and looping campaign matching
 - Form-specific tests under `tests/composables/` — operation deltas, race handling, and hidden projections on both unavailable and rejected rates
