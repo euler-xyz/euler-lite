@@ -42,6 +42,7 @@ const walletChangeTokenSymbol = computed(() =>
 )
 const walletChangeTokenDecimals = computed(() => eulToken.value?.decimals ?? reulToken.value?.decimals ?? 18)
 const isBatchActive = computed(() => entryCount.value > 0)
+const hasRemainderLoss = computed(() => item.amountToBeBurned > 0n)
 
 const unlockableAmount = computed(() => {
   return nanoToValue(item.unlockableAmount, reulToken.value?.decimals)
@@ -134,6 +135,10 @@ const onUnlockClick = async () => {
       return
     }
     const reviewedLock = validation.lock
+    if (reviewedLock.amountToBeBurned > 0n) {
+      error('Early rEUL unlocks are temporarily unavailable')
+      return
+    }
     const tokenAddress = reulTokenContractAddress.value
     if (!tokenAddress) throw new Error('rEUL token address is unavailable')
     const intent = createIntent({
@@ -260,12 +265,18 @@ const onUnlockClick = async () => {
         <UiButton
           rounded
           :loading="isUnlocking || isPreparing"
-          :disabled="isSpyMode || isBatchActive"
+          :disabled="isSpyMode || isBatchActive || hasRemainderLoss"
           @click="onUnlockClick"
         >
           Unlock
         </UiButton>
       </div>
+      <p
+        v-if="hasRemainderLoss"
+        class="mt-8 text-center text-p3 text-content-tertiary"
+      >
+        Early rEUL unlocks are temporarily unavailable. Your locked EUL will continue vesting.
+      </p>
       <p
         v-if="isBatchActive"
         class="mt-8 text-center text-p3 text-content-tertiary"

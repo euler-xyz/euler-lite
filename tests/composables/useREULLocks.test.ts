@@ -122,7 +122,7 @@ describe('useREULLocks', () => {
       chainId: 1,
       account: owner,
       lockTimestamp: 123n,
-      allowRemainderLoss: true,
+      allowRemainderLoss: false,
       rEulAddress: reulAddress,
     })
   })
