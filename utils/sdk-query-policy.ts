@@ -86,6 +86,8 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
   queryDeployments: { staleTimeMs: 5 * MINUTE },
   queryABI: { staleTimeMs: Infinity },
   queryTokenList: { staleTimeMs: Infinity },
+  // The SDK supplies a null cache key, so the wrapper bypasses this policy.
+  queryTokenDecimals: { staleTimeMs: 0 },
   queryEulerLabelsEntities: { staleTimeMs: 5 * MINUTE },
   queryEulerLabelsProducts: { staleTimeMs: 5 * MINUTE },
   queryEulerLabelsPoints: { staleTimeMs: 5 * MINUTE },
