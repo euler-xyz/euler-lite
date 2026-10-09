@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Account, EVault, IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
 import { useMultiplyForm } from '~/composables/borrow/useMultiplyForm'
 import type { RewardCampaign } from '~/entities/reward-campaign'
+import { getAssetOraclePrice, getCollateralOraclePrice } from '~/utils/sdk-prices'
+import { computeLeverageDebt } from '~/utils/multiply-math'
 
 const { USER, makeVault, planAccount, mocks } = vi.hoisted(() => {
   const USER = '0x0000000000000000000000000000000000000001'
@@ -68,10 +70,15 @@ const { USER, makeVault, planAccount, mocks } = vi.hoisted(() => {
       getSupplyRewardCampaigns: vi.fn(() => [] as RewardCampaign[]),
       getBorrowRewardCampaignsForCollaterals: vi.fn(() => [] as RewardCampaign[]),
       getEligibleLoopingRewardCampaignsForCollaterals: vi.fn(() => [] as RewardCampaign[]),
+      resolveTokenDecimals: vi.fn(),
     },
   }
 })
 const rewardsVersion = ref(0)
+
+vi.mock('~/composables/useEulerSdk', () => ({
+  getEulerSdkForChain: vi.fn(async () => ({ tokenlistService: { resolveTokenDecimals: mocks.resolveTokenDecimals } })),
+}))
 
 vi.mock('#components', () => ({
   OperationReviewModal: {},
@@ -203,16 +210,16 @@ vi.mock('~/entities/cowswap', () => ({
   isCowProviderOrQuote: vi.fn(() => false),
 }))
 
-const makeForm = (vault: EVault) => useMultiplyForm({
+const makeForm = (vault: EVault, borrow: EVault = vault) => useMultiplyForm({
   pair: ref({
     collateral: vault,
-    borrow: vault,
+    borrow,
     ltv: {
       borrowLTV: 500000000000000000n,
       liquidationLTV: 750000000000000000n,
     },
   } as never),
-  borrowVault: computed(() => vault),
+  borrowVault: computed(() => borrow),
   collateralVault: computed(() => vault),
   formTab: ref('multiply'),
   resolvePendingSubAccount: vi.fn(async () => USER),
@@ -236,6 +243,7 @@ describe('useMultiplyForm cap validation', () => {
       }),
     }))
     vi.clearAllMocks()
+    mocks.resolveTokenDecimals.mockReset().mockResolvedValue(0)
     mocks.getProjectedRatesBatch.mockImplementation(async (requests: unknown[]) => requests.map(() => ({ supplyAPY: 0n, borrowAPY: 0n })))
     mocks.getAssetUsdValueForEstimate.mockResolvedValue(0)
     mocks.getSupplyRewardApy.mockReturnValue(0)
@@ -330,6 +338,139 @@ describe('useMultiplyForm cap validation', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
+  })
+
+  it('parses, validates and signs wallet-funded collateral with verified decimals', async () => {
+    // Registry metadata says 0 decimals; the chain says 2.
+    mocks.resolveTokenDecimals.mockResolvedValue(2)
+    mocks.planMultiply.mockResolvedValue([{ type: 'evcBatch', items: [] }])
+    mocks.prepareTransactionPlan.mockResolvedValue({ plan: [] })
+    mocks.runPreparedSimulation.mockResolvedValue(true)
+    const vault = makeVault(0, 0)
+    const form = makeForm(vault)
+
+    form.initMultiplySupplyVault(vault)
+    expect(form.isMultiplySpendingBlocked.value).toBe(true)
+    expect(form.isMultiplySubmitDisabled.value).toBe(true)
+    await vi.waitFor(() => expect(form.isMultiplySpendingBlocked.value).toBe(false))
+    expect(mocks.resolveTokenDecimals).toHaveBeenCalledWith(1, vault.asset.address)
+    expect(form.multiplySupplyAsset.value?.decimals).toBe(2)
+
+    form.multiplyInputAmount.value = '1.5'
+    form.multiplier.value = 2
+    expect(form.multiplySupplyAmountNano.value).toBe(150n)
+    // Wallet balance is 100 base units: a 0-decimal parse (1n) would pass this check.
+    expect(form.multiplyErrorText.value).toBe('Not enough balance')
+
+    form.multiplyInputAmount.value = '1'
+    expect(form.multiplyErrorText.value).toBeNull()
+    await form.submitMultiply()
+
+    expect(mocks.planMultiply).toHaveBeenCalledWith(expect.objectContaining({ collateralAmount: 100n }))
+    expect(mocks.openReview).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      review: expect.objectContaining({
+        supplyingAssetForBorrow: expect.objectContaining({ address: vault.asset.address, decimals: 2 }),
+        supplyingAmount: '1',
+      }),
+    }))
+  })
+
+  it('sizes the debt and values the deposit in verified units when cached asset decimals are stale', async () => {
+    // The chain says 17 decimals; the cached vault asset says 18 while its shares say 17.
+    mocks.resolveTokenDecimals.mockResolvedValue(17)
+    const actualPrices = await vi.importActual<typeof import('~/utils/sdk-prices')>('~/utils/sdk-prices')
+    const actualMath = await vi.importActual<typeof import('~/utils/multiply-math')>('~/utils/multiply-math')
+    vi.mocked(getCollateralOraclePrice).mockImplementation(actualPrices.getCollateralOraclePrice)
+    vi.mocked(getAssetOraclePrice).mockImplementation(actualPrices.getAssetOraclePrice)
+    vi.mocked(computeLeverageDebt).mockImplementation(actualMath.computeLeverageDebt)
+    mocks.getAssetUsdValueForEstimate.mockImplementation(actualPrices.getAssetUsdValueForEstimate as never)
+
+    const unit = 10n ** 18n
+    const base = makeVault(0, 0)
+    const supplyVault = {
+      ...base,
+      asset: { ...base.asset, decimals: 18 },
+      shares: { ...base.shares, decimals: 17 },
+      marketPriceUsd: unit,
+      convertToShares: (assets: bigint) => assets,
+    } as unknown as EVault
+    const shortVault = {
+      ...base,
+      address: '0x0000000000000000000000000000000000000004',
+      asset: { address: '0x0000000000000000000000000000000000000005', symbol: 'DAI', decimals: 18 },
+      shares: { address: '0x0000000000000000000000000000000000000004', symbol: 'eDAI', decimals: 18 },
+      unitOfAccount: { decimals: 18 },
+      // $1 per whole liability token.
+      oraclePriceRaw: { amountIn: unit, amountOutMid: unit, amountOutAsk: unit, amountOutBid: unit },
+      collaterals: [{
+        address: base.address,
+        borrowLTV: 500000000000000000n,
+        liquidationLTV: 750000000000000000n,
+        // $1 per whole collateral share, quoted in 17-decimal share units.
+        oraclePriceRaw: { amountIn: 10n ** 17n, amountOutMid: unit, amountOutAsk: unit, amountOutBid: unit },
+      }],
+    } as unknown as EVault
+
+    try {
+      const form = makeForm(supplyVault, shortVault)
+      form.initMultiplySupplyVault(supplyVault)
+      await vi.waitFor(() => expect(form.multiplySupplyAsset.value?.decimals).toBe(17))
+      form.multiplyInputAmount.value = '50'
+      form.multiplier.value = 2
+
+      expect(form.multiplySupplyAmountNano.value).toBe(50n * 10n ** 17n)
+      // 50 one-dollar tokens at 2x borrow 50 one-dollar tokens, not 500.
+      expect(form.multiplyDebtAmountNano.value).toBe(50n * unit)
+      expect(getCollateralOraclePrice).toHaveBeenCalledWith(
+        expect.objectContaining({ address: shortVault.address }),
+        expect.objectContaining({ address: supplyVault.address }),
+        17,
+      )
+      await vi.waitFor(() => expect(form.multiplySupplyValueUsd.value).toBe(50))
+      expect(mocks.getAssetUsdValueForEstimate).toHaveBeenCalledWith(50n * 10n ** 17n, supplyVault, 'off-chain', 17)
+    }
+    finally {
+      vi.mocked(getCollateralOraclePrice).mockImplementation(() => ({ amountOutMid: 1n, amountOutBid: 1n }) as never)
+      vi.mocked(getAssetOraclePrice).mockImplementation(() => ({ amountOutMid: 1n, amountOutAsk: 1n }) as never)
+      vi.mocked(computeLeverageDebt).mockImplementation(() => 1n)
+      mocks.getAssetUsdValueForEstimate.mockImplementation(async () => 0)
+    }
+  })
+
+  it('keeps wallet-funded multiply blocked until a failed decimals read is retried', async () => {
+    mocks.resolveTokenDecimals.mockRejectedValueOnce(new Error('rpc down'))
+    const vault = makeVault(0, 0)
+    const form = makeForm(vault)
+
+    form.initMultiplySupplyVault(vault)
+    await vi.waitFor(() => expect(form.spending.error.value).toBeTruthy())
+    expect(form.isMultiplySpendingBlocked.value).toBe(true)
+    expect(form.multiplySupplyAsset.value).toBeUndefined()
+    form.multiplyInputAmount.value = '1'
+    form.multiplier.value = 2
+    expect(form.multiplySupplyAmountNano.value).toBe(0n)
+    expect(form.multiplyDebtAmountNano.value).toBe(0n)
+    expect(form.isMultiplySubmitDisabled.value).toBe(true)
+    await form.submitMultiply()
+    expect(mocks.planMultiply).not.toHaveBeenCalled()
+
+    await form.spending.retry()
+    expect(form.isMultiplySpendingBlocked.value).toBe(false)
+    expect(form.multiplySupplyAsset.value?.decimals).toBe(0)
+  })
+
+  it('does not block savings collateral on the wallet token read', async () => {
+    mocks.resolveTokenDecimals.mockImplementation(() => new Promise(() => {}))
+    const vault = makeVault(0, 0)
+    const form = makeForm(vault)
+
+    form.initMultiplySupplyVault(vault)
+    expect(form.isMultiplySpendingBlocked.value).toBe(true)
+    form.isMultiplySavingCollateral.value = true
+    expect(form.isMultiplySpendingBlocked.value).toBe(false)
+    expect(form.multiplySupplyAsset.value).toEqual(vault.asset)
+    form.multiplyInputAmount.value = '5'
+    expect(form.multiplySupplyAmountNano.value).toBe(5n)
   })
 
   it('surfaces a reached supply cap as the multiply disabled reason and form warning', () => {
