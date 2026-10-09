@@ -10,7 +10,6 @@ import type { OperationIntent } from '~/features/reviewed-execution/domain/inten
  */
 export const useSwapRepayQuotes = (options: {
   direction: Ref<SwapperMode>
-  validateQuote?: (quote: SwapQuote) => void
   includeCowSwap?: SwapQuoteIncludeCowSwap
   buildTxPlanForQuote: (quote: SwapQuote, provider: string, context: SwapQuotePlanContext) => Promise<TransactionPlan>
   createIntentsForQuote?: (quote: SwapQuote, provider: string) => readonly OperationIntent[]
@@ -24,8 +23,8 @@ export const useSwapRepayQuotes = (options: {
 }) => {
   const { direction, includeCowSwap, buildTxPlanForQuote, createIntentsForQuote, buildGasEstimatePlan, prefetchPluginData, getPlanAccount } = options
 
-  const exactInQuotes = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max', validateQuote: options.validateQuote, includeCowSwap, buildTxPlanForQuote, createIntentsForQuote, buildGasEstimatePlan, prefetchPluginData, getPlanAccount })
-  const targetDebtQuotes = useSwapQuotesParallel({ amountField: 'amountIn', compare: 'min', validateQuote: options.validateQuote, includeCowSwap, buildTxPlanForQuote, createIntentsForQuote, buildGasEstimatePlan, prefetchPluginData, getPlanAccount })
+  const exactInQuotes = useSwapQuotesParallel({ amountField: 'amountOut', compare: 'max', includeCowSwap, buildTxPlanForQuote, createIntentsForQuote, buildGasEstimatePlan, prefetchPluginData, getPlanAccount })
+  const targetDebtQuotes = useSwapQuotesParallel({ amountField: 'amountIn', compare: 'min', includeCowSwap, buildTxPlanForQuote, createIntentsForQuote, buildGasEstimatePlan, prefetchPluginData, getPlanAccount })
 
   const isExactIn = computed(() => direction.value === SwapperMode.EXACT_IN)
 

@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { captureSwapReview } from '~/utils/swapReview'
 import type { VaultAsset } from '~/types/asset'
-import { useVerifiedSpendingAsset } from '~/composables/useVerifiedSpendingAsset'
-import { assertSpendingQuoteAsset } from '~/utils/spending-quote'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
 import { getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatio, getTokenUsdPrice } from '~/utils/sdk-prices'
 import type { SwapQuote, EVault } from '@eulerxyz/euler-v2-sdk'
@@ -30,17 +28,7 @@ const { chainId } = useEulerAddresses()
 useFullBalances()
 
 // Supply-specific state
-const spending = useVerifiedSpendingAsset(() => {
-  form.amount.value = ''
-  form.clearSimulationError()
-  form.resetSwapQuoteState()
-})
-const { asset: selectedAsset, isBlocked: spendingBlocked, isLoading: spendingLoading, error: spendingError } = spending
-const validateSpendingQuote = (quote: SwapQuote) => {
-  const asset = selectedAsset.value
-  if (!asset) throw new Error('Token decimals are not verified')
-  assertSpendingQuoteAsset(quote, asset, isNativeCurrencyAddress(asset.address) ? resolveWrappedNativeAddress(chainId.value!) : undefined)
-}
+const selectedAsset = ref<VaultAsset | undefined>()
 const swapAssetUsdPrice = ref<number | undefined>()
 const isUnknownSwapToken = ref(false)
 
@@ -60,12 +48,10 @@ const isNativeWrap = computed(() => {
 })
 
 const activeBalance = computed(() => (needsSwap.value || isNativeWrap.value) ? selectedAssetBalance.value : balance.value)
-const activeAsset = computed(() => selectedAsset.value ?? form.asset.value)
+const activeAsset = computed(() => (needsSwap.value || isNativeWrap.value) && selectedAsset.value ? selectedAsset.value : form.asset.value)
 
 const form = useCollateralForm({
   mode: 'supply',
-  inputBlocked: spendingBlocked,
-  validateSwapQuote: validateSpendingQuote,
   needsSwap,
   effectiveBalance: activeBalance,
   effectiveAsset: activeAsset,
@@ -126,7 +112,6 @@ const form = useCollateralForm({
     if (isNative && !wrappedAddress) {
       throw new Error('Wrapped native token not found')
     }
-    assertSpendingQuoteAsset(quote, selectedAsset.value, wrappedAddress)
     return planDepositWithSwap({
       swapQuote: quote,
       amount: inputAmount,
@@ -150,7 +135,6 @@ const form = useCollateralForm({
       const isNative = isNativeCurrencyAddress(selected.address)
       const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
       if (isNative && !wrappedAddress) throw new Error('Wrapped native token not found')
-      assertSpendingQuoteAsset(quote, selected, wrappedAddress)
       return createIntent({
         kind: 'deposit',
         planner: 'deposit-with-swap',
@@ -166,8 +150,7 @@ const form = useCollateralForm({
         subAccounts: [receiver],
       })
     }
-    if (!selectedAsset.value) throw new Error('Token decimals are not verified')
-    const amount = valueToNano(form.amount.value || '0', selectedAsset.value.decimals)
+    const amount = valueToNano(form.amount.value || '0', asset.decimals)
     const wrappedAddress = isNativeWrap.value ? resolveWrappedNativeAddress(chainId.value!) : null
     return createIntent({
       kind: 'deposit',
@@ -222,7 +205,7 @@ const form = useCollateralForm({
       }
       return selectedAsset.value
     }
-    return selectedAsset.value ?? form.asset.value
+    return form.asset.value
   },
   getSwapToAsset: () => form.asset.value,
 
@@ -251,7 +234,6 @@ const isCowSwapSelected = computed(() =>
   needsSwap.value && isCowProviderOrQuote(form.swapSelectedProvider.value, form.swapSelectedQuote.value),
 )
 const canAddToBatch = computed(() => {
-  if (spendingBlocked.value) return false
   if (form.isGeoBlocked.value || form.isSwapRestricted.value || form.isInputAssetBlocked.value) return false
   if (!(+form.amount.value) || isNativeWrap.value || !form.collateralVault.value?.address || !form.position.value) return false
   if (needsSwap.value) return !!form.swapSelectedQuote.value && !isCowSwapSelected.value
@@ -279,7 +261,6 @@ const addToBatch = async () => {
       const inputAmount = valueToNano(form.amount.value, sel.decimals)
       const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
       if (isNative && !wrappedAddress) return
-      assertSpendingQuoteAsset(quote, sel, wrappedAddress)
       const tokenIn = (wrappedAddress || sel.address) as Address
       const wrappedNativeInfo = isNative && wrappedAddress ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount } : undefined
       const quoteIntents = form.swapQuoteCardsSorted.value.find(card => card.quote === quote)?.intents
@@ -301,8 +282,7 @@ const addToBatch = async () => {
     else {
       const vaultAddress = form.collateralVault.value!.address as Address
       const assetAddress = a.address as Address
-      if (!selectedAsset.value) return
-      const amount = valueToNano(form.amount.value, selectedAsset.value.decimals)
+      const amount = valueToNano(form.amount.value, a.decimals)
       await addBatchEntry({
         label: `Supply ${form.amount.value} ${a.symbol}`,
         intent: createIntent({
@@ -313,7 +293,7 @@ const addToBatch = async () => {
           subAccounts: [pos.subAccount as Address],
         }),
         subAccount: pos.subAccount as Address,
-        review: { type: 'supply', asset: selectedAsset.value, amount: form.amount.value },
+        review: { type: 'supply', asset: a, amount: form.amount.value },
       })
     }
     form.amount.value = ''
@@ -345,8 +325,6 @@ const openSwapTokenSelector = () => {
 }
 
 // Supply-specific watchers
-watch([form.asset, chainId], ([vaultAsset]) => spending.setDefaultAsset(vaultAsset), { immediate: true })
-
 watch(selectedAsset, async () => {
   if (needsSwap.value && form.amount.value) {
     form.resetSwapQuoteState()
@@ -398,17 +376,11 @@ watch(selectedAsset, async () => {
               v-model="form.amount.value"
               label="Supply amount"
               :desc="name"
-              :asset="selectedAsset ?? form.asset.value"
+              :asset="(needsSwap || isNativeWrap) && selectedAsset ? selectedAsset : form.asset.value"
               :vault="(needsSwap || isNativeWrap) ? undefined : (form.collateralVault.value as EVault)"
               :price-override="(needsSwap || isNativeWrap) ? swapAssetUsdPrice : undefined"
               :balance="activeBalance"
-              :readonly="spendingBlocked"
-              :maxable="!spendingBlocked"
-            />
-            <SpendingAssetStatus
-              :loading="spendingLoading"
-              :error="spendingError"
-              @retry="spending.retry"
+              maxable
             />
 
             <!-- Pay with token selector -->

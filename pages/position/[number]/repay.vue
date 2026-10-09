@@ -101,7 +101,6 @@ const liqPriceFromHealth = (health: number | null | undefined): number | null =>
 }
 
 // --- APYs ---
-const verifiedSpendingAsset = shallowRef<VaultAsset>()
 const {
   netAPY,
   collateralSupplyApy,
@@ -112,19 +111,18 @@ const {
   position,
   borrowVault,
   collateralVault,
-  verifiedSpendingAsset,
 })
 
 // --- Tab composables ---
-const walletSwap = useWalletSwapRepay({
+const wallet = useWalletRepay({
   position,
   borrowVault,
   collateralVault,
   formTab,
+  walletBalance,
   plan,
   isSubmitting,
   isPreparing,
-  slippage,
   clearSimulationError,
   runSimulation,
   netAPY,
@@ -134,19 +132,16 @@ const walletSwap = useWalletSwapRepay({
   borrowRewardApy,
   oraclePriceRatio,
 })
-watch(walletSwap.selectedAsset, (asset) => {
-  verifiedSpendingAsset.value = asset
-}, { immediate: true, flush: 'sync' })
-const wallet = useWalletRepay({
+
+const walletSwap = useWalletSwapRepay({
   position,
   borrowVault,
   collateralVault,
-  spendingAsset: walletSwap.selectedAsset,
   formTab,
-  walletBalance,
   plan,
   isSubmitting,
   isPreparing,
+  slippage,
   clearSimulationError,
   runSimulation,
   netAPY,
@@ -187,7 +182,6 @@ const isCowSwapSelectedForBatch = computed(() => {
   return false
 })
 const canAddToBatch = computed(() => {
-  if (formTab.value === 'wallet' && walletSwap.spending.isBlocked.value) return false
   if (!borrowVault.value || !position.value) return false
   if (formTab.value === 'wallet') {
     if (!(+wallet.amount.value) && !(+walletSwap.amount.value)) return false
@@ -276,9 +270,7 @@ const addToBatchWithoutWarnings = async () => {
       return
     }
     const liabilityVault = borrowVault.value.address as Address
-    const directAsset = wallet.verifiedAsset.value
-    if (!directAsset) return
-    const amountNano = valueToNano(wallet.amount.value, directAsset.decimals)
+    const amountNano = valueToNano(wallet.amount.value, borrowVault.value.asset.decimals)
     const currentDebt = position.value.borrowed || 0n
     const isFullRepay = amountNano >= currentDebt || wallet.walletRepayPercent.value >= 100
     const receiver = position.value.subAccount as Address
@@ -293,7 +285,7 @@ const addToBatchWithoutWarnings = async () => {
       }),
       subAccount: position.value.subAccount as Address,
       affectedSubAccounts: getFullRepayAffectedSubAccounts(isFullRepay),
-      review: { type: 'repay', asset: directAsset, amount: wallet.amount.value },
+      review: { type: 'repay', asset: borrowVault.value.asset, amount: wallet.amount.value },
     })
     wallet.amount.value = ''
     redirectAfterRepayAdd(isFullRepay)
@@ -508,12 +500,8 @@ const formTabs = computed(() => {
 })
 
 // --- Submit ---
-watch(walletSwap.spending.isBlocked, () => {
-  wallet.amount.value = ''
-}, { flush: 'sync' })
 const reviewRepayLabel = 'Review Repay'
 const reviewRepayDisabled = computed(() => {
-  if (formTab.value === 'wallet' && walletSwap.spending.isBlocked.value) return true
   if (formTab.value === 'wallet') {
     return walletSwap.needsSwap.value
       ? (isWalletSwapRestricted.value || isPayWithAssetBlocked.value || walletSwap.isSubmitDisabled.value)
@@ -564,7 +552,6 @@ const activeHookWarning = computed(() => {
 })
 
 const onSubmitForm = async () => {
-  if (formTab.value === 'wallet' && walletSwap.spending.isBlocked.value) return
   if (isOperationBlocked.value) return
   if (formTab.value === 'wallet') {
     if (walletSwap.needsSwap.value) {
@@ -693,27 +680,25 @@ watch(formTab, () => {
                   v-model="wallet.amount.value"
                   label="Pay from wallet"
                   :desc="name"
-                  :asset="wallet.verifiedAsset.value ?? borrowVault.asset"
+                  :asset="borrowVault.asset"
                   :vault="borrowVault"
                   :balance="walletBalance"
                   :max-handler="wallet.onSourceMax"
-                  :readonly="walletSwap.spending.isBlocked.value"
-                  :maxable="!walletSwap.spending.isBlocked.value"
+                  maxable
                 />
 
                 <AssetInput
                   v-if="borrowVault?.asset"
                   v-model="wallet.amount.value"
                   label="Debt to repay"
-                  :asset="wallet.verifiedAsset.value ?? borrowVault.asset"
+                  :asset="borrowVault.asset"
                   :vault="borrowVault"
                   :balance="position.borrowed"
-                  :readonly="walletSwap.spending.isBlocked.value"
-                  :maxable="!walletSwap.spending.isBlocked.value"
+                  maxable
                 />
 
                 <UiRange
-                  v-if="borrowVault && !walletSwap.spending.isBlocked.value"
+                  v-if="borrowVault"
                   v-model="wallet.walletRepayPercent.value"
                   label="Percent of debt to repay"
                   :min="0"
@@ -733,8 +718,7 @@ watch(formTab, () => {
                   :asset="walletSwap.selectedAsset.value"
                   :balance="walletSwap.selectedAssetBalance.value"
                   :max-handler="walletSwap.onSourceMax"
-                  :readonly="walletSwap.spending.isBlocked.value"
-                  :maxable="!walletSwap.spending.isBlocked.value"
+                  maxable
                   @update:model-value="walletSwap.onAmountInput"
                 />
 
@@ -745,13 +729,12 @@ watch(formTab, () => {
                   :asset="borrowVault.asset"
                   :vault="borrowVault"
                   :balance="position.borrowed"
-                  :readonly="walletSwap.spending.isBlocked.value"
-                  :maxable="!walletSwap.spending.isBlocked.value"
+                  maxable
                   @update:model-value="walletSwap.onDebtInput"
                 />
 
                 <UiRange
-                  v-if="borrowVault && !walletSwap.spending.isBlocked.value"
+                  v-if="borrowVault"
                   v-model="walletSwap.debtPercent.value"
                   label="Percent of debt to repay"
                   :min="0"
@@ -761,12 +744,6 @@ watch(formTab, () => {
                   @update:model-value="walletSwap.onPercentInput"
                 />
               </template>
-
-              <SpendingAssetStatus
-                :loading="walletSwap.spending.isLoading.value"
-                :error="walletSwap.spending.error.value"
-                @retry="walletSwap.spending.retry"
-              />
 
               <!-- Pay with token selector -->
               <div class="flex items-center gap-8">
