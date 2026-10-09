@@ -12,7 +12,7 @@ const bullets = [
 <template>
   <UiInfoModal
     title="Cyclical Note"
-    icon="refresh"
+    icon="badge-cyclical"
     headline="Fixed rates with recurring cycles"
     body="Cyclical Notes offer borrowers a fixed interest rate for most of the cycle, followed by a short repayment window with a sharply higher rate to incentivise repayment. For lenders, withdrawals may be limited during the cycle."
     :bullets="bullets"

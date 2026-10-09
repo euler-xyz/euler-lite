@@ -11,7 +11,8 @@ const { size = 'small', block = false, as = 'span', nudge = false } = defineProp
 
 <template>
   <VaultMetadataBadge
-    icon="search-user"
+    icon="badge-access-control"
+    active-icon="badge-access-control-filled"
     label="Access control"
     title="This vault restricts operations to allowlisted addresses"
     :modal="AccessControlInfoModal"

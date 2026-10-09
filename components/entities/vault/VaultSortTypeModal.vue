@@ -11,6 +11,7 @@ const { options, selected, onSave } = defineProps<{
 }>()
 
 const selectedIdx = ref(options.findIndex(option => option.label === selected))
+const hoveredIdx = ref(-1)
 
 const handleClose = () => {
   emits('close')
@@ -33,10 +34,12 @@ const handleClose = () => {
       :data-value="option.label"
       :class="[selectedIdx === idx ? 'bg-card-hover' : '']"
       @click="onSave(option.label)"
+      @mouseenter="hoveredIdx = idx"
+      @mouseleave="hoveredIdx = -1"
     >
       <UiIcon
         v-if="option.icon"
-        :name="option.icon"
+        :name="option.icon.startsWith('sort-') && (selectedIdx === idx || hoveredIdx === idx) ? `${option.icon}-filled` : option.icon"
         class="!w-20 !h-20 text-content-secondary flex-shrink-0"
       />
       <div class="grow-1">

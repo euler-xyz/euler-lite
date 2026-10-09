@@ -218,7 +218,7 @@ onClickOutside(wrapperRef, () => {
                 ? 'text-accent-600'
                 : 'text-content-muted',
             ]"
-            :name="item.icon"
+            :name="getIsMenuItemActive(item) ? item.activeIcon : item.icon"
           />
           <span
             v-if="item.sublabel"

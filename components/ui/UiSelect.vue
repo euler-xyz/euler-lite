@@ -9,6 +9,7 @@ const props = defineProps<{
   placeholder?: string
   title?: string
   icon?: string
+  activeIcon?: string
   showSelectedOptions?: boolean
   modalInputPlaceholder?: string
   chipOptions?: SelectOption[]
@@ -16,6 +17,7 @@ const props = defineProps<{
 }>()
 
 const modal = useModal()
+const isIconHovered = ref(false)
 
 const displayText = computed(() => {
   if (model.value.length === 0 || !props.showSelectedOptions) {
@@ -91,11 +93,13 @@ const open = () => {
       :data-selected-count="model.length"
       :aria-label="accessibleLabel"
       aria-haspopup="dialog"
+      @mouseenter="isIconHovered = true"
+      @mouseleave="isIconHovered = false"
       @click="open"
     >
       <UiIcon
         v-if="icon"
-        :name="icon"
+        :name="activeIcon && (isIconHovered || model.length > 0) ? activeIcon : icon"
         class="ui-select__icon"
       />
       <span class="ui-select__text">{{ displayText }}</span>

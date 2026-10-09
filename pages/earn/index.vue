@@ -254,7 +254,7 @@ const clearEarnFilters = () => {
       title="Earn"
       description="One deposit, diversified yield. Curators allocate your capital across multiple lending strategies."
       class="mb-16"
-      arrow-right
+      icon="nav-earn"
     />
 
     <div class="mb-16 -mx-16">
@@ -271,9 +271,9 @@ const clearEarnFilters = () => {
           v-model="sortBy"
           v-model:dir="sortDir"
           :options="[
-            { label: 'Total Supply', icon: 'lend-outline' },
-            { label: 'Liquidity', icon: 'wallet' },
-            { label: 'Supply APY', icon: 'percent' },
+            { label: 'Total Supply', icon: 'sort-total-supply' },
+            { label: 'Liquidity', icon: 'sort-liquidity' },
+            { label: 'Supply APY', icon: 'sort-apy' },
           ]"
           title="Sorting type"
         />
@@ -285,7 +285,8 @@ const clearEarnFilters = () => {
           placeholder="Curator"
           title="Curator"
           modal-input-placeholder="Search curator"
-          icon="search-user"
+          icon="filter-curator"
+          active-icon="filter-curator-filled"
         />
         <UiSelect
           :key="`collateral-${chainId}`"
@@ -294,7 +295,8 @@ const clearEarnFilters = () => {
           placeholder="Asset"
           title="Asset"
           modal-input-placeholder="Search asset"
-          icon="wallet"
+          icon="filter-asset"
+          active-icon="filter-asset-filled"
         />
         <UiCustomFilterChips
           :filters="customFilters"
@@ -325,7 +327,7 @@ const clearEarnFilters = () => {
       <UiEmptyState
         v-else
         class="flex-1"
-        icon="earn-outline"
+        icon="nav-earn"
         :title="emptyStateTitle"
         :description="emptyStateDescription"
       >

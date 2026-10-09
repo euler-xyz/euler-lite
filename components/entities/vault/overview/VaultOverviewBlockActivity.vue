@@ -61,6 +61,7 @@ watch(feedContextKey, () => {
     v-show="availability.reason.value === 'capability-check-failed' || hasCheckedRuntimeSupport"
     :key="feedContextKey"
     title="Activity"
+    icon="section-activity"
     :default-open="defaultOpen"
     :keep-mounted="true"
     content-class="flex flex-col gap-16 pt-8"

@@ -309,7 +309,7 @@ const clearLendFilters = () => {
       title="Lend"
       description="Supply assets to isolated lending markets. Earn yield from borrower demand."
       class="mb-16"
-      arrow-down
+      icon="nav-lend"
     />
 
     <div class="mb-16 -mx-16">
@@ -326,9 +326,9 @@ const clearLendFilters = () => {
           v-model="sortBy"
           v-model:dir="sortDir"
           :options="[
-            { label: 'Total Supply', icon: 'lend-outline' },
-            { label: 'Utilization', icon: 'pulse' },
-            { label: 'Supply APY', icon: 'percent' },
+            { label: 'Total Supply', icon: 'sort-total-supply' },
+            { label: 'Utilization', icon: 'sort-utilization' },
+            { label: 'Supply APY', icon: 'sort-apy' },
           ]"
           title="Sorting type"
         />
@@ -340,7 +340,8 @@ const clearLendFilters = () => {
           placeholder="Curator"
           title="Curator"
           modal-input-placeholder="Search curator"
-          icon="shield"
+          icon="filter-curator"
+          active-icon="filter-curator-filled"
         />
         <UiSelect
           v-if="enableEntityBranding"
@@ -350,7 +351,8 @@ const clearLendFilters = () => {
           placeholder="Market"
           title="Market"
           modal-input-placeholder="Search market"
-          icon="bank"
+          icon="market"
+          active-icon="market-filled"
         />
         <UiSelect
           :key="`collateral-${chainId}`"
@@ -359,7 +361,8 @@ const clearLendFilters = () => {
           placeholder="Asset"
           title="Asset"
           modal-input-placeholder="Search asset"
-          icon="wallet"
+          icon="filter-asset"
+          active-icon="filter-asset-filled"
         />
         <UiCustomFilterChips
           :filters="customFilters"
@@ -390,7 +393,7 @@ const clearLendFilters = () => {
       <UiEmptyState
         v-else
         class="flex-1"
-        icon="lend-outline"
+        icon="nav-lend"
         :title="emptyStateTitle"
         :description="emptyStateDescription"
       >

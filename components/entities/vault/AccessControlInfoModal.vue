@@ -11,7 +11,7 @@ const bullets = [
 <template>
   <UiInfoModal
     title="Access-controlled Vault"
-    icon="search-user"
+    icon="badge-access-control"
     headline="Permissioned Operations"
     body="This vault routes operations through an access-control hook. Only addresses on an on-chain allowlist can perform the gated operations."
     :bullets="bullets"

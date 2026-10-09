@@ -4,6 +4,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 
 const { modal, size = 'small', block = false, as = 'span', nudge = false } = defineProps<{
   icon: string
+  activeIcon?: string
   label: string
   title: string
   modal: Component
@@ -26,6 +27,7 @@ const openInfoModal = (event: MouseEvent | KeyboardEvent) => {
   <VaultMetadataTag
     :as="as"
     :icon="icon"
+    :active-icon="activeIcon"
     :label="label"
     tone="accent"
     :size="size"
