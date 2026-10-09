@@ -1,14 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  ContractFunctionExecutionError,
-  ContractFunctionRevertedError,
-  ContractFunctionZeroDataError,
-  InternalRpcError,
-  RawContractError,
-  erc20Abi,
-  zeroAddress,
-  type BaseError,
-} from 'viem'
+import { zeroAddress } from 'viem'
 
 const mocks = vi.hoisted(() => ({
   fetchWithTimeout: vi.fn(),
@@ -55,15 +46,17 @@ const onchain: Record<string, number> = {
   [LODE.address.toLowerCase()]: 17,
 }
 
-const contractError = (cause: BaseError) =>
-  new ContractFunctionExecutionError(cause, { abi: erc20Abi, functionName: 'decimals' })
-const noContract = () => contractError(new ContractFunctionZeroDataError({ functionName: 'decimals' }))
-const revertedInMulticall = () => contractError(new ContractFunctionRevertedError({
-  abi: erc20Abi, functionName: 'decimals', cause: new RawContractError({ data: '0x' }),
-}))
-const rpcInternalError = () => contractError(new ContractFunctionRevertedError({
-  abi: erc20Abi, functionName: 'decimals', message: 'internal error', cause: new InternalRpcError(new Error('internal error')),
-}))
+// Plain errors because production errors come from the SDK's bundled viem, not the app's viem classes.
+// Cause chains as SDK 4.0.1 produced them against live Ethereum RPCs on 2026-10-09.
+const errorChain = ([name = 'Error', ...causes]: string[]): Error =>
+  Object.assign(new Error(name, causes.length ? { cause: errorChain(causes) } : undefined), { name })
+const noContract = () => errorChain(['ContractFunctionExecutionError', 'ContractFunctionZeroDataError', 'AbiDecodingZeroDataError'])
+const revertedInMulticall = () => errorChain([
+  'ContractFunctionExecutionError', 'ContractFunctionRevertedError', 'CallExecutionError', 'ExecutionRevertedError', 'RawContractError',
+])
+const rpcInternalError = () => errorChain([
+  'ContractFunctionExecutionError', 'ContractFunctionRevertedError', 'CallExecutionError', 'InternalRpcError', 'RpcRequestError',
+])
 
 const readOnchain = async (_chainId: number, address: string) => {
   if (address.toLowerCase() === NO_CODE.address.toLowerCase()) throw noContract()
@@ -95,6 +88,7 @@ describe('/api/internal/token-list decimals', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.clearAllMocks()
   })
 
@@ -142,6 +136,27 @@ describe('/api/internal/token-list decimals', () => {
 
     expect(bySymbol(await refreshTokenList(1))).toMatchObject({ FLUX: 8 })
     expect(mocks.resolveTokenDecimals.mock.calls.map(([, address]) => address)).toEqual([FLUX.address])
+  })
+
+  it('serves list decimals when reads hang past the deadline and keeps late results for the next build', async () => {
+    vi.useFakeTimers()
+    const { refreshTokenList } = await importRoute()
+    let finishFluxRead = (_decimals: number) => {}
+    mocks.resolveTokenDecimals.mockImplementation(async (chainId: number, address: string) => {
+      if (address !== FLUX.address) return readOnchain(chainId, address)
+      return new Promise<number>((resolve) => {
+        finishFluxRead = resolve
+      })
+    })
+
+    const build = refreshTokenList(1)
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(bySymbol(await build)).toMatchObject({ FLUX: 18 })
+
+    finishFluxRead(8)
+    mocks.resolveTokenDecimals.mockClear()
+    expect(bySymbol(await refreshTokenList(1))).toMatchObject({ FLUX: 8 })
+    expect(mocks.resolveTokenDecimals).not.toHaveBeenCalled()
   })
 
   it('serves the list when the server SDK is unavailable', async () => {

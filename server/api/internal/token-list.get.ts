@@ -11,6 +11,7 @@ import { buildEulerSDK, type EulerSDK, type TokenListItem } from '@eulerxyz/eule
 import { readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-url-env'
 
 const CACHE_TTL_MS = 300_000
+const DECIMALS_READ_DEADLINE_MS = 5_000
 const DEFILLAMA_DEFAULT_URL = 'https://d3g10bzo9rdluh.cloudfront.net'
 
 interface TokenEntry {
@@ -330,8 +331,8 @@ const onchainDecimals = new Map<string, number | null>()
 
 const decimalsKey = (chainId: number, address: string) => `${chainId}:${address.toLowerCase()}`
 
-// Matched by name because the SDK bundles its own viem. RawContractError marks a failed call inside a
-// successful multicall; RPC failures (often -32603, which viem also reports as a revert) never carry it.
+// Matched by name because the SDK bundles its own viem. RawContractError only marks a call that failed inside a
+// successful Multicall3 batch; RPC failures (often -32603, which viem also reports as a revert) never carry it.
 const isMissingDecimals = (err: unknown): boolean => {
   for (let e: unknown = err; e instanceof Error; e = e.cause) {
     if (e.name === 'RawContractError' || e.name === 'ContractFunctionZeroDataError') return true
@@ -368,7 +369,11 @@ async function readMissingDecimals(chainId: number, tokens: TokenEntry[]): Promi
 
 async function applyOnchainDecimals(chainId: number, tokens: TokenEntry[]): Promise<TokenEntry[]> {
   const chainTokens = tokens.filter(t => t.chainId === chainId && isAddress(t.address))
-  await readMissingDecimals(chainId, chainTokens)
+  // viem retries a hanging RPC for ~40 s; reads that miss the deadline still fill the memo for the next build.
+  await Promise.race([
+    readMissingDecimals(chainId, chainTokens),
+    new Promise(resolve => setTimeout(resolve, DECIMALS_READ_DEADLINE_MS)),
+  ])
   return chainTokens.flatMap((token) => {
     const decimals = onchainDecimals.get(decimalsKey(chainId, token.address))
     if (decimals === null) return []
@@ -377,10 +382,6 @@ async function applyOnchainDecimals(chainId: number, tokens: TokenEntry[]): Prom
 }
 
 const buildMergedTokens = async (chainId: number): Promise<TokenEntry[]> => {
-  // Fetch all four sources concurrently. Each fetcher has its own cache,
-  // in-flight dedup, and stale-fallback (via allSettled so one failure
-  // doesn't kill the merge). Bounded by the slowest cold-fetch (10s
-  // timeout); warm-cache path is a Map lookup.
   const [eulerResult, uniswapResult, defillamaResult, merklResult] = await Promise.allSettled([
     fetchEulerSdkTokenList(chainId),
     fetchUniswap(),

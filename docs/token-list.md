@@ -43,7 +43,7 @@ All four sources run concurrently via `Promise.allSettled`. Each fetcher has its
 
 **Deduplication**: tokens are merged with the Euler SDK token list taking priority. If the same `chainId:address` appears in multiple sources, the higher-priority entry wins. This ensures Euler metadata (name, symbol, logo URL) takes precedence over supplemental sources.
 
-**Decimals**: the response holds only the requested chain's tokens, and each token's decimals come from its contract through the server SDK (`tokenlistService.resolveTokenDecimals`). A token is read once per server process. Tokens with no contract or no `decimals()` are left out, and tokens whose read failed keep their list decimals until a later build reads them. The native currency entry at the zero address is not read.
+**Decimals**: the response holds only the requested chain's tokens, and each token's decimals come from its contract through the server SDK (`tokenlistService.resolveTokenDecimals`), read once per server process.
 
 **Error contract**:
 
