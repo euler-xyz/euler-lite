@@ -23,32 +23,36 @@ const chainById = new Map<number, AppKitNetwork>(
     .map((chain): [number, AppKitNetwork] => [Number((chain as AppKitNetwork).id), chain as AppKitNetwork]),
 )
 
-/** Origins only allowed in dev deployments. */
-const CONNECT_SRC_DEV = [
-  'https://golang-proxy-development.up.railway.app',
-]
+/**
+ * The origin of a URL a deployment configures, for connect-src only: an
+ * encrypted (https or wss) URL reduced to scheme, host and port, so a value
+ * can never carry a path, a second source or a directive into the policy.
+ */
+// The URL parser keeps ';', ',' and quotes in a hostname (also when percent-encoded), and any of
+// them would end the source or the directive, so only a plain host and port is accepted.
+const CSP_CONNECT_ORIGIN = /^(?:https|wss):\/\/(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*(?::\d{1,5})?$/
+
+export function cspConnectOrigin(raw: string | undefined): string | null {
+  const trimmed = raw?.trim()
+  if (!trimmed) return null
+  try {
+    const { origin } = new URL(trimmed)
+    return CSP_CONNECT_ORIGIN.test(origin) ? origin : null
+  }
+  catch {
+    return null
+  }
+}
 
 /**
  * Extra connect-src origins (comma-separated).
  * Use CSP_EXTRA_CONNECT_SRC to allow additional origins per deployment
  * on top of the built-in and dev-only lists.
  */
-function parseExtraConnectSrc(): string[] {
+export function parseExtraConnectSrc(): string[] {
   const raw = process.env.CSP_EXTRA_CONNECT_SRC?.trim()
   if (!raw) return []
-  return raw.split(',').map(s => s.trim()).filter(Boolean)
-}
-
-/** Extract the origin (scheme + host + port) from a URL string. */
-function safeOrigin(raw: string | undefined): string | null {
-  const trimmed = raw?.trim()
-  if (!trimmed) return null
-  try {
-    return new URL(trimmed).origin
-  }
-  catch {
-    return null
-  }
+  return [...new Set(raw.split(',').map(cspConnectOrigin).filter((origin): origin is string => origin !== null))]
 }
 
 /** Read an env var with fallback names (mirrors app-config.ts resolution order). */
@@ -93,7 +97,7 @@ function parseChainPublicRpcOrigins(): string[] {
     const chain = chainById.get(Number(match[1]))
     const urls = chain?.rpcUrls?.default?.http ?? []
     for (const url of urls) {
-      const origin = safeOrigin(url)
+      const origin = cspConnectOrigin(url)
       if (origin) origins.add(origin)
     }
   }
@@ -111,55 +115,30 @@ function parseEnvOrigins(): { connect: string[] } {
     ...scanDynamicEnvUrls(),
   ]
 
-  const connect = [...new Set(connectVars.map(safeOrigin).filter(Boolean))] as string[]
+  const connect = [...new Set(connectVars.map(cspConnectOrigin).filter(Boolean))] as string[]
   return { connect }
 }
 
 const CONNECT_SRC_BASE = [
   '\'self\'',
-  'https://api.merkl.xyz',
-  'https://incentra-prd.brevis.network',
-  // WalletConnect / Reown
-  'https://rpc.walletconnect.com',
-  'https://rpc.walletconnect.org',
-  'https://relay.walletconnect.com',
-  'https://relay.walletconnect.org',
-  'https://api.web3modal.com',
+  // AppKit: wallet list and remote project config
   'https://api.web3modal.org',
-  'https://keys.walletconnect.com',
-  'https://keys.walletconnect.org',
-  'https://notify.walletconnect.com',
-  'https://notify.walletconnect.org',
-  'https://echo.walletconnect.com',
-  'https://echo.walletconnect.org',
-  'https://push.walletconnect.com',
-  'https://push.walletconnect.org',
-  'https://pulse.walletconnect.com',
-  'https://pulse.walletconnect.org',
-  'https://verify.walletconnect.com',
-  'https://verify.walletconnect.org',
-  'https://explorer-api.walletconnect.com',
-  // Coinbase Wallet SDK
-  'https://chain-proxy.wallet.coinbase.com',
-  'https://cca-lite.coinbase.com',
-  // External data APIs
-  'https://api.fuul.xyz',
-  // Error signature decoding (via SDK)
-  'https://api.4byte.sourcify.dev',
-  // CoW Protocol orderbook
-  'https://barn.api.cow.fi',
-  'https://api.cow.fi',
-  // Reown AppKit SDK version check
-  'https://registry.npmjs.org',
-  // RPC providers (wildcard — operators configure per chain)
-  'https://*.quiknode.pro',
-  'https://*.alchemy.com',
-  'https://*.ankr.com',
-  'https://*.goldsky.com',
-  // WebSocket connections
-  'wss://www.walletlink.org',
-  'wss://relay.walletconnect.com',
+  // AppKit: blockchain API, also its fallback RPC transport
+  'https://rpc.walletconnect.org',
+  // WalletConnect relay
   'wss://relay.walletconnect.org',
+  // WalletConnect and AppKit event telemetry
+  'https://pulse.walletconnect.org',
+  // AppKit version check
+  'https://registry.npmjs.org',
+  // Coinbase Wallet SDK: WalletLink events and socket, and its RPC
+  'https://www.walletlink.org',
+  'wss://www.walletlink.org',
+  'https://rpc.wallet.coinbase.com',
+  // Error signature decoding in the SDK
+  'https://api.4byte.sourcify.dev',
+  // CoW Protocol order submission and status in the SDK
+  'https://api.cow.fi',
 ]
 
 export function buildCsp(
@@ -170,7 +149,6 @@ export function buildCsp(
 ): string {
   const connectSrc = [
     ...CONNECT_SRC_BASE,
-    ...(isDev ? CONNECT_SRC_DEV : []),
     ...extraConnectSrc,
     ...envOrigins.connect,
     ...chainPublicOrigins,
@@ -178,20 +156,22 @@ export function buildCsp(
 
   const directives = [
     'default-src \'self\'',
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval' https://static.cloudflareinsights.com`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
     'style-src \'unsafe-inline\' \'self\'',
     'object-src \'none\'',
     'base-uri \'self\'',
     `connect-src ${connectSrc.join(' ')}`,
     'font-src \'self\' https://fonts.reown.com',
-    'frame-src \'self\' https://verify.walletconnect.org https://verify.walletconnect.com',
+    // Nuxt DevTools mounts its panel in a same-origin frame on the local dev server.
+    `frame-src ${import.meta.dev ? '\'self\' ' : ''}https://verify.walletconnect.org https://secure.walletconnect.org`,
+    'child-src \'none\'',
     'frame-ancestors \'none\'',
     // Token logos come from arbitrary CDNs (CoinGecko, DefiLlama, Uniswap, etc.)
     // that cannot be whitelisted upfront. Images are passive content — no script execution risk.
     'img-src \'self\' data: blob: https:',
     'manifest-src \'self\'',
     'media-src \'self\'',
-    'worker-src \'self\' blob:',
+    'worker-src \'none\'',
     'form-action \'self\'',
     ...(isDev ? [] : ['upgrade-insecure-requests']),
   ]
