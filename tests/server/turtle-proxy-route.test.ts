@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const API_KEY = 'sk_live_turtle_secret_do_not_leak'
 const WALLET = '0x0000000000000000000000000000000000000001'
-const PROOFS_URL = `https://app.example/api/internal/proxy/turtle/streams/merkle_proofs?wallet=${WALLET}&streamIds=stream-1,stream-2`
+const STREAM_A = '7e9c407e-3992-4587-b8e7-9a30f96b12b5'
+const STREAM_B = '6ab3c09e-a384-436e-ba8b-c30d249bdf83'
+const PROOFS_QUERY = `wallet=${WALLET}&streamIds=${STREAM_A}&streamIds=${STREAM_B}`
+const PROOFS_URL = `https://app.example/api/internal/proxy/turtle/streams/merkle_proofs?${PROOFS_QUERY}`
 
 const mocks = vi.hoisted(() => ({
   consume: vi.fn(),
@@ -74,15 +77,16 @@ describe('/api/internal/proxy/turtle route', () => {
   })
 
   it('forwards an allowed reward-proof request with the configured X-API-Key', async () => {
-    mocks.fetchWithTimeout.mockResolvedValueOnce(upstreamResponse(200, '[{"streamId":"stream-1"}]'))
+    const proofs = `{"proofs":[{"streamId":"${STREAM_A}"}]}`
+    mocks.fetchWithTimeout.mockResolvedValueOnce(upstreamResponse(200, proofs))
 
     const body = await handler(makeEvent(PROOFS_URL))
 
-    expect(body).toBe('[{"streamId":"stream-1"}]')
+    expect(body).toBe(proofs)
     expect(mocks.consume).toHaveBeenCalledTimes(1)
     expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(1)
     const [target, , init] = mocks.fetchWithTimeout.mock.calls[0]
-    expect(target).toBe(`https://earn.turtle.xyz/v1/streams/merkle_proofs?wallet=${WALLET}&streamIds=stream-1,stream-2`)
+    expect(target).toBe(`https://earn.turtle.xyz/v2/streams/merkle_proofs?${PROOFS_QUERY}`)
     expect(init.method).toBe('GET')
     expect(init.headers).toEqual({ 'accept': 'application/json', 'X-API-Key': API_KEY })
     expect(mocks.setResponseHeaders).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
@@ -153,14 +157,15 @@ describe('/api/internal/proxy/turtle route', () => {
     await handler(makeEvent(PROOFS_URL))
 
     const [target] = mocks.fetchWithTimeout.mock.calls[0]
-    expect(target).toMatch(/^https:\/\/earn\.turtle\.xyz\/v1\//)
+    expect(target).toMatch(/^https:\/\/earn\.turtle\.xyz\/v2\//)
   })
 
   it.each([
     ['other path', `https://app.example/api/internal/proxy/turtle/streams?chainId=1`],
     ['extra query key', `${PROOFS_URL}&debug=true`],
-    ['invalid wallet', 'https://app.example/api/internal/proxy/turtle/streams/merkle_proofs?wallet=nope&streamIds=stream-1'],
-    ['path traversal', `https://app.example/api/internal/proxy/turtle/../v3/streams/merkle_proofs?wallet=${WALLET}&streamIds=stream-1`],
+    ['invalid wallet', `https://app.example/api/internal/proxy/turtle/streams/merkle_proofs?wallet=nope&streamIds=${STREAM_A}`],
+    ['comma-joined stream ids', `https://app.example/api/internal/proxy/turtle/streams/merkle_proofs?wallet=${WALLET}&streamIds=${STREAM_A},${STREAM_B}`],
+    ['path traversal', `https://app.example/api/internal/proxy/turtle/../v3/streams/merkle_proofs?wallet=${WALLET}&streamIds=${STREAM_A}`],
   ])('keeps blocking disallowed requests (%s) before any upstream call', async (_label, url) => {
     await expect(handler(makeEvent(url))).rejects.toMatchObject({ statusCode: 404 })
     expect(mocks.fetchWithTimeout).not.toHaveBeenCalled()

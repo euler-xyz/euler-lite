@@ -2,7 +2,7 @@
  * Server-side proxy for Turtle stream reward proofs.
  *
  * Lite calls:
- *   `/api/internal/proxy/turtle/streams/merkle_proofs?wallet=0x…&streamIds=…`
+ *   `/api/internal/proxy/turtle/streams/merkle_proofs?wallet=0x…&streamIds=<uuid>[&streamIds=<uuid>…]`
  *
  * Forwards to Turtle Earn (a fixed upstream — see `turtle-proxy.ts`) while
  * keeping the browser same-origin and allowlisting only the reward proof

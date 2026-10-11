@@ -1,6 +1,6 @@
 const EVM_ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/
 const POSITIVE_INTEGER_RE = /^[1-9]\d*$/
-const TURTLE_STREAM_ID_RE = /^[A-Za-z0-9_-]+$/
+const TURTLE_STREAM_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const FUUL_INCENTIVE_PROTOCOLS = new Set(['euler', 'euler-looping'])
 const MERKL_OPPORTUNITY_TYPES = new Set([
@@ -123,7 +123,10 @@ export const isAllowedTurtleProxyRequest = (
   if (!hasOnlySearchKeys(params, ['wallet', 'streamIds'])) return false
 
   const wallet = getSingleParam(params, 'wallet')
-  const streamIds = getSingleParam(params, 'streamIds')
+  // Turtle /v2 takes one stream UUID per `streamIds` value and rejects a
+  // comma-joined list with 400.
+  const streamIds = params.getAll('streamIds')
   return EVM_ADDRESS_RE.test(wallet ?? '')
-    && Boolean(streamIds?.split(',').every(streamId => TURTLE_STREAM_ID_RE.test(streamId)))
+    && streamIds.length > 0
+    && streamIds.every(streamId => TURTLE_STREAM_ID_RE.test(streamId))
 }
