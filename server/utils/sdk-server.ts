@@ -1,3 +1,6 @@
+import { createQueryCacheBuildQuery } from '@eulerxyz/euler-v2-sdk'
+import { getSdkTokenDecimals } from '~/utils/token-decimals'
+import { withVerifiedVaultDecimals } from '~/utils/sdk-token-decimals'
 /**
  * Lazy per-chain server-side `EulerSDK` builder.
  *
@@ -125,6 +128,10 @@ export const getServerSdk = (chainId: number): Promise<EulerSDK> => {
   const providerService = createServerProviderService(config.rpcUrls, new ProviderService(config.rpcUrls))
   const promise = buildEulerSDK({
     config,
+    buildQuery: withVerifiedVaultDecimals(createQueryCacheBuildQuery(), async (targetChainId, address) => {
+      const sdk = await promise
+      return getSdkTokenDecimals(sdk)(targetChainId, address)
+    }),
     servicesOverrides: { providerService },
   }).catch((err) => {
     if (sdkByChain.get(chainId) === promise) sdkByChain.delete(chainId)

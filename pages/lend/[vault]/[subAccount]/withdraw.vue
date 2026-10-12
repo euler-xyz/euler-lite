@@ -654,7 +654,7 @@ const updateAsyncEstimates = useDebounceFn(async () => {
   const gen = estimatesGuard.next()
   try {
     const v = projectionEVault.value
-    const amountNano = valueToNano(amount.value, v.shares.decimals)
+    const amountNano = valueToNano(amount.value, v.asset.decimals)
     const projected = await getProjectedRates(
       v.address,
       v.totalCash,

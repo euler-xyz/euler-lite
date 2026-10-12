@@ -11,7 +11,7 @@ import { nanoToValue } from '~/utils/crypto-utils'
  */
 export function getTotalCollateralValue(position: PortfolioBorrowPosition<VaultEntity>): number | null {
   const borrowVault = position.borrowVault
-  const borrowed = nanoToValue(position.borrowed, borrowVault?.shares.decimals || 18)
+  const borrowed = nanoToValue(position.borrowed, borrowVault?.asset.decimals ?? 18)
   const userLtvValue = position.userLTV ?? position.currentLTV
   if (userLtvValue === undefined) return null
   const userLtv = nanoToValue(userLtvValue, 18)
@@ -60,7 +60,7 @@ export function estimatePositionAfterChange(params: EstimateParams): PositionEst
   if (totalCollateralValue === null) return null
 
   const borrowVault = position.borrowVault
-  const borrowed = nanoToValue(position.borrowed, borrowVault?.shares.decimals || 18)
+  const borrowed = nanoToValue(position.borrowed, borrowVault?.asset.decimals ?? 18)
   const effectiveLiquidationLtv = getBorrowPositionEffectiveLiquidationLTV(position)
   if (effectiveLiquidationLtv === undefined) return null
   const liquidationLtv = effectiveLiquidationLtv * 100

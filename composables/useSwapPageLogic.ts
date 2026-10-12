@@ -192,7 +192,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
       toAmount.value = ''
       return
     }
-    const formatted = formatUnits(amount, Number(toVault.value.shares.decimals))
+    const formatted = formatUnits(amount, Number(toVault.value.asset.decimals))
     toAmount.value = formatSmartAmount(formatted).replace(/,/g, '')
   }, { immediate: true })
 
@@ -502,7 +502,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     return buildSwapRouteItems({
       quoteCards: quoteCardsSorted.value,
       getQuoteDiffPct,
-      decimals: Number(toVault.value.shares.decimals),
+      decimals: Number(toVault.value.asset.decimals),
       symbol: toVault.value.asset.symbol,
       formatAmount: formatSmartAmount,
       amountField: displayAmountField,

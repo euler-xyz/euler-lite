@@ -472,8 +472,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     swapCollateralDeltaNano.value ?? valueToNano(amount.value || '0', collateralVault.value?.asset.decimals),
     Number(collateralVault.value?.asset.decimals),
   ))
-  const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, borrowVault.value?.shares.decimals || 18))
-  const suppliedFixed = computed(() => FixedPoint.fromValue(collateralAssets.value, collateralVault.value?.asset.decimals || 18))
+  const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, borrowVault.value?.asset.decimals ?? 18))
+  const suppliedFixed = computed(() => FixedPoint.fromValue(collateralAssets.value, collateralVault.value?.asset.decimals ?? 18))
   const priceFixed = computed(() => {
     if (!position.value) return FixedPoint.fromValue(0n, 18)
     return options.computePriceFixed(position.value, borrowVault.value, collateralVault.value)

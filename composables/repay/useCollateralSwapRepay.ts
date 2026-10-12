@@ -269,7 +269,7 @@ export const useCollateralSwapRepay = (options: UseCollateralSwapRepayOptions) =
     if (isCrossPositionSource.value) return null
     if (!sourceVault.value || core.spent.value === null) return null
     const nextAssets = sourceAssets.value - core.spent.value
-    return nanoToValue(nextAssets > 0n ? nextAssets : 0n, sourceVault.value.shares.decimals)
+    return nanoToValue(nextAssets > 0n ? nextAssets : 0n, sourceVault.value.asset.decimals)
   })
 
   const nextLiquidationLtv = computed(() => {

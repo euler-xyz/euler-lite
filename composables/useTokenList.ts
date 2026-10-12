@@ -61,16 +61,14 @@ const filterByChain = (chainId: number) => {
     && [...filtered.values()].find(t => t.symbol.toUpperCase() === wrappedSymbol)
 
   if (hasWrappedNative) {
-    if (!filtered.has(zeroAddress)) {
-      filtered.set(zeroAddress, {
-        chainId,
-        address: zeroAddress,
-        name: chain!.nativeCurrency.name,
-        symbol: chain!.nativeCurrency.symbol,
-        decimals: chain!.nativeCurrency.decimals,
-        ...(hasWrappedNative.tags?.length ? { tags: hasWrappedNative.tags } : {}),
-      })
-    }
+    filtered.set(zeroAddress, {
+      chainId,
+      address: zeroAddress,
+      name: chain!.nativeCurrency.name,
+      symbol: chain!.nativeCurrency.symbol,
+      decimals: chain!.nativeCurrency.decimals,
+      ...(hasWrappedNative.tags?.length ? { tags: hasWrappedNative.tags } : {}),
+    })
   }
   else {
     filtered.delete(zeroAddress)

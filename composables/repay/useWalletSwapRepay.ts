@@ -240,8 +240,8 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
   const estimatesError = ref('')
   const isEstimatesLoading = ref(false)
 
-  const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, borrowVault.value?.shares.decimals || 18))
-  const suppliedFixed = computed(() => FixedPoint.fromValue(position.value?.supplied || 0n, collateralVault.value?.shares.decimals || 18))
+  const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, borrowVault.value?.asset.decimals ?? 18))
+  const suppliedFixed = computed(() => FixedPoint.fromValue(position.value?.supplied ?? 0n, collateralVault.value?.asset.decimals ?? 18))
   const priceFixed = computed(() => {
     const ratio = oraclePriceRatio.value
     if (ratio && Number.isFinite(ratio) && ratio > 0) {
@@ -482,7 +482,7 @@ export const useWalletSwapRepay = (options: UseWalletSwapRepayOptions) => {
       }
 
       const debtRepaidNano = getDebtRepaidNano()
-      const debtRepaidFixed = FixedPoint.fromValue(debtRepaidNano, Number(borrowVault.value.shares.decimals))
+      const debtRepaidFixed = FixedPoint.fromValue(debtRepaidNano, Number(borrowVault.value.asset.decimals))
       const totalValue = getTotalCollateralValue(position.value!)
       const collateralValueFl = totalValue !== null
         ? totalValue

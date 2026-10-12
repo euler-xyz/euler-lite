@@ -97,7 +97,7 @@ export const useRepayHealthMetrics = (options: UseRepayHealthMetricsOptions) => 
   const borrowAmountAfter = computed(() => {
     if (!borrowVault.value || !position.value || debtRepaid.value === null) return null
     const nextBorrow = position.value.borrowed - debtRepaid.value
-    return nanoToValue(nextBorrow > 0n ? nextBorrow : 0n, borrowVault.value.shares.decimals)
+    return nanoToValue(nextBorrow > 0n ? nextBorrow : 0n, borrowVault.value.asset.decimals)
   })
 
   const nextLtv = computed(() => {

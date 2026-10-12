@@ -21,7 +21,7 @@ Merge with deduplicateTokens()
 Priority: Euler SDK > DefiLlama > Uniswap > Merkl reward-tokens
   |
   v
-Keep the requested chain, read decimals() once per token per server process
+Keep the requested chain, resolve contract decimals before publishing metadata
 ```
 
 ## Server Endpoint
@@ -43,15 +43,25 @@ All four sources run concurrently via `Promise.allSettled`. Each fetcher has its
 
 **Deduplication**: tokens are merged with the Euler SDK token list taking priority. If the same `chainId:address` appears in multiple sources, the higher-priority entry wins. This ensures Euler metadata (name, symbol, logo URL) takes precedence over supplemental sources.
 
-**Decimals**: the response holds only the requested chain's tokens, and each token's decimals come from its contract through the server SDK (`tokenlistService.resolveTokenDecimals`), read once per server process.
+**Decimals**: the response holds only the requested chain's tokens. `utils/token-decimals.ts` resolves ERC-20 decimals through the SDK, caches successful reads for five minutes by chain and address, and deduplicates concurrent reads. A failed or five-second timed-out read excludes that token; no unverified list value is substituted. An expired merged list is not served when verification fails. Late successful reads can serve the next request. Failed reads retry on subsequent requests. The cache is bounded to 20,000 successful entries per SDK instance. Existing requests and cache warming drive refreshes.
+
+Native currency decimals come from the chain definition, including when an upstream list includes its own zero-address entry. Zero decimals is valid for an ERC-20 token.
+
+### Shared metadata boundaries
+
+`utils/sdk-token-decimals.ts` verifies indexed EVault and Earn metadata before the SDK constructs vaults, populates accounts, or computes market prices. On-chain lens reads obtain contract metadata directly. The browser also verifies the serialized vault snapshot before publishing it to the registry. Asset and vault-share contracts are verified independently. Indexed asset oracle quotes are normalized to one verified asset unit; collateral share quotes retain their explicit share input. Consequently forms, oracle helpers, wallet balances and review decoding consume the same normalized vault metadata without component-level overrides.
+
+`useSwapApi` resolves both requested token contracts and replaces quote display metadata before quotes reach route valuation and review. This includes CoW share-token quotes: the share contract keeps its own decimals. Raw quote amounts and calldata are unchanged.
+
+Amounts passed to asset operations (deposit, borrow, repay and withdraw) use asset decimals. Savings transfers and share-token swaps use shares, with an explicit asset-to-share conversion where required. Metadata freshness is bounded by the resolver TTL and the existing token-list/snapshot caches; it is not a per-block monitoring service.
 
 **Error contract**:
 
 | Status | Condition | Body |
 |--------|-----------|------|
-| `200` | At least one source returned tokens | `{ tokens: TokenEntry[] }` |
+| `200` | At least one token has verified or native metadata | `{ tokens: TokenEntry[] }` |
 | `400` | `chainId` is missing, non-numeric, zero, or negative | `{ statusCode: 400, statusMessage: "chainId is required and must be a positive integer" }` |
-| `502` | Merged token list is empty after combining all sources | `{ statusCode: 502, statusMessage: "Upstream error" }` |
+| `502` | No token remains after combining sources and verifying decimals | `{ statusCode: 502, statusMessage: "Upstream error" }` |
 
 ## Client Composable
 

@@ -2125,7 +2125,7 @@ const nextPriceRatio = computed(() => {
 })
 const nextDebtAmount = computed(() => {
   if (!effectiveDebtVault.value || nextDebtAmountNano.value === null) return null
-  return nanoToValue(nextDebtAmountNano.value, effectiveDebtVault.value.shares.decimals)
+  return nanoToValue(nextDebtAmountNano.value, effectiveDebtVault.value.asset.decimals)
 })
 const getRiskMetrics = (
   debtVault: EVault | undefined,
@@ -2158,7 +2158,7 @@ const getRiskMetrics = (
     )
     if (priceRatio === null || priceRatio <= 0) return null
 
-    const amount = nanoToValue(leg.amount, leg.vault.shares.decimals)
+    const amount = nanoToValue(leg.amount, leg.vault.asset.decimals)
     const collateralValue = amount * priceRatio
     if (!Number.isFinite(collateralValue) || collateralValue <= 0) continue
 
@@ -2181,7 +2181,7 @@ const getRiskMetrics = (
   }
 }
 const currentRiskMetrics = computed<RefinanceRiskMetrics | null>(() =>
-  getRiskMetrics(sourceDebtVault.value, currentCollateralLegs.value, nanoToValue(currentDebt.value, sourceDebtVault.value?.shares.decimals ?? 18)),
+  getRiskMetrics(sourceDebtVault.value, currentCollateralLegs.value, nanoToValue(currentDebt.value, sourceDebtVault.value?.asset.decimals ?? 18)),
 )
 const nextRiskMetrics = computed<RefinanceRiskMetrics | null>(() =>
   getRiskMetrics(effectiveDebtVault.value, nextCollateralLegs.value, nextDebtAmount.value),

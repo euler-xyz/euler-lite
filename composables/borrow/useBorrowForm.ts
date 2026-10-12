@@ -593,7 +593,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     borrowAmount.value = trimTrailingZeros(effectiveCollateralFixed.value
       .mul(priceFixed.value)
       .mul(ltvFixed.value)
-      .div(FixedPoint.fromValue(100n, 0)).round(Number(borrowVault.value?.asset.decimals || 18))
+      .div(FixedPoint.fromValue(100n, 0)).round(Number(borrowVault.value?.asset.decimals ?? 18))
       .toString())
   }
 
@@ -921,7 +921,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     if (isNative && !wrappedAddress) {
       throw new Error('Wrapped native token not found')
     }
-    const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrowVault.value.shares.decimals)
+    const borrowAmountNano = valueToNano(borrowAmount.value || '0', borrowVault.value.asset.decimals)
     const subAccount = await resolvePendingSubAccount()
     const subAccountSnapshotApplied = await ensureBorrowSubAccountSnapshot(account, subAccount as Address)
     return planSwapAndBorrow({
@@ -957,7 +957,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       const inputAmount = valueToNano(snap.collateralAmount || '0', snap.selectedAsset.decimals)
       const wrappedAddress = isNative ? resolveWrappedNativeAddress(snap.chainId) : null
       if (isNative && !wrappedAddress) throw new Error('Wrapped native token not found')
-      const borrowAmountNano = valueToNano(snap.borrowAmount || '0', snap.borrowVault.shares.decimals)
+      const borrowAmountNano = valueToNano(snap.borrowAmount || '0', snap.borrowVault.asset.decimals)
       return planSwapAndBorrow({
         swapQuote: snap.quote,
         amount: inputAmount,
@@ -976,20 +976,14 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
 
     // Standard borrow (fresh-deposit or savings-sourced collateral; collateral
     // amount may be 0 for a pure borrow against an earlier batch step's collateral).
-    let collateralAmountForPlan = FixedPoint.fromValue(
-      valueToNano(snap.collateralAmount || '0', snap.collateralVault.asset.decimals),
-      Number(snap.collateralVault.asset.decimals),
-    ).toFormat({ decimals: Number(snap.collateralVault.shares.decimals) }).value
+    let collateralAmountForPlan = valueToNano(snap.collateralAmount || '0', snap.collateralVault.asset.decimals)
     if (snap.isSavingCollateral) {
       if (!snap.savingCollateral) throw new Error('Savings position not found')
       collateralAmountForPlan = snap.savingCollateral.assets === collateralAmountForPlan
         ? snap.savingCollateral.shares
         : snap.collateralVault.convertToShares(collateralAmountForPlan)
     }
-    const borrowAmountNano = FixedPoint.fromValue(
-      valueToNano(snap.borrowAmount || '0', snap.borrowVault.asset.decimals),
-      Number(snap.borrowVault.asset.decimals),
-    ).toFormat({ decimals: Number(snap.borrowVault.shares.decimals) }).value
+    const borrowAmountNano = valueToNano(snap.borrowAmount || '0', snap.borrowVault.asset.decimals)
     return snap.isSavingCollateral
       ? planBorrow({
           vaultAddress: snap.borrowVault.address as Address,
@@ -1043,7 +1037,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
           tokenIn: (wrappedAddress || snap.selectedAsset.address) as Address,
           collateralVault: snap.collateralVault.address as Address,
           borrowVault: snap.borrowVault.address as Address,
-          borrowAmount: valueToNano(snap.borrowAmount || '0', snap.borrowVault.shares.decimals),
+          borrowAmount: valueToNano(snap.borrowAmount || '0', snap.borrowVault.asset.decimals),
           borrowAccount: subAccount,
           wrappedNativeInfo: isNative && wrappedAddress
             ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
@@ -1054,10 +1048,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       })
     }
 
-    let collateralAmount = FixedPoint.fromValue(
-      valueToNano(snap.collateralAmount || '0', snap.collateralVault.asset.decimals),
-      Number(snap.collateralVault.asset.decimals),
-    ).toFormat({ decimals: Number(snap.collateralVault.shares.decimals) }).value
+    let collateralAmount = valueToNano(snap.collateralAmount || '0', snap.collateralVault.asset.decimals)
     if (snap.isSavingCollateral) {
       if (!snap.savingCollateral) throw new Error('Savings position not found')
       collateralAmount = snap.savingCollateral.assets === collateralAmount
@@ -1070,10 +1061,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
       args: {
         vaultAddress: snap.borrowVault.address as Address,
         assetAddress: snap.borrowVault.asset.address as Address,
-        amount: FixedPoint.fromValue(
-          valueToNano(snap.borrowAmount || '0', snap.borrowVault.asset.decimals),
-          Number(snap.borrowVault.asset.decimals),
-        ).toFormat({ decimals: Number(snap.borrowVault.shares.decimals) }).value,
+        amount: valueToNano(snap.borrowAmount || '0', snap.borrowVault.asset.decimals),
         borrowAccount: subAccount,
         collateral: snap.isSavingCollateral
           ? { vault: snap.collateralVault.address as Address, amount: collateralAmount, source: 'savings', from: snap.savingCollateral!.subAccount as Address }

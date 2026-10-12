@@ -1,5 +1,6 @@
+import { getSdkTokenDecimals, createTokenDecimalsResolver } from '~/utils/token-decimals'
 import { createError, getQuery, setResponseHeader } from 'h3'
-import { isAddress, zeroAddress, type Address } from 'viem'
+import { isAddress } from 'viem'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { getServerSdk } from '~/server/utils/sdk-server'
 import { createTtlCache } from '~/server/utils/cache'
@@ -11,7 +12,6 @@ import { buildEulerSDK, type EulerSDK, type TokenListItem } from '@eulerxyz/eule
 import { readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-url-env'
 
 const CACHE_TTL_MS = 300_000
-const DECIMALS_READ_DEADLINE_MS = 5_000
 const DEFILLAMA_DEFAULT_URL = 'https://d3g10bzo9rdluh.cloudfront.net'
 
 interface TokenEntry {
@@ -326,59 +326,29 @@ const mergeSources = (
   )
 }
 
-// Read once per token per server process. null: no contract or no decimals(), so the token is dropped.
-const onchainDecimals = new Map<string, number | null>()
-
-const decimalsKey = (chainId: number, address: string) => `${chainId}:${address.toLowerCase()}`
-
-// Matched by name because the SDK bundles its own viem. RawContractError only marks a call that failed inside a
-// successful Multicall3 batch; RPC failures (often -32603, which viem also reports as a revert) never carry it.
-const isMissingDecimals = (err: unknown): boolean => {
-  for (let e: unknown = err; e instanceof Error; e = e.cause) {
-    if (e.name === 'RawContractError' || e.name === 'ContractFunctionZeroDataError') return true
-  }
-  return false
-}
-
-async function readMissingDecimals(chainId: number, tokens: TokenEntry[]): Promise<void> {
-  const missing = tokens.filter(t => t.address !== zeroAddress && !onchainDecimals.has(decimalsKey(chainId, t.address)))
-  if (!missing.length) return
-  try {
-    const { tokenlistService } = await getServerSdk(chainId)
-    const resolveDecimals = tokenlistService.resolveTokenDecimals?.bind(tokenlistService)
-    if (!resolveDecimals) throw new Error('SDK token decimals resolver unavailable')
-    await Promise.all(missing.map(async (token) => {
-      const key = decimalsKey(chainId, token.address)
-      try {
-        onchainDecimals.set(key, await resolveDecimals(chainId, token.address as Address))
-      }
-      catch (err: unknown) {
-        if (isMissingDecimals(err)) onchainDecimals.set(key, null)
-      }
-    }))
-    const unread = missing.filter(t => !onchainDecimals.has(decimalsKey(chainId, t.address))).length
-    reportStatus('token-list', `decimals:${chainId}`, unread ? 'unread' : 'ok',
-      unread ? `${unread} token decimals unread for chain ${chainId}, retrying on the next build` : undefined)
-  }
-  catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err)
-    reportStatus('token-list', `decimals:${chainId}`, `failed:${msg}`,
-      `Token decimals read failed for chain ${chainId}: ${msg}`)
-  }
-}
+// Native metadata comes from the chain definition even when the SDK is unavailable.
+const resolveNativeDecimals = createTokenDecimalsResolver(async () => {
+  throw new Error('Not native')
+})
 
 async function applyOnchainDecimals(chainId: number, tokens: TokenEntry[]): Promise<TokenEntry[]> {
   const chainTokens = tokens.filter(t => t.chainId === chainId && isAddress(t.address))
-  // viem retries a hanging RPC for ~40 s; reads that miss the deadline still fill the memo for the next build.
-  await Promise.race([
-    readMissingDecimals(chainId, chainTokens),
-    new Promise(resolve => setTimeout(resolve, DECIMALS_READ_DEADLINE_MS)),
-  ])
-  return chainTokens.flatMap((token) => {
-    const decimals = onchainDecimals.get(decimalsKey(chainId, token.address))
-    if (decimals === null) return []
-    return decimals === undefined ? [token] : [{ ...token, decimals }]
-  })
+  let resolve = resolveNativeDecimals
+  try {
+    resolve = getSdkTokenDecimals(await getServerSdk(chainId))
+  }
+  catch (err) {
+    reportStatus('token-list', `decimals:${chainId}`, 'unavailable', String(err))
+  }
+  const verified = await Promise.all(chainTokens.map(async (token) => {
+    try {
+      return { ...token, decimals: await resolve(chainId, token.address) }
+    }
+    catch {
+      return undefined
+    }
+  }))
+  return verified.filter((token): token is TokenEntry => token !== undefined)
 }
 
 const buildMergedTokens = async (chainId: number): Promise<TokenEntry[]> => {
@@ -434,11 +404,6 @@ export default defineEventHandler(async (event) => {
   })
 
   if (tokens.length === 0) {
-    const stale = mergedCache.getStale(key)
-    if (stale && stale.length > 0) {
-      setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
-      return { tokens: stale }
-    }
     throw createError({ statusCode: 502, statusMessage: 'Upstream error' })
   }
 

@@ -354,7 +354,7 @@ const load = async () => {
       isLtvDriven: isLtvDriven.value,
       borrowAmount: borrowAmount.value,
       borrowed: currentPosition.borrowed,
-      borrowDecimals: nextPair.borrow.shares.decimals,
+      borrowDecimals: nextPair.borrow.asset.decimals,
       totalCollateral: getTotalCollateralValue(currentPosition),
       baselineLtv: nextUserLTV,
     })
@@ -428,7 +428,7 @@ const submit = async () => {
     const plannerArgs = {
       vaultAddress: borrowVault.value.address as Address,
       assetAddress: borrowVault.value.asset.address as Address,
-      amount: valueToNano(capturedAmount || '0', borrowVault.value.shares.decimals),
+      amount: valueToNano(capturedAmount || '0', borrowVault.value.asset.decimals),
       borrowAccount: position.value!.subAccount as Address,
     }
     const intent = createIntent({
@@ -489,7 +489,7 @@ const canAddToBatch = computed(() =>
 const addToBatch = async () => {
   if (!canAddToBatch.value || !borrowVault.value || !position.value) return
   const vaultAddress = borrowVault.value.address as Address
-  const amount = valueToNano(borrowAmount.value, borrowVault.value.shares.decimals)
+  const amount = valueToNano(borrowAmount.value, borrowVault.value.asset.decimals)
   const borrowAccount = position.value.subAccount as Address
   const label = `Borrow ${borrowAmount.value} ${borrowVault.value.asset.symbol}`
   const intent = createIntent({
@@ -526,7 +526,7 @@ const computedBorrowAmount = computed(() => {
   const currentLtvFP = FixedPoint.fromValue(valueToNano(currentUserLTV.value, 4), 4)
   if (currentLtvFP.isZero() || newLtvFP.lte(currentLtvFP)) return '0'
 
-  const borrowedFP = FixedPoint.fromValue(borrowed, Number(borrowVault.value.shares.decimals))
+  const borrowedFP = FixedPoint.fromValue(borrowed, Number(borrowVault.value.asset.decimals))
   const delta = newLtvFP.subUnsafe(currentLtvFP)
   const additional = borrowedFP.mul(delta).div(currentLtvFP)
   if (additional.isZero() || additional.isNegative()) return '0'
@@ -536,7 +536,7 @@ const ltvHeadroomAmount = computed((): bigint | undefined => {
   if (!pair.value || !borrowVault.value || !position.value) return undefined
   return getBorrowMoreLtvHeadroomAmount({
     borrowed: position.value.borrowed || 0n,
-    borrowDecimals: borrowVault.value.shares.decimals,
+    borrowDecimals: borrowVault.value.asset.decimals,
     assetDecimals: borrowVault.value.asset.decimals,
     currentLtvPercent: currentUserLTV.value,
     maxBorrowLtv: pair.value.ltv.borrowLTV,
@@ -564,7 +564,7 @@ const onBorrowInput = async () => {
   if (!position.value) return
   const projectedLtv = getBorrowMoreProjectedLtv({
     borrowed: position.value.borrowed,
-    borrowDecimals: borrowVault.value?.shares.decimals || 18,
+    borrowDecimals: borrowVault.value?.asset.decimals ?? 18,
     additionalBorrowAmount: borrowAmount.value,
     totalCollateral: getTotalCollateralValue(position.value),
   })
@@ -630,8 +630,8 @@ const updateAsyncEstimates = useDebounceFn(async (gen: number) => {
     return
   }
   try {
-    const additionalBorrowNano = valueToNano(currentBorrowAmount, currentBorrowVault.shares.decimals)
-    const existingBorrow = nanoToValue(currentPosition.borrowed || 0n, currentBorrowVault.shares.decimals)
+    const additionalBorrowNano = valueToNano(currentBorrowAmount, currentBorrowVault.asset.decimals)
+    const existingBorrow = nanoToValue(currentPosition.borrowed || 0n, currentBorrowVault.asset.decimals)
     const totalBorrow = existingBorrow + +currentBorrowAmount
 
     const [collateralSnapshot, borrowUsd] = await Promise.all([

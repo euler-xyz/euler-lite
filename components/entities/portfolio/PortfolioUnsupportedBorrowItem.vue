@@ -41,16 +41,16 @@ const borrowedValue = computed(() => toUsdAmount(position.borrow.borrowedValueUs
 const borrowedValueDisplay = computed(() => {
   if (borrowedValue.value.hasPrice) return formatCompactUsdValue(borrowedValue.value.usd)
   if (!borrowVault.value) return position.borrowed.toString()
-  return `${roundAndCompactTokens(position.borrowed, borrowVault.value.shares.decimals)} ${borrowVault.value.asset.symbol}`
+  return `${roundAndCompactTokens(position.borrowed, borrowVault.value.asset.decimals)} ${borrowVault.value.asset.symbol}`
 })
 const borrowedCompactDisplay = computed(() => {
   if (!borrowVault.value) return ''
-  return `${roundAndCompactTokens(position.borrowed, borrowVault.value.shares.decimals)} ${borrowVault.value.asset.symbol}`
+  return `${roundAndCompactTokens(position.borrowed, borrowVault.value.asset.decimals)} ${borrowVault.value.asset.symbol}`
 })
 
 const borrowedExactDisplay = computed(() => {
   if (!borrowVault.value) return ''
-  return formatExactAmount(position.borrowed, borrowVault.value.shares.decimals, borrowVault.value.asset.symbol)
+  return formatExactAmount(position.borrowed, borrowVault.value.asset.decimals, borrowVault.value.asset.symbol)
 })
 
 const health = computed(() => position.healthFactor)

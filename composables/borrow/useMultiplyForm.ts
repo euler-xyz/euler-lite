@@ -1,6 +1,6 @@
 import type { EVault, SwapQuote, TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { areProjectedRatesComplete, type ProjectedRates, getPositionMultiplier, getProjectedRatesBatch } from '~/utils/vault/apy'
-import { getAssetUsdValue, getAssetUsdValueForEstimate, getAssetOraclePrice, getCollateralOraclePrice, getCollateralShareOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
+import { getAssetUsdValue, getAssetUsdValueForEstimate, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
@@ -355,18 +355,16 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     }
     if (!suppliedCollateral) return 0n
 
-    const rawSharePrice = getCollateralShareOraclePrice(multiplyShortVault.value, multiplySupplyVault.value)
     const collateralPriceInfo = getCollateralOraclePrice(multiplyShortVault.value, multiplySupplyVault.value)
     const liabilityPrice = getAssetOraclePrice(multiplyShortVault.value)
 
-    if (!rawSharePrice || !rawSharePrice.amountIn || rawSharePrice.amountIn <= 0n) return 0n
     if (!collateralPriceInfo || collateralPriceInfo.amountOutMid <= 0n) return 0n
     if (!liabilityPrice || !liabilityPrice.amountOutAsk || liabilityPrice.amountOutAsk <= 0n) return 0n
 
     return computeLeverageDebt({
       suppliedCollateral,
       collateralOutBid: collateralPriceInfo.amountOutBid || collateralPriceInfo.amountOutMid,
-      collateralAmountIn: rawSharePrice.amountIn,
+      collateralAmountIn: 10n ** BigInt(multiplySupplyVault.value.asset.decimals),
       multiplier: multiplier.value,
       liabilityIn: 10n ** BigInt(multiplyShortVault.value.asset.decimals),
       liabilityOutAsk: liabilityPrice.amountOutAsk || liabilityPrice.amountOutMid,

@@ -1,3 +1,4 @@
+import { getSdkTokenDecimals, normalizeVaultTokenDecimals } from '~/utils/token-decimals'
 import type {
   EulerEarn as EulerEarnClass,
   DataIssue,
@@ -739,15 +740,36 @@ const hydrateFromServer = async (targetChainId: number, generation: number): Pro
       return false
     }
 
+    const resolve = getSdkTokenDecimals(await getSdkVaults(targetChainId))
+    const verifyEntries = async (entries: SerialisedVault[]) => {
+      const results = await Promise.all(entries.map(async (entry): Promise<SerialisedVault | undefined> => {
+        const args = decodeArgs(entry)
+        if (!args) return undefined
+        try {
+          const data = await normalizeVaultTokenDecimals(targetChainId, args as unknown as IEVault, resolve)
+          return { ...entry, data }
+        }
+        catch {
+          return undefined
+        }
+      }))
+      return results.filter((entry): entry is SerialisedVault => entry !== undefined)
+    }
+    const [evkEntries, earnEntries, securitizeEntries, escrowEntries] = await Promise.all([
+      verifyEntries(snap.evkVaults), verifyEntries(snap.earnVaults),
+      verifyEntries(snap.securitizeVaults), verifyEntries(snap.escrowVaults),
+    ])
+    if (loadGeneration.value !== generation) return false
+
     // Pass 1: instantiate + register. Keep the decoded args alongside each
     // instance so the populate-stubs in pass 2 can read snapshot fields
     // that the SDK constructors don't restore (marketPriceUsd, rewards,
     // intrinsicApy, and per-collateral marketPriceUsd).
     const isHydrated = <V>(h: Hydrated<V> | undefined): h is Hydrated<V> => h !== undefined
-    const evk = snap.evkVaults.map(instantiateEvk).filter(isHydrated)
-    const earn = snap.earnVaults.map(instantiateEarn).filter(isHydrated)
-    const securitize = snap.securitizeVaults.map(instantiateSecuritize).filter(isHydrated)
-    const escrow = snap.escrowVaults.map(instantiateEvk).filter(isHydrated)
+    const evk = evkEntries.map(instantiateEvk).filter(isHydrated)
+    const earn = earnEntries.map(instantiateEarn).filter(isHydrated)
+    const securitize = securitizeEntries.map(instantiateSecuritize).filter(isHydrated)
+    const escrow = escrowEntries.map(instantiateEvk).filter(isHydrated)
     if (isDeprecatedChainId(targetChainId) && !evk.length && !earn.length && !securitize.length && !escrow.length) {
       logWarn(
         'useVaults/hydrateFromServer',

@@ -146,7 +146,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
   // --- Savings-specific computeds ---
   const collateralAmountAfter = computed(() => {
     if (!collateralVault.value || !position.value) return null
-    return nanoToValue(position.value.supplied || 0n, collateralVault.value.shares.decimals)
+    return nanoToValue(position.value.supplied || 0n, collateralVault.value.asset.decimals)
   })
 
   const nextLiquidationLtv = computed(() => {
@@ -545,7 +545,7 @@ export const useSavingsRepay = (options: UseSavingsRepayOptions) => {
       const transferAmounts: Record<string, string> = {}
       if (collateralSnapshot && positionSupplied) {
         const addr = collateralSnapshot.address.toLowerCase()
-        transferAmounts[addr] = nanoToValue(positionSupplied, collateralSnapshot.shares.decimals).toString()
+        transferAmounts[addr] = nanoToValue(positionSupplied, collateralSnapshot.asset.decimals).toString()
       }
       const inputDisplay = getRepaySwapReviewInputAmount({
         amount: snapshot.amount!,

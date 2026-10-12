@@ -277,4 +277,23 @@ describe('useWalletRepay projected Net APY', () => {
     expect(repay.projectedYieldDetails.value).toBeNull()
     expect(repay.isEstimatesLoading.value).toBe(false)
   })
+  it.each([6, 18])('wallet repay stays enabled with 6 asset / %i share decimals', async (sharesDecimals) => {
+    const liability = { ...borrowVault, asset: { ...borrowVault.asset, decimals: 6 }, shares: { ...borrowVault.shares, decimals: sharesDecimals } } as EVault
+    const currentPosition = { ...position, borrowVault: liability, borrowed: 2_000n * 10n ** 6n, userLTV: 2n * 10n ** 17n, healthFactor: 4n * 10n ** 18n } as PortfolioBorrowPosition<VaultEntity>
+    const form = useWalletRepay({
+      position: shallowRef(currentPosition), borrowVault: computed(() => liability), collateralVault: computed(() => collateralVault),
+      formTab: ref('wallet'), walletBalance: ref(1_500n * 10n ** 6n), plan: ref(null), isSubmitting: ref(false), isPreparing: ref(false),
+      clearSimulationError: vi.fn(), runSimulation: vi.fn(async () => true), netAPY: ref(1),
+      collateralSupplyApy: computed(() => 5), borrowApy: computed(() => 5), collateralSupplyRewardApy: computed(() => 0),
+      borrowRewardApy: computed(() => 0), oraclePriceRatio: computed(() => 1),
+    })
+    form.amount.value = '500'
+    await new Promise(resolve => setTimeout(resolve, 25))
+    expect.soft(form.estimatesError.value).toBe('')
+    expect.soft(form.isSubmitDisabled.value).toBe(false)
+    expect(getCollateralApySnapshot).toHaveBeenCalledWith(currentPosition, liability, {
+      liabilityRateDelta: { cashDelta: 500_000_000n, borrowsDelta: -500_000_000n },
+    })
+    expect(getAssetUsdValueForEstimate).toHaveBeenCalledWith(1_500_000_000n, liability, 'off-chain')
+  })
 })

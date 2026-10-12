@@ -744,7 +744,7 @@ const updateEstimates = useDebounceFn(async () => {
       // When swapping, use the swap output amount (vault-asset denominated)
       const supplyNano = needsSwap.value
         ? BigInt(swapEffectiveQuote.value?.amountOut || 0)
-        : valueToNano(amount.value, currentVault.shares.decimals)
+        : valueToNano(amount.value, currentVault.asset.decimals)
 
       if (needsSwap.value && !supplyNano) {
         // The vault-asset amount is unknown until a quote resolves, so there is

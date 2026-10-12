@@ -1,3 +1,4 @@
+import { computeLeverageDebt } from '~/utils/multiply-math'
 import { computed, ref, shallowRef, watch, watchEffect } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Account, EVault, IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
@@ -527,5 +528,17 @@ describe('useMultiplyForm cap validation', () => {
       { symbol: 'LOOP', icon: '/loop.png', afterApr: 4 },
       { symbol: 'SUP', icon: '/sup.png', afterApr: 2 },
     ])
+  })
+  it.each([0, 6, 17])('sizes multiply debt in asset units with %i asset / 18 share decimals', async (decimals) => {
+    const actual = await vi.importActual<typeof import('~/utils/multiply-math')>('~/utils/multiply-math')
+    const vault = makeVault()
+    vault.asset.decimals = decimals
+    vault.shares.decimals = 18
+    const form = makeForm(vault)
+    form.initMultiplySupplyVault(vault)
+    vi.mocked(computeLeverageDebt).mockImplementationOnce(actual.computeLeverageDebt)
+    form.multiplyInputAmount.value = '100'
+    form.multiplier.value = 2
+    expect(form.multiplyDebtAmountNano.value).toBe(100n * 10n ** BigInt(decimals))
   })
 })

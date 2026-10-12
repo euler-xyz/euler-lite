@@ -1,3 +1,4 @@
+import { getSdkTokenDecimals } from '~/utils/token-decimals'
 import { zeroAddress, type Address } from 'viem'
 import type { SwapProviderExtraData, SwapQuote, SwapQuoteRequest } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkForChain } from '~/composables/useEulerSdk'
@@ -56,7 +57,17 @@ export const useSwapApi = () => {
     if (!request) return []
 
     const sdk = await getEulerSdkForChain(request.chainId)
-    return sdk.swapService.fetchSwapQuotes(request)
+    const resolve = getSdkTokenDecimals(sdk)
+    const [quotes, decimalsIn, decimalsOut] = await Promise.all([
+      sdk.swapService.fetchSwapQuotes(request),
+      resolve(request.chainId, request.tokenIn),
+      resolve(request.chainId, request.tokenOut),
+    ])
+    return quotes.map(quote => ({
+      ...quote,
+      tokenIn: { ...quote.tokenIn, decimals: decimalsIn },
+      tokenOut: { ...quote.tokenOut, decimals: decimalsOut },
+    }))
   }
 
   // `includeCowSwap` lets the parallel-quotes pipeline opt CoW back in for

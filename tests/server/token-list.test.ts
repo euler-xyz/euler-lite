@@ -111,34 +111,43 @@ describe('/api/internal/token-list decimals', () => {
     expect(tokens).toEqual([{ ...LODE, decimals: 17 }])
   })
 
-  it('reads each token once per server process, including tokens without decimals()', async () => {
+  it('does not revive an expired list when contract verification fails', async () => {
+    vi.useFakeTimers()
+    const { default: handler } = await importRoute()
+    expect((await handler({ query: { chainId: '43114' } } as never)).tokens).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(300_001)
+    mocks.resolveTokenDecimals.mockRejectedValue(new Error('RPC unavailable'))
+    await expect(handler({ query: { chainId: '43114' } } as never)).rejects.toMatchObject({ statusCode: 502 })
+  })
+
+  it('reuses successful reads within the metadata TTL and retries failures', async () => {
     const { refreshTokenList } = await importRoute()
     await refreshTokenList(1)
     mocks.resolveTokenDecimals.mockClear()
 
     const tokens = await refreshTokenList(1)
 
-    expect(mocks.resolveTokenDecimals).not.toHaveBeenCalled()
+    expect(mocks.resolveTokenDecimals.mock.calls.map(([, address]) => address)).toEqual([NO_CODE.address, REVERTS.address])
     expect(bySymbol(tokens)).toEqual({ USDC: 6, FLUX: 8, ETH: 18 })
   })
 
-  it('serves list decimals while reads fail and retries them on the next build', async () => {
+  it('omits unresolved tokens and retries them on the next build', async () => {
     const { refreshTokenList } = await importRoute()
     mocks.resolveTokenDecimals.mockImplementation(async (chainId: number, address: string) => {
       if (address === FLUX.address) throw rpcInternalError()
       return readOnchain(chainId, address)
     })
 
-    expect(bySymbol(await refreshTokenList(1))).toMatchObject({ FLUX: 18 })
+    expect(bySymbol(await refreshTokenList(1))).not.toHaveProperty('FLUX')
 
     mocks.resolveTokenDecimals.mockClear()
     mocks.resolveTokenDecimals.mockImplementation(readOnchain)
 
     expect(bySymbol(await refreshTokenList(1))).toMatchObject({ FLUX: 8 })
-    expect(mocks.resolveTokenDecimals.mock.calls.map(([, address]) => address)).toEqual([FLUX.address])
+    expect(mocks.resolveTokenDecimals.mock.calls.map(([, address]) => address)).toEqual([NO_CODE.address, REVERTS.address, FLUX.address])
   })
 
-  it('serves list decimals when reads hang past the deadline and keeps late results for the next build', async () => {
+  it('omits timed-out tokens and uses late results on the next build', async () => {
     vi.useFakeTimers()
     const { refreshTokenList } = await importRoute()
     let finishFluxRead = (_decimals: number) => {}
@@ -151,20 +160,20 @@ describe('/api/internal/token-list decimals', () => {
 
     const build = refreshTokenList(1)
     await vi.advanceTimersByTimeAsync(5_000)
-    expect(bySymbol(await build)).toMatchObject({ FLUX: 18 })
+    expect(bySymbol(await build)).not.toHaveProperty('FLUX')
 
     finishFluxRead(8)
     mocks.resolveTokenDecimals.mockClear()
     expect(bySymbol(await refreshTokenList(1))).toMatchObject({ FLUX: 8 })
-    expect(mocks.resolveTokenDecimals).not.toHaveBeenCalled()
+    expect(mocks.resolveTokenDecimals.mock.calls.map(([, address]) => address)).toEqual([NO_CODE.address, REVERTS.address])
   })
 
-  it('serves the list when the server SDK is unavailable', async () => {
+  it('serves only native metadata when the server SDK is unavailable', async () => {
     const { refreshTokenList } = await importRoute()
     mocks.getServerSdk.mockImplementation(() => {
       throw new Error('No RPC URL configured for chain 1')
     })
 
-    expect(bySymbol(await refreshTokenList(1))).toEqual({ USDC: 6, FLUX: 18, ETH: 18, NOCODE: 18, REVERT: 18 })
+    expect(bySymbol(await refreshTokenList(1))).toEqual({ ETH: 18 })
   })
 })

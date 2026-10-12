@@ -223,7 +223,7 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   return undefined
 })
 
-const balanceFixed = computed(() => FixedPoint.fromValue(balance.value, form.collateralVault.value?.asset.decimals || 18))
+const balanceFixed = computed(() => FixedPoint.fromValue(balance.value, form.collateralVault.value?.asset.decimals ?? 18))
 const assets = computed(() => [form.asset.value].filter((v): v is VaultAsset => !!v))
 const pairAssetsLabel = usePositionPairLabel(form.position)
 const { name } = useEulerProductOfVault(computed(() => form.collateralVault.value?.address || ''))

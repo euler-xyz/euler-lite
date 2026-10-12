@@ -100,8 +100,8 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     valueToNano(amount.value || '0', borrowVault.value?.asset.decimals),
     Number(borrowVault.value?.asset.decimals),
   ))
-  const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, borrowVault.value?.shares.decimals || 18))
-  const suppliedFixed = computed(() => FixedPoint.fromValue(position.value?.supplied || 0n, collateralVault.value?.shares.decimals || 18))
+  const borrowedFixed = computed(() => FixedPoint.fromValue(position.value?.borrowed || 0n, borrowVault.value?.asset.decimals ?? 18))
+  const suppliedFixed = computed(() => FixedPoint.fromValue(position.value?.supplied ?? 0n, collateralVault.value?.asset.decimals ?? 18))
   const priceFixed = computed(() => {
     const ratio = oraclePriceRatio.value
     if (ratio && Number.isFinite(ratio) && ratio > 0) {
@@ -230,7 +230,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
     hasEstimate.value = false
     if (!position.value || !collateralVault.value || !borrowVault.value || !(+amount.value > 0)) return false
     try {
-      if (walletBalance.value < valueToNano(amount.value, borrowVault.value.shares.decimals)) {
+      if (walletBalance.value < valueToNano(amount.value, borrowVault.value.asset.decimals)) {
         throw new Error('Not enough balance')
       }
       if (borrowedFixed.value.lt(amountFixed.value)) {
@@ -287,7 +287,7 @@ export const useWalletRepay = (options: UseWalletRepayOptions) => {
       return
     }
     try {
-      const repayNano = valueToNano(amount.value, currentBorrowVault.shares.decimals)
+      const repayNano = valueToNano(amount.value, currentBorrowVault.asset.decimals)
       const remainingBorrow = (currentPosition.borrowed || 0n) - repayNano
 
       const [currentCollateralSnapshot, nextCollateralSnapshot, currentBorrowUsd, borrowUsd] = await Promise.all([

@@ -107,7 +107,7 @@ watch(
   [() => props.selectedOptionId, () => props.selectedSource, () => props.selectedSubAccount, () => props.selectedVaultAddress, () => props.collateralOptions],
   () => { selectedIdx.value = getSelectedIdx() },
 )
-const friendlyBalance = computed(() => nanoToValue(props.balance ?? 0n, props.asset?.decimals || 18))
+const friendlyBalance = computed(() => nanoToValue(props.balance ?? 0n, props.asset?.decimals ?? 18))
 
 // Auto-advance past disabled options (blocked/restricted vaults)
 watch(() => props.collateralOptions, (options) => {

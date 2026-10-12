@@ -988,4 +988,47 @@ describe('useBorrowForm savings collateral', () => {
     }]))
     expect(form.projectedYieldDetails.value?.after.breakdown.rewards).toBe(2)
   })
+  it.each([6, 18])('wallet collateral remains in asset units with 6 asset / %i share decimals', async (sharesDecimals) => {
+    const collateral = { ...vault, asset: { ...vault.asset, decimals: 6 }, shares: { ...vault.shares, decimals: sharesDecimals } } as EVault
+    const form = makeForm(shallowRef([]), shallowRef(makePair(collateral, vault)))
+    form.collateralAmount.value = '1.25'
+    form.borrowAmount.value = '1'
+    const snapshot = form.captureBorrowSnapshot(USER as Address)
+    await form.buildBorrowPlan(snapshot)
+    const intent = form.createBorrowIntent(snapshot) as unknown as { planner: { args: { collateral: { amount: bigint } } } }
+    const planned = mocks.planBorrow.mock.calls.at(-1)?.[0].collateral.amount
+    const intended = intent.planner.args.collateral.amount
+    expect.soft(planned).toBe(1_250_000n)
+    expect.soft(intended).toBe(1_250_000n)
+  })
+  it.each([false, true])('liability amount stays in asset units, needsSwap=%s', async (needsSwap) => {
+    const collateral = { ...vault, asset: { ...vault.asset, decimals: 6 }, shares: { ...vault.shares, decimals: 6 } } as EVault
+    const liability = { ...vault, asset: { ...vault.asset, decimals: 6 }, shares: { ...vault.shares, decimals: 18 } } as EVault
+    const form = makeForm(shallowRef([]), shallowRef(makePair(collateral, liability)))
+    form.collateralAmount.value = '100'
+    form.borrowAmount.value = '1.25'
+    const snap = { ...form.captureBorrowSnapshot(USER as Address), needsSwap, selectedAsset: collateral.asset, quote: {} as never }
+    await form.buildBorrowPlan(snap)
+    const intent = form.createBorrowIntent(snap) as unknown as { planner: { args: { collateral: { amount: bigint }, borrowAmount: bigint, amount: bigint } } }
+    const args = (needsSwap ? mocks.planSwapAndBorrow : mocks.planBorrow).mock.calls.at(-1)?.[0]
+    const planned = needsSwap ? args.borrowAmount : args.amount
+    const intended = needsSwap ? intent.planner.args.borrowAmount : intent.planner.args.amount
+    expect.soft(planned).toBe(1_250_000n)
+    expect.soft(intended).toBe(1_250_000n)
+  })
+
+  it.each([[6, false], [18, false], [6, true], [18, true]] as const)('savings collateral converts raw assets once, shares decimals %i, max=%s', async (sd, useMax) => {
+    const scale = 10n ** BigInt(sd - 6)
+    const collateral = { ...vault, asset: { ...vault.asset, decimals: 6 }, shares: { ...vault.shares, decimals: sd }, convertToShares: (assets: bigint) => assets * 2n * scale } as EVault
+    const form = makeForm(shallowRef([]), shallowRef(makePair(collateral, vault)))
+    form.collateralAmount.value = '1.25'
+    form.borrowAmount.value = '1'
+    const expected = 2_500_000n * scale
+    const snap = { ...form.captureBorrowSnapshot(USER as Address), isSavingCollateral: true, savingCollateral: { assets: useMax ? 1_250_000n : 2_500_000n, shares: useMax ? expected : 2n * expected, subAccount: USER } as PortfolioSavingsPosition<VaultEntity> }
+    await form.buildBorrowPlan(snap)
+    const intent = form.createBorrowIntent(snap) as unknown as { planner: { args: { collateral: { amount: bigint } } } }
+    const actual = mocks.planBorrow.mock.calls.at(-1)?.[0].collateral.amount
+    expect.soft(actual).toBe(expected)
+    expect.soft(intent.planner.args.collateral.amount).toBe(expected)
+  })
 })

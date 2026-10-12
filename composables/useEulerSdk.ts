@@ -1,3 +1,5 @@
+import { getSdkTokenDecimals } from '~/utils/token-decimals'
+import { withVerifiedVaultDecimals } from '~/utils/sdk-token-decimals'
 import { buildEulerSDK, createKeyringPlugin, createPythPlugin, IntrinsicApyService, IntrinsicApyV3Adapter } from '@eulerxyz/euler-v2-sdk'
 import type { BuildQueryFn, EulerSDK, EulerSDKConfig } from '@eulerxyz/euler-v2-sdk'
 import { INTERNAL_API_BASE } from '~/utils/api-url-env'
@@ -314,7 +316,7 @@ const buildInstance = async ({ backend, buildQuery }: InstanceBuildArgs): Promis
 
   const sdk = await buildEulerSDK({
     config,
-    buildQuery,
+    buildQuery: withVerifiedVaultDecimals(buildQuery, (chainId, address) => getSdkTokenDecimals(sdk)(chainId, address)),
     positionMigrationConnectorConfig: {
       morpho: { morphoGraphqlUrl: buildMorphoProxyApiPath() },
       aave: { graphqlEndpoint: buildAaveProxyApiPath() },

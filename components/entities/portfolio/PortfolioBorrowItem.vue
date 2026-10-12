@@ -248,7 +248,7 @@ const collateralValue = computed<UsdAmount>(() => toUsdAmount(position.totalColl
 const collateralValueDisplay = computed(() => {
   if (collateralValue.value.hasPrice) return formatCompactUsdValue(collateralValue.value.usd)
   if (!collateralVault.value) return '—'
-  return `${roundAndCompactTokens(collateralItems.value[0]?.assets ?? supplied.value, BigInt(collateralVault.value.shares.decimals))} ${collateralVault.value.asset.symbol}`
+  return `${roundAndCompactTokens(collateralItems.value[0]?.assets ?? supplied.value, BigInt(collateralVault.value.asset.decimals))} ${collateralVault.value.asset.symbol}`
 })
 
 const borrowedValue = computed<UsdAmount>(() => toUsdAmount(position.borrow.borrowedValueUsd))
@@ -261,7 +261,7 @@ const borrowedValueInfo = computed<{ display: string, hasPrice: boolean }>(() =>
     }
   }
   return {
-    display: `${roundAndCompactTokens(borrowed.value, borrowVault.value.shares.decimals)} ${borrowVault.value.asset.symbol}`,
+    display: `${roundAndCompactTokens(borrowed.value, borrowVault.value.asset.decimals)} ${borrowVault.value.asset.symbol}`,
     hasPrice: false,
   }
 })
@@ -637,9 +637,9 @@ const openPositionInformationModal = () => {
               <UiExactAmount
                 v-if="borrowedValueInfo.hasPrice"
                 class="text-content-tertiary text-p3"
-                :exact="formatExactAmount(borrowed, borrowVault.shares.decimals, borrowVault.asset.symbol)"
+                :exact="formatExactAmount(borrowed, borrowVault.asset.decimals, borrowVault.asset.symbol)"
               >
-                ~ {{ roundAndCompactTokens(borrowed, borrowVault.shares.decimals) }}
+                ~ {{ roundAndCompactTokens(borrowed, borrowVault.asset.decimals) }}
                 {{ borrowVault.asset.symbol }}
               </UiExactAmount>
             </div>
@@ -667,7 +667,7 @@ const openPositionInformationModal = () => {
                 </template>
                 <UiExactAmount
                   v-else-if="collateralVault"
-                  :exact="formatExactAmount(collateralItems[0]?.assets ?? supplied, collateralVault.shares.decimals, collateralVault.asset.symbol)"
+                  :exact="formatExactAmount(collateralItems[0]?.assets ?? supplied, collateralVault.asset.decimals, collateralVault.asset.symbol)"
                 >
                   {{ collateralValueDisplay }}
                 </UiExactAmount>
@@ -678,9 +678,9 @@ const openPositionInformationModal = () => {
               <UiExactAmount
                 v-if="collateralValue.hasPrice && collateralVault"
                 class="text-content-tertiary text-p3"
-                :exact="formatExactAmount(collateralItems[0]?.assets ?? supplied, collateralVault.shares.decimals, collateralVault.asset.symbol)"
+                :exact="formatExactAmount(collateralItems[0]?.assets ?? supplied, collateralVault.asset.decimals, collateralVault.asset.symbol)"
               >
-                ~ {{ roundAndCompactTokens(collateralItems[0]?.assets ?? supplied, collateralVault.shares.decimals) }}
+                ~ {{ roundAndCompactTokens(collateralItems[0]?.assets ?? supplied, collateralVault.asset.decimals) }}
                 {{ collateralVault.asset.symbol }} {{ collateralItems.length > 1 ? '& others' : '' }}
               </UiExactAmount>
             </div>
