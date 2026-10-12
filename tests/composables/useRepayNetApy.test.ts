@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EVault, PortfolioBorrowPosition, VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
 import { useRepayNetApy } from '~/composables/repay/useRepayNetApy'
-import type { VaultAsset } from '~/types/asset'
 
 const { getAssetUsdValueForEstimate, getNetAPYFromWeightedSupplySnapshot, logWarn } = vi.hoisted(() => ({
   getAssetUsdValueForEstimate: vi.fn(async () => 50 as number | undefined),
@@ -30,8 +29,8 @@ const COLLATERAL_VAULT = '0x0000000000000000000000000000000000000002'
 
 const borrowVault = {
   address: BORROW_VAULT,
-  asset: { address: BORROW_VAULT, symbol: 'USDC', decimals: 18 },
-  shares: { decimals: 18 },
+  asset: { address: BORROW_VAULT, symbol: 'USDC', decimals: 6 },
+  shares: { decimals: 6 },
 } as unknown as EVault
 const collateralVault = {
   address: COLLATERAL_VAULT,
@@ -95,34 +94,11 @@ describe('useRepayNetApy', () => {
     vi.restoreAllMocks()
   })
 
-  const makeBaseline = (verifiedSpendingAsset = shallowRef<VaultAsset>()) => scope.run(() => useRepayNetApy({
+  const makeBaseline = () => scope.run(() => useRepayNetApy({
     position: shallowRef<PortfolioBorrowPosition<VaultEntity> | undefined>(position),
     borrowVault: computed(() => borrowVault),
     collateralVault: computed(() => collateralVault),
-    verifiedSpendingAsset,
   }))!
-
-  it('uses verified debt decimals for the baseline, but not swap-token decimals', async () => {
-    const verifiedSpendingAsset = shallowRef<VaultAsset>({ ...borrowVault.asset, decimals: 6 } as VaultAsset)
-    const baseline = makeBaseline(verifiedSpendingAsset)
-
-    await vi.waitFor(() => expect(getAssetUsdValueForEstimate).toHaveBeenCalledWith(
-      position.borrowed,
-      borrowVault,
-      'off-chain',
-      6,
-    ))
-    await vi.waitFor(() => expect(baseline.netAPY.value).toBe(5))
-
-    getAssetUsdValueForEstimate.mockClear()
-    verifiedSpendingAsset.value = { ...verifiedSpendingAsset.value!, address: COLLATERAL_VAULT }
-    await vi.waitFor(() => expect(getAssetUsdValueForEstimate).toHaveBeenCalledWith(
-      position.borrowed,
-      borrowVault,
-      'off-chain',
-      undefined,
-    ))
-  })
 
   it('clears the baseline while refreshing and ignores a superseded completion', async () => {
     const baseline = makeBaseline()
@@ -167,7 +143,6 @@ describe('useRepayNetApy', () => {
       position.borrowed,
       borrowVault,
       'off-chain',
-      undefined,
     ))
     expect(baseline.netAPY.value).toBeNull()
     expect(getNetAPYFromWeightedSupplySnapshot).not.toHaveBeenCalled()

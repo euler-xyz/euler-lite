@@ -40,8 +40,6 @@ export type SwapQuoteIncludeCowSwap = boolean | (() => boolean)
 type SwapQuotesParallelOptions = {
   amountField: SwapQuoteAmountField
   compare: SwapQuoteCompare
-  /** Validate transaction-critical metadata before quote display or gas estimation. */
-  validateQuote?: (quote: SwapQuote) => void
   /** Surface CoW Protocol as a quote source (Ethereum mainnet etc.). */
   includeCowSwap?: SwapQuoteIncludeCowSwap
   /** Build a TransactionPlan from a quote so the composable can run gas
@@ -545,7 +543,6 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
 
           const best = pickBestQuote(data, options.amountField, options.compare)
           if (best) {
-            options.validateQuote?.(best)
             const card = await profAsync(flow, 'enrichQuoteCard.total', () => enrichQuoteCard(provider, best, providerParams, client, gasPricePromise))
             if (guard.isStale(gen) || !card) {
               return

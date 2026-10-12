@@ -266,7 +266,7 @@ const canAddBorrowToBatch = computed(() => {
   // NOT checked here: an earlier batch step may supply the funds, and the layered
   // simulation flags the entry if it genuinely can't execute. This is why the
   // button stays enabled even when Review is blocked by "Not enough balance".
-  if (isGeoBlocked.value || isBorrowRestricted.value || borrow.isBorrowSwapRestricted.value || borrow.isBorrowPayWithBlocked.value || (!borrow.isSavingCollateral.value && borrow.spending.isBlocked.value)) return false
+  if (isGeoBlocked.value || isBorrowRestricted.value || borrow.isBorrowSwapRestricted.value || borrow.isBorrowPayWithBlocked.value) return false
   if (!borrowVault.value || !collateralVault.value) return false
   // Only the borrow amount is required to add to the batch — collateral can be
   // empty (e.g. borrowing against collateral an earlier batch step supplies).
@@ -282,7 +282,6 @@ const addToBatch = async () => {
   if (!canAddBorrowToBatch.value) return
   await guardWithBorrowSwapPriceImpact(async () => {
     const subAccount = (await resolvePendingSubAccount()) as Address
-    if (!canAddBorrowToBatch.value) return
     const cVault = collateralVault.value
     const bVault = borrowVault.value
     if (!cVault || !bVault) return
@@ -670,23 +669,16 @@ watch(
                   v-model="borrow.collateralAmount.value"
                   :desc="collateralProduct.name"
                   :label="`Supply ${collateralVault.asset.symbol}`"
-                  :asset="!borrow.isSavingCollateral.value && borrow.borrowSelectedAsset.value ? borrow.borrowSelectedAsset.value : collateralVault.asset"
+                  :asset="borrow.borrowNeedsSwap.value && borrow.borrowSelectedAsset.value ? borrow.borrowSelectedAsset.value : collateralVault.asset"
                   :price-override="borrow.borrowNeedsSwap.value ? borrow.borrowSwapAssetUsdPrice.value : borrow.collateralUnitPrice.value"
                   :balance="borrow.borrowActiveBalance.value"
                   :collateral-options="borrow.borrowNeedsSwap.value ? undefined : (borrow.collateralOptions.value as CollateralOption[])"
                   :selected-source="borrow.isSavingCollateral.value ? 'saving' : 'wallet'"
                   :selected-sub-account="borrow.selectedSavingSubAccount.value"
                   :selected-vault-address="collateralVault?.address"
-                  :maxable="borrow.isSavingCollateral.value || !borrow.spending.isBlocked.value"
-                  :readonly="!borrow.isSavingCollateral.value && borrow.spending.isBlocked.value"
+                  maxable
                   @input="borrow.onCollateralInput"
                   @change-collateral="borrow.onChangeCollateral"
-                />
-
-                <SpendingAssetStatus
-                  :loading="!borrow.isSavingCollateral.value && borrow.spending.isLoading.value"
-                  :error="!borrow.isSavingCollateral.value ? borrow.spending.error.value : null"
-                  @retry="borrow.spending.retry"
                 />
 
                 <!-- Pay with token selector -->
