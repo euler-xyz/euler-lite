@@ -52,13 +52,20 @@ describe('rewards proxy allowlists', () => {
   })
 
   it('allows only Turtle stream proof requests used by claim planning', () => {
-    expect(isAllowedTurtleProxyRequest('GET', 'streams/merkle_proofs', params(`wallet=${ACCOUNT}&streamIds=stream-1`))).toBe(true)
-    expect(isAllowedTurtleProxyRequest('HEAD', 'streams/merkle_proofs', params(`wallet=${ACCOUNT}&streamIds=stream-1,stream-2`))).toBe(true)
+    const streamA = '7e9c407e-3992-4587-b8e7-9a30f96b12b5'
+    const streamB = '6ab3c09e-a384-436e-ba8b-c30d249bdf83'
 
-    expect(isAllowedTurtleProxyRequest('POST', 'streams/merkle_proofs', params(`wallet=${ACCOUNT}&streamIds=stream-1`))).toBe(false)
-    expect(isAllowedTurtleProxyRequest('GET', 'streams', params(`wallet=${ACCOUNT}&streamIds=stream-1`))).toBe(false)
-    expect(isAllowedTurtleProxyRequest('GET', 'streams/merkle_proofs', params(`wallet=not-an-address&streamIds=stream-1`))).toBe(false)
+    expect(isAllowedTurtleProxyRequest('GET', 'streams/merkle_proofs', params(`wallet=${ACCOUNT}&streamIds=${streamA}`))).toBe(true)
+    expect(isAllowedTurtleProxyRequest('HEAD', 'streams/merkle_proofs', params(`wallet=${ACCOUNT}&streamIds=${streamA}&streamIds=${streamB}`))).toBe(true)
+    expect(isAllowedTurtleProxyRequest('GET', 'streams/merkle_proofs', params(`wallet=${ACCOUNT}&streamIds=${streamA.toUpperCase()}`))).toBe(true)
+
+    expect(isAllowedTurtleProxyRequest('POST', 'streams/merkle_proofs', params(`wallet=${ACCOUNT}&streamIds=${streamA}`))).toBe(false)
+    expect(isAllowedTurtleProxyRequest('GET', 'streams', params(`wallet=${ACCOUNT}&streamIds=${streamA}`))).toBe(false)
+    expect(isAllowedTurtleProxyRequest('GET', 'streams/merkle_proofs', params(`wallet=not-an-address&streamIds=${streamA}`))).toBe(false)
+    expect(isAllowedTurtleProxyRequest('GET', 'streams/merkle_proofs', params(`wallet=${ACCOUNT}`))).toBe(false)
     expect(isAllowedTurtleProxyRequest('GET', 'streams/merkle_proofs', params(`wallet=${ACCOUNT}&streamIds=`))).toBe(false)
-    expect(isAllowedTurtleProxyRequest('GET', 'streams/merkle_proofs', params(`wallet=${ACCOUNT}&streamIds=stream-1&debug=true`))).toBe(false)
+    expect(isAllowedTurtleProxyRequest('GET', 'streams/merkle_proofs', params(`wallet=${ACCOUNT}&streamIds=${streamA},${streamB}`))).toBe(false)
+    expect(isAllowedTurtleProxyRequest('GET', 'streams/merkle_proofs', params(`wallet=${ACCOUNT}&streamIds=${streamA}&streamIds=stream-2`))).toBe(false)
+    expect(isAllowedTurtleProxyRequest('GET', 'streams/merkle_proofs', params(`wallet=${ACCOUNT}&streamIds=${streamA}&debug=true`))).toBe(false)
   })
 })

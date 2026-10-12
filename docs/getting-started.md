@@ -11,7 +11,7 @@ Welcome to the Euler Lite project! This guide will help you get up and running w
 - **Lending**: Users can deposit assets to earn yield
 - **Borrowing**: Users can borrow assets using collateral
 - **Portfolio Management**: Track positions and performance
-- **Rewards**: Participate in Merkl, Incentra, and Fuul reward programs
+- **Rewards**: Participate in Merkl, Incentra, Fuul, and Turtle reward programs
 - **Multi-chain**: Connect to any EVM-compatible network
 
 ## 🏗️ Technology Stack
@@ -81,6 +81,8 @@ Welcome to the Euler Lite project! This guide will help you get up and running w
 - `npm run preview` - Preview production build
 - `npm run generate` - Generate static site (requires a running backend for data proxy endpoints)
 - `npm run lint` - Run ESLint
+- `npm run typecheck` - Run Nuxt type checking
+- `npm run test:run` - Run Vitest once (not `npm run test`, which is watch mode)
 
 ## Environment Configuration
 
@@ -120,14 +122,26 @@ SUBGRAPH_URL_1=https://your-subgraph.com
 ### Merkl
 
 - **Purpose**: Reward distribution and management
-- **Integration**: API for opportunities and rewards
+- **Integration**: Same-origin `/api/internal/proxy/merkl`
 - **Data Source**: Campaign information, user rewards
+
+### Incentra (Brevis)
+
+- **Purpose**: Euler campaign proofs and incentive distribution
+- **Integration**: Same-origin `/api/internal/proxy/incentra` (see [Server-Side Caching](./server-side-caching.md#per-host-proxies))
+- **Data Source**: Campaign APR data and Merkle proofs
 
 ### Fuul
 
 - **Purpose**: Incentive campaign distribution
-- **Integration**: API for incentive campaigns
+- **Integration**: Same-origin `/api/internal/proxy/fuul`
 - **Data Source**: Campaign APR data and claimable rewards
+
+### Turtle Club
+
+- **Purpose**: Earn-stream rewards
+- **Integration**: Browser fetches proofs through `/api/internal/proxy/turtle`; stream discovery runs in the server-side SDK with `TURTLE_EARN_API_KEY`
+- **Data Source**: Per-wallet Merkle proofs (`streams/merkle_proofs`)
 
 ## 🆘 Common Issues
 

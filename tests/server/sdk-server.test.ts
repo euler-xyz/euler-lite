@@ -82,7 +82,7 @@ describe('getServerSdk', () => {
     const config = mocks.buildEulerSDK.mock.calls[0]?.[0].config
     expect(config).toMatchObject({
       rewardsTurtleApiKey: 'turtle-secret',
-      rewardsTurtleApiUrl: 'https://earn.turtle.xyz/v1',
+      rewardsTurtleApiUrl: 'https://earn.turtle.xyz/v2',
     })
     expect(config).not.toHaveProperty('rewardsEnableTurtle')
   })
@@ -106,7 +106,7 @@ describe('getServerSdk', () => {
     await getServerSdk(1)
 
     expect(mocks.buildEulerSDK.mock.calls[0]?.[0].config).toMatchObject({
-      rewardsTurtleApiUrl: 'https://earn.turtle.xyz/v1',
+      rewardsTurtleApiUrl: 'https://earn.turtle.xyz/v2',
     })
     delete process.env.TURTLE_EARN_API_URL
   })
