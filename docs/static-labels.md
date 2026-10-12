@@ -26,7 +26,7 @@ For each enabled chain, the loader reads these JSON documents:
 
 Collections may be omitted: HTTP 404 and HTTP 403 (the missing-key response from some S3/CDN hosts) resolve to `{}` for products/entities and `[]` for points/Earn/assets. Missing chain asset rules do not remove global asset rules, and vice versa. Explicit empty documents are also supported. Other HTTP errors, network failures and malformed content fail the refresh. File syntax retains the five-file authoring format; no generated normalized snapshot needs editing. [`tests/fixtures/static-labels.json`](../tests/fixtures/static-labels.json) is an executable example of the file contents.
 
-Only HTTP(S) profile links and simple image filenames are accepted. Remote hosted label images must use `https://token-images.euler.finance`; static images may additionally use the configured source origin. Paths/credentials and lookalike hosts cannot bypass the image allowlist. The browser repeats the image check before rendering.
+Only HTTP(S) profile links and simple image filenames are accepted. Remote hosted label images use `https://token-images.euler.finance` or `https://v3.euler.finance/v3/images/labels/{slug}`; static images may additionally use the configured source origin. Paths/credentials and lookalike hosts cannot bypass the image allowlist. The browser repeats the image check before rendering.
 
 ## Failure behavior
 
