@@ -46,17 +46,17 @@ describe('vault bad debt helpers', () => {
     expect(formatBadDebtHint(entry, 500)).toContain('25% of total borrows')
   })
 
-  it('reads the unpriced share of bad debt when the row reports it', () => {
+  it('reports bad debt in positions with unpriced collateral without attributing its cause', () => {
     const entry = buildBadDebtCache([row({ unpricedBadDebtUsd: 40, unpricedCollateralCount: 3 })]).values().next().value!
 
     expect(entry.pricing).toEqual({ status: 'reported', unpricedUsd: 40, unpricedCollateralCount: 3 })
-    expect(formatBadDebtHint(entry, 500)).toContain('$40 of the bad debt is from 3 collateral positions with no price (valued at $0)')
+    expect(formatBadDebtHint(entry, 500)).toContain('$40 bad debt in positions with unpriced collateral (3 unpriced collateral positions valued at $0)')
   })
 
   it('names one collateral position in the singular', () => {
     const entry = buildBadDebtCache([row({ unpricedBadDebtUsd: 40, unpricedCollateralCount: 1 })]).values().next().value!
 
-    expect(formatBadDebtHint(entry, 500)).toContain('is from 1 collateral position with no price')
+    expect(formatBadDebtHint(entry, 500)).toContain('$40 bad debt in positions with unpriced collateral (1 unpriced collateral position valued at $0)')
   })
 
   it('treats a reported zero as fully priced', () => {

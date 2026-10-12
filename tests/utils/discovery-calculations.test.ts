@@ -434,7 +434,7 @@ describe('attribute stats matrix', () => {
     expect(cell.numeric).toBe(125)
     expect(cell.hint).toContain('25% of total borrows')
     expect(cell.hint).toContain('2 underwater accounts')
-    expect(cell.hint).toContain('$25 of the bad debt is from 1 collateral position with no price')
+    expect(cell.hint).toContain('$25 bad debt in positions with unpriced collateral (1 unpriced collateral position valued at $0)')
   })
 
   it('shows zero bad debt for borrowable vaults when loaded data has no row', () => {

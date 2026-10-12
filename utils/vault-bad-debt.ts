@@ -61,7 +61,7 @@ const formatBadDebtPricing = (pricing: VaultBadDebtPricing): string => {
   if (pricing.status === 'invalid') return 'unpriced collateral data is invalid'
   if (pricing.unpricedCollateralCount === 0) return 'all collateral priced'
   const positions = pricing.unpricedCollateralCount === 1 ? 'position' : 'positions'
-  return `${formatCompactUsdValue(pricing.unpricedUsd)} of the bad debt is from ${pricing.unpricedCollateralCount} collateral ${positions} with no price (valued at $0)`
+  return `${formatCompactUsdValue(pricing.unpricedUsd)} bad debt in positions with unpriced collateral (${pricing.unpricedCollateralCount} unpriced collateral ${positions} valued at $0)`
 }
 
 export const buildBadDebtCache = (
