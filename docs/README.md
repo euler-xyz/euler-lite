@@ -18,11 +18,13 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Data flow patterns
 - Technology decisions
 - Shareable Explore / Lend / Borrow / Earn query parameters and curator aliases
+- JSON-RPC proxy allowlist (`eth_createAccessList` for simulation), batch/timeout limits, and wagmi public-RPC fallback
 
 ### 🚀 [Development Guide](./development-guide.md)
 
 - Development workflow
 - Shareable listing-filter URLs (`?curator=` plus legacy `riskManager` / Earn `allocator`)
+- JSON-RPC proxy, `/healthz` liveness, and Advanced-mode localStorage pitfalls
 
 ### 💰 [Pricing System](./pricing-system.md)
 
@@ -37,6 +39,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - USD-weighted multi-collateral snapshots
 - Net APY, ROE, intrinsic yield, and reward breakdowns
 - Provider-owned reward eligibility notices (`complete` / `incomplete` / `none`)
+- Settings `enableIntrinsicApy` / `enableRewardsApy` display toggles and spy-mode viewer (no wallet fallback while verifying)
 - Transaction-batch layer consistency and fail-closed estimates
 
 ### 📊 [Portfolio Logic](./portfolio-logic.md)
@@ -153,6 +156,11 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Asset-level pattern matching (exact `symbols`/`names` + `symbolRegex`/`nameRegex`) and cross-chain `all/assets.json`
 - Country group aliases (EU, EEA, EFTA)
 - UI enforcement across browse, detail, action, and modal pages, plus the arbitrary-asset swap selector
+
+### ✍️ [Terms of Use Signing](./tos-signing.md)
+
+- On-chain TOS signature gated by `NUXT_PUBLIC_CONFIG_TOS_MD_URL`
+- Content-hash message construction; users re-sign when markdown or the TOS URL changes
 
 ### 🛂 [Address Screening](./address-screening.md)
 

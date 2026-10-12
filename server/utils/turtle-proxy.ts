@@ -13,7 +13,7 @@ import { readTurtleEarnApiKey } from '~/utils/api-url-env'
  * into a credential leak, and nothing needs Turtle traffic pointed elsewhere.
  * Tests intercept `fetch` instead of redirecting the host.
  */
-export const TURTLE_EARN_API_URL = 'https://earn.turtle.xyz/v1'
+export const TURTLE_EARN_API_URL = 'https://earn.turtle.xyz/v2'
 
 /**
  * Request headers for the Turtle upstream fetch. Returns `undefined` when no

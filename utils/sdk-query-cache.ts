@@ -46,7 +46,11 @@ export const subscribeToSdkQueryInvalidations = (
 const buildSdkQuery = (staleTimes: Partial<Record<EulerSDKQueryName, number>>): BuildQueryFn => {
   return ((queryName: string, fn, _target: object, context) => {
     const wrapped = (async (...args: Parameters<typeof fn>) => {
-      const serializedArgs = context?.getCacheKey(args) ?? serializeQueryArgs(args)
+      const sdkCacheKey = context?.getCacheKey(args)
+      // The SDK uses a null key to opt out of caching, including failure caching.
+      // Token decimals must be read again after each settled request.
+      if (sdkCacheKey === null) return fn(...args)
+      const serializedArgs = sdkCacheKey ?? serializeQueryArgs(args)
       if (serializedArgs === null) {
         throw new TypeError(`SDK query arguments for ${queryName} are not serializable`)
       }
