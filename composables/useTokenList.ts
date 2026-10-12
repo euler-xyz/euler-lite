@@ -78,34 +78,28 @@ const filterByChain = (chainId: number) => {
 }
 
 const loadTokenList = async (forceRefresh = false) => {
+  const { chainId: currentChainId } = useEulerAddresses()
+  const chainId = currentChainId.value
+  if (!chainId) return
+
+  if (!forceRefresh
+    && loadState.rawTokens.length > 0
+    && loadState.chainId === chainId
+    && (Date.now() - loadState.timestamp) < CACHE_TTL_5MIN_MS) {
+    return
+  }
+
+  const gen = guard.next()
+  // Consumers share this map directly. A replacement fetch must not leave
+  // expired or invalidated metadata available while pending or after failure.
+  tokenMap.value = new Map()
+  loadState.rawTokens = []
+  loadState.chainId = 0
+  loadState.timestamp = 0
+  isLoading.value = true
+  isLoaded.value = false
+
   try {
-    const { chainId: currentChainId } = useEulerAddresses()
-    const chainId = currentChainId.value
-    if (!chainId) return
-
-    const now = Date.now()
-
-    // DefiLlama data is per-chain, so re-fetch when chain changes
-    if (!forceRefresh
-      && loadState.rawTokens.length > 0
-      && loadState.chainId === chainId
-      && (now - loadState.timestamp) < CACHE_TTL_5MIN_MS) {
-      return
-    }
-
-    // When switching chains, wipe stale cross-chain data immediately so
-    // consumers calling getAllTokens()/hasToken() during the refetch
-    // window see "empty" rather than the previous chain's tokens.
-    if (loadState.chainId !== chainId) {
-      tokenMap.value = new Map()
-      loadState.rawTokens = []
-      loadState.chainId = 0
-    }
-
-    const gen = guard.next()
-    isLoading.value = true
-    isLoaded.value = false
-
     const res = await axios.get('/api/internal/token-list', { params: { chainId } })
     if (guard.isStale(gen)) return
 
@@ -118,10 +112,10 @@ const loadTokenList = async (forceRefresh = false) => {
     isLoaded.value = true
   }
   catch (e) {
-    logWarn('tokenList/load', e)
+    if (!guard.isStale(gen)) logWarn('tokenList/load', e)
   }
   finally {
-    isLoading.value = false
+    if (!guard.isStale(gen)) isLoading.value = false
   }
 }
 

@@ -11,7 +11,7 @@ export const createTokenDecimalsResolver = (
   read: (chainId: number, address: Address) => Promise<number>,
 ): ResolveTokenDecimals => {
   const cache = new Map<string, { decimals: number, expiresAt: number }>()
-  const pending = new Map<string, { promise: Promise<number>, startedAt: number }>()
+  const pending = new Map<string, Promise<number>>()
 
   return async (chainId, address) => {
     const normalized = getAddress(address)
@@ -21,32 +21,27 @@ export const createTokenDecimalsResolver = (
       return native.decimals
     }
     const key = `${chainId}:${normalized.toLowerCase()}`
-    const now = Date.now()
     const cached = cache.get(key)
-    if (cached && cached.expiresAt > now) return cached.decimals
+    if (cached && cached.expiresAt > Date.now()) return cached.decimals
     cache.delete(key)
     let flight = pending.get(key)
-    // A transport that never settles must not suppress all future retries.
-    if (!flight || now - flight.startedAt >= 60_000) {
-      const promise = Promise.resolve().then(() => read(chainId, normalized)).then((decimals) => {
+    if (!flight) {
+      flight = Promise.resolve().then(() => read(chainId, normalized)).then((decimals) => {
         if (!Number.isInteger(decimals) || decimals < 0 || decimals > 255) {
           throw new Error(`Invalid token decimals for ${normalized}`)
         }
-        if (pending.get(key)?.promise === promise) {
-          if (cache.size >= 20_000) cache.delete(cache.keys().next().value!)
-          cache.set(key, { decimals, expiresAt: Date.now() + TOKEN_DECIMALS_TTL_MS })
-        }
+        if (cache.size >= 20_000) cache.delete(cache.keys().next().value!)
+        cache.set(key, { decimals, expiresAt: Date.now() + TOKEN_DECIMALS_TTL_MS })
         return decimals
       }).finally(() => {
-        if (pending.get(key)?.promise === promise) pending.delete(key)
+        pending.delete(key)
       })
-      flight = { promise, startedAt: now }
       pending.set(key, flight)
     }
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       return await Promise.race([
-        flight.promise,
+        flight,
         new Promise<never>((_, reject) => {
           timer = setTimeout(() => reject(new Error(`Token decimals unavailable for ${normalized}`)), TOKEN_DECIMALS_DEADLINE_MS)
         }),

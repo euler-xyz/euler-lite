@@ -3241,7 +3241,7 @@ const submitCowSwapCollateralSwap = async () => {
   const toVault = targetCollateralEVault.value
   const fromAsset = fromVault.asset
   const toAsset = toVault.asset
-  const fromShareAmount = trimTrailingZeros(formatUnits(sellAmount, Number(fromAsset.decimals)))
+  const fromShareAmount = trimTrailingZeros(formatUnits(sellAmount, Number(fromVault.shares.decimals)))
   const fromAssetAmount = trimTrailingZeros(formatUnits(convertVaultSharesToAssets(fromVault, sellAmount), Number(fromAsset.decimals)))
   const quotedBuyAmount = parseCowProviderAmount(selectedCollateralQuote.value.providerData?.buyAmount) ?? buyAmount
   const toAssetAmount = trimTrailingZeros(formatUnits(convertVaultSharesToAssets(toVault, quotedBuyAmount), Number(toAsset.decimals)))

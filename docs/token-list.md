@@ -70,7 +70,8 @@ Amounts passed to asset operations (deposit, borrow, repay and withdraw) use ass
 Singleton state with a `shallowRef` token map, keyed by normalized address.
 
 - **Cache TTL**: 5 minutes. The client skips the API call if the same chain's data was fetched within the last 5 minutes (bypassed by `forceRefresh`).
-- **Race guard**: prevents stale responses (from a previous chain) from overwriting current data.
+- **Refresh invalidation**: a replacement fetch clears the shared token map immediately. Failed refreshes leave it empty until a successful retry. Expiry is checked when loading; there is no background expiry timer.
+- **Race guard**: only the latest request can publish data or finish the loading state.
 - **`filterByChain()`**: filters the raw token array by `chainId`, normalizes addresses, and conditionally includes the native currency (address zero) when the wrapped variant exists.
 - **Tags**: token entries may include `tags?: string[]`. `filterByChain()` normalizes tags with `normalizeTokenCategoryTags()` and copies wrapped-native tags to the native zero-address entry.
 

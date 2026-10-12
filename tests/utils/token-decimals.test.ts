@@ -38,6 +38,7 @@ describe('shared token decimals', () => {
     const failed = expect(resolve(1, ASSET)).rejects.toThrow('unavailable')
     await vi.advanceTimersByTimeAsync(5_000)
     await failed
+    await vi.advanceTimersByTimeAsync(61_000)
     const retry = resolve(1, ASSET)
     finish(8)
     expect(await retry).toBe(8)
