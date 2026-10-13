@@ -411,7 +411,7 @@ Whether `V3_API_URL` (or aliases) is set changes how the default `fallback` adap
 
 Pinning either source to `onchain` ignores V3 even when `V3_API_URL` is set. Pinning to `v3` requires `V3_API_URL` — the SDK build throws otherwise, and the boot warning surfaces this misconfiguration before warming starts.
 
-Chains listed in `ONCHAIN_SDK_CHAINS` use onchain adapters for chain-aware browser SDK reads and server snapshot builds, so regular chains continue to follow the configured V3/fallback source while pinned chains avoid V3-backed account/vault/Earn reads. Independently, the warm-cache plugin skips per-chain warm work for chains listed in `DEPRECATED_CHAINS`; deprecated chains whose V3 data is gone should typically also be listed in `ONCHAIN_SDK_CHAINS`.
+Chains listed in `ONCHAIN_SDK_CHAINS` use onchain adapters for chain-aware browser SDK reads and server snapshot builds, so regular chains continue to follow the configured V3/fallback source while pinned chains avoid V3-backed account/vault/Earn reads. Independently, the warm-cache plugin skips per-chain warm work for chains listed in `DEPRECATED_CHAINS` or marked `deprecated` in the cached `EulerChains.json` (re-read every cycle); deprecated chains whose V3 data is gone should typically also be listed in `ONCHAIN_SDK_CHAINS`.
 
 Chains listed in `EVAULT_FETCH_CHUNK_CHAINS` split EVault list reads into small sequential SDK calls in both the browser loader and the server snapshot builder. This is a Lite-side throttle around SDK `eVaultService.fetchVaults` calls for chains whose RPC/lens path does not tolerate larger concurrent onchain EVault reads. It does not replace [server provider overrides](#server-provider-overrides): Sonic's Multicall byte cap is applied inside the server viem client, not by this env list.
 
@@ -423,7 +423,7 @@ The snapshot remains active in all modes (unless `DISABLE_SERVER_VAULT_CACHE=tru
 |---|---|---|---|---|
 | `SERVER_VAULT_CACHE_SOURCE` | server | `fallback` \| `onchain` \| `v3` | `fallback` | Adapter chain in `server/utils/sdk-server.ts`; `ONCHAIN_SDK_CHAINS` chains use `onchain`. |
 | `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` | browser (exposed) | `fallback` \| `onchain` \| `v3` | `fallback` | Adapter chain in `composables/useEulerSdk.ts:getEulerSdk()`. `getEulerSdkForChain(chainId)` uses `onchain` for `ONCHAIN_SDK_CHAINS` chains. The "fresh" / plan-time SDK is always `onchain` regardless. |
-| `DEPRECATED_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Chains shown collapsed in the chain selector and skipped by per-chain warm-cache work. |
+| `DEPRECATED_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Chains shown collapsed in the chain selector and skipped by per-chain warm-cache work. Status `deprecated` in `EulerChains.json` has the same effect. |
 | `ONCHAIN_SDK_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Chains pinned to onchain adapters in chain-aware browser SDK reads and server snapshot builds. |
 | `TURTLE_EARN_API_KEY` | server | Turtle Earn server key | unset | Passed to the server SDK as `rewardsTurtleApiKey` (and sent by the Turtle proxy). Unset or blank, the proxy answers 503 and the server SDK is built with `rewardsEnableTurtle: false`, which disables direct Turtle discovery only; V3-sourced Turtle campaigns may still be listed. |
 | `EVAULT_FETCH_CHUNK_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Chains whose EVault list reads are split into small sequential SDK calls in Lite. |

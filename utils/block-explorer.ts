@@ -1,4 +1,5 @@
 import { getChainById } from '~/entities/chainRegistry'
+import { useChainConfig } from '~/composables/useChainConfig'
 
 const cleanUrl = (url?: string) => {
   if (!url) return ''
@@ -21,12 +22,13 @@ export const getExplorerLink = (
   chainId?: number,
   isAddress = false,
 ) => {
-  const baseUrl = resolveExplorerBase(chainId)
+  const registryUrl = chainId ? cleanUrl(useChainConfig().explorerUrls?.[chainId]) : ''
+  const baseUrl = registryUrl || resolveExplorerBase(chainId)
   if (!hashOrAddress) {
     return baseUrl
   }
 
-  const chain = chainId ? getChainById(chainId) : undefined
+  const chain = chainId && !registryUrl ? getChainById(chainId) : undefined
   const explorerName = chain?.blockExplorers?.default?.name
   const path = isAddress
     ? 'address'

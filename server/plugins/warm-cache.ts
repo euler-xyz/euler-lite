@@ -28,15 +28,16 @@
  * rather than refetching — sequential mode is therefore much cheaper
  * than N× the first chain's wall time.
  *
- * Per-chain warms skip chains listed in `DEPRECATED_CHAINS`. Their data
- * is still served — the first visitor to a deprecated chain pays a
+ * Per-chain warms skip deprecated chains (`DEPRECATED_CHAINS`, or status
+ * `deprecated` in the cached deployment manifest, re-read every cycle). Their
+ * data is still served — the first visitor to a deprecated chain pays a
  * cold-upstream fetch, cached from then on under normal TTL behavior.
  *
  * Merkl's /tokens/reward payload is fetched transitively by /api/internal/token-list
  * (one of its sources).
  */
 import { LABEL_FILES, refreshLabelFile } from '../api/internal/labels/[file].get'
-import { refreshEulerChains } from '../api/internal/euler-chains.get'
+import { peekEulerChains, refreshEulerChains } from '../api/internal/euler-chains.get'
 import { ABI_CONTRACTS, refreshAbi } from '../api/internal/abis/[contract].get'
 import { refreshTokenList } from '../api/internal/token-list.get'
 import { refreshChainVaults } from '../utils/vaults-cache'
@@ -47,6 +48,7 @@ import {
 } from '~/utils/api-url-env'
 import { getEnabledChainIds } from '~/utils/chain-env'
 import { parseChainIds } from '~/utils/parseChainIds'
+import { getRegistryDeprecatedChainIds, readChainRegistry } from '~/utils/chain-status'
 import { reportStatus } from '../utils/log'
 import { logger } from '~/server/utils/logger'
 
@@ -157,10 +159,15 @@ export default defineNitroPlugin(() => {
   const chainIds = enabledChainIds.filter(id => !deprecatedChainIds.has(id))
   if (chainIds.length === 0) return
 
+  const currentChainIds = () => {
+    const registryDeprecated = new Set(getRegistryDeprecatedChainIds(readChainRegistry(peekEulerChains())))
+    return chainIds.filter(id => !registryDeprecated.has(id))
+  }
+
   const serverVaultCacheDisabled = readDisableServerVaultCache()
 
   const warmChainsSequentially = async () => {
-    for (const chainId of chainIds) {
+    for (const chainId of currentChainIds()) {
       await Promise.allSettled(warmChainTasks(chainId))
     }
   }
@@ -184,7 +191,7 @@ export default defineNitroPlugin(() => {
       // Sequential across chains: cross-chain upstreams (V3 prices,
       // intrinsic APY) dedupe via their in-flight maps, so chains 2..N
       // hit warm upstream caches rather than refetching.
-      for (const chainId of chainIds) {
+      for (const chainId of currentChainIds()) {
         await warmVaults(chainId)
       }
     }
