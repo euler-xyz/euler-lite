@@ -152,6 +152,7 @@ watchEffect(() => {
     content-class="flex flex-col gap-20"
   >
     <VaultDeprecationBanner :addresses="[vault.address]" />
+    <LiquidationCoverageNotice :vault="vault" />
     <VaultPublicNotice :addresses="[vault.address]" />
     <!-- eslint-disable vue/no-v-html -- autoLink escapes label text before adding links -->
     <p

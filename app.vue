@@ -15,6 +15,7 @@ const { loadEulerConfig, chainId } = useEulerAddresses()
 const { loadVaults, isReady: isVaultsReady, resetVaultsState, refreshVaults, setShowAllLabelEntries } = useVaults()
 const { loadTokenList, isLoaded: isTokenListLoaded } = useTokenList()
 const { loadLabels, refreshLabelsIfStale, retryLabels, isReady: isLabelsReady, isLoading: isLabelsLoading, loadError: labelsLoadError } = useEulerLabels()
+const { refreshLiquidationCoverageIfStale } = useLiquidationCoverage()
 const backendUnavailableText = 'Vault verification could not be loaded from the Euler backend. Every vault shows as unverified until the connection is back.'
 const { loadCountry } = useGeoBlock()
 const { updateBalances, resetBalances } = useWallets()
@@ -163,21 +164,23 @@ watch([chainId, showAllLabelEntries], () => {
   })
 }, { immediate: true })
 
-// Refresh live label verdicts for an open tab and after returning from a
-// suspended/background tab. The labels store owns freshness and deduplication.
+// Refresh live label verdicts and liquidation bot coverage for an open tab and
+// after returning from a suspended/background tab. Each store owns its freshness.
 let labelsRefreshInterval: ReturnType<typeof setInterval> | undefined
-const refreshVisibleLabels = () => {
-  if (document.visibilityState === 'visible') void refreshLabelsIfStale()
+const refreshVisibleData = () => {
+  if (document.visibilityState !== 'visible') return
+  void refreshLabelsIfStale()
+  refreshLiquidationCoverageIfStale()
 }
 onMounted(() => {
-  labelsRefreshInterval = setInterval(refreshVisibleLabels, POLL_INTERVAL_60S_MS)
-  window.addEventListener('focus', refreshVisibleLabels)
-  document.addEventListener('visibilitychange', refreshVisibleLabels)
+  labelsRefreshInterval = setInterval(refreshVisibleData, POLL_INTERVAL_60S_MS)
+  window.addEventListener('focus', refreshVisibleData)
+  document.addEventListener('visibilitychange', refreshVisibleData)
 })
 onUnmounted(() => {
   clearInterval(labelsRefreshInterval)
-  window.removeEventListener('focus', refreshVisibleLabels)
-  document.removeEventListener('visibilitychange', refreshVisibleLabels)
+  window.removeEventListener('focus', refreshVisibleData)
+  document.removeEventListener('visibilitychange', refreshVisibleData)
 })
 
 // Refresh balances when token list finishes loading (includes new DefiLlama tokens)

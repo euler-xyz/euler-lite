@@ -357,6 +357,7 @@ const onClick = () => {
                 </span>
               </UiHoverPreviewTooltip>
               <VaultDeprecatedBadge :addresses="[vault.address]" />
+              <LiquidationCoverageBadge :vault="vault" />
             </div>
             <VaultVisibilityNotice :address="vault.address" />
             <div

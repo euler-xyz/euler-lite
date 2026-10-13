@@ -202,6 +202,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 | Endpoint | TTL | Notes |
 |----------|-----|-------|
 | `/api/internal/public-labels` | 5 min | One chain/version-scoped Public Labels V3 bundle; in-flight dedup and bounded stale fallback |
+| `/api/internal/liquidation-coverage` | 5 min | One chain's default liquidation bot coverage (`LIQUIDATION_BOT_API_URL`); last answer kept 30 min, then `no-bot` |
 | `/api/internal/token-list` | 5 min | Four sources merged via `Promise.allSettled` (Euler SDK, DefiLlama, Uniswap, Merkl); per-source cache with stale fallback |
 | `/api/internal/v3/oracles/adapter-assessments/{address}?chainId={chainId}` | request-scoped | Lazy per-address Data V3 assessment fetch through the exact SDK browser endpoint allowlist |
 | `/api/internal/euler-chains` | 5 min | Static chain-agnostic config from `euler-interfaces` repo. 7-day stale window so a running instance outlives upstream outages |
@@ -215,7 +216,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 
 Every cacheable proxy above uses a TTL cache for fresh hits and in-flight request deduplication so concurrent cache-miss callers (e.g. warm-cache racing real traffic) collapse onto a single upstream fetch per cache key. The in-flight dedup pattern itself is a shared util — `createInFlightDedup` / `scheduleBackgroundRefresh` in `server/utils/in-flight.ts`. The rewards-provider proxies are one `createProviderProxy` pipeline (`server/utils/provider-proxy.ts`) over the shared forwarder `server/utils/external-proxy.ts`; the rules every provider proxy follows are documented once in [Server-Side Caching](./server-side-caching.md#per-host-proxies). Most cacheable proxies also return stale data on upstream failure. The intrinsic-APY overlay is a separate aggregator with chain-keyed TTL and in-flight coalescing; it does not use that forwarder and does not stale-fallback a previous successful payload. See [Intrinsic APY](./intrinsic-apy.md#lite-override-proxy).
 
-`server/plugins/warm-cache.ts` pre-populates the Public Labels bundle, its temporary effective-policy overlay, and the token list for every enabled chain, plus Euler Chains and runtime ABI manifests once globally, on a 5-minute cycle. The vault snapshot runs on its own faster timer (1 minute when V3 is configured, 5 minutes otherwise). Warm calls refresh the shared utilities directly; concurrent requests deduplicate against the same in-flight work, and stale fallback is bounded by `createTtlCache`.
+`server/plugins/warm-cache.ts` pre-populates the Public Labels bundle, its temporary effective-policy overlay, the token list and (when `LIQUIDATION_BOT_API_URL` is set) liquidation bot coverage for every enabled chain, plus Euler Chains and runtime ABI manifests once globally, on a 5-minute cycle. The vault snapshot runs on its own faster timer (1 minute when V3 is configured, 5 minutes otherwise). Warm calls refresh the shared utilities directly; concurrent requests deduplicate against the same in-flight work, and stale fallback is bounded by `createTtlCache`.
 
 For the full setup — per-host proxies, vault snapshot pipeline, two-pass client hydration, V3-conditional cadence, and the bigint wire codec — see [Server-Side Caching](./server-side-caching.md).
 

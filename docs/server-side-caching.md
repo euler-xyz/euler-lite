@@ -21,6 +21,8 @@ This document covers the per-host proxies, the vault snapshot pipeline, the warm
 | `server/api/internal/proxy/subgraph/[chainId].post.ts` | Proxies the per-chain Goldsky subgraph (hand-rolled: router param, per-chain URL, not built with the factory) |
 | `server/api/internal/public-labels.get.ts` | Chain/version-scoped aggregate Public Labels endpoint |
 | `server/utils/public-labels-source.ts` | Public Labels V3 pagination, 5-minute cache, in-flight dedup, and bounded stale fallback |
+| `server/api/internal/liquidation-coverage.get.ts` | Chain-scoped default liquidation bot coverage |
+| `server/utils/liquidation-coverage-source.ts` | Reads each bot's `/vault-filter`, 5-minute cache, 30-minute last-good window, one-minute retry floor |
 | `server/utils/static-labels-source.ts` | Atomic static authoring snapshots, used only in static mode |
 | `server/api/internal/v3/[...path].ts` | Rate-limited V3 backend proxy for SDK browser endpoints (`/api/internal/v3/...` → `v3.euler.finance/v3/...`) |
 | `server/api/internal/proxy/intrinsic-apy-overrides.get.ts` | Lite intrinsic-APY overlay for HyperEVM / Monad; chain-keyed 5-min cache |
@@ -96,6 +98,10 @@ Turtle is the only provider whose credential is required: Turtle rejects unauthe
 `/api/internal/public-labels?chainId=N&version=latest` is the browser's single label read. `server/utils/public-labels-source.ts` paginates vaults, products, entities, entity governance addresses, and geo policies directly from V3, then combines published metadata with the live visibility and geo overlays. The result is cached for 5 minutes by chain and version; concurrent misses share one in-flight operation. Bundle stale fallback is bounded. Geo separately retains a validated, fetchedAt-stamped disk checkpoint with unbounded stale-on-error fallback; cold starts without geo cannot publish a bundle. Mount `GEO_POLICY_CACHE_DIR` for cross-container persistence.
 
 `LABELS_SOURCE=v3` performs no label-file reads. `LABELS_SOURCE=static` reads the operator-owned authoring files on the same warm/refresh cycle and uses one atomic disk checkpoint for the entire collection. See [Static labels](./static-labels.md).
+
+### Liquidation bot coverage
+
+`/api/internal/liquidation-coverage?chainId=N` answers which vaults the default liquidation bot (`LIQUIDATION_BOT_API_URL`) leaves out on that chain. `server/utils/liquidation-coverage-source.ts` fetches `{base}/vault-filter` with one 5 s deadline covering the headers and the body, follows no redirects, keeps the mode and the listed addresses and drops the bot's reasons. An answer is fresh for 5 minutes; after that it is still served at once while a background refresh runs, until 30 minutes after it was fetched. Past that, or when the bot has not answered since the server started, the chain is `no-bot` and the browser badges every borrowable vault on it. A failing chain is retried at most once a minute. The browser asks again after a minute for a `no-bot` answer and before an answer reaches 30 minutes. With the variable unset the route answers `{ enabled: false }` and nothing is fetched.
 
 ### V3 proxy
 
@@ -371,6 +377,8 @@ Global cycle (5 min)                   Vaults cycle (1 min if V3, else 5 min)
 - per-chain Public Labels bundle
 - per-chain labels snapshot
 - per-chain token list
+- per-chain liquidation bot coverage
+  (when LIQUIDATION_BOT_API_URL is set)
 ```
 
 Vault snapshot has its own faster timer because V3-backed refreshes are cheap — one batched POST per chain hitting V3's own cache. Pulling a fresh snapshot every minute keeps it tight without hammering upstream. Without V3, the snapshot is built from heavier onchain lens multicalls, so it falls back to the global 5-min cadence.

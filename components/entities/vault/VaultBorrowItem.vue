@@ -331,6 +331,10 @@ const linkPath = computed(() => ({
               variant="restricted"
             />
             <VaultDeprecatedBadge :addresses="[pair.collateral.address, pair.borrow.address]" />
+            <LiquidationCoverageBadge
+              :vault="pair.borrow"
+              context="borrow"
+            />
             <VaultAssessmentWarning
               :address="pair.collateral.address"
               :family="isSecuritizeBorrowPair(pair) ? null : 'evk'"
