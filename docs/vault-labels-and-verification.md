@@ -263,9 +263,9 @@ Router recognition comes from `/v3/oracles/routers`, which lists exactly the rou
 
 #### Oracle provider logos
 
-Explore and vault oracle rows resolve logos through `getOracleProviderLogo` (`entities/oracle-providers.ts`), not local SVG assets.
+Explore and vault oracle rows resolve remote logos through `getOracleProviderLogo` and bundled fallbacks through `getOracleProviderFallbackLogo` (`entities/oracle-providers.ts`). Both use the same provider identity mapping.
 
-The URL is `{base}/oracle-providers/{key}`, where `base` is the public images base the server reads from its own V3 (`GET /v3/images`) and passes to the browser as `window.__APP_CONFIG__.v3ImagesUrl`. `V3_API_URL` and the API key stay server-side. When the base is unknown (V3 unreachable at boot, or an invalid answer), oracle-provider logos are not shown. `img-src` already allows `https:` (see [Token List](./token-list.md#csp)).
+The URL is `{base}/oracle-providers/{key}`, where `base` is the public images base the server reads from its own V3 (`GET /v3/images`) and passes to the browser as `window.__APP_CONFIG__.v3ImagesUrl`. `V3_API_URL` and the API key stay server-side. When the base is unknown (V3 unreachable at boot, or an invalid answer), mapped oracle providers use their bundled logos. `img-src` already allows `https:` (see [Token List](./token-list.md#csp)).
 
 Lookup rules:
 
@@ -273,7 +273,9 @@ Lookup rules:
 2. If provider is missing, map `meta.name` / the adapter type name (`ChainlinkOracle`, `PythOracle`, `UniswapV3Oracle`, …).
 3. Unknown identifiers return `undefined` — the UI renders without a logo rather than guessing.
 
-`utils/oracle-adapter-views.ts` assigns `view.logo` from those two fields when it builds the shared adapter view used by the borrow-page Oracles block and the Explore matrix.
+`utils/oracle-adapter-views.ts` assigns `view.logo` and `view.fallbackLogo` from those two fields when it builds the shared adapter view used by the borrow-page Oracles block and the Explore matrix.
+
+Bundled WebP files in `assets/oracle-providers/` show while a remote image loads, when it fails, or when no remote URL is available. V3 artwork takes over after a successful load. Unknown providers keep the question-mark icon; bundled artwork does not change adapter recognition, checks, or the unavailable-assessment state. No additional environment configuration is required.
 
 ---
 

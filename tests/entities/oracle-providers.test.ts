@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getOracleProviderLogo } from '~/entities/oracle-providers'
+import { getOracleProviderFallbackLogo, getOracleProviderLogo } from '~/entities/oracle-providers'
 
 const BASE = 'https://v3.example/v3/images'
 const imageUrl = (key: string) => `${BASE}/oracle-providers/${key}`
@@ -21,12 +21,38 @@ describe('getOracleProviderLogo', () => {
     expect(getOracleProviderLogo('Lido Fundamental', undefined, BASE)).toBe(imageUrl('lido'))
   })
 
-  it('shows no logo when the images base is unknown', () => {
+  it('returns no remote logo URL when the images base is unknown', () => {
     expect(getOracleProviderLogo('Chainlink', undefined, '')).toBeUndefined()
     expect(getOracleProviderLogo('Chainlink')).toBeUndefined()
   })
 
   it('does not infer a logo for an unknown provider', () => {
     expect(getOracleProviderLogo('Unknown provider', 'ChainlinkOracle', BASE)).toBeUndefined()
+  })
+})
+
+describe('getOracleProviderFallbackLogo', () => {
+  it('bundles each provider with a remote logo as an inline image', () => {
+    const providers = [
+      'API3', 'Chainlink', 'Chronicle', 'eOracle', 'ERC4626Vault', 'Idle', 'Lido',
+      'Mev', 'Midas', 'Pendle', 'Poppie', 'Pyth', 'Redstone', 'Resolv', 'FixedRate',
+      'RateProvider', 'Uniswap V3',
+    ]
+    for (const provider of providers) {
+      expect(getOracleProviderFallbackLogo(provider), provider).toMatch(/^data:image\/webp;base64,/)
+    }
+  })
+
+  it('keeps the provider brand when its adapter uses another provider name', () => {
+    expect(getOracleProviderFallbackLogo('Midas', 'ChainlinkOracle')).toBe(getOracleProviderFallbackLogo('Midas'))
+    expect(getOracleProviderFallbackLogo('Midas', 'ChainlinkOracle')).not.toBe(getOracleProviderFallbackLogo('Chainlink'))
+    expect(getOracleProviderFallbackLogo('Unknown provider', 'ChainlinkOracle')).toBeUndefined()
+    expect(getOracleProviderFallbackLogo('toString', 'ChainlinkOracle')).toBeUndefined()
+  })
+
+  it('uses adapter aliases only when provider metadata is absent', () => {
+    expect(getOracleProviderFallbackLogo(undefined, 'ChainlinkOracle')).toBe(getOracleProviderFallbackLogo('Chainlink'))
+    expect(getOracleProviderFallbackLogo('RedStone Pull')).toBe(getOracleProviderFallbackLogo('Redstone'))
+    expect(getOracleProviderFallbackLogo()).toBeUndefined()
   })
 })

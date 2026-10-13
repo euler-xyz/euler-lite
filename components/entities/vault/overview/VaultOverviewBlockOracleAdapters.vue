@@ -247,9 +247,10 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
             <span class="text-content-tertiary">Provider</span>
             <div class="flex min-w-0 items-center gap-8">
               <BaseAvatar
-                v-if="adapter.logo"
+                v-if="adapter.logo || adapter.fallbackLogo"
                 :src="adapter.logo"
-                :label="adapter.name"
+                :fallback-src="adapter.fallbackLogo"
+                :label="adapter.provider || adapter.name"
                 class="icon--20 flex-shrink-0"
               />
               <SvgIcon

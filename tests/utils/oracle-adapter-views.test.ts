@@ -49,16 +49,22 @@ describe('buildOracleAdapterView', () => {
     expect(view.isCustomAdapter).toBe(false)
     expect(view.methodology).toBe('Market price')
     expect(view.logo).toBe('https://v3.example/v3/images/oracle-providers/chainlink')
+    expect(view.fallbackLogo).toMatch(/^data:image\/webp;base64,/)
     expect(view.label).toEqual({ primary: 'Chainlink WETH/USD', suffix: '(Primary)' })
     expect(view.checksStatus).toBe('positive')
   })
 
-  it('shows no provider logo when the images base is unknown', () => {
+  it('keeps bundled provider artwork when the images base is unknown', () => {
     const meta: Record<string, OracleAdapterMeta> = {
       [oracle.toLowerCase()]: assessed({ base: weth, quote: usd, name: 'Chainlink WETH/USD', provider: 'Chainlink' }),
     }
 
-    expect(buildOracleAdapterView(adapterStep(), meta, '').logo).toBeUndefined()
+    for (const imagesBaseUrl of [undefined, '']) {
+      const view = buildOracleAdapterView(adapterStep(), meta, imagesBaseUrl)
+      expect(view.logo).toBeUndefined()
+      expect(view.fallbackLogo).toMatch(/^data:image\/webp;base64,/)
+      expect(view.provider).toBe('Chainlink')
+    }
   })
 
   it('flags an adapter with no curated entry as custom (no onchain-name leak, no logo)', () => {
@@ -68,6 +74,7 @@ describe('buildOracleAdapterView', () => {
     expect(view.provider).toBeUndefined()
     expect(view.isCustomAdapter).toBe(true)
     expect(view.logo).toBeUndefined()
+    expect(view.fallbackLogo).toBeUndefined()
     expect(view.label).toBeUndefined()
     expect(view.checksStatus).toBeNull()
     expect(view.assessmentState).toBe('unassessed')
@@ -88,6 +95,7 @@ describe('buildOracleAdapterView', () => {
 
     expect(view.isCustomAdapter).toBe(true)
     expect(view.assessmentState).toBe('unrecognized')
+    expect(view.fallbackLogo).toBeUndefined()
     expect(view.label).toBeUndefined()
     expect(view.invertPrice).toBe(false)
     expect(view.assessmentPairMatchesRoute).toBeNull()
