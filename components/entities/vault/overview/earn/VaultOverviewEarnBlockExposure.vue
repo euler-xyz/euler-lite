@@ -259,6 +259,7 @@ load()
   <VaultOverviewAccordionSection
     v-if="exposureList.length"
     title="Exposure"
+    icon="section-exposure"
     :default-open="defaultOpen"
     content-class="flex flex-col gap-12"
   >

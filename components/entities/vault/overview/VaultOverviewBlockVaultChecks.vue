@@ -30,6 +30,7 @@ const cards = computed<VaultChecksTarget[]>(() => {
   <VaultOverviewAccordionSection
     v-if="canShow && cards.length"
     title="Vault checks"
+    icon="section-vault-checks"
     :default-open="props.defaultOpen ?? false"
     content-class="flex flex-col gap-16"
   >

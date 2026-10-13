@@ -63,6 +63,7 @@ const supplyApyModalData = computed(() => ({
 <template>
   <VaultOverviewAccordionSection
     title="Statistics"
+    icon="section-statistics"
     :default-open="defaultOpen"
     content-class="flex flex-col items-start gap-24"
   >

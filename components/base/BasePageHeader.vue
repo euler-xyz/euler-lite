@@ -1,4 +1,6 @@
 <script setup lang="ts">
+const isIconHovered = ref(false)
+
 defineProps({
   title: {
     type: String,
@@ -26,9 +28,11 @@ defineProps({
         !icon && arrowDown && !arrowRight ? '[&>svg]:rotate-0' : '',
         !icon && !arrowDown && !arrowRight ? '[&>svg]:rotate-180' : '',
       ]"
+      @mouseenter="isIconHovered = true"
+      @mouseleave="isIconHovered = false"
     >
       <SvgIcon
-        :name="icon || 'arrow-big'"
+        :name="icon && isIconHovered ? `${icon}-filled` : icon || 'arrow-big'"
         :class="icon ? '!w-40 !h-40' : '!w-36 !h-36'"
       />
     </div>

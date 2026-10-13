@@ -181,6 +181,7 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
   <VaultOverviewAccordionSection
     ref="section"
     title="Oracles"
+    icon="section-oracles"
     :default-open="props.defaultOpen ?? true"
     content-class="flex flex-col gap-24"
   >

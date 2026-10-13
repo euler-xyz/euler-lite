@@ -11,7 +11,8 @@ const { size = 'small', block = false, as = 'span', nudge = false } = defineProp
 
 <template>
   <VaultMetadataBadge
-    icon="refresh"
+    icon="badge-cyclical"
+    active-icon="badge-cyclical-filled"
     label="Cyclical note"
     title="Fixed-rate vault with recurring cycles"
     :modal="CyclicalNoteInfoModal"

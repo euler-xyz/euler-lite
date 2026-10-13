@@ -102,6 +102,7 @@ const onRampDownInfoIconClick = (event: MouseEvent, pair: EVaultCollateral) => {
 <template>
   <VaultOverviewAccordionSection
     title="Overview"
+    icon="section-overview"
     :default-open="defaultOpen"
     content-class="flex flex-col items-start gap-24"
   >

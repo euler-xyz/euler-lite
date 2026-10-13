@@ -23,6 +23,7 @@ const vaultAddresesInfo = computed(() => ([
 <template>
   <VaultOverviewAccordionSection
     title="Addresses"
+    icon="section-addresses"
     :default-open="defaultOpen"
     content-class="flex flex-col items-start gap-24"
   >
