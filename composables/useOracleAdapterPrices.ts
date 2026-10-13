@@ -15,7 +15,7 @@ import { encodeFunctionData, type Address, decodeFunctionResult, type Hex, type 
 import { erc20DecimalsAbi } from '~/abis/erc20'
 import { vaultConvertToAssetsAbi } from '~/abis/vault'
 import { priceOracleAbi } from '~/abis/oracle'
-import { getEulerSdk } from '~/composables/useEulerSdk'
+import { getEulerSdkForChain } from '~/composables/useEulerSdk'
 import type { ComputedRef } from 'vue'
 
 export type AdapterPriceInfo = {
@@ -124,15 +124,10 @@ const fetchMissingDecimals = async (
         }) as number
         result.set(addresses[i].toLowerCase(), decimals)
       }
-      catch {
-        result.set(addresses[i].toLowerCase(), 18)
+      catch (err) {
+        // Keep unresolved decimals absent so the quote is not mis-scaled.
+        logWarn('oracleAdapterPrices/decimals', err)
       }
-    }
-    else {
-      // Non-ERC20 addresses (e.g. BTC/ETH placeholders) will fail
-      // decimals() calls — default to 18 so their adapters are not
-      // filtered out of price queries.
-      result.set(addresses[i].toLowerCase(), 18)
     }
   })
 
@@ -234,67 +229,51 @@ export const useOracleAdapterPrices = (
   const { PYTH_HERMES_URL } = useEulerConfig()
   const { chainId, eulerCoreAddresses } = useEulerAddresses()
 
-  const fetchPrices = async () => {
-    const stepList = steps.value
-    const evcAddress = eulerCoreAddresses.value?.evc
-    if (!stepList.length || !evcAddress || !chainId.value) {
+  watch(
+    [steps, chainId, () => eulerCoreAddresses.value?.evc],
+    async ([stepList, currentChainId, evcAddress], _previous, onCleanup) => {
+      let cancelled = false
+      onCleanup(() => {
+        cancelled = true
+      })
       prices.value = new Map()
-      return
-    }
+      isLoading.value = false
+      if (!stepList.length || !evcAddress || !currentChainId) return
 
-    try {
-      const sdk = await getEulerSdk()
-      // The SDK is linked from a workspace and ships its own viem (2.43.x), so
-      // its PublicClient is structurally similar but not identical to the app's
-      // viem (2.48.x) — cast once at the boundary.
-      const provider = sdk.providerService.getProvider(chainId.value) as unknown as PublicClient
-
-      // 1. Build known decimals
       const knownDecimals = buildKnownDecimals(sourceVaults.value, collateralVaults.value)
+      isLoading.value = true
+      try {
+        const sdk = await getEulerSdkForChain(currentChainId)
+        const provider = sdk.providerService.getProvider(currentChainId) as unknown as PublicClient
 
-      // 2. Find unknown decimals
-      const unknownAddresses = findUnknownDecimalsAddresses(stepList, knownDecimals)
+        const unknownAddresses = findUnknownDecimalsAddresses(stepList, knownDecimals)
+        if (unknownAddresses.length) {
+          const fetched = await fetchMissingDecimals(unknownAddresses, evcAddress, provider)
+          fetched.forEach((dec, addr) => knownDecimals.set(addr, dec))
+        }
 
-      // 3. Fetch missing decimals if needed
-      if (unknownAddresses.length) {
-        const fetched = await fetchMissingDecimals(unknownAddresses, evcAddress, provider)
-        fetched.forEach((dec, addr) => knownDecimals.set(addr, dec))
+        const adapterList = getOracleRouteAdapters(stepList)
+        const { items: pythItems } = await buildPythBatchItemsFromFeeds(
+          collectPythFeedsFromAdapters(adapterList),
+          provider,
+          PYTH_HERMES_URL,
+        )
+        const { quoteRequests, items: priceItems } = buildPriceQueryItems(stepList, knownDecimals)
+        if (!priceItems.length) return
+        const batchResults = await evcBatchCall(provider, evcAddress, [...pythItems, ...priceItems])
+        if (!cancelled) {
+          prices.value = decodePriceResults(quoteRequests, batchResults.slice(pythItems.length))
+        }
       }
-
-      // 4. Build Pyth update batch items for the adapters being quoted
-      const adapterList = getOracleRouteAdapters(stepList)
-      const { items: pythItems } = await buildPythBatchItemsFromFeeds(
-        collectPythFeedsFromAdapters(adapterList),
-        provider,
-        PYTH_HERMES_URL,
-      )
-
-      // 5. Build price query batch items (skipping adapters with unknown decimals)
-      const { quoteRequests, items: priceItems } = buildPriceQueryItems(stepList, knownDecimals)
-
-      // 6. Execute single batchSimulation
-      const allItems = [...pythItems, ...priceItems]
-      const batchResults = await evcBatchCall(provider, evcAddress, allItems)
-
-      // 7. Decode price results (skip Pyth update results)
-      const priceResults = batchResults.slice(pythItems.length)
-      prices.value = decodePriceResults(quoteRequests, priceResults)
-    }
-    catch (err) {
-      logWarn('oracleAdapterPrices/fetchPrices', err)
-      prices.value = new Map()
-    }
-  }
-
-  watch(steps, async () => {
-    if (!steps.value.length) {
-      prices.value = new Map()
-      return
-    }
-    isLoading.value = true
-    await fetchPrices()
-    isLoading.value = false
-  }, { immediate: true })
+      catch (err) {
+        if (!cancelled) logWarn('oracleAdapterPrices/fetchPrices', err)
+      }
+      finally {
+        if (!cancelled) isLoading.value = false
+      }
+    },
+    { immediate: true },
+  )
 
   return {
     prices,
