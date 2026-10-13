@@ -283,6 +283,7 @@ watch(
     :aria-busy="dotMetric === 'oracle' && oracleAssessmentsStatus === 'loading'"
   >
     <div
+      v-if="dotMetric !== 'oracle' || oracleAssessmentsStatus !== 'unavailable'"
       class="relative isolate max-h-[50vh] overflow-auto rounded-8 border border-line-subtle px-12 pb-12 pt-0"
     >
       <table class="border-separate border-spacing-0">

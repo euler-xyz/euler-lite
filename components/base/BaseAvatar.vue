@@ -7,6 +7,7 @@ import { stringToColor } from '~/utils/string-utils'
 
 const loadedImages = new Set<string>()
 const fallbackRedirects = reactive(new Map<string, string>())
+let imageGeneration = 0
 const isInlineImage = (src: string) => src.startsWith('data:image/')
 
 defineOptions({
@@ -15,6 +16,7 @@ defineOptions({
 const props = defineProps<{ src?: string | string[], fallbackSrc?: string | string[], label?: string | string[] }>()
 const listFromProp = (value?: string | string[]): string[] => Array.isArray(value) ? value : [value || '']
 const images = computed(() => {
+  const generation = ++imageGeneration
   const srcs = listFromProp(props.src)
   const fallbacks = listFromProp(props.fallbackSrc)
   const labels = listFromProp(props.label)
@@ -41,7 +43,7 @@ const images = computed(() => {
 
     if (effectiveSrc === s && fb) {
       watch(() => state.error, (err) => {
-        if (err && !fallbackRedirects.has(s)) {
+        if (err && generation === imageGeneration && !fallbackRedirects.has(s)) {
           fallbackRedirects.set(s, fb)
         }
       })
