@@ -341,6 +341,10 @@ watchEffect(async () => {
             :warning="supplyCapWarning"
             tooltip-placement="top-start"
           />
+          <VaultNoUsdPriceHint
+            v-if="priceValues.totalSupplyState === 'unavailable'"
+            placement="top-start"
+          />
         </div>
         <div
           class="text-p2 text-content-primary"

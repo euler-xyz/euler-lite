@@ -258,6 +258,7 @@ const unlistedNotice = computed(() => {
 const unverifiedActionCopy = computed(() => getUnverifiedActionCopy(unlistedNotice.value, unverifiedVaultNames.value))
 
 interface REULUnlockInfo {
+  hasBurn: boolean
   unlockableAmount: number
   amountToBeBurned: number
   maturityDate: string
@@ -267,7 +268,8 @@ interface REULUnlockInfo {
 const isREULUnlockInfo = (value: unknown): value is REULUnlockInfo => {
   if (!value || typeof value !== 'object') return false
   const info = value as Partial<REULUnlockInfo>
-  return typeof info.unlockableAmount === 'number'
+  return typeof info.hasBurn === 'boolean'
+    && typeof info.unlockableAmount === 'number'
     && typeof info.amountToBeBurned === 'number'
     && typeof info.maturityDate === 'string'
     && typeof info.daysUntilMaturity === 'number'
@@ -278,6 +280,7 @@ const reulUnlockWarnings = computed<Array<{ id: string, description: string }>>(
     const review = entry.review as { type?: string, reulUnlockInfo?: unknown } | undefined
     if (review?.type !== 'reul-unlock' || !isREULUnlockInfo(review.reulUnlockInfo)) return []
     const info = review.reulUnlockInfo
+    if (!info.hasBurn) return []
     return [{
       id: entry.id,
       description: `This batch includes an rEUL unlock that will unlock ${formatNumber(info.unlockableAmount, 6)} EUL, and ${formatNumber(info.amountToBeBurned, 6)} EUL will be permanently burned. To fully redeem your EUL rewards, wait for the 6-month vesting period to complete (${info.daysUntilMaturity} days remaining, maturity date: ${info.maturityDate}).`,

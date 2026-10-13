@@ -59,4 +59,24 @@ describe('useCustomFilters', () => {
     clearCustomFilters()
     expect(customFilters.value).toEqual([initialLiquidityFilter])
   })
+
+  it('keeps items without a USD value under a user USD filter, but not under other units', () => {
+    const { addCustomFilter, clearCustomFilters, matchesCustomFilters } = useCustomFilters<Market>(
+      [
+        { key: 'liquidity', label: 'Available liquidity', shortLabel: 'Avail. liquidity', unit: 'usd' },
+        { key: 'apy', label: 'APY', shortLabel: 'APY', unit: 'percent' },
+      ],
+      (market, metric) => market[metric as keyof Market],
+    )
+
+    addCustomFilter({ id: 'liquidity-floor', metric: 'liquidity', operator: 'gt', value: 1000, label: 'Avail. liquidity > $1K' })
+    expect(matchesCustomFilters({ liquidity: undefined })).toBe(true)
+    expect(matchesCustomFilters({ liquidity: Number.NaN })).toBe(true)
+    expect(matchesCustomFilters({ liquidity: 500 })).toBe(false)
+    expect(matchesCustomFilters({ liquidity: 1500 })).toBe(true)
+
+    clearCustomFilters()
+    addCustomFilter({ id: 'apy-floor', metric: 'apy', operator: 'gt', value: 5, label: 'APY > 5%' })
+    expect(matchesCustomFilters({ apy: undefined })).toBe(false)
+  })
 })

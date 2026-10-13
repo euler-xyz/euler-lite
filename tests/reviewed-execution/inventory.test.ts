@@ -220,7 +220,7 @@ describe('Stage A transaction inventory', () => {
 
 describe('review compatibility fixtures', () => {
   const fixtures = [
-    { path: 'components/entities/operation/OperationReviewModal.vue', templateOnly: true, sha256: '82a75f61077200e9488acbe27d750b800ae4102207e7ac856dafab8f9dec8f85' },
+    { path: 'components/entities/operation/OperationReviewModal.vue', templateOnly: true, sha256: 'b03e862b31f997157fcfac75710126bc230f5059898f09d5d0f780acd49098d0' },
     { path: 'components/BatchReviewModal.vue', templateOnly: true, sha256: '064f2a3be91748cd01fb5c87c219bba0ecfaf599dff0e35b35336b819a1864da' },
     { path: 'utils/stepDecoding.ts', templateOnly: false, sha256: '15983b9cd9bf200fceaf4910910562eb184095bdff64a0491abd937c5112347d' },
     { path: 'utils/batchReviewDisplay.ts', templateOnly: false, sha256: 'c8e892115e9bba21ad695b5cdd158e6b69d8aefc9ceb3c5aaae2faf17128ade4' },

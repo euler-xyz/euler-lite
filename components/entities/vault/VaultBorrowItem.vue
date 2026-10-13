@@ -195,11 +195,13 @@ const borrowCapInfo = computed(() => getBorrowCapWarning(pair.borrow))
 const supplyCapInfo = computed(() => getCollateralSupplyCapWarning(pair.collateral))
 
 const liquidityDisplay = ref('-')
+const isLiquidityUnpriced = ref(false)
 
 watchEffect(async () => {
   const liquidity = getVaultAvailableLiquidity(pair.borrow)
   const price = await formatAssetValue(liquidity, pair.borrow, 'on-chain')
   liquidityDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
+  isLiquidityUnpriced.value = !price.hasPrice
 })
 
 const borrowApyModalData = computed(() => ({
@@ -538,6 +540,10 @@ const linkPath = computed(() => ({
               :warning="[borrowCapInfo, supplyCapInfo]"
               tooltip-placement="top-end"
             />
+            <VaultNoUsdPriceHint
+              v-if="isLiquidityUnpriced"
+              placement="top-end"
+            />
           </div>
           <div
             class="text-p2 text-content-primary"
@@ -691,6 +697,10 @@ const linkPath = computed(() => ({
             <VaultWarningIcon
               :warning="[borrowCapInfo, supplyCapInfo]"
               tooltip-placement="top-end"
+            />
+            <VaultNoUsdPriceHint
+              v-if="isLiquidityUnpriced"
+              placement="top-end"
             />
           </div>
         </div>

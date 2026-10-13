@@ -7,6 +7,7 @@ import type { EulerLabelProduct } from '~/entities/euler/labels'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 
 vi.mock('~/utils/sdk-prices', () => ({
+  getAssetUsdValueForEstimate: async (amount: bigint) => Number(amount),
   getAssetUsdValueOrZero: async (amount: bigint) => Number(amount),
 }))
 

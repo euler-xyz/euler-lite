@@ -45,6 +45,8 @@ All four sources run concurrently via `Promise.allSettled`. Each fetcher has its
 
 **Decimals**: the response holds only the requested chain's tokens, and each token's decimals come from its contract through the server SDK (`tokenlistService.resolveTokenDecimals`), read once per server process.
 
+**Missing V3 logos**: V3 sets `logoURI` on every token and marks tokens without a managed image with `hasLogo: false`. For those tokens the merged entry takes the DefiLlama logo, else the Uniswap logo, else the V3 `logoURI`, which still serves a fallback image. If an image fails to load, the app shows initials. An older V3 response without `hasLogo` keeps the V3 logo. The flag itself is not passed on to the browser.
+
 **Error contract**:
 
 | Status | Condition | Body |

@@ -5,7 +5,7 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 
-import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
+import { getAssetUsdValueForEstimate } from '~/utils/sdk-prices'
 import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultRecentlyAdded, isVaultDeprecated, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
@@ -93,9 +93,9 @@ const {
   ],
   (vault, metric) => {
     switch (metric) {
-      case 'totalSupply': return vaultUsdValues.value.get(vault.address) ?? 0
-      case 'liquidity': return vaultLiquidityUsd.value.get(vault.address) ?? 0
-      case 'inWallet': return vaultWalletUsd.value.get(vault.address) ?? 0
+      case 'totalSupply': return vaultUsdValues.value.get(vault.address)
+      case 'liquidity': return vaultLiquidityUsd.value.get(vault.address)
+      case 'inWallet': return vaultWalletUsd.value.get(vault.address)
       case 'supplyApy': return getDisplayedVaultSupplyApy(vault)
       case 'utilization': return vault.utilization
       default: return 0
@@ -146,13 +146,13 @@ const fetchLendPrices = useDebounceFn(async () => {
         const walletBalance = getBalance(vault.asset.address as `0x${string}`)
         const liquidity = vault.availableLiquidity
         const [totalSupply, liquidityUsd, wallet] = await Promise.all([
-          getAssetUsdValueOrZero(vault.totalAssets, vault, 'off-chain'),
-          getAssetUsdValueOrZero(liquidity, vault, 'off-chain'),
-          walletBalance > 0n ? getAssetUsdValueOrZero(walletBalance, vault, 'off-chain') : Promise.resolve(0),
+          getAssetUsdValueForEstimate(vault.totalAssets, vault, 'off-chain'),
+          getAssetUsdValueForEstimate(liquidity, vault, 'off-chain'),
+          getAssetUsdValueForEstimate(walletBalance, vault, 'off-chain'),
         ])
-        supplyValues.set(vault.address, totalSupply)
-        liquidityValues.set(vault.address, liquidityUsd)
-        walletValues.set(vault.address, wallet)
+        if (totalSupply !== undefined) supplyValues.set(vault.address, totalSupply)
+        if (liquidityUsd !== undefined) liquidityValues.set(vault.address, liquidityUsd)
+        if (wallet !== undefined) walletValues.set(vault.address, wallet)
       }),
     )
 

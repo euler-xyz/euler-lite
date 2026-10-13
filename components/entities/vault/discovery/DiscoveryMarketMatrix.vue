@@ -36,6 +36,7 @@ const {
   loadAllOracleAdapters,
 } = useEulerLabels()
 const { chainId } = useEulerAddresses()
+const { v3ImagesUrl } = useEnvConfig()
 const { getTokenCategoryTags } = useTokenList()
 
 const hoveredCell = ref<{
@@ -230,7 +231,7 @@ const cellAdapterViews = computed((): Map<string, OracleAdapterView[]> => {
       if (!liability || !isEVault(liability)) continue
       const steps = collectOracleRouteSteps([liability], [collateral])
       if (steps.length) {
-        result.set(`${collateralAddr}:${liabilityAddr}`, buildOracleAdapterViews(steps, oracleAdapters))
+        result.set(`${collateralAddr}:${liabilityAddr}`, buildOracleAdapterViews(steps, oracleAdapters, v3ImagesUrl))
       }
     }
   }
