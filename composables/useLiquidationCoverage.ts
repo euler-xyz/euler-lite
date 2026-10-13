@@ -17,6 +17,15 @@ const coverageByChain = shallowRef<Readonly<Record<number, LiquidationCoverage>>
 const nextLoadAt = new Map<number, number>()
 const inFlight = createInFlightDedup<number, LiquidationCoverage | null>()
 
+/** A failed browser request leaves coverage unknown once the last bot answer expires. */
+const expireAnsweredCoverage = (chainId: number): void => {
+  const coverage = coverageByChain.value[chainId]
+  if (!coverage?.enabled || coverage.state !== 'answered'
+    || Date.now() - coverage.fetchedAt < ANSWER_VALID_MS) return
+  const { [chainId]: _expired, ...nextCoverage } = coverageByChain.value
+  coverageByChain.value = nextCoverage
+}
+
 const nextLoadAfter = (coverage: LiquidationCoverage, now: number): number => {
   if (!coverage.enabled) return now + REFRESH_MS
   if (coverage.state === 'no-bot') return now + RETRY_MS
@@ -38,9 +47,14 @@ const load = (chainId: number): Promise<LiquidationCoverage | null> => inFlight.
     logWarn('liquidation-coverage', error)
     return null
   }
+  finally {
+    expireAnsweredCoverage(chainId)
+  }
 })
 
 const ensureLiquidationCoverage = (chainId: number): void => {
+  // Expiry also applies during retry backoff and while a request is in flight.
+  expireAnsweredCoverage(chainId)
   if (Date.now() < (nextLoadAt.get(chainId) ?? 0)) return
   nextLoadAt.set(chainId, Number.POSITIVE_INFINITY)
   void load(chainId)

@@ -1,5 +1,6 @@
 import { VaultType } from '@eulerxyz/euler-v2-sdk'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { computed } from 'vue'
 import type { LiquidationCoverage } from '~/utils/liquidation-coverage'
 
 const mocks = vi.hoisted(() => ({
@@ -16,7 +17,7 @@ const MINUTE = 60_000
 const borrowable = (address: string) => ({ type: VaultType.EVault, address, isBorrowable: true, totalBorrowed: 0n })
 const collateralOnly = (address: string) => ({ type: VaultType.EVault, address, isBorrowable: false, totalBorrowed: 0n })
 
-const blacklist = (chainId: number, fetchedAt = Date.now()): LiquidationCoverage => ({
+const blacklist = (chainId: number, fetchedAt = Date.now()): Extract<LiquidationCoverage, { state: 'answered' }> => ({
   enabled: true,
   chainId,
   state: 'answered',
@@ -163,5 +164,94 @@ describe('useLiquidationCoverage', () => {
     vi.setSystemTime(Date.now() + MINUTE)
     coverage.ensureLiquidationCoverage(8453)
     expect(mocks.fetch).toHaveBeenCalledTimes(3)
+  })
+
+  it('expires warnings reactively during retry backoff and recovers with a fresh answer', async () => {
+    const coverage = await load()
+    const warning = computed(() => coverage.isNotCoveredByDefaultBot(8453, borrowable(LISTED)))
+    const startedAt = Date.now()
+    coverage.ensureLiquidationCoverage(8453)
+    await flush()
+    expect(warning.value).toBe(true)
+    mocks.fetch.mockRejectedValue(new Error('offline'))
+
+    for (const minutes of [5, 29.5]) {
+      vi.setSystemTime(startedAt + minutes * MINUTE)
+      coverage.refreshLiquidationCoverageIfStale()
+      await flush()
+      expect(warning.value).toBe(true)
+    }
+
+    mocks.fetch.mockResolvedValueOnce(blacklist(1))
+    coverage.ensureLiquidationCoverage(1)
+    await flush()
+    const callsBeforeExpiry = mocks.fetch.mock.calls.length
+
+    vi.setSystemTime(startedAt + 30 * MINUTE)
+    coverage.refreshLiquidationCoverageIfStale()
+    expect(mocks.fetch).toHaveBeenCalledTimes(callsBeforeExpiry)
+    expect(warning.value).toBe(false)
+    expect(coverage.isNotCoveredByDefaultBot(8453, borrowable(OTHER))).toBe(false)
+    expect(coverage.isNotCoveredByDefaultBot(1, borrowable(LISTED))).toBe(true)
+
+    vi.setSystemTime(startedAt + 24 * 60 * MINUTE)
+    coverage.refreshLiquidationCoverageIfStale()
+    await flush()
+    expect(warning.value).toBe(false)
+
+    vi.setSystemTime(Date.now() + MINUTE)
+    mocks.fetch.mockResolvedValueOnce(blacklist(8453))
+    coverage.ensureLiquidationCoverage(8453)
+    await flush()
+    expect(warning.value).toBe(true)
+  })
+
+  it('expires warnings while a refresh is in flight and refuses its expired answer', async () => {
+    const coverage = await load()
+    const answer = blacklist(8453)
+    mocks.fetch.mockResolvedValueOnce(answer)
+    coverage.ensureLiquidationCoverage(8453)
+    await flush()
+    const warning = computed(() => coverage.isNotCoveredByDefaultBot(8453, borrowable(LISTED)))
+    expect(warning.value).toBe(true)
+
+    let finishRefresh!: (value: LiquidationCoverage) => void
+    mocks.fetch.mockImplementationOnce(() => new Promise<LiquidationCoverage>((resolve) => {
+      finishRefresh = resolve
+    }))
+    vi.setSystemTime(answer.fetchedAt + 30 * MINUTE - 5_000)
+    coverage.refreshLiquidationCoverageIfStale()
+
+    vi.setSystemTime(answer.fetchedAt + 30 * MINUTE)
+    coverage.refreshLiquidationCoverageIfStale()
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+    expect(warning.value).toBe(false)
+
+    finishRefresh(answer)
+    await flush()
+    expect(warning.value).toBe(false)
+  })
+
+  it.each(['resolve', 'reject'] as const)('expires an answer when a late refresh settles with %s between polls', async (outcome) => {
+    const coverage = await load()
+    const answer = blacklist(8453)
+    mocks.fetch.mockResolvedValueOnce(answer)
+    coverage.ensureLiquidationCoverage(8453)
+    await flush()
+    const warning = computed(() => coverage.isNotCoveredByDefaultBot(8453, borrowable(LISTED)))
+    expect(warning.value).toBe(true)
+
+    let finishRefresh!: () => void
+    mocks.fetch.mockImplementationOnce(() => new Promise<LiquidationCoverage>((resolve, reject) => {
+      finishRefresh = () => outcome === 'resolve' ? resolve(answer) : reject(new Error('offline'))
+    }))
+    vi.setSystemTime(answer.fetchedAt + 30 * MINUTE - 5_000)
+    coverage.ensureLiquidationCoverage(8453)
+    vi.setSystemTime(answer.fetchedAt + 30 * MINUTE)
+    finishRefresh()
+    await flush()
+
+    expect(warning.value).toBe(false)
+    expect(coverage.isNotCoveredByDefaultBot(8453, borrowable(OTHER))).toBe(false)
   })
 })
