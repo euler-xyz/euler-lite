@@ -455,10 +455,9 @@ watch(
                     :data-quote-address="adapter.quote"
                   >
                     <BaseAvatar
-                      v-if="adapter.logo || adapter.fallbackLogo"
+                      v-if="adapter.logo"
                       :src="adapter.logo"
-                      :fallback-src="adapter.fallbackLogo"
-                      :label="adapter.provider || adapter.name"
+                      :label="adapter.name"
                       class="icon--16"
                     />
                     <SvgIcon

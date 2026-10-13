@@ -10,7 +10,7 @@ import {
   type OracleAdapterMeta,
   type OracleAssessmentState,
 } from '~/entities/oracle'
-import { getOracleProviderFallbackLogo, getOracleProviderLogo } from '~/entities/oracle-providers'
+import { getOracleProviderLogo } from '~/entities/oracle-providers'
 import { shouldInvertOraclePrice } from '~/utils/oracle-label'
 import { getCollateralOracleRouteSteps, getDebtOracleRouteSteps, isOracleAdapterRouteStep } from '~/utils/oracle-route-steps'
 import { getOracleRouteStepKey } from '~/composables/useOracleAdapterPrices'
@@ -33,7 +33,6 @@ export type OracleAdapterView = {
   isCustomAdapter: boolean
   methodology?: string
   logo?: string
-  fallbackLogo?: string
   label?: { primary: string, suffix?: string }
   invertPrice: boolean
   // Recognized adapters: the health findings (when the assessed pair is the
@@ -131,7 +130,6 @@ export const buildOracleAdapterView = (
     isCustomAdapter,
     methodology: trustedMeta?.methodology || (step.kind === 'vault' ? 'Exchange Rate' : undefined),
     logo: getOracleProviderLogo(provider, name, imagesBaseUrl),
-    fallbackLogo: getOracleProviderFallbackLogo(provider, name),
     label: parseAdapterLabel(assessmentApplies ? trustedMeta?.label : undefined),
     invertPrice: shouldInvertOraclePrice({
       metaBase: trustedMeta?.base,

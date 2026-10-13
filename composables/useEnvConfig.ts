@@ -34,8 +34,8 @@ export interface EnvConfig {
   appUrl: string
   v3ApiUrl: string
   /** Public V3 images base (ends in /v3/images) the server read from its V3;
-   *  empty when unknown, so chain and mapped oracle-provider logos use
-   *  bundled files. */
+   *  empty when unknown, so chain logos use bundled files and oracle-provider
+   *  logos are hidden. */
   v3ImagesUrl: string
   /** True when the deployment has an upstream V3 API configured. Drives the
    *  SDK "fast" instance: when true it uses v3 adapters; when false it falls

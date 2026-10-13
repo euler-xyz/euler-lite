@@ -1,5 +1,4 @@
 import { v3OracleProviderLogoUrl } from '~/utils/v3-images'
-import { getBundledOracleProviderLogo } from '~/utils/oracle-provider-logo'
 
 const ORACLE_PROVIDER_IMAGE_KEYS: Record<string, string> = {
   // API provider names
@@ -44,12 +43,14 @@ const ORACLE_PROVIDER_IMAGE_KEYS: Record<string, string> = {
   'UniswapV3Oracle': 'uniswap-v3',
 }
 
-// Remote and bundled artwork share the same provider-first identity mapping.
-// Unknown providers keep the question-mark icon, even if the adapter name maps.
-const resolveOracleProviderImageKey = (provider?: string, adapterName?: string): string | undefined => {
-  const identifier = provider || adapterName
+// Providers V3 reports today with no managed image yet (Stork, Curve, Swaap,
+// Cross, DIA, Re Protocol, InfiniFi Custom Oracle) are intentionally unmapped:
+// a missing image degrades to the question-mark icon, whereas a mapped 404
+// would fall back to an initials avatar. Add them here once the image exists
+// under `/v3/images/oracle-providers/`.
+const resolveOracleProviderImage = (identifier: string | undefined, imagesBaseUrl: string | undefined): string | undefined => {
   if (!identifier || !Object.hasOwn(ORACLE_PROVIDER_IMAGE_KEYS, identifier)) return undefined
-  return ORACLE_PROVIDER_IMAGE_KEYS[identifier]
+  return v3OracleProviderLogoUrl(ORACLE_PROVIDER_IMAGE_KEYS[identifier], imagesBaseUrl)
 }
 
 export const getOracleProviderLogo = (
@@ -57,11 +58,10 @@ export const getOracleProviderLogo = (
   adapterName?: string,
   imagesBaseUrl?: string,
 ): string | undefined => {
-  const key = resolveOracleProviderImageKey(provider, adapterName)
-  return key ? v3OracleProviderLogoUrl(key, imagesBaseUrl) : undefined
-}
-
-export const getOracleProviderFallbackLogo = (provider?: string, adapterName?: string): string | undefined => {
-  const key = resolveOracleProviderImageKey(provider, adapterName)
-  return key ? getBundledOracleProviderLogo(key) : undefined
+  // When provider is known, only use its logo — never fall through to adapter name
+  // This prevents e.g. Midas (using ChainlinkOracle) from showing Chainlink's logo
+  if (provider) {
+    return resolveOracleProviderImage(provider, imagesBaseUrl)
+  }
+  return resolveOracleProviderImage(adapterName, imagesBaseUrl)
 }
