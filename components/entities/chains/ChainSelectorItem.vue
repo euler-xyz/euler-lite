@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { getChainLogoUrl } from '~/utils/chain-logo'
+import { v3ChainLogoUrl } from '~/utils/v3-images'
 
 const props = defineProps<{
   chainId: number
@@ -7,7 +8,9 @@ const props = defineProps<{
   deprecated?: boolean
 }>()
 
-const logoSrc = computed(() => getChainLogoUrl(props.chainId))
+const { v3ImagesUrl } = useEnvConfig()
+const logoSrc = computed(() => v3ChainLogoUrl(props.chainId, v3ImagesUrl))
+const fallbackLogoSrc = computed(() => getChainLogoUrl(props.chainId))
 </script>
 
 <template>
@@ -20,6 +23,7 @@ const logoSrc = computed(() => getChainLogoUrl(props.chainId))
       class="mr-8 w-32 h-32 shadow-[inset_0_0_0_1px_var(--border-subtle)] rounded-full"
       :class="props.deprecated ? 'opacity-40' : ''"
       :src="logoSrc"
+      :fallback-src="fallbackLogoSrc"
       :label="props.name"
     />
     {{ props.name }}

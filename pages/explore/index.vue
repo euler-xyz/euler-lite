@@ -13,6 +13,7 @@ import { getVaultAddress, getVaultAssetSymbol, getVaultAssetAddress } from '~/ut
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import type { FilterOptionEntry } from '~/utils/buildTvlSortedOptions'
 import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
+import { marketUsdMetricValue } from '~/utils/market-usd-metric'
 
 defineOptions({
   name: 'ExplorePage',
@@ -77,8 +78,7 @@ const {
       const best = getBestMaxROE(group.id)
       return best.metric === 'max-roe' ? best.value : Number.NaN
     }
-    const val = group.metrics[metric as keyof typeof group.metrics]
-    return typeof val === 'number' ? val : 0
+    return marketUsdMetricValue(group.metrics, metric)
   },
 )
 

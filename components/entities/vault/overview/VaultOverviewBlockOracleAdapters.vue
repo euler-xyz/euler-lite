@@ -25,6 +25,7 @@ const {
   loadOracleAdapters,
 } = useEulerLabels()
 const { chainId } = useEulerAddresses()
+const { v3ImagesUrl } = useEnvConfig()
 const { buildKnownSymbols, resolveSymbol: resolveTokenSymbol, shortenAddress } = useTokenSymbolResolver()
 const { recognizedRouters, recognizedRoutersChainId, loadRecognizedRouters } = useEulerOracleRouters()
 
@@ -61,7 +62,7 @@ const knownSymbols = computed(() => {
 })
 
 const trustedRouteSteps = computed(() => oracleAssessmentsAvailable.value ? routeSteps.value : [])
-const adapterViews = computed(() => buildOracleAdapterViews(trustedRouteSteps.value, oracleAdapters))
+const adapterViews = computed(() => buildOracleAdapterViews(trustedRouteSteps.value, oracleAdapters, v3ImagesUrl))
 
 watch(
   () => routeSteps.value,
