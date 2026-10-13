@@ -36,6 +36,7 @@ const {
   loadAllOracleAdapters,
 } = useEulerLabels()
 const { chainId } = useEulerAddresses()
+const { v3ImagesUrl } = useEnvConfig()
 const { getTokenCategoryTags } = useTokenList()
 
 const hoveredCell = ref<{
@@ -230,7 +231,7 @@ const cellAdapterViews = computed((): Map<string, OracleAdapterView[]> => {
       if (!liability || !isEVault(liability)) continue
       const steps = collectOracleRouteSteps([liability], [collateral])
       if (steps.length) {
-        result.set(`${collateralAddr}:${liabilityAddr}`, buildOracleAdapterViews(steps, oracleAdapters))
+        result.set(`${collateralAddr}:${liabilityAddr}`, buildOracleAdapterViews(steps, oracleAdapters, v3ImagesUrl))
       }
     }
   }
@@ -282,6 +283,7 @@ watch(
     :aria-busy="dotMetric === 'oracle' && oracleAssessmentsStatus === 'loading'"
   >
     <div
+      v-if="dotMetric !== 'oracle' || oracleAssessmentsStatus !== 'unavailable'"
       class="relative isolate max-h-[50vh] overflow-auto rounded-8 border border-line-subtle px-12 pb-12 pt-0"
     >
       <table class="border-separate border-spacing-0">

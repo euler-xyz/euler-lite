@@ -161,8 +161,9 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
     <div class="flex pt-12 items-center mobile:justify-between mobile:border-b mobile:border-line-subtle mobile:pb-12">
       <div class="flex-1 flex gap-12 mobile:hidden">
         <div class="flex-1 min-w-0">
-          <div class="text-content-tertiary text-p3 mb-4">
+          <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
             Total supply
+            <MarketPartialPricingHint v-if="!market.metrics.allVaultsPriced" />
           </div>
           <div
             class="text-p2 text-content-primary"
@@ -255,8 +256,9 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
       <!-- Mobile: 2-column row matching lend card style -->
       <div class="hidden mobile:flex mobile:flex-1 mobile:justify-between">
         <div>
-          <div class="text-content-tertiary text-p3 mb-4">
+          <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
             Total supply
+            <MarketPartialPricingHint v-if="!market.metrics.allVaultsPriced" />
           </div>
           <div class="text-p2 text-content-primary">
             {{ formatCompactUsdValue(market.metrics.totalTVL) }}

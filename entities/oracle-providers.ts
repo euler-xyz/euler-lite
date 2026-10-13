@@ -1,6 +1,4 @@
-import { DEFAULT_V3_API_URL } from '~/utils/api-url-env'
-
-const ORACLE_PROVIDER_IMAGE_BASE_URL = `${DEFAULT_V3_API_URL}/v3/images/oracle-providers`
+import { v3OracleProviderLogoUrl } from '~/utils/v3-images'
 
 const ORACLE_PROVIDER_IMAGE_KEYS: Record<string, string> = {
   // API provider names
@@ -50,16 +48,20 @@ const ORACLE_PROVIDER_IMAGE_KEYS: Record<string, string> = {
 // a missing image degrades to the question-mark icon, whereas a mapped 404
 // would fall back to an initials avatar. Add them here once the image exists
 // under `/v3/images/oracle-providers/`.
-const resolveOracleProviderImage = (identifier: string | undefined): string | undefined => {
+const resolveOracleProviderImage = (identifier: string | undefined, imagesBaseUrl: string | undefined): string | undefined => {
   if (!identifier || !Object.hasOwn(ORACLE_PROVIDER_IMAGE_KEYS, identifier)) return undefined
-  return `${ORACLE_PROVIDER_IMAGE_BASE_URL}/${ORACLE_PROVIDER_IMAGE_KEYS[identifier]}`
+  return v3OracleProviderLogoUrl(ORACLE_PROVIDER_IMAGE_KEYS[identifier], imagesBaseUrl)
 }
 
-export const getOracleProviderLogo = (provider?: string, adapterName?: string): string | undefined => {
+export const getOracleProviderLogo = (
+  provider?: string,
+  adapterName?: string,
+  imagesBaseUrl?: string,
+): string | undefined => {
   // When provider is known, only use its logo — never fall through to adapter name
   // This prevents e.g. Midas (using ChainlinkOracle) from showing Chainlink's logo
   if (provider) {
-    return resolveOracleProviderImage(provider)
+    return resolveOracleProviderImage(provider, imagesBaseUrl)
   }
-  return resolveOracleProviderImage(adapterName)
+  return resolveOracleProviderImage(adapterName, imagesBaseUrl)
 }

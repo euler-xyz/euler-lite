@@ -20,6 +20,7 @@ import { getPositionTag, getSourcePositionTag } from '~/utils/positionTag'
 const emits = defineEmits(['close', 'confirm'])
 
 interface REULUnlockInfo {
+  hasBurn: boolean
   unlockableAmount: number
   amountToBeBurned: number
   maturityDate: string
@@ -384,7 +385,7 @@ const btnLabel = computed(() => {
 })
 
 const reulUnlockDisclaimerText = computed(() => {
-  if (type !== 'reul-unlock' || !reulUnlockInfo) return
+  if (type !== 'reul-unlock' || !reulUnlockInfo?.hasBurn) return
 
   return `This action will unlock ${formatNumber(reulUnlockInfo.unlockableAmount, 6)} EUL, and ${formatNumber(reulUnlockInfo.amountToBeBurned, 6)} EUL will be permanently burned. To fully redeem your EUL rewards, you must wait for the 6-month vesting period to complete (${reulUnlockInfo.daysUntilMaturity} days remaining, maturity date: ${reulUnlockInfo.maturityDate}).`
 })
@@ -599,7 +600,7 @@ const confirmLabel = computed(() => {
         size="compact"
       />
       <UiAlert
-        v-if="type === 'reul-unlock'"
+        v-if="reulUnlockDisclaimerText"
         title="Important"
         variant="warning"
         :description="reulUnlockDisclaimerText"

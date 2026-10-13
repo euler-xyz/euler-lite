@@ -119,6 +119,7 @@ const getReviewProps = (reviewedLock: REULLock) => ({
   },
   amount: nanoToValue(reviewedLock.unlockableAmount, reulToken.value?.decimals),
   reulUnlockInfo: {
+    hasBurn: reviewedLock.amountToBeBurned > 0n,
     unlockableAmount: nanoToValue(reviewedLock.unlockableAmount, reulToken.value?.decimals),
     amountToBeBurned: nanoToValue(reviewedLock.amountToBeBurned, reulToken.value?.decimals),
     maturityDate: getFormattedDate(reviewedLock),

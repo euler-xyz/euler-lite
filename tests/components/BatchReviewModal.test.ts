@@ -4,7 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import BatchReviewModal from '~/components/BatchReviewModal.vue'
 import { BatchPreviewNotReadyError, ReviewedPlanDivergenceError } from '~/features/reviewed-execution/planning/errors'
 
-const mocks = vi.hoisted(() => ({ prepare: vi.fn() }))
+const mocks = vi.hoisted(() => ({
+  prepare: vi.fn(),
+  entries: [] as Array<{ id: string, review: Record<string, unknown> }>,
+}))
 
 // Run the modal's mounted preparation before asserting its server-rendered output.
 vi.mock('vue', async (importOriginal) => {
@@ -14,7 +17,7 @@ vi.mock('vue', async (importOriginal) => {
 
 vi.mock('~/composables/useTxBatch', () => ({
   useTxBatch: () => ({
-    entries: ref([]), layers: ref([]), walletChanges: ref([]), entryPlans: ref({}), marketByEntryId: ref({}),
+    entries: ref(mocks.entries), layers: ref([]), walletChanges: ref([]), entryPlans: ref({}), marketByEntryId: ref({}),
     simError: ref(), execError: ref(), insufficientBalanceMessage: ref(),
     isSimulating: ref(false), canExecuteBatch: ref(true), hasFailedOps: ref(false), hasInsufficientBalance: ref(false),
     tenderlyEnabled: ref(false), isTenderlySimulating: ref(false), tenderlyUrl: ref(), tenderlyError: ref(),
@@ -56,11 +59,31 @@ const renderModal = () => {
 beforeEach(() => {
   vi.useFakeTimers()
   mocks.prepare.mockReset()
+  mocks.entries.length = 0
   vi.stubGlobal('useReviewedExecution', () => ({}))
   vi.stubGlobal('useEffectiveAddress', () => ({ isSpyMode: ref(false), effectiveAddress: ref('0x1000000000000000000000000000000000000000') }))
   vi.stubGlobal('useEulerAddresses', () => ({ eulerCoreAddresses: ref({}) }))
   vi.stubGlobal('useClipboardCopy', () => ({ copied: ref(false), copyToClipboard: vi.fn() }))
   vi.stubGlobal('useSafeExecutionDetachment', () => ({ hasPendingDetachedExecution: ref(false) }))
+})
+
+describe('batch rEUL burn warnings', () => {
+  it.each([
+    { label: 'zero raw burn', hasBurn: false, amountToBeBurned: 0, daysUntilMaturity: 0 },
+    { label: 'a positive raw burn with zero displayed days', hasBurn: true, amountToBeBurned: 1, daysUntilMaturity: 0 },
+    { label: 'a positive raw burn that formats as zero', hasBurn: true, amountToBeBurned: 1e-18, daysUntilMaturity: 0 },
+  ])('respects the captured burn condition for $label', async ({ hasBurn, amountToBeBurned, daysUntilMaturity }) => {
+    mocks.entries.push({
+      id: 'reul-unlock',
+      review: {
+        type: 'reul-unlock',
+        reulUnlockInfo: { hasBurn, unlockableAmount: 100, amountToBeBurned, daysUntilMaturity, maturityDate: 'October 12, 2026' },
+      },
+    })
+    mocks.prepare.mockRejectedValue(new BatchPreviewNotReadyError())
+    const html = await renderModal()
+    expect(html.includes('data-alert-title="rEUL burn mechanics"')).toBe(hasBurn)
+  })
 })
 afterEach(() => {
   vi.clearAllTimers()

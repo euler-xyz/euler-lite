@@ -20,7 +20,7 @@ import { createInFlightDedup } from './in-flight'
 import { getInternalFetchHeaders } from './internal-headers'
 import { buildEntityAddressSets, declaredKeysOf, tryChecksum } from './labels-helpers'
 import { logger } from './logger'
-import { summarizeSdkIssue } from './observability'
+import { buildVaultAssetLookup, summarizeSdkIssue } from './observability'
 import { getServerSdk } from './sdk-server'
 import { isSdkErrorDiagnostic } from './sdk-diagnostics'
 import type { VerificationLabels } from '~/utils/vault/governor-verification'
@@ -280,9 +280,10 @@ async function buildSnapshot(
     earnAddresses.length ? sdk.eulerEarnService.fetchVaults(chainId, earnAddresses, vaultOptions) : { result: [], errors: [] },
   ])
 
+  const assetForVault = buildVaultAssetLookup([...evk.result, ...securitize.result, ...earn.result])
   for (const issue of [...evk.errors, ...securitize.errors, ...earn.errors]) {
     if (isSdkErrorDiagnostic(issue)) {
-      logger.error({ ctx: 'labels-view', chainId, issue: summarizeSdkIssue(issue) }, 'sdk vault fetch issue')
+      logger.error({ ctx: 'labels-view', chainId, issue: summarizeSdkIssue(issue, assetForVault) }, 'sdk vault fetch issue')
     }
   }
 
@@ -314,9 +315,10 @@ async function buildSnapshot(
   const fetchedEscrow = referencedEscrowAddresses.length
     ? await sdk.eVaultService.fetchVaults(chainId, referencedEscrowAddresses, vaultOptions)
     : { result: [], errors: [] }
+  const escrowAssetForVault = buildVaultAssetLookup(fetchedEscrow.result)
   for (const issue of fetchedEscrow.errors) {
     if (isSdkErrorDiagnostic(issue)) {
-      logger.error({ ctx: 'labels-view', chainId, issue: summarizeSdkIssue(issue) }, 'sdk escrow fetch issue')
+      logger.error({ ctx: 'labels-view', chainId, issue: summarizeSdkIssue(issue, escrowAssetForVault) }, 'sdk escrow fetch issue')
     }
   }
 
