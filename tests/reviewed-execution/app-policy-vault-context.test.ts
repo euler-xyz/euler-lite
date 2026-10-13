@@ -143,8 +143,12 @@ describe('final two-vault swap policy', () => {
     await expect(resolveAppPolicy(requestSet, 100, [withdrawal])).resolves.toBeDefined()
   })
 
-  it('requires a known region for an outbound migration', async () => {
-    geo.country.value = null
+  it.each([
+    ['an unknown region', null, undefined, 'Regional availability could not be determined'],
+    ['unavailable hosted geo policies', 'US', { chainId: 1, policies: undefined, productByVault: {} }, 'Compliance data unavailable'],
+  ] as const)('blocks outbound migration with %s', async (_case, country, context, expectedError) => {
+    geo.country.value = country
+    geo.context = context
     const intent = createOperationIntent({
       kind: 'migration', planner: 'cross-protocol-migration',
       args: {
@@ -158,7 +162,7 @@ describe('final two-vault swap policy', () => {
       constraints: [{ kind: 'deadline', timestamp: 1_000 }],
     })
     await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [intent]))
-      .rejects.toThrow('Regional availability could not be determined')
+      .rejects.toThrow(expectedError)
   })
 
   it.each([

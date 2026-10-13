@@ -28,7 +28,7 @@ import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { formatCompactUsdValue, formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
 import { MODAL_CLOSE_REDIRECT_DELAY_MS } from '~/entities/tuning-constants'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
-import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
+import { isAnyVaultBlockedByCountry, useGeoBlock } from '~/composables/useGeoBlock'
 import { OP_REDEEM, OP_REPAY, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import type { DisplayStep } from '~/utils/stepDecoding'
 import {
@@ -404,6 +404,7 @@ const plannedOps = computed<PlannedOp[]>(() => {
   return steps
 })
 const hookWarning = computed(() => getPlanHookDisabledWarning(plannedOps.value))
+const { isPolicyAvailable } = useGeoBlock()
 const isGeoBlocked = computed(() => isAnyVaultBlockedByCountry(
   ...[
     sourceDebtVault.value?.address,
@@ -419,6 +420,7 @@ const canLoadTargets = computed(() =>
 )
 const pageDisabledReason = computed(() => {
   if (!enableExternalMigrations.value) return 'Enable advanced mode in settings'
+  if (!isPolicyAvailable.value) return 'Compliance data unavailable. Please retry.'
   if (isGeoBlocked.value) return 'This operation is not available in your region'
   if (!sourceDebtVault.value || !sourceCollateralEVault.value || !migrationAccount.value) return 'Migration requires standard Euler collateral and debt vaults'
   if (!planAccount.value) return 'Account data is loading'
@@ -437,7 +439,7 @@ const noTargetsFound = computed(() =>
 const { tosGuard, unverifiedVaultGuard } = useOperationGuard(computed(() => [
   sourceDebtVault.value?.address,
   sourceCollateralVault.value?.address,
-].filter(Boolean)), { acquiresExposure: false })
+].filter(Boolean)))
 
 function continueAfterRequiredAcknowledgments(action: () => Promise<void>) {
   if (tosGuard.isTermsRequired && !tosGuard.tosLoadFailed) {
