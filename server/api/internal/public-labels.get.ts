@@ -29,14 +29,15 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Unsupported chainId' })
   }
 
-  const version = typeof query.version === 'string' && query.version.length > 0
-    ? query.version
-    : undefined
-  if (version !== undefined && !isV3LabelsVersionSelector(version)) {
-    throw createError({ statusCode: 400, statusMessage: 'Invalid labels version' })
-  }
-  if (version !== undefined && !isInternalRequest(event)) {
-    throw createError({ statusCode: 400, statusMessage: 'Labels version selection is internal' })
+  let version: string | undefined
+  if (query.version !== undefined) {
+    if (typeof query.version !== 'string' || !isV3LabelsVersionSelector(query.version)) {
+      throw createError({ statusCode: 400, statusMessage: 'Invalid labels version' })
+    }
+    if (!isInternalRequest(event)) {
+      throw createError({ statusCode: 400, statusMessage: 'Labels version selection is internal' })
+    }
+    version = query.version
   }
 
   setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')

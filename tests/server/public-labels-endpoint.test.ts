@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  query: {} as Record<string, string>,
+  query: {} as Record<string, string | string[]>,
   cacheControl: undefined as string | undefined,
   getPublicLabelsBundle: vi.fn(),
   refreshPublicLabelsBundle: vi.fn(),
@@ -114,6 +114,18 @@ describe('public labels aggregate endpoint', () => {
     const handler = await loadHandler()
 
     await expect(handler({})).rejects.toMatchObject({ statusCode: 400 })
+    expect(mocks.getPublicLabelsBundle).not.toHaveBeenCalled()
+    expect(mocks.refreshPublicLabelsBundle).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['repeated', ['v20260804151305236', 'draft']],
+    ['empty', ''],
+  ])('rejects %s version parameters instead of serving the default bundle', async (_, version) => {
+    mocks.query = { chainId: '1', version }
+    const handler = await loadHandler()
+
+    await expect(handler({})).rejects.toMatchObject({ statusCode: 400, statusMessage: 'Invalid labels version' })
     expect(mocks.getPublicLabelsBundle).not.toHaveBeenCalled()
     expect(mocks.refreshPublicLabelsBundle).not.toHaveBeenCalled()
   })
