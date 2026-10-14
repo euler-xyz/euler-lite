@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import type {
   SecuritizeCollateralVault,
   EVault,
@@ -121,7 +122,11 @@ const revealTargetAdapter = async () => {
 }
 watch([() => route.hash, () => adapterViews.value.length], () => {
   void revealTargetAdapter()
-}, { immediate: true })
+})
+/** After in-app navigation the adapters are already loaded, so the section must exist before the first reveal. */
+onMounted(() => {
+  void revealTargetAdapter()
+})
 
 const { copyToClipboard } = useClipboardCopy()
 
