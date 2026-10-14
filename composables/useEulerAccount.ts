@@ -8,7 +8,7 @@ import { setBatchPrefetchedBaseAccount } from '~/composables/batchPrefetchState'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createAddressRefreshCoordinator } from '~/utils/address-refresh-coordinator'
 import { logWarn } from '~/utils/errorHandling'
-import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
+import { buildVisiblePortfolioPositionFilter, hydrateHeldMetadataVaults } from '~/utils/portfolioPositionFilter'
 import { portfolioPricingGaps } from '~/utils/portfolio-pricing'
 import { createRaceGuard } from '~/utils/race-guard'
 import { liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
@@ -166,6 +166,8 @@ export const useEulerAccount = () => {
       if (positionGuard.isStale(gen)) return
 
       const nextAllPortfolio = sdk.portfolioService.buildPortfolio(fetched.result)
+      await hydrateHeldMetadataVaults(nextAllPortfolio)
+      if (positionGuard.isStale(gen)) return
       const nextVisiblePortfolio = sdk.portfolioService.buildPortfolio(fetched.result, {
         positionFilter: buildVisiblePortfolioPositionFilter(),
       })

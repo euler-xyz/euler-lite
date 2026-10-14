@@ -14,6 +14,7 @@ import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/uti
 import { getAddress, type Address, zeroAddress, maxUint256 } from 'viem'
 import { FixedPoint } from '~/utils/fixed-point'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
+import { collectPlannerVaultAddresses } from '~/features/reviewed-execution/planning/requirements'
 
 import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
 
@@ -181,7 +182,10 @@ const form = useCollateralForm({
   },
   usePreparedPipeline: true,
 })
-useOperationGuard(computed(() => [form.collateralVault.value?.address, form.borrowVault.value?.address].filter(Boolean)), { acquiresExposure: false })
+useOperationGuard(computed(() => collectPlannerVaultAddresses({
+  vaultAddress: form.collateralVault.value?.address,
+  swapQuote: needsSwap.value ? form.swapSelectedQuote.value : undefined,
+})), { acquiresExposure: false })
 const withdrawableCollateralAssets = computed(() => cashLimitedCollateralAssets())
 
 // True when the requested amount covers the entire collateral balance. The Max

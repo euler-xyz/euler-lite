@@ -21,6 +21,7 @@ import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { isRoeStateApplicable, resolvePositionRoeCollateralVaults, resolveRoeCollateralVaultsByAddresses } from '~/utils/position-roe'
 import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
+import { collectPlannerVaultAddresses } from '~/features/reviewed-execution/planning/requirements'
 
 const _route = useRoute()
 const _router = useRouter()
@@ -69,7 +70,6 @@ const collateralVault = computed<EVault | SecuritizeCollateralVault | undefined>
 const positionCollateralVaults = computed(() =>
   resolvePositionRoeCollateralVaults(position.value, collateralVault.value),
 )
-useOperationGuard(computed(() => [borrowVault.value?.address].filter(Boolean)), { acquiresExposure: false })
 const assets = computed<VaultAsset[]>(() => [collateralVault.value?.asset, borrowVault.value?.asset].filter((asset): asset is VaultAsset => !!asset))
 const assetsLabel = usePositionPairLabel(position)
 const isEligibleForLiquidation = computed(() => position.value?.liquidatable ?? false)
@@ -441,6 +441,22 @@ const savings = useSavingsRepay({
   borrowApy,
   borrowRewardApy,
 })
+
+const repayGuardVaults = computed(() => {
+  const liabilityVault = borrowVault.value?.address
+  if (formTab.value === 'wallet') {
+    return walletSwap.needsSwap.value && walletSwap.quotes.selectedQuote.value
+      ? collectPlannerVaultAddresses({ swapQuote: walletSwap.quotes.selectedQuote.value })
+      : collectPlannerVaultAddresses({ liabilityVault })
+  }
+  const sourceVault = formTab.value === 'collateral' ? collateral.sourceVault.value : savings.sourceVault.value
+  const sameAsset = formTab.value === 'collateral' ? collateral.isSameAsset.value : savings.isSameAsset.value
+  const quote = formTab.value === 'collateral' ? collateral.quotes.selectedQuote.value : savings.quotes.selectedQuote.value
+  return !sameAsset && quote
+    ? collectPlannerVaultAddresses({ swapQuote: quote })
+    : collectPlannerVaultAddresses({ liabilityVault, fromVault: sourceVault?.address })
+})
+useOperationGuard(repayGuardVaults, { acquiresExposure: false })
 
 const isPositionRoeApplicable = computed(() =>
   isRoeStateApplicable(positionCollateralVaults.value, borrowVault.value, getTokenCategoryTags),

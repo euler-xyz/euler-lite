@@ -45,6 +45,13 @@ const collectNamedAddresses = (
   }
 }
 
+/** Use the same planner address rules for form acknowledgements and final policy. */
+export const collectPlannerVaultAddresses = (args: unknown): Address[] => {
+  const collected = { accounts: new Set<Address>(), vaults: new Set<Address>(), assets: new Set<Address>() }
+  collectNamedAddresses(args, undefined, collected)
+  return [...collected.vaults].sort((left, right) => left.toLowerCase().localeCompare(right.toLowerCase()))
+}
+
 export const intentSetDigest = (intents: readonly OperationIntent[]): Hash =>
   canonicalDigest('operation-intent-set-v1', toCanonicalValue(intents))
 

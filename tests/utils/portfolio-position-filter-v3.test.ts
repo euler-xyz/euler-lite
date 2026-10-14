@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { getAddress } from 'viem'
-import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
+import type { Portfolio, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { buildVisiblePortfolioPositionFilter, hydrateHeldMetadataVaults } from '~/utils/portfolioPositionFilter'
 
 const state = vi.hoisted(() => ({
   source: 'v3',
@@ -8,6 +9,8 @@ const state = vi.hoisted(() => ({
   vaultCandidates: [] as string[],
   earnCandidates: [] as string[],
   verifiedMetadata: new Set<string>(),
+  registered: new Set<string>(),
+  resolved: [] as string[],
 }))
 vi.mock('~/composables/useEulerLabels', () => ({
   useEulerLabels: () => ({
@@ -23,7 +26,13 @@ vi.mock('~/composables/useVaultRegistry', () => ({
   useVaultRegistry: () => ({
     escrowAddresses: { value: [] },
     getEscrowVaults: () => [],
-    isVerifiedVault: (address: string) => state.verifiedMetadata.has(address.toLowerCase()),
+    get: (address: string) => state.registered.has(address.toLowerCase()) ? { vault: { address } } : undefined,
+    getOrFetch: async (address: string) => {
+      state.resolved.push(address.toLowerCase())
+      state.registered.add(address.toLowerCase())
+      return { address }
+    },
+    isVerifiedVault: (address: string) => state.registered.has(address.toLowerCase()) && state.verifiedMetadata.has(address.toLowerCase()),
   }),
 }))
 
@@ -41,6 +50,8 @@ describe('V3 portfolio position filter', () => {
     state.vaultCandidates = []
     state.earnCandidates = []
     state.verifiedMetadata.clear()
+    state.registered.clear()
+    state.resolved = []
   })
 
   it('keeps own hidden and pending-review positions without showing unrelated vaults', () => {
@@ -68,8 +79,36 @@ describe('V3 portfolio position filter', () => {
     state.earnCandidates = [pending]
     state.verifiedMetadata.add(hidden.toLowerCase())
     state.verifiedMetadata.add(pending.toLowerCase())
+    state.registered.add(hidden.toLowerCase())
+    state.registered.add(pending.toLowerCase())
     const filter = buildVisiblePortfolioPositionFilter()
     const context = { account } as unknown as Parameters<typeof filter>[1]
+    expect(filter(position(hidden) as Parameters<typeof filter>[0], context)).toBe(true)
+    expect(filter(position(pending) as Parameters<typeof filter>[0], context)).toBe(true)
+    expect(filter(position(unknown) as Parameters<typeof filter>[0], context)).toBe(false)
+  })
+
+  it('resolves held metadata-only candidates before filtering while leaving unverified candidates hidden', async () => {
+    state.source = 'v3-metadata'
+    state.vaultCandidates = [hidden, unknown]
+    state.earnCandidates = [pending]
+    const portfolio = {
+      savings: [{ position: { vaultAddress: hidden } }],
+      borrows: [{
+        borrow: { account: owner, vaultAddress: pending, liquidity: { collaterals: [{ address: unknown }] } },
+        collateralVaults: [unknown],
+      }],
+      account: { getSubAccount: () => ({ enabledCollaterals: [unknown] }) },
+    } as unknown as Portfolio<VaultEntity>
+    const context = { account } as unknown as Parameters<ReturnType<typeof buildVisiblePortfolioPositionFilter>>[1]
+
+    expect(buildVisiblePortfolioPositionFilter()(position(hidden) as Parameters<ReturnType<typeof buildVisiblePortfolioPositionFilter>>[0], context)).toBe(false)
+    await hydrateHeldMetadataVaults(portfolio)
+    expect(state.resolved).toEqual([hidden.toLowerCase(), pending.toLowerCase(), unknown.toLowerCase()])
+
+    state.verifiedMetadata.add(hidden.toLowerCase())
+    state.verifiedMetadata.add(pending.toLowerCase())
+    const filter = buildVisiblePortfolioPositionFilter()
     expect(filter(position(hidden) as Parameters<typeof filter>[0], context)).toBe(true)
     expect(filter(position(pending) as Parameters<typeof filter>[0], context)).toBe(true)
     expect(filter(position(unknown) as Parameters<typeof filter>[0], context)).toBe(false)

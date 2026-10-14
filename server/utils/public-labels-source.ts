@@ -126,7 +126,9 @@ export function refreshPublicLabelsBundle(
         // Keep the labels source timestamp and cache lifetime unchanged.
         if (currentGeo) {
           if (currentGeo.fetchedAt < (stale.geoFetchedAt ?? 0) && hasUsableGeo(stale)) return stale
-          return withCurrentGeo(stale, currentGeo)
+          const updated = withCurrentGeo(stale, currentGeo)
+          cache.replace(key, updated)
+          return updated
         }
         if (hasUsableGeo(stale)) return stale
       }

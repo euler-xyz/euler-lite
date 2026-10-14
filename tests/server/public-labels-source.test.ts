@@ -287,6 +287,37 @@ describe('public labels server source', () => {
     expect(fallback.sourceFetchedAt).toBe(first.sourceFetchedAt)
   })
 
+  it('serves a newer geo overlay on the next cache read without extending labels freshness', async () => {
+    const { getPublicLabelsBundle, getCachedPublicLabelsBundle, refreshPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
+    await getPublicLabelsBundle(1)
+    vi.advanceTimersByTime(4 * 60_000)
+    const first = await getPublicLabelsBundle(10)
+    if (first.source === 'static') throw new Error('Expected V3 labels')
+
+    vi.advanceTimersByTime(60_001)
+    const restriction = {
+      id: 'new-restriction', chainId: 10, productId: null, vaultAddress: null,
+      assetAddress: null, countries: ['US'], countriesResolved: ['US'],
+      policyType: 'block', reason: 'Restricted', createdAt: '2026-08-05T10:00:00Z',
+    }
+    mocks.fetchWithTimeout.mockImplementation(async (input: string) => {
+      if (new URL(input).pathname.endsWith('/geo-policies')) {
+        return new Response(JSON.stringify({ data: [restriction], meta: { total: 1 } }), { status: 200 })
+      }
+      throw new Error('labels unavailable')
+    })
+
+    const fallback = await refreshPublicLabelsBundle(10)
+    const cached = await getPublicLabelsBundle(10)
+    if (fallback.source === 'static' || cached.source === 'static') throw new Error('Expected V3 labels')
+    expect(cached.publicLabels.geoPolicies).toEqual([restriction])
+    expect(cached.sourceFetchedAt).toBe(first.sourceFetchedAt)
+    expect(cached.geoFetchedAt).toBe(fallback.geoFetchedAt)
+
+    vi.advanceTimersByTime(4 * 60_000)
+    expect(getCachedPublicLabelsBundle(10)).toBeUndefined()
+  })
+
   it('never serves an aggregate bundle after its geo rules expire', async () => {
     const { getPublicLabelsBundle, refreshPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
     const first = await getPublicLabelsBundle(1)

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createOperationIntent } from '~/features/reviewed-execution/domain/factory'
 import { clearDeprecatedDepositAcknowledgements, clearUnverifiedVaultAcknowledgements, recordDeprecatedDepositAcknowledgement, recordUnverifiedVaultAcknowledgement } from '~/features/reviewed-execution/policy/acknowledgements'
 import { resolveAppPolicy } from '~/features/reviewed-execution/policy/app-policy'
+import { collectPlannerVaultAddresses } from '~/features/reviewed-execution/planning/requirements'
 import { makeReviewedExecution, TEST_ACCOUNT, TEST_TOKEN, TEST_VAULT } from './fixtures'
 import { makeSwapQuote } from './swap-quote.test-fixture'
 import type { HostedGeoContext } from '~/utils/geo-policies'
@@ -118,6 +119,32 @@ describe('final two-vault swap policy', () => {
     recordUnverifiedVaultAcknowledgement({ chainId: 1, account: TEST_ACCOUNT, operation: 'lend-withdraw', vaults: [TEST_VAULT] })
     await expect(resolveAppPolicy(requestSet, 100, [intent])).resolves.toBeDefined()
     await expect(resolveAppPolicy(requestSet, 100, [intent, swapIntent()])).rejects.toThrow('Vault verification is unavailable')
+  })
+
+  it('accepts the exact form guard sets for position withdrawal and repayment from a deposit during a labels outage', async () => {
+    geo.labelsReady.value = false
+    const requestSet = makeReviewedExecution().requestSet
+    const withdrawal = createOperationIntent({
+      kind: 'withdraw', planner: 'withdraw',
+      args: { vaultAddress: TEST_VAULT, owner: TEST_ACCOUNT, assets: 1n },
+      chainId: 1, account: TEST_ACCOUNT, subAccounts: [TEST_ACCOUNT],
+      source: 'position/withdraw:review', operation: 'position-number-withdraw', createdAt: 1,
+    })
+    const withdrawGuardVaults = collectPlannerVaultAddresses({ vaultAddress: TEST_VAULT })
+    expect(withdrawGuardVaults).toEqual([TEST_VAULT])
+    recordUnverifiedVaultAcknowledgement({ chainId: 1, account: TEST_ACCOUNT, operation: 'position-number-withdraw', vaults: withdrawGuardVaults })
+    await expect(resolveAppPolicy(requestSet, 100, [withdrawal])).resolves.toBeDefined()
+
+    const repayment = createOperationIntent({
+      kind: 'repay', planner: 'repay-from-deposit',
+      args: { liabilityVault: TEST_VAULT, liabilityAsset: TEST_TOKEN, liabilityAmount: 1n, receiver: TEST_ACCOUNT, fromVault: TARGET_VAULT, fromAccount: TEST_ACCOUNT },
+      chainId: 1, account: TEST_ACCOUNT, subAccounts: [TEST_ACCOUNT],
+      source: 'position/repay-savings', operation: 'position-number-repay', createdAt: 1,
+    })
+    const repayGuardVaults = collectPlannerVaultAddresses({ liabilityVault: TEST_VAULT, fromVault: TARGET_VAULT })
+    expect(repayGuardVaults).toEqual([TEST_VAULT, TARGET_VAULT])
+    recordUnverifiedVaultAcknowledgement({ chainId: 1, account: TEST_ACCOUNT, operation: 'position-number-repay', vaults: repayGuardVaults })
+    await expect(resolveAppPolicy(requestSet, 100, [repayment])).resolves.toBeDefined()
   })
 
   it('keeps a withdrawal with a wallet swap available during a labels outage when geo is known', async () => {
