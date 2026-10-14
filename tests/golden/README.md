@@ -41,11 +41,15 @@ self-approval, so the suite can never "pass" in CI by minting its own baseline.
 ## Swap-quote fixtures
 
 The swap-quote tests load real quotes saved under `fixtures/*.json`. They were
-fetched once via the SDK's `SwapService` against `https://swap-dev.euler.finance`
-with the real Ethereum mainnet Euler deployment addresses (so the SDK's
-verifier-address + verifier-data validations pass).
+fetched via the SDK's `SwapService` against `https://swap-dev.euler.finance`,
+validated against the Ethereum mainnet deployment in euler-interfaces
+`EulerChains.json`. The same run writes that deployment's EVC, Permit2, Swapper,
+SwapVerifier and AccountLens addresses to `fixtures/deployment.json`, which
+`harness.ts` reads, so the SDK's verifier-address check passes.
 
-Regenerate when the swap API or the SDK validation rules change:
+Regenerate when the swap API, the SDK validation rules or the mainnet
+deployment change, then run `npm run test:golden:update` and review the plan
+diff:
 
 ```sh
 npm run test:golden:fetch-fixtures
@@ -57,16 +61,16 @@ To point the fetcher at a different swap API URL:
 GOLDEN_SWAP_API_URL=https://swap.example.org npm run test:golden:fetch-fixtures
 ```
 
-Each fixture is a `{ request, quote }` pair — the request is preserved so the
+Each quote fixture is a `{ request, quote }` pair — the request is preserved so the
 test can recover bigint inputs (`amount`, `currentDebt`) via the `$bigint`
 reviver in `load-fixture.ts`.
 
 ## Addresses & scenarios
 
-`harness.ts` pins the real Ethereum mainnet Euler core/periphery addresses (evc,
-permit2, swapper, swapVerifier, accountLens) and real mainnet ERC20s — the swap
-quotes are validated against these. Vaults are placeholder `0xa00…` addresses
-(the swap API doesn't validate them), chosen so they stand out in calldata.
+`harness.ts` reads the Euler deployment addresses from `fixtures/deployment.json`
+and pins real mainnet ERC20s, which the swap API requires. Vaults are placeholder
+`0xa00…` addresses (the swap API doesn't validate them), chosen so they stand out
+in calldata.
 
 Scenarios are tuned to bypass external dependencies the planners would otherwise
 touch: Pyth feed fetch (no controllers / no liability vault), swap verifier RPC
