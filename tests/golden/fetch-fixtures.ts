@@ -36,7 +36,7 @@ const FIXED_DEADLINE = 4_000_000_000 // year ~2096, in seconds — keeps fixture
 const stubDeployment: Deployment = {
   chainId: CHAIN_ID,
   name: 'mainnet',
-  status: 'active',
+  status: 'production',
   addresses: {
     coreAddrs: {
       balanceTracker: zeroAddress as Address,
