@@ -1,0 +1,3 @@
+## Checklist
+
+- [ ] Changes how a chain is added? Update `docs/adding-a-chain.md`.

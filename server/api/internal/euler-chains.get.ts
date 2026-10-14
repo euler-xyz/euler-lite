@@ -134,6 +134,11 @@ export function refreshEulerChains(): Promise<unknown[]> {
   })
 }
 
+/** The cached manifest, fresh or within the stale window, without fetching. */
+export function peekEulerChains(): unknown[] | undefined {
+  return cache.getStale(CACHE_KEY)
+}
+
 /**
  * Full resolution chain: fresh cache → upstream → stale cache (long
  * manifest window). Throws only when upstream is down and no copy has been

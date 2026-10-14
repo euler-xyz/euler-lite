@@ -55,4 +55,18 @@ describe('ChainSelectorItem', () => {
     expect(html).toContain('data-label="Fo"')
     expect(html).not.toContain('<img')
   })
+
+  it('shows the chain initials when the V3 logo fails and there is no bundled logo', async () => {
+    imageState.isReady = false
+    imageState.error = new Event('error')
+    try {
+      const html = await render({ chainId: 424242, name: 'Forknet' })
+
+      expect(html).toContain('data-label="Fo"')
+      expect(html).not.toContain('<img')
+    }
+    finally {
+      imageState.error = null
+    }
+  })
 })
