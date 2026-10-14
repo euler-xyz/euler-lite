@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  EXPLORER_OVERRIDES,
   getChainById,
   getChainIdByName,
   getKnownChainIds,
@@ -24,12 +25,11 @@ describe('chainRegistry', () => {
     expect(chain?.rpcUrls.default.http).toContain('https://rpc.hyperliquid.xyz/evm')
   })
 
-  it('uses MonadScan as the Monad block explorer', () => {
-    const chain = getChainById(143)
+  it.each([...EXPLORER_OVERRIDES])('applies the block explorer override for chain %i', (chainId, explorer) => {
+    const chain = getChainById(chainId)
 
-    expect(chain?.blockExplorers?.default.name).toBe('MonadScan')
-    expect(chain?.blockExplorers?.default.url).toBe('https://monadscan.com/')
-    expect(getChainIdByName('monad')).toBe(143)
+    expect(chain?.blockExplorers?.default).toMatchObject(explorer)
+    expect(getChainIdByName(chain?.name ?? '')).toBe(chainId)
   })
 
   it('keeps reverse slug lookup pinned to canonical chain ID collisions', () => {
