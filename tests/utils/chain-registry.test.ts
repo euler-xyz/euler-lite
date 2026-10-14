@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   getChainById,
   getChainIdByName,
-  getDefiLlamaChainName,
   getKnownChainIds,
   getNetworksByChainIds,
   getUnknownChainIds,
@@ -23,7 +22,6 @@ describe('chainRegistry', () => {
     expect(chain?.name).toBe('HyperEVM')
     expect(chain?.nativeCurrency.symbol).toBe('HYPE')
     expect(chain?.rpcUrls.default.http).toContain('https://rpc.hyperliquid.xyz/evm')
-    expect(getDefiLlamaChainName(999)).toBe('Hyperliquid')
   })
 
   it('uses MonadScan as the Monad block explorer', () => {

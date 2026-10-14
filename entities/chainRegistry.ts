@@ -106,23 +106,3 @@ export const getKnownChainIds = (ids: readonly number[]): number[] =>
 
 export const getUnknownChainIds = (ids: readonly number[]): number[] =>
   ids.filter(id => !isKnownChainId(id))
-
-const DEFI_LLAMA_NAMES: ReadonlyMap<number, string> = new Map([
-  [1, 'Ethereum'],
-  [56, 'BSC'],
-  [130, 'Unichain'],
-  [146, 'Sonic'],
-  [239, 'TAC'],
-  [1923, 'Swell'],
-  [42161, 'Arbitrum'],
-  [43114, 'Avalanche'],
-  [59144, 'Linea'],
-  [60808, 'BOB'],
-  [80094, 'Berachain'],
-  [8453, 'Base'],
-  [9745, 'Plasma'],
-  [999, 'Hyperliquid'],
-])
-
-export const getDefiLlamaChainName = (chainId: number): string | undefined =>
-  DEFI_LLAMA_NAMES.get(chainId)

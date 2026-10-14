@@ -26,6 +26,11 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Shareable listing-filter URLs (`?curator=` plus legacy `riskManager` / Earn `allocator`)
 - JSON-RPC proxy, `/healthz` liveness, and Advanced-mode localStorage pitfalls
 
+### ⛓️ [Adding a Chain](./adding-a-chain.md)
+
+- SDK release, code release, Doppler variables, ECS redeploy, and testing on dev
+- How the `EulerChains.json` status (`staging`, `production`, `deprecated`, `unlisted`) shows in Lite
+
 ### 💰 [Pricing System](./pricing-system.md)
 
 - 3-layer pricing architecture (oracle → USD → values)

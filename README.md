@@ -63,7 +63,7 @@ Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for 
 | `SERVER_VAULT_CACHE_SOURCE` | `fallback` | Server snapshot builder adapter chain: `fallback`, `onchain`, or `v3`. |
 | `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` | `fallback` | Browser "fast" SDK adapter chain: `fallback`, `onchain`, or `v3`. The plan-time SDK is always on-chain. |
 | `DISABLE_SERVER_VAULT_CACHE` | `false` | Set to `true` to disable `/api/internal/vaults` snapshots and let the browser fall through to the normal RPC pipeline. |
-| `DEPRECATED_CHAINS` | — | Comma-separated chain IDs shown collapsed in the chain selector and skipped by startup warm-cache cycles. |
+| `DEPRECATED_CHAINS` | — | Comma-separated chain IDs shown collapsed in the chain selector and skipped by startup warm-cache cycles. A chain with status `deprecated` in `EulerChains.json` is treated the same way. |
 | `ONCHAIN_SDK_CHAINS` | — | Comma-separated chain IDs pinned to the onchain SDK adapter config for chain-aware browser reads and the server vault snapshot, bypassing V3. Independent of `DEPRECATED_CHAINS`; list a chain in both to deprecate it and route it onchain. |
 | `EVAULT_FETCH_CHUNK_CHAINS` | — | Comma-separated chain IDs whose EVault list reads are split into small sequential SDK calls. Use for RPC/lens endpoints that fail under larger concurrent onchain EVault fetches. |
 | `EULER_SDK_EULER_INTERFACES_BRANCH` | `master` | Euler interfaces branch used for runtime ABIs and `EulerChains.json`. Explicit `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` and `NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL` overrides take precedence over the branch for their respective manifests. |
@@ -147,7 +147,11 @@ RPC_URL_42161=https://your-arbitrum-rpc.com
 SUBGRAPH_URL_42161=https://api.goldsky.com/.../euler-simple-arbitrum/latest/gn
 ```
 
-The app scans for `RPC_URL_<chainId>` env vars at server startup and automatically enables those chains. The SDK subgraph adapters call the same-origin `/api/internal/proxy/subgraph/<chainId>` route, which resolves `SUBGRAPH_URL_<chainId>` first and `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` second. No code changes needed to add or remove chains.
+The app scans for `RPC_URL_<chainId>` env vars at server startup and automatically enables those chains. The SDK subgraph adapters call the same-origin `/api/internal/proxy/subgraph/<chainId>` route, which resolves `SUBGRAPH_URL_<chainId>` first and `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` second.
+
+A chain also needs an entry in euler-interfaces `EulerChains.json`, and both the pinned `@eulerxyz/euler-v2-sdk` and `@reown/appkit/networks` must support it. When they already do, adding a chain needs no code change; otherwise it needs a dependency bump and a release. See [Adding a Chain](./docs/adding-a-chain.md) for the full checklist.
+
+The chain's `status` in `EulerChains.json` decides whether an enabled chain is shown: `production` chains are shown, `staging` chains only where `DOPPLER_ENVIRONMENT` is not `prd`, `deprecated` chains in the chain selector's deprecated section (like `DEPRECATED_CHAINS`), and `unlisted` chains not at all.
 
 #### Base App In-App Browser
 
@@ -428,6 +432,7 @@ Before deploying:
 
 - Ensure at least one `RPC_URL_<chainId>` env var is set
 - Each chain needs a matching `SUBGRAPH_URL_<chainId>` or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`
+- Check the chain's `status` in `EulerChains.json`: `unlisted` chains are always hidden, and `staging` chains are hidden when `DOPPLER_ENVIRONMENT=prd`
 
 ## Additional Resources
 

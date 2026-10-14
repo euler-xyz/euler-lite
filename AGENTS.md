@@ -57,9 +57,14 @@ Euler Lite is the only service. Standard commands live in `README.md` ("Availabl
 - **Config flows env → server plugin → `window` global → composable:**
   - `RPC_URL_*`, `DEPRECATED_CHAINS`, `ONCHAIN_SDK_CHAINS`, `EVAULT_FETCH_CHUNK_CHAINS`
     → `server/plugins/chain-config.ts` → `window.__CHAIN_CONFIG__` → `useChainConfig()`.
+    On every HTML render the plugin layers the cached `EulerChains.json` `status` and
+    `explorerUrl` over the env lists (`utils/chain-status.ts`): `unlisted` chains are dropped,
+    `staging` chains are dropped when `DOPPLER_ENVIRONMENT=prd`, `deprecated` chains join
+    `deprecatedChainIds`. With no cached manifest the env lists apply unchanged.
     Note: `__CHAIN_CONFIG__` carries only chain IDs + validation metadata (`enabledChainIds`,
     `deprecatedChainIds`, `onchainSdkChainIds`, `eVaultFetchChunkChainIds`, `unsupportedChainIds`,
-    `chainEnvIssues`) — the `RPC_URL_*` values themselves stay server-side.
+    `chainEnvIssues`) and the registry `explorerUrls` — the `RPC_URL_*` values themselves stay
+    server-side.
   - AppKit / V3 / Swap / Pyth URLs + branding → `server/plugins/app-config.ts` →
     `window.__APP_CONFIG__` → `useEnvConfig()`
   - `NUXT_PUBLIC_CONFIG_*` feature flags/page toggles → Nuxt `runtimeConfig.public` → `useDeployConfig()`

@@ -49,7 +49,7 @@ export const HIGH_ALLOWANCE = maxUint256
 const stubDeployment: Deployment = {
   chainId: CHAIN_ID,
   name: 'golden',
-  status: 'active',
+  status: 'production',
   addresses: {
     coreAddrs: {
       balanceTracker: zeroAddress as Address,
