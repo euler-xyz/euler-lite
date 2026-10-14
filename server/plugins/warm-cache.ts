@@ -41,6 +41,7 @@ import { peekEulerChains, refreshEulerChains } from '../api/internal/euler-chain
 import { ABI_CONTRACTS, refreshAbi } from '../api/internal/abis/[contract].get'
 import { refreshTokenList } from '../api/internal/token-list.get'
 import { refreshChainVaults } from '../utils/vaults-cache'
+import { UPSTREAM_FETCH_TIMEOUT_MS } from '../utils/fetchWithTimeout'
 import {
   readDisableServerVaultCache,
   readV3ApiUrl,
@@ -53,6 +54,11 @@ import { reportStatus } from '../utils/log'
 import { logger } from '~/server/utils/logger'
 
 const REWARM_INTERVAL_MS = 5 * 60_000
+
+const delay = (ms: number) => new Promise<void>((resolve) => {
+  const timer = setTimeout(resolve, ms)
+  timer.unref?.()
+})
 
 // Vaults snapshot gets a separate, faster timer when V3 is configured —
 // V3-backed refreshes are cheap (one batched POST per chain hitting V3's
@@ -164,9 +170,17 @@ export default defineNitroPlugin(() => {
     return chainIds.filter(id => !registryDeprecated.has(id))
   }
 
+  // Chain selection reads deprecated statuses from the manifest, so the first
+  // per-chain warms wait for its first read; a failed or slow read leaves the env list.
+  const firstManifestRead = Promise.race([
+    refreshEulerChains().then(() => undefined, () => undefined),
+    delay(UPSTREAM_FETCH_TIMEOUT_MS),
+  ])
+
   const serverVaultCacheDisabled = readDisableServerVaultCache()
 
   const warmChainsSequentially = async () => {
+    await firstManifestRead
     for (const chainId of currentChainIds()) {
       await Promise.allSettled(warmChainTasks(chainId))
     }
@@ -191,6 +205,7 @@ export default defineNitroPlugin(() => {
       // Sequential across chains: cross-chain upstreams (V3 prices,
       // intrinsic APY) dedupe via their in-flight maps, so chains 2..N
       // hit warm upstream caches rather than refetching.
+      await firstManifestRead
       for (const chainId of currentChainIds()) {
         await warmVaults(chainId)
       }

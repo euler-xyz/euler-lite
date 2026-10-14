@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
+  refreshEulerChains: vi.fn((): Promise<unknown[]> => Promise.resolve([])),
   peekEulerChains: vi.fn((): unknown[] | undefined => undefined),
   refreshTokenList: vi.fn((_chainId: number) => Promise.resolve([])),
   refreshChainVaults: vi.fn((_chainId: number) => Promise.resolve()),
@@ -12,7 +13,7 @@ vi.mock('~/server/api/internal/labels/[file].get', () => ({
 }))
 
 vi.mock('~/server/api/internal/euler-chains.get', () => ({
-  refreshEulerChains: () => Promise.resolve([]),
+  refreshEulerChains: mocks.refreshEulerChains,
   peekEulerChains: mocks.peekEulerChains,
 }))
 
@@ -48,6 +49,20 @@ vi.mock('~/server/utils/logger', () => ({
 }))
 
 const REWARM_INTERVAL_MS = 5 * 60_000
+const UPSTREAM_FETCH_TIMEOUT_MS = 10_000
+const REGISTRY = [
+  { chainId: 1, status: 'production' },
+  { chainId: 146, status: 'deprecated' },
+]
+
+const pendingManifest = () => {
+  let settle: { resolve: () => void, reject: (err: Error) => void } = { resolve: () => {}, reject: () => {} }
+  const promise = new Promise<unknown[]>((resolve, reject) => {
+    settle = { resolve: () => resolve(REGISTRY), reject }
+  })
+  mocks.refreshEulerChains.mockReturnValue(promise)
+  return settle
+}
 const WARM_LATCH_KEY = '__eulerLiteWarmCacheStarted'
 
 const bootPlugin = async () => {
@@ -71,6 +86,7 @@ describe('warm-cache plugin deprecated chains', () => {
     vi.unstubAllEnvs()
     Reflect.deleteProperty(globalThis, WARM_LATCH_KEY)
     mocks.peekEulerChains.mockReset().mockReturnValue(undefined)
+    mocks.refreshEulerChains.mockReset().mockImplementation(() => Promise.resolve([]))
     mocks.refreshTokenList.mockClear()
     mocks.refreshChainVaults.mockClear()
   })
@@ -94,6 +110,44 @@ describe('warm-cache plugin deprecated chains', () => {
 
     expect(warmedChains(mocks.refreshTokenList)).toEqual([1, 8453])
     expect(warmedChains(mocks.refreshChainVaults)).toEqual([1, 8453])
+  })
+
+  it('holds the first per-chain warms until the cold-start manifest read answers', async () => {
+    const manifest = pendingManifest()
+    await bootPlugin()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(mocks.refreshTokenList).not.toHaveBeenCalled()
+    expect(mocks.refreshChainVaults).not.toHaveBeenCalled()
+
+    mocks.peekEulerChains.mockReturnValue(REGISTRY)
+    manifest.resolve()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(warmedChains(mocks.refreshTokenList)).toEqual([1, 8453])
+    expect(warmedChains(mocks.refreshChainVaults)).toEqual([1, 8453])
+  })
+
+  it('warms the env chain list when the cold-start manifest read fails', async () => {
+    const manifest = pendingManifest()
+    await bootPlugin()
+    manifest.reject(new Error('upstream down'))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(warmedChains(mocks.refreshTokenList)).toEqual([1, 146, 8453])
+    expect(warmedChains(mocks.refreshChainVaults)).toEqual([1, 146, 8453])
+  })
+
+  it('warms the env chain list when the cold-start manifest read is too slow', async () => {
+    pendingManifest()
+    await bootPlugin()
+    await vi.advanceTimersByTimeAsync(UPSTREAM_FETCH_TIMEOUT_MS - 1)
+    expect(mocks.refreshTokenList).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(warmedChains(mocks.refreshTokenList)).toEqual([1, 146, 8453])
+    expect(warmedChains(mocks.refreshChainVaults)).toEqual([1, 146, 8453])
   })
 
   it('picks up a registry deprecation on the next cycle', async () => {
