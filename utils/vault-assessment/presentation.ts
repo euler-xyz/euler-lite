@@ -211,11 +211,11 @@ export interface VaultCheckGroup {
   findings: VaultAssessmentFinding[]
 }
 
-/** `evidence.*` entries that only carry data are not checks. */
+/** A not-applicable finding without a cause only carries observed data (`evidence.*`, `collateral.<address>.ramp`, …). */
 export const groupVaultCheckFindings = (findings: readonly VaultAssessmentFinding[]): VaultCheckGroup[] => {
   const groups = new Map<string, VaultCheckGroup>()
   for (const finding of findings) {
-    if (finding.key.startsWith('evidence.') && (finding.outcome === 'not_applicable' || finding.outcome === 'pass')) continue
+    if (finding.outcome === 'not_applicable' && !finding.cause?.summary) continue
     const prefix = finding.key.split('.')[0] || finding.key
     const group = groups.get(prefix)
     groups.set(prefix, group

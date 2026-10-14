@@ -404,11 +404,24 @@ describe('resolving vault check results', () => {
     expect(getVaultCheckTitle(key)).toBe(title)
   })
 
+  it('leaves out a not-applicable finding unless the backend gave it a cause', () => {
+    const groups = groupVaultCheckFindings([
+      finding('collateral.0x55f9bace2c864ac0d3392ea9fa654b605f21a3d3.ramp', { outcome: 'not_applicable', cause: null }),
+      finding('collateral.0x55f9bace2c864ac0d3392ea9fa654b605f21a3d3.price', { outcome: 'not_applicable', cause: null }),
+      finding('collateral.0x55f9bace2c864ac0d3392ea9fa654b605f21a3d3.ltv', { outcome: 'pass' }),
+      finding('governance.curator-registered', { outcome: 'not_applicable' }),
+    ])
+    expect(groups.flatMap(group => group.findings.map(item => item.key))).toEqual([
+      'collateral.0x55f9bace2c864ac0d3392ea9fa654b605f21a3d3.ltv',
+      'governance.curator-registered',
+    ])
+  })
+
   it('groups checks by the first part of their key, open groups first, and leaves out evidence that only carries data', () => {
     const groups = groupVaultCheckFindings([
       finding(`strategy.${strategy}.visible`),
       finding('governance.timelock', { outcome: 'pass' }),
-      finding('evidence.multisig', { outcome: 'not_applicable' }),
+      finding('evidence.multisig', { outcome: 'not_applicable', cause: null }),
       finding('evidence.safe-threshold'),
       finding('governance.owner-registered', { outcome: 'pass' }),
       finding('new-rule-family.something', { outcome: 'pass' }),

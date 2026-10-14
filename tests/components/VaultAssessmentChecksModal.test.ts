@@ -50,6 +50,7 @@ describe('vault checks pop-up', () => {
   const findings = [
     finding('governance.timelock'),
     finding('evidence.multisig', { outcome: 'not_applicable', required: false }),
+    finding(`collateral.${STRATEGY}.ramp`, { outcome: 'not_applicable', required: false }),
     finding(`strategy.${STRATEGY}.visible`, {
       outcome: 'fail',
       required: false,
@@ -71,6 +72,8 @@ describe('vault checks pop-up', () => {
     expect(groups).toEqual(['strategy', 'governance'])
     expect(html).toContain('Strategies')
     expect(html).not.toContain('evidence.multisig')
+    expect(html).not.toContain(`collateral.${STRATEGY}.ramp`)
+    expect(html.match(/>N\/A</g)).toHaveLength(1)
   })
 
   it('names the subject, says the failure does not affect listing, and shows the cause rather than the rule documentation', async () => {
