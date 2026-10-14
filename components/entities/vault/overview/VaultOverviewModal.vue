@@ -89,6 +89,7 @@ const navigateToBorrow = (collateralAddress: string, borrowVaultAddress: string)
 const closeForMarketNavigation = () => {
   emits('close')
 }
+watch(() => route.path, () => emits('close'))
 </script>
 
 <template>

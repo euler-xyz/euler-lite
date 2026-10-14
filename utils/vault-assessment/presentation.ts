@@ -2,6 +2,9 @@ import type { VaultAssessment, VaultAssessmentFinding } from '@eulerxyz/euler-v2
 import { getAddress, isAddress } from 'viem'
 import type { VaultWarning } from '~/composables/useVaultWarnings'
 import { formatExactAmount, shortenAddress } from '~/utils/string-utils'
+import { collectObservedAddresses, getVaultCheckSubject, type VaultCheckSubject } from './subjects'
+
+export type VaultCheckListingImpact = 'affects-listing' | 'does-not-affect-listing'
 
 export interface VaultCheckLine {
   key: string
@@ -10,9 +13,13 @@ export interface VaultCheckLine {
   parts?: Array<{ text: string, address?: string }>
   /** Element id of the adapter's card in the Oracles section, for lines that come from one adapter. */
   anchor?: string
+  adapter?: string
+  subject?: VaultCheckSubject
+  listingImpact?: VaultCheckListingImpact
 }
 
 export const ORACLE_ADAPTERS_CHECKS_KEY = 'oracle.adapters-checks'
+export const VAULT_CHECKS_DISCLAIMER = 'Vault checks test this vault\'s configuration against fixed rules. They are not a risk rating or a recommendation by Euler.'
 const ADAPTER_RECOGNITION_CHECKS = new Set([
   'feed-recognized', 'pyth-feed-recognized', 'chronicle-feed-recognized', 'cross-legs-recognized', 'pendle-pool-recognized', 'custom-adapter-recognized',
 ])
@@ -81,7 +88,7 @@ const ADDRESS_IN_KEY = /0x[a-fA-F0-9]{40}/g
 
 export const getVaultCheckCopyableParts = (text: string, finding: VaultAssessmentFinding): VaultCheckLine['parts'] => {
   const candidates = [...new Map(
-    [finding.cause?.subject, ...(finding.key.match(ADDRESS_IN_KEY) ?? [])]
+    [finding.cause?.subject, ...(finding.key.match(ADDRESS_IN_KEY) ?? []), ...collectObservedAddresses(finding.observed)]
       .filter((value): value is string => typeof value === 'string' && isAddress(value))
       .map(address => [address.toLowerCase(), address] as const),
   ).values()]
@@ -144,6 +151,83 @@ export interface VaultCheckLineOptions {
   adapterLabel?: (address: string) => string | undefined
 }
 
+/** Read from the response's own `required` flag, so no rule key is named here. */
+export const getVaultCheckListingImpact = (finding: VaultAssessmentFinding): VaultCheckListingImpact | null => {
+  if (finding.exempted || isMutedAdapterFinding(finding)) return null
+  if (finding.outcome !== 'fail' && finding.outcome !== 'unknown') return null
+  return finding.required ? 'affects-listing' : 'does-not-affect-listing'
+}
+
+export const VAULT_CHECK_LISTING_IMPACT_LABELS: Record<VaultCheckListingImpact, string> = {
+  'affects-listing': 'Affects listing',
+  'does-not-affect-listing': 'Doesn\'t affect listing',
+}
+
+const listingImpactOf = (finding: VaultAssessmentFinding): { listingImpact?: VaultCheckListingImpact } => {
+  const listingImpact = getVaultCheckListingImpact(finding)
+  return listingImpact ? { listingImpact } : {}
+}
+
+/** The rule description documents the rule for API readers, so it stands in only for an open check that has no cause. */
+export const getVaultCheckMessage = (finding: VaultAssessmentFinding): string | null =>
+  finding.cause?.summary
+  || ((finding.outcome === 'fail' || finding.outcome === 'unknown') && finding.description ? finding.description : null)
+
+const TITLE_WORDS: Record<string, string> = { apy: 'APY', ltv: 'LTV', evc: 'EVC', evault: 'EVault', irm: 'IRM', id: 'ID' }
+
+const humanizeKeyPart = (part: string): string => part
+  .split('-')
+  .filter(Boolean)
+  .map((word, index) => {
+    const lower = word.toLowerCase()
+    if (Object.hasOwn(TITLE_WORDS, lower)) return TITLE_WORDS[lower]
+    return index === 0 ? `${lower.charAt(0).toUpperCase()}${lower.slice(1)}` : lower
+  })
+  .join(' ')
+
+export const getVaultCheckTitle = (key: string): string => {
+  const parts = key.split('.').filter(part => part && !/^0x[a-fA-F0-9]{40}$/.test(part))
+  return humanizeKeyPart(parts.at(-1) ?? key)
+}
+
+const GROUP_TITLES: Record<string, string> = {
+  oracle: 'Oracles',
+  collateral: 'Collateral',
+  strategy: 'Strategies',
+  governance: 'Governance',
+  hooks: 'Hooks',
+  irm: 'Interest rate model',
+  liquidation: 'Liquidation',
+  market: 'Market',
+  deployment: 'Deployment',
+  configuration: 'Configuration',
+  scheduled: 'Scheduled changes',
+  evidence: 'Evidence',
+}
+
+export interface VaultCheckGroup {
+  key: string
+  title: string
+  findings: VaultAssessmentFinding[]
+}
+
+/** `evidence.*` entries that only carry data are not checks. */
+export const groupVaultCheckFindings = (findings: readonly VaultAssessmentFinding[]): VaultCheckGroup[] => {
+  const groups = new Map<string, VaultCheckGroup>()
+  for (const finding of findings) {
+    if (finding.key.startsWith('evidence.') && (finding.outcome === 'not_applicable' || finding.outcome === 'pass')) continue
+    const prefix = finding.key.split('.')[0] || finding.key
+    const group = groups.get(prefix)
+    groups.set(prefix, group
+      ? { ...group, findings: [...group.findings, finding] }
+      : { key: prefix, title: Object.hasOwn(GROUP_TITLES, prefix) ? GROUP_TITLES[prefix]! : humanizeKeyPart(prefix), findings: [finding] })
+  }
+  const best = (group: VaultCheckGroup) => Math.min(...group.findings.map(findingRank))
+  return [...groups.values()]
+    .map(group => ({ ...group, findings: [...group.findings].sort((a, b) => findingRank(a) - findingRank(b)) }))
+    .sort((a, b) => best(a) - best(b))
+}
+
 const adapterFailureLines = (finding: VaultAssessmentFinding, options?: VaultCheckLineOptions): VaultCheckLine[] =>
   getWarningAdapterFailures(finding).map((failure) => {
     const label = options?.adapterLabel?.(failure.address) ?? shortenAddress(failure.address)
@@ -154,6 +238,8 @@ const adapterFailureLines = (finding: VaultAssessmentFinding, options?: VaultChe
       outcome: 'fail',
       parts: [{ text: label, address: failure.address }, { text: ` · ${checks}` }],
       anchor: oracleAdapterAnchor(failure.address),
+      adapter: failure.address,
+      ...listingImpactOf(finding),
     }
   })
 
@@ -169,10 +255,22 @@ export const getVaultCheckWarningLines = (assessment: VaultAssessment, options?:
     if (lines.has(key) && !(lines.get(key)?.outcome === 'unknown' && finding.outcome === 'fail')) continue
     const text = finding.outcome === 'unknown' ? finding.cause?.summary || 'Being re-checked' : finding.cause?.summary || finding.description
     const parts = getVaultCheckCopyableParts(text, finding)
-    lines.set(key, { key, text, outcome: finding.outcome as 'fail' | 'unknown', ...(parts ? { parts } : {}) })
+    const subject = getVaultCheckSubject(finding.key)
+    lines.set(key, {
+      key,
+      text,
+      outcome: finding.outcome as 'fail' | 'unknown',
+      ...(parts ? { parts } : {}),
+      ...(subject ? { subject } : {}),
+      ...listingImpactOf(finding),
+    })
   }
   return [...lines.values()]
 }
+
+const findingRank = (finding: VaultAssessmentFinding): number => finding.outcome === 'fail'
+  ? finding.exempted || isMutedAdapterFinding(finding) ? 2 : 0
+  : finding.outcome === 'unknown' ? 1 : finding.outcome === 'pass' ? 3 : 4
 
 /** Full findings are loaded only for an opened vault, as in Toolbox's detail view. */
 export const getVaultAssessmentCheckDetails = (assessment: VaultAssessment) => {
@@ -189,10 +287,7 @@ export const getVaultAssessmentCheckDetails = (assessment: VaultAssessment) => {
     else if (finding.outcome === 'unknown') counts.unknown++
     else counts.notApplicable++
   }
-  const rank = (finding: VaultAssessmentFinding) => finding.outcome === 'fail'
-    ? finding.exempted || isMutedAdapterFinding(finding) ? 2 : 0
-    : finding.outcome === 'unknown' ? 1 : finding.outcome === 'pass' ? 3 : 4
-  return { findings: [...findings].sort((a, b) => rank(a) - rank(b)), counts }
+  return { findings: [...findings].sort((a, b) => findingRank(a) - findingRank(b)), counts }
 }
 
 export type VaultChecksCell = { text: string, tone: 'positive' | 'warning' | 'muted' }

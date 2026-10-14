@@ -15,7 +15,6 @@ const vaultAddresesInfo = computed(() => ([
   {
     title: `Fee receiver`,
     address: vault.governance.feeReceiver,
-    checkSafe: true,
   },
 ]))
 </script>
@@ -33,10 +32,7 @@ const vaultAddresesInfo = computed(() => ([
       :label="infoItem.title"
       orientation="horizontal"
     >
-      <VaultOverviewAddressValue
-        :address="infoItem.address"
-        :check-safe="infoItem.checkSafe"
-      />
+      <VaultOverviewAddressValue :address="infoItem.address" />
     </VaultOverviewLabelValue>
   </VaultOverviewAccordionSection>
 </template>

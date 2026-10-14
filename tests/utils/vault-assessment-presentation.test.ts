@@ -16,6 +16,10 @@ import {
   getVaultAssessmentCheckDetails,
   getVaultCheckFindings,
   getVaultChecksStatusLine,
+  getVaultCheckListingImpact,
+  getVaultCheckMessage,
+  getVaultCheckTitle,
+  groupVaultCheckFindings,
   hasOnlyAcceptedVaultCheckFindings,
 } from '~/utils/vault-assessment/presentation'
 
@@ -347,5 +351,73 @@ describe('vault checks presentation', () => {
       expect(getVaultChecksStatusLine(checked, 'available')).toBe('Warning · 3 to review')
       expect(getVaultChecksCell(checked).text).toBe('1 failed')
     })
+  })
+})
+
+describe('resolving vault check results', () => {
+  const strategy = '0x6fe7fa90756434645f0b0428fdff78e99dda0fbc'
+
+  it('matches a shortened address in the sentence to a full address anywhere in the evidence', () => {
+    const adapters = ['0xb62286380e2d0f9b2d2fc9975765fd272275cd39', '0x916f006ae522769badf95cf6afdb90e162cb96e6']
+    const summary = '2 adapters on the oracle routes (0xb62286…cd39, 0x916f00…96e6) are not a recognized Euler deployment.'
+    const lines = getVaultCheckWarningLines(assessment([finding('oracle.adapters-recognized', {
+      observed: { adapters: 4, unrecognized: adapters },
+      cause: { code: 'route-adapter-unrecognized', subject: adapters[0]!, summary, remedy: null },
+    })]))
+    expect(lines[0]?.parts?.filter(part => part.address).map(part => part.address)).toEqual(adapters)
+  })
+
+  it('carries the subject and whether the failure affects listing on each line', () => {
+    const lines = getVaultCheckWarningLines(assessment([
+      finding(`strategy.${strategy}.visible`, { required: false }),
+      finding('governance.timelock', { required: true }),
+    ]))
+    expect(lines.map(line => [line.key, line.subject, line.listingImpact])).toEqual([
+      [`strategy.${strategy}.visible`, { namespace: 'strategy', address: getAddress(strategy) }, 'does-not-affect-listing'],
+      ['governance.timelock', undefined, 'affects-listing'],
+    ])
+  })
+
+  it('says a failure affects listing only for an open required check', () => {
+    expect(getVaultCheckListingImpact(finding('a.b', { required: true }))).toBe('affects-listing')
+    expect(getVaultCheckListingImpact(finding('a.b', { outcome: 'unknown', required: true }))).toBe('affects-listing')
+    expect(getVaultCheckListingImpact(finding('a.b', { required: false }))).toBe('does-not-affect-listing')
+    expect(getVaultCheckListingImpact(finding('a.b', { required: true, exempted: true }))).toBeNull()
+    expect(getVaultCheckListingImpact(finding('a.b', { outcome: 'pass', required: true }))).toBeNull()
+  })
+
+  it('shows the cause when there is one and the rule description only for an open check without one', () => {
+    expect(getVaultCheckMessage(finding('a.b'))).toBe('V3 says a.b')
+    expect(getVaultCheckMessage(finding('a.b', { cause: null }))).toBe('Description fallback')
+    expect(getVaultCheckMessage(finding('a.b', { outcome: 'pass', cause: null }))).toBeNull()
+    expect(getVaultCheckMessage(finding('a.b', { outcome: 'not_applicable', cause: { code: 'curator-unset', subject: null, summary: 'The vault has no curator; its owner holds the curator role.', remedy: null } })))
+      .toBe('The vault has no curator; its owner holds the curator role.')
+  })
+
+  it.each([
+    [`strategy.${strategy}.visible`, 'Visible'],
+    ['collateral.0x55f9bace2c864ac0d3392ea9fa654b605f21a3d3.ltv', 'LTV'],
+    ['irm.max-apy', 'Max APY'],
+    ['oracle.liability-quote', 'Liability quote'],
+    ['scheduled.governance.timelock', 'Timelock'],
+  ])('titles %s as %s', (key, title) => {
+    expect(getVaultCheckTitle(key)).toBe(title)
+  })
+
+  it('groups checks by the first part of their key, open groups first, and leaves out evidence that only carries data', () => {
+    const groups = groupVaultCheckFindings([
+      finding(`strategy.${strategy}.visible`),
+      finding('governance.timelock', { outcome: 'pass' }),
+      finding('evidence.multisig', { outcome: 'not_applicable' }),
+      finding('evidence.safe-threshold'),
+      finding('governance.owner-registered', { outcome: 'pass' }),
+      finding('new-rule-family.something', { outcome: 'pass' }),
+    ])
+    expect(groups.map(group => [group.key, group.title, group.findings.map(item => item.key)])).toEqual([
+      ['strategy', 'Strategies', [`strategy.${strategy}.visible`]],
+      ['evidence', 'Evidence', ['evidence.safe-threshold']],
+      ['governance', 'Governance', ['governance.timelock', 'governance.owner-registered']],
+      ['new-rule-family', 'New rule family', ['new-rule-family.something']],
+    ])
   })
 })

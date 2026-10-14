@@ -16,6 +16,7 @@ import {
   type CollateralExposureGroup,
 } from '~/utils/vault/collateral-exposure'
 import {
+  getExposureLead,
   resolveVaultExposureDisplay,
   type ExposureValueState,
   type VaultExposureDisplay,
@@ -239,6 +240,20 @@ const getStrategySupplyApyModalData = (strategyVault: EVault) => ({
   },
 })
 
+const strategyHeaderAssets = (strategyVault: EVault) => {
+  const lead = getExposureLead(getStrategyExposureDisplay(strategyVault))
+  if (!lead) {
+    return { assets: [{ address: strategyVault.asset.address, decimals: strategyVault.asset.decimals, name: strategyVault.asset.name, symbol: strategyVault.asset.symbol }], label: undefined }
+  }
+  return {
+    assets: lead.assets.map(asset => ({ address: getAddress(asset.address), decimals: asset.decimals ?? 18, name: asset.name ?? asset.symbol, symbol: asset.symbol })),
+    label: lead.label,
+  }
+}
+
+const headerAssetsByStrategy = computed(() => new Map(exposureRows.value
+  .flatMap(row => row.vault ? [[row.vault.address.toLowerCase(), strategyHeaderAssets(row.vault)] as const] : [])))
+
 const hasExposureUsdPrice = (exposure: typeof exposureList.value[0]) => {
   return exposureUsdPrices.value.has(exposure.address.toLowerCase())
 }
@@ -287,12 +302,8 @@ load()
             <VaultLabelsAndAssets
               class="min-w-0 flex-1 mobile:order-1"
               :vault="row.vault"
-              :assets="[{
-                address: row.vault.asset.address,
-                decimals: row.vault.asset.decimals,
-                name: row.vault.asset.name,
-                symbol: row.vault.asset.symbol,
-              }]"
+              :assets="headerAssetsByStrategy.get(row.vault.address.toLowerCase())?.assets ?? []"
+              :assets-label="headerAssetsByStrategy.get(row.vault.address.toLowerCase())?.label"
             >
               <span
                 v-if="row.hookWarning"

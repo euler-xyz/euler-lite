@@ -45,6 +45,12 @@ const pendingGuardian = computed(() => vault.governance.pendingGuardianValidAt >
   ? { address: vault.governance.pendingGuardian, validAt: vault.governance.pendingGuardianValidAt }
   : null)
 const pendingCaps = computed(() => vault.strategies.filter(strategy => strategy.allocationCap.pendingValidAt > 0))
+const { ensureVaults } = useVaultReferences()
+watch(
+  () => [...vault.supplyQueue, ...vault.withdrawQueue, ...pendingCaps.value.map(strategy => strategy.address)],
+  ensureVaults,
+  { immediate: true },
+)
 
 const vaultAddressesInfo = computed(() => ([
   {
@@ -151,7 +157,10 @@ const timelockDisplay = computed(() => formatTimelock(vault.governance.timelock)
       orientation="horizontal"
     >
       <div class="flex flex-col items-end gap-4">
-        <VaultOverviewAddressValue :address="strategy.address" />
+        <VaultReference
+          class="text-accent-600"
+          :address="strategy.address"
+        />
         <span class="text-p3 text-content-tertiary">
           {{ formatExactAmount(strategy.allocationCap.pending, strategy.vault?.asset.decimals ?? vault.asset.decimals, vault.asset.symbol) }}
           · valid {{ formatValidAt(strategy.allocationCap.pendingValidAt) }}
@@ -163,26 +172,44 @@ const timelockDisplay = computed(() => formatTimelock(vault.governance.timelock)
       label="Supply queue"
       orientation="horizontal"
     >
-      <div class="flex flex-col items-end gap-8">
-        <VaultOverviewAddressValue
-          v-for="address in vault.supplyQueue"
+      <ol
+        class="flex flex-col items-end gap-8"
+        data-id="earn-supply-queue"
+      >
+        <li
+          v-for="(address, index) in vault.supplyQueue"
           :key="address"
-          :address="address"
-        />
-      </div>
+          class="flex items-center gap-6"
+        >
+          <span class="text-content-tertiary">{{ index + 1 }}.</span>
+          <VaultReference
+            class="text-accent-600"
+            :address="address"
+          />
+        </li>
+      </ol>
     </VaultOverviewLabelValue>
     <VaultOverviewLabelValue
       v-if="vault.withdrawQueue.length"
       label="Withdraw queue"
       orientation="horizontal"
     >
-      <div class="flex flex-col items-end gap-8">
-        <VaultOverviewAddressValue
-          v-for="address in vault.withdrawQueue"
+      <ol
+        class="flex flex-col items-end gap-8"
+        data-id="earn-withdraw-queue"
+      >
+        <li
+          v-for="(address, index) in vault.withdrawQueue"
           :key="address"
-          :address="address"
-        />
-      </div>
+          class="flex items-center gap-6"
+        >
+          <span class="text-content-tertiary">{{ index + 1 }}.</span>
+          <VaultReference
+            class="text-accent-600"
+            :address="address"
+          />
+        </li>
+      </ol>
     </VaultOverviewLabelValue>
   </VaultOverviewAccordionSection>
 </template>
