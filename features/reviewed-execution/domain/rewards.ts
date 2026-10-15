@@ -11,6 +11,7 @@ export const rewardClaimId = (reward: UserReward): string => [
   reward.streamId ?? '',
   reward.token.address.toLowerCase(),
   reward.unclaimed,
+  ...(reward.provider === 'brevis' ? [reward.epoch ?? ''] : []),
 ].join(':')
 
 const claimBearingReward = (reward: UserReward) => ({
@@ -68,9 +69,9 @@ export const rewardClaimSnapshot = (reward: UserReward): RewardClaimSnapshot | u
 
 /**
  * True when the live reward no longer matches the snapshot the review was
- * built from. `rewardClaimId` covers the chain, provider, campaign, token and
- * unclaimed amount; decimals are compared separately because a token that
- * stops resolving keeps the same claim id.
+ * built from. `rewardClaimId` covers the chain, provider, campaign, token,
+ * unclaimed amount and Brevis epoch; decimals are compared separately because
+ * a token that stops resolving keeps the same claim id.
  */
 export const hasRewardDrifted = (
   snapshot: RewardClaimSnapshot,
