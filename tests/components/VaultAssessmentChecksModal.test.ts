@@ -146,4 +146,10 @@ describe('vault checks pop-up', () => {
     expect(html).toContain('<span class="sr-only">: failed</span>')
     expect(html).toContain('<span class="sr-only">: not checked yet</span>')
   })
+
+  it('keeps a vault with a single check on one line, the check named after the vault', async () => {
+    const html = await render([finding(`collateral.${PRIME}.visible`)]).html
+    expect(html).not.toContain('<ul')
+    expect(html).toMatch(/data-reference="[^"]+"[^>]*>[^<]*<\/span>\s*<span[^>]*data-id="vault-check-finding"[^>]*> · Visible</)
+  })
 })

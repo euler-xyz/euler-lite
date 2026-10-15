@@ -11,7 +11,8 @@ const lead = computed(() => props.row.checks.reduce((worst, check) => TONE_SEVER
 const details = computed(() => props.row.subject
   ? props.row.checks.filter(check => check.parts.length || check.tag)
   : props.row.checks.filter(check => check.parts.length))
-const namesCheck = (parts: unknown[]) => !!props.row.subject && (details.value.length > 1 || !parts.length)
+const listsChecks = computed(() => !!props.row.subject && props.row.checks.length > 1)
+const namesCheck = (parts: unknown[]) => listsChecks.value && (details.value.length > 1 || !parts.length)
 </script>
 
 <template>
@@ -40,6 +41,13 @@ const namesCheck = (parts: unknown[]) => !!props.row.subject && (details.value.l
           :address="row.subject.address"
         />
         <span
+          v-if="!listsChecks"
+          class="font-medium"
+          data-id="vault-check-finding"
+          :data-key="lead.key"
+          :data-tone="lead.tone"
+        > · {{ lead.title }}<span class="sr-only">: {{ lead.status }}</span></span>
+        <span
           v-if="row.weight"
           class="ml-6 text-p4 text-content-tertiary"
           data-id="vault-check-weight"
@@ -60,7 +68,7 @@ const namesCheck = (parts: unknown[]) => !!props.row.subject && (details.value.l
         >{{ lead.tag }}</span>
       </p>
       <ul
-        v-if="row.subject"
+        v-if="listsChecks"
         class="flex flex-wrap items-center gap-x-10 gap-y-2 text-p4 text-content-secondary"
       >
         <li
