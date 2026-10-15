@@ -222,9 +222,9 @@ export const groupVaultCheckFindings = (findings: readonly VaultAssessmentFindin
       ? { ...group, findings: [...group.findings, finding] }
       : { key: prefix, title: Object.hasOwn(GROUP_TITLES, prefix) ? GROUP_TITLES[prefix]! : humanizeKeyPart(prefix), findings: [finding] })
   }
-  const best = (group: VaultCheckGroup) => Math.min(...group.findings.map(findingRank))
+  const best = (group: VaultCheckGroup) => Math.min(...group.findings.map(getVaultCheckFindingRank))
   return [...groups.values()]
-    .map(group => ({ ...group, findings: [...group.findings].sort((a, b) => findingRank(a) - findingRank(b)) }))
+    .map(group => ({ ...group, findings: [...group.findings].sort((a, b) => getVaultCheckFindingRank(a) - getVaultCheckFindingRank(b)) }))
     .sort((a, b) => best(a) - best(b))
 }
 
@@ -268,7 +268,7 @@ export const getVaultCheckWarningLines = (assessment: VaultAssessment, options?:
   return [...lines.values()]
 }
 
-const findingRank = (finding: VaultAssessmentFinding): number => finding.outcome === 'fail'
+export const getVaultCheckFindingRank = (finding: VaultAssessmentFinding): number => finding.outcome === 'fail'
   ? finding.exempted || isMutedAdapterFinding(finding) ? 2 : 0
   : finding.outcome === 'unknown' ? 1 : finding.outcome === 'pass' ? 3 : 4
 
@@ -287,7 +287,7 @@ export const getVaultAssessmentCheckDetails = (assessment: VaultAssessment) => {
     else if (finding.outcome === 'unknown') counts.unknown++
     else counts.notApplicable++
   }
-  return { findings: [...findings].sort((a, b) => findingRank(a) - findingRank(b)), counts }
+  return { findings: [...findings].sort((a, b) => getVaultCheckFindingRank(a) - getVaultCheckFindingRank(b)), counts }
 }
 
 export type VaultChecksCell = { text: string, tone: 'positive' | 'warning' | 'muted' }

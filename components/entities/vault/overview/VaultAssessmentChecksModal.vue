@@ -11,6 +11,8 @@ import {
   getVaultCheckTitle,
   groupVaultCheckFindings,
 } from '~/utils/vault-assessment/presentation'
+import { groupVaultCheckRows, type VaultCheckRowView, type VaultCheckView } from '~/utils/vault-assessment/check-rows'
+import { getVaultCheckSubject, vaultCheckSubjectKey, type VaultCheckSubject } from '~/utils/vault-assessment/subjects'
 import { getRelativeTimeBetweenDates } from '~/utils/time-utils'
 
 defineEmits(['close'])
@@ -38,25 +40,54 @@ const messagePartsFor = (finding: VaultAssessmentFinding) => {
   if (!message) return []
   return getVaultCheckCopyableParts(message, finding) ?? [{ text: message, address: undefined }]
 }
-const groups = computed(() => groupVaultCheckFindings(details.value.findings).map(group => ({
-  ...group,
-  rows: group.findings.map((finding) => {
-    const impact = getVaultCheckListingImpact(finding)
-    return {
-      finding,
-      address: finding.key.match(/0x[a-fA-F0-9]{40}/)?.[0],
-      title: getVaultCheckTitle(finding.key),
-      tone: getVaultCheckFindingTone(finding),
-      icon: iconFor(finding),
-      parts: messagePartsFor(finding),
-      listingImpact: impact ? VAULT_CHECK_LISTING_IMPACT_LABELS[impact] : null,
-    }
-  }),
-})))
+const tagFor = (finding: VaultAssessmentFinding): string | null => {
+  if (finding.outcome === 'fail' && finding.exempted) return 'Accepted exception'
+  if (finding.outcome === 'not_applicable') return 'N/A'
+  const impact = getVaultCheckListingImpact(finding)
+  return impact ? VAULT_CHECK_LISTING_IMPACT_LABELS[impact] : null
+}
+const statusFor = (finding: VaultAssessmentFinding): string => {
+  if (finding.outcome === 'fail') return finding.exempted ? 'accepted exception' : 'failed'
+  if (finding.outcome === 'unknown') return 'not checked yet'
+  return finding.outcome === 'pass' ? 'passed' : 'not applicable'
+}
+const toCheckView = (finding: VaultAssessmentFinding): VaultCheckView => ({
+  key: finding.key,
+  title: getVaultCheckTitle(finding.key),
+  status: statusFor(finding),
+  tone: getVaultCheckFindingTone(finding),
+  icon: iconFor(finding),
+  parts: messagePartsFor(finding),
+  tag: tagFor(finding),
+})
+
+const shownGroups = computed(() => groupVaultCheckFindings(details.value.findings))
+const checkViews = computed(() => new Map(shownGroups.value.flatMap(group => group.findings.map(finding => [finding, toCheckView(finding)] as const))))
+
+const { weighAll } = useVaultCheckWeights(() => props.assessment.vaultAddress)
+const groups = computed(() => {
+  const subjects = [...new Map(shownGroups.value
+    .flatMap(group => group.findings.map(finding => getVaultCheckSubject(finding.key)))
+    .filter((subject): subject is VaultCheckSubject => !!subject)
+    .map(subject => [vaultCheckSubjectKey(subject), subject] as const)).values()]
+  const measured = weighAll(subjects)
+  const weights = new Map(subjects.map((subject, index) => [vaultCheckSubjectKey(subject), measured[index]]))
+  const weightOf = (subject: VaultCheckSubject) => weights.get(vaultCheckSubjectKey(subject)) ?? null
+  return shownGroups.value.map(group => ({
+    key: group.key,
+    title: group.title,
+    rows: groupVaultCheckRows(group.findings, subject => weightOf(subject)?.value ?? null).map((row): VaultCheckRowView => ({
+      key: row.key,
+      subject: row.subject,
+      weight: row.subject ? weightOf(row.subject)?.label ?? null : null,
+      checks: row.findings.map(finding => checkViews.value.get(finding)!),
+    })),
+  }))
+})
 
 const { ensureResolved } = useVaultReferences()
-watch(groups, (list) => {
-  ensureResolved(list.flatMap(group => group.rows.map(row => ({ key: row.finding.key, parts: row.parts }))))
+watch(checkViews, (views) => {
+  ensureResolved([...views.values()].map(check => ({ key: check.key, parts: check.parts })))
 }, { immediate: true })
 </script>
 
@@ -97,72 +128,11 @@ watch(groups, (list) => {
         <h3 class="text-p3 font-semibold text-content-primary">
           {{ group.title }}
         </h3>
-        <div
-          v-for="(row, index) in group.rows"
-          :key="`${row.finding.key}-${index}`"
-          class="flex items-start gap-10"
-          data-id="vault-check-finding"
-          :data-key="row.finding.key"
-        >
-          <span
-            class="flex-shrink-0 w-20 h-20 rounded-full flex items-center justify-center mt-2"
-            :class="{
-              'bg-success-500': row.tone === 'pass',
-              'bg-warning-500': row.tone === 'warning',
-              'bg-error-500': row.tone === 'error',
-              'bg-content-muted': row.tone === 'muted',
-            }"
-            :data-tone="row.tone"
-          >
-            <SvgIcon
-              :name="row.icon"
-              class="!w-10 !h-10 text-white"
-            />
-          </span>
-          <div class="min-w-0">
-            <p class="text-p3 font-medium text-content-primary break-words">
-              <template v-if="row.address">
-                <VaultReference
-                  class="font-normal text-accent-600"
-                  :address="row.address"
-                />
-                ·
-              </template>{{ row.title }}
-              <span
-                v-if="row.finding.outcome === 'fail' && row.finding.exempted"
-                class="ml-4 text-p4 font-normal text-content-tertiary"
-              >Accepted exception</span>
-              <span
-                v-else-if="row.finding.outcome === 'not_applicable'"
-                class="ml-4 text-p4 font-normal text-content-tertiary"
-              >N/A</span>
-              <span
-                v-else-if="row.listingImpact"
-                class="ml-4 text-p4 font-normal text-content-tertiary"
-                data-id="vault-check-listing-impact"
-              >{{ row.listingImpact }}</span>
-            </p>
-            <p
-              v-if="row.parts.length"
-              class="text-p3 text-content-secondary break-words"
-            >
-              <template
-                v-for="(part, partIndex) in row.parts"
-                :key="partIndex"
-              >
-                <VaultReference
-                  v-if="part.address"
-                  class="text-accent-600"
-                  :address="part.address"
-                  :fallback="part.text"
-                />
-                <template v-else>
-                  {{ part.text }}
-                </template>
-              </template>
-            </p>
-          </div>
-        </div>
+        <VaultAssessmentCheckRow
+          v-for="row in group.rows"
+          :key="row.key"
+          :row="row"
+        />
       </section>
     </div>
   </BaseModalWrapper>
