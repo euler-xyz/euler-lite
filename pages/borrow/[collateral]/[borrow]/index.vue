@@ -1066,6 +1066,7 @@ watch(
             <template #buttons>
               <VaultFormInfoButton
                 :pair="(pair as BorrowVaultPair)"
+                reveal-oracle-link
                 :extra-vault="formTab === 'multiply' ? multiply.multiplySupplyVault.value : undefined"
                 class="laptop:!hidden"
               />

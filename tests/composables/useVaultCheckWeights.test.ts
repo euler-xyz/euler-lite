@@ -11,14 +11,19 @@ const PRIME = '0x797dd80692c3b2dadabce8e30c07fde5307d48a9'
 const COLLATERAL = '0x55f9bace2c864ac0d3392ea9fa654b605f21a3d3'
 
 const isLoaded = ref(true)
-const openInterest: Record<string, Record<string, number>> = {
-  [EVK]: { [COLLATERAL]: 1500 },
-  [STRATEGY]: { [COLLATERAL]: 200 },
-  [PRIME]: { [COLLATERAL]: 300 },
-}
+let openInterest: Record<string, Record<string, number>>
+let borrowVaults: Record<string, { type: VaultType, address: string, totalBorrowed: bigint }>
 
 beforeEach(() => {
   isLoaded.value = true
+  openInterest = {
+    [EVK]: { [COLLATERAL]: 1500 },
+    [STRATEGY]: { [COLLATERAL]: 200 },
+    [PRIME]: { [COLLATERAL]: 300 },
+  }
+  borrowVaults = Object.fromEntries([EVK, STRATEGY, PRIME, COLLATERAL].map(address => [address, {
+    type: VaultType.EVault, address, totalBorrowed: address === COLLATERAL ? 0n : 1_000n,
+  }]))
   vi.stubGlobal('useVaultRegistry', () => ({
     get: (address: string) => ({
       [EARN]: { vault: { type: VaultType.EulerEarn, address: EARN, strategies: [
@@ -26,7 +31,7 @@ beforeEach(() => {
         { address: PRIME, allocatedAssets: 36_675n },
         { address: COLLATERAL, allocatedAssets: 0n },
       ] } },
-      [EVK]: { vault: { type: VaultType.EVault, address: EVK } },
+      ...Object.fromEntries(Object.entries(borrowVaults).map(([address, vault]) => [address, { vault }])),
     } as Record<string, unknown>)[address.toLowerCase()],
     registryVersion: ref(0),
   }))
@@ -65,5 +70,38 @@ describe('useVaultCheckWeights', () => {
     isLoaded.value = false
     expect(useVaultCheckWeights(EVK).weightOf({ namespace: 'collateral', address: COLLATERAL })).toBeNull()
     expect(useVaultCheckWeights(EVK).weightOf(undefined)).toBeNull()
+  })
+
+  it.each([undefined, {}, { [COLLATERAL]: 0 }])('suppresses a missing utilized EVK split: %s', (split) => {
+    if (split) openInterest[EVK] = split
+    else Reflect.deleteProperty(openInterest, EVK)
+    expect(useVaultCheckWeights(EVK).weightOf({ namespace: 'collateral', address: COLLATERAL })).toBeNull()
+  })
+
+  it('keeps known zero borrows distinct from missing exposure', () => {
+    Reflect.deleteProperty(openInterest, EVK)
+    borrowVaults[EVK].totalBorrowed = 0n
+    expect(useVaultCheckWeights(EVK).weightOf({ namespace: 'collateral', address: COLLATERAL })).toBe('Backs no borrows')
+  })
+
+  it('suppresses partial Earn totals when a utilized strategy split is missing', () => {
+    Reflect.deleteProperty(openInterest, STRATEGY)
+    const { weightOf } = useVaultCheckWeights(EARN)
+    expect(weightOf({ namespace: 'collateral', address: COLLATERAL })).toBeNull()
+    expect(weightOf({ namespace: 'collateral', address: PRIME })).toBeNull()
+    expect(weightOf({ namespace: 'strategy', address: STRATEGY })).toBe('Holds 6% of deposits')
+  })
+
+  it('can aggregate Earn exposure when the missing strategy split has known zero borrows', () => {
+    Reflect.deleteProperty(openInterest, STRATEGY)
+    borrowVaults[STRATEGY].totalBorrowed = 0n
+    expect(useVaultCheckWeights(EARN).weightOf({ namespace: 'collateral', address: COLLATERAL }))
+      .toBe(`Backs ${formatCompactUsdValue(300)} of borrows in this vault's strategies`)
+  })
+
+  it('does not assume an unresolved strategy with a missing split has zero borrows', () => {
+    Reflect.deleteProperty(openInterest, STRATEGY)
+    Reflect.deleteProperty(borrowVaults, STRATEGY)
+    expect(useVaultCheckWeights(EARN).weightOf({ namespace: 'collateral', address: COLLATERAL })).toBeNull()
   })
 })
