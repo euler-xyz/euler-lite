@@ -36,6 +36,14 @@
       ]
     },
     {
+      "id": "collateral-withdraw-and-swap",
+      "label": "Open borrow position and withdraw collateral through transferMin",
+      "scenarios": [
+        "borrow-open-position-execute",
+        "collateral-withdraw-and-swap-execute"
+      ]
+    },
+    {
       "id": "swap-and-repay",
       "label": "Open borrow position and repay through wallet swap",
       "scenarios": [
@@ -86,7 +94,7 @@
     },
     {
       "id": "cleanup-transfer",
-      "label": "Open borrow position and max repay cleanup transfer sweep",
+      "label": "Open borrow position and max repay with cleanup",
       "scenarios": [
         "borrow-open-position-execute",
         "position-repay-wallet-max-cleanup-execute"
@@ -119,6 +127,22 @@
       "scenarios": [
         "earn-supply-execute",
         "earn-withdraw-execute"
+      ]
+    },
+    {
+      "id": "collateral-swap",
+      "label": "Swap savings between assets with skimMin verification",
+      "scenarios": [
+        "lend-supply-execute",
+        "lend-collateral-swap-execute"
+      ]
+    },
+    {
+      "id": "transfer-min-batch",
+      "label": "Two withdrawals with transferMin in one reviewed batch",
+      "scenarios": [
+        "lend-supply-execute",
+        "lend-withdraw-and-swap-batch-execute"
       ]
     }
   ]

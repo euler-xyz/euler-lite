@@ -44,19 +44,20 @@ const LEGACY_CHAIN_ALIASES: ReadonlyMap<string, number> = new Map([
   ['lineamainnet', 59144],
 ])
 
-const MONAD_CHAIN_ID = 143
-const MONAD_EXPLORER_URL = 'https://monadscan.com/'
+export const EXPLORER_OVERRIDES: ReadonlyMap<number, { readonly name: string, readonly url: string }> = new Map([
+  [143, { name: 'MonadScan', url: 'https://monadscan.com/' }],
+])
 
-const monad = chainMap.get(MONAD_CHAIN_ID)
-if (monad) {
-  chainMap.set(MONAD_CHAIN_ID, {
-    ...monad,
+for (const [chainId, explorer] of EXPLORER_OVERRIDES) {
+  const chain = chainMap.get(chainId)
+  if (!chain) continue
+  chainMap.set(chainId, {
+    ...chain,
     blockExplorers: {
-      ...monad.blockExplorers,
+      ...chain.blockExplorers,
       default: {
-        ...monad.blockExplorers?.default,
-        name: 'MonadScan',
-        url: MONAD_EXPLORER_URL,
+        ...chain.blockExplorers?.default,
+        ...explorer,
       },
     },
   })

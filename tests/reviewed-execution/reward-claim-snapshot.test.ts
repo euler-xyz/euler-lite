@@ -3,6 +3,7 @@ import type { UserReward } from '~/entities/reward-campaign'
 import {
   hasRewardDrifted,
   rewardClaimId,
+  rewardClaimSetDigest,
   rewardClaimSnapshot,
 } from '~/features/reviewed-execution/domain/rewards'
 
@@ -29,6 +30,34 @@ const makeReward = (overrides: Partial<UserReward> & { decimals?: number } = {})
     ...rest,
   } as unknown as UserReward
 }
+
+describe('rewardClaimId', () => {
+  it('selects each Brevis epoch independently when campaign and amount match', () => {
+    const rewards = ['0', '1', '2'].map(epoch => makeReward({
+      provider: 'brevis',
+      campaignId: 'brevis-campaign',
+      claimAddress: '0x0000000000000000000000000000000000000008',
+      cumulativeAmounts: ['603375'],
+      proof: [`0x${'11'.repeat(32)}`],
+      epoch,
+    }))
+
+    for (const reward of rewards) {
+      const snapshot = rewardClaimSnapshot(reward)!
+      const selected = rewards.filter(candidate => rewardClaimId(candidate) === snapshot.claimId)
+
+      expect(selected).toEqual([reward])
+      expect(rewardClaimSetDigest(selected)).toBe(rewardClaimSetDigest([reward]))
+    }
+  })
+
+  it.each(['merkl', 'fuul', 'turtle'] as const)('keeps %s claim identity independent of Brevis epochs', (provider) => {
+    const reward = makeReward({ provider })
+
+    expect(rewardClaimId({ ...reward, epoch: '1' })).toBe(rewardClaimId(reward))
+    expect(rewardClaimId({ ...reward, epoch: '2' })).toBe(rewardClaimId(reward))
+  })
+})
 
 describe('rewardClaimSnapshot', () => {
   it('states the amount and decimals the review was built from', () => {
@@ -68,6 +97,13 @@ describe('hasRewardDrifted', () => {
   it('rejects a refreshed amount', () => {
     const refreshed = makeReward({ accumulated: '2020000', unclaimed: '2020000' })
     expect(hasRewardDrifted(snapshot, refreshed)).toBe(true)
+  })
+
+  it('rejects a changed Brevis epoch at the same amount', () => {
+    const reward = makeReward({ provider: 'brevis', epoch: '1' })
+    const snapshot = rewardClaimSnapshot(reward)!
+
+    expect(hasRewardDrifted(snapshot, { ...reward, epoch: '2' })).toBe(true)
   })
 
   it('rejects a token that stopped resolving at the same amount', () => {
