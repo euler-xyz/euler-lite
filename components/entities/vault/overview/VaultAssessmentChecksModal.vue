@@ -1,8 +1,17 @@
 <script setup lang="ts">
 import type { VaultAssessment, VaultAssessmentFinding } from '@eulerxyz/euler-v2-sdk'
-import { getVaultAssessmentCheckDetails, getVaultCheckCopyableParts, getVaultCheckFindingTone } from '~/utils/vault-assessment/presentation'
+import {
+  VAULT_CHECKS_DISCLAIMER,
+  VAULT_CHECK_LISTING_IMPACT_LABELS,
+  getVaultAssessmentCheckDetails,
+  getVaultCheckCopyableParts,
+  getVaultCheckFindingTone,
+  getVaultCheckListingImpact,
+  getVaultCheckMessage,
+  getVaultCheckTitle,
+  groupVaultCheckFindings,
+} from '~/utils/vault-assessment/presentation'
 import { getRelativeTimeBetweenDates } from '~/utils/time-utils'
-import { shortenAddress } from '~/utils/string-utils'
 
 defineEmits(['close'])
 
@@ -18,28 +27,37 @@ const checkedAgo = computed(() => {
   if (!at || !Number.isFinite(Date.parse(at))) return null
   return getRelativeTimeBetweenDates(new Date(), new Date(at))
 })
-const titleFor = (finding: VaultAssessmentFinding) => {
-  const parts = finding.key.split('.').filter(part => !/^0x[a-fA-F0-9]{40}$/.test(part))
-  const suffix = (parts.at(-1) ?? finding.key).replaceAll('-', ' ')
-  const label = finding.key.startsWith('collateral.') ? `Collateral ${suffix}` : suffix
-  return `${label.charAt(0).toUpperCase()}${label.slice(1)}`
-    .replace(/\bapy\b/gi, 'APY').replace(/\bltv\b/gi, 'LTV')
-    .replace(/\bevc\b/gi, 'EVC').replace(/\bevault\b/gi, 'EVault')
-}
-const addressFor = (finding: VaultAssessmentFinding) => finding.key.match(/0x[a-fA-F0-9]{40}/)?.[0]
 const iconFor = (finding: VaultAssessmentFinding) => {
   const tone = getVaultCheckFindingTone(finding)
   if (tone === 'pass') return 'check'
   if (tone === 'muted') return 'info-circle'
   return tone === 'error' && finding.outcome === 'fail' ? 'close' : 'warning'
 }
-const messageFor = (finding: VaultAssessmentFinding) => finding.cause?.summary || finding.description
-const messagePartsFor = (finding: VaultAssessmentFinding) =>
-  getVaultCheckCopyableParts(messageFor(finding), finding) ?? [{ text: messageFor(finding), address: undefined }]
-const { isCopied, copyToClipboard } = useClipboardCopy()
-const copyAddress = (address: string) => {
-  copyToClipboard(address).catch(() => {})
+const messagePartsFor = (finding: VaultAssessmentFinding) => {
+  const message = getVaultCheckMessage(finding)
+  if (!message) return []
+  return getVaultCheckCopyableParts(message, finding) ?? [{ text: message, address: undefined }]
 }
+const groups = computed(() => groupVaultCheckFindings(details.value.findings).map(group => ({
+  ...group,
+  rows: group.findings.map((finding) => {
+    const impact = getVaultCheckListingImpact(finding)
+    return {
+      finding,
+      address: finding.key.match(/0x[a-fA-F0-9]{40}/)?.[0],
+      title: getVaultCheckTitle(finding.key),
+      tone: getVaultCheckFindingTone(finding),
+      icon: iconFor(finding),
+      parts: messagePartsFor(finding),
+      listingImpact: impact ? VAULT_CHECK_LISTING_IMPACT_LABELS[impact] : null,
+    }
+  }),
+})))
+
+const { ensureResolved } = useVaultReferences()
+watch(groups, (list) => {
+  ensureResolved(list.flatMap(group => group.rows.map(row => ({ key: row.finding.key, parts: row.parts }))))
+}, { immediate: true })
 </script>
 
 <template>
@@ -57,93 +75,95 @@ const copyAddress = (address: string) => {
       >
         Checked {{ checkedAgo }}
       </p>
-      <p class="text-p4 text-content-tertiary">
-        Configuration checks are not an overall risk rating.
+      <p
+        class="text-p4 text-content-tertiary"
+        data-id="vault-checks-disclaimer"
+      >
+        {{ VAULT_CHECKS_DISCLAIMER }}
       </p>
       <p
-        v-if="!details.findings.length"
+        v-if="!groups.length"
         class="text-p3 text-content-secondary"
       >
         No detailed findings are available yet.
       </p>
-      <div
-        v-for="(finding, index) in details.findings"
-        :key="`${finding.key}-${index}`"
-        class="flex items-start gap-10"
+      <section
+        v-for="group in groups"
+        :key="group.key"
+        class="flex flex-col gap-10 pt-4"
+        data-id="vault-check-group"
+        :data-group="group.key"
       >
-        <span
-          class="flex-shrink-0 w-20 h-20 rounded-full flex items-center justify-center mt-8"
-          :class="{
-            'bg-success-500': getVaultCheckFindingTone(finding) === 'pass',
-            'bg-warning-500': getVaultCheckFindingTone(finding) === 'warning',
-            'bg-error-500': getVaultCheckFindingTone(finding) === 'error',
-            'bg-content-muted': getVaultCheckFindingTone(finding) === 'muted',
-          }"
-          :data-tone="getVaultCheckFindingTone(finding)"
+        <h3 class="text-p3 font-semibold text-content-primary">
+          {{ group.title }}
+        </h3>
+        <div
+          v-for="(row, index) in group.rows"
+          :key="`${row.finding.key}-${index}`"
+          class="flex items-start gap-10"
+          data-id="vault-check-finding"
+          :data-key="row.finding.key"
         >
-          <SvgIcon
-            :name="iconFor(finding)"
-            class="!w-10 !h-10 text-white"
-          />
-        </span>
-        <div class="min-w-0">
-          <p class="text-p3 font-medium text-content-primary break-words">
-            {{ titleFor(finding) }}
-            <button
-              v-if="addressFor(finding)"
-              type="button"
-              class="ml-4 inline-flex items-center gap-2 font-mono text-p4 font-normal text-accent-600 underline decoration-dotted outline-none hover:text-accent-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
-              :aria-label="`Copy address ${addressFor(finding)}`"
-              @mousedown.stop.prevent
-              @click.stop.prevent="copyAddress(addressFor(finding)!)"
-            >
-              {{ shortenAddress(addressFor(finding)) }}
-              <SvgIcon
-                class="!w-12 !h-12"
-                :name="isCopied(addressFor(finding)!) ? 'check' : 'copy'"
-              />
-            </button>
-            <span
-              v-if="finding.outcome === 'fail' && finding.exempted"
-              class="ml-4 text-p4 text-content-tertiary"
-            >Accepted exception</span>
-            <span
-              v-else-if="finding.outcome === 'not_applicable'"
-              class="ml-4 text-p4 text-content-tertiary"
-            >N/A</span>
-          </p>
-          <p class="text-p3 text-content-secondary break-words">
-            <template
-              v-for="(part, partIndex) in messagePartsFor(finding)"
-              :key="partIndex"
-            >
-              <button
-                v-if="part.address"
-                type="button"
-                class="inline-flex items-center gap-2 font-mono text-accent-600 underline decoration-dotted outline-none hover:text-accent-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
-                :aria-label="`Copy address ${part.address}`"
-                @mousedown.stop.prevent
-                @click.stop.prevent="copyAddress(part.address)"
-              >
-                {{ part.text }}
-                <SvgIcon
-                  class="!w-12 !h-12"
-                  :name="isCopied(part.address) ? 'check' : 'copy'"
-                />
-              </button>
-              <template v-else>
-                {{ part.text }}
-              </template>
-            </template>
-          </p>
-          <p
-            v-if="finding.cause?.summary && finding.description !== finding.cause.summary"
-            class="text-p4 text-content-tertiary break-words"
+          <span
+            class="flex-shrink-0 w-20 h-20 rounded-full flex items-center justify-center mt-2"
+            :class="{
+              'bg-success-500': row.tone === 'pass',
+              'bg-warning-500': row.tone === 'warning',
+              'bg-error-500': row.tone === 'error',
+              'bg-content-muted': row.tone === 'muted',
+            }"
+            :data-tone="row.tone"
           >
-            {{ finding.description }}
-          </p>
+            <SvgIcon
+              :name="row.icon"
+              class="!w-10 !h-10 text-white"
+            />
+          </span>
+          <div class="min-w-0">
+            <p class="text-p3 font-medium text-content-primary break-words">
+              <template v-if="row.address">
+                <VaultReference
+                  class="font-normal text-accent-600"
+                  :address="row.address"
+                />
+                ·
+              </template>{{ row.title }}
+              <span
+                v-if="row.finding.outcome === 'fail' && row.finding.exempted"
+                class="ml-4 text-p4 font-normal text-content-tertiary"
+              >Accepted exception</span>
+              <span
+                v-else-if="row.finding.outcome === 'not_applicable'"
+                class="ml-4 text-p4 font-normal text-content-tertiary"
+              >N/A</span>
+              <span
+                v-else-if="row.listingImpact"
+                class="ml-4 text-p4 font-normal text-content-tertiary"
+                data-id="vault-check-listing-impact"
+              >{{ row.listingImpact }}</span>
+            </p>
+            <p
+              v-if="row.parts.length"
+              class="text-p3 text-content-secondary break-words"
+            >
+              <template
+                v-for="(part, partIndex) in row.parts"
+                :key="partIndex"
+              >
+                <VaultReference
+                  v-if="part.address"
+                  class="text-accent-600"
+                  :address="part.address"
+                  :fallback="part.text"
+                />
+                <template v-else>
+                  {{ part.text }}
+                </template>
+              </template>
+            </p>
+          </div>
         </div>
-      </div>
+      </section>
     </div>
   </BaseModalWrapper>
 </template>

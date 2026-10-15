@@ -1,7 +1,8 @@
 import { isEulerEarn, isEVault, type VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
 import type { AnyVault } from '~/composables/useVaultRegistry'
 import { useEulerLabels } from '~/composables/useEulerLabels'
-import { getVaultCheckFindings, hasOnlyAcceptedVaultCheckFindings } from '~/utils/vault-assessment/presentation'
+import { getVaultCheckFindings, hasOnlyAcceptedVaultCheckFindings, type VaultCheckLine } from '~/utils/vault-assessment/presentation'
+import { useVaultReferences } from '~/composables/useVaultReferences'
 
 const getAssessmentFamily = (vault: AnyVault): VaultAssessmentFamily | null =>
   isEulerEarn(vault) ? 'earn' : isEVault(vault) ? 'evk' : null
@@ -11,6 +12,10 @@ export const useDiscoveryVaultWarningDetails = () => {
     isReady, source, vaultAssessments,
     getVaultAssessmentEntry, loadVaultAssessment,
   } = useEulerLabels()
+  const { describe } = useVaultReferences()
+  const lineText = (line: VaultCheckLine) => line.parts
+    ? line.parts.map(part => part.address ? describe(part.address, part.text).label : part.text).join('')
+    : line.text
 
   const isAcceptedOnlyWarning = (vault: AnyVault | undefined): boolean => {
     const family = vault && getAssessmentFamily(vault)
@@ -31,7 +36,7 @@ export const useDiscoveryVaultWarningDetails = () => {
     if (entry.status !== 'available' || !entry.assessment?.assessed) return summary
     const findings = getVaultCheckFindings(entry.assessment)
     if (!findings.lines.length) return summary
-    const lines = findings.lines.map(finding => `• ${finding.text}`)
+    const lines = findings.lines.map(finding => `• ${lineText(finding)}`)
     if (findings.moreCount) lines.push(`• ${findings.moreCount} more not shown`)
     return lines.join('\n')
   }

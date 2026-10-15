@@ -53,11 +53,6 @@ const isCyclicalIRM = computed(() => vault.interestRateModel.type === INTEREST_R
       :default-open="false"
     />
 
-    <VaultOverviewBlockOracleAdapters
-      :vault="vault"
-      :default-open="false"
-    />
-
     <VaultOverviewBlockBorrow
       :vault="vault"
       :default-open="false"

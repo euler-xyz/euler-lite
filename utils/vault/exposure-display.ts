@@ -311,3 +311,18 @@ export const sortVaultExposureDisplayItems = (
     if (b.valueUsd !== a.valueUsd) return b.valueUsd - a.valueUsd
     return (a.label ?? a.asset.symbol).localeCompare(b.label ?? b.asset.symbol)
   })
+
+export const getExposureLead = (
+  display: VaultExposureDisplay,
+  limit = 3,
+): { assets: ExposureBackingAsset[], label: string } | null => {
+  if (display.valueState === 'loading' || !display.items.length) return null
+  const sorted = sortVaultExposureDisplayItems(display.items)
+  const shown = sorted.slice(0, limit)
+  const rest = sorted.length - shown.length
+  const symbols = `${shown.map(item => item.label ?? item.asset.symbol).join(', ')}${rest > 0 ? ` +${rest}` : ''}`
+  return {
+    assets: shown.map(item => item.asset),
+    label: `${display.valueState === 'ready' ? 'Backed by' : 'Accepts'} ${symbols}`,
+  }
+}

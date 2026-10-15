@@ -3,6 +3,7 @@ import {
   buildAllocatedVaultExposureDisplayItems,
   buildFallbackVaultExposureDisplay,
   combineVaultExposureDisplays,
+  getExposureLead,
   mergeVaultExposureDisplayItems,
   resolveVaultExposureDisplay,
   sortVaultExposureDisplayItems,
@@ -368,5 +369,25 @@ describe('combineVaultExposureDisplays', () => {
     expect(valueState).toBe('unavailable')
     expect(items.map(entry => entry.asset.symbol).sort()).toEqual(['cbBTC', 'wstETH'])
     expect(items.every(entry => entry.valueUsd === 0)).toBe(true)
+  })
+})
+
+describe('getExposureLead', () => {
+  const asset = (symbol: string) => ({ address: `0x${symbol.padStart(40, '0').toLowerCase().replace(/[^0-9a-f]/g, '0')}`, symbol })
+  const item = (symbol: string, valueUsd: number) => ({ asset: asset(symbol), valueUsd })
+
+  it('leads with the collateral backing borrows, largest first, the rest counted', () => {
+    const lead = getExposureLead({ valueState: 'ready', items: [item('WBTC', 10), item('wstETH', 50), item('cbBTC', 5), item('LINK', 1)] })
+    expect(lead?.assets.map(entry => entry.symbol)).toEqual(['wstETH', 'WBTC', 'cbBTC'])
+    expect(lead?.label).toBe('Backed by wstETH, WBTC, cbBTC +1')
+  })
+
+  it('names accepted collateral when the split is unknown', () => {
+    expect(getExposureLead({ valueState: 'unavailable', items: [item('WBTC', 0)] })?.label).toBe('Accepts WBTC')
+  })
+
+  it('has no lead when nothing backs the strategy or it is still loading', () => {
+    expect(getExposureLead({ valueState: 'ready', items: [] })).toBeNull()
+    expect(getExposureLead({ valueState: 'loading', items: [] })).toBeNull()
   })
 })

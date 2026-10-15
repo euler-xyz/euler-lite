@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
+import { VAULT_CHECKS_DISCLAIMER } from '~/utils/vault-assessment/presentation'
 
 type VaultChecksTarget = {
   address: string
@@ -34,6 +35,12 @@ const cards = computed<VaultChecksTarget[]>(() => {
     :default-open="props.defaultOpen ?? false"
     content-class="flex flex-col gap-16"
   >
+    <p
+      class="text-p3 text-content-tertiary"
+      data-id="vault-checks-disclaimer"
+    >
+      {{ VAULT_CHECKS_DISCLAIMER }}
+    </p>
     <VaultOverviewBlockVaultChecksCard
       v-for="card in cards"
       :key="card.address"

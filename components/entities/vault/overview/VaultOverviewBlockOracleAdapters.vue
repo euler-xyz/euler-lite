@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import type {
   SecuritizeCollateralVault,
   EVault,
@@ -110,18 +111,23 @@ registerOracleAdapterAnchors(computed(() => oracleAssessmentsStatus.value === 'a
   ? adapterViews.value.map(adapter => oracleAdapterAnchor(adapter.oracle))
   : []))
 const route = useRoute()
-const section = ref<{ setOpen: (open: boolean) => void } | null>(null)
+const section = ref<{ setOpen: (open: boolean) => void, $el: HTMLElement } | null>(null)
 const revealTargetAdapter = async () => {
   if (!import.meta.client) return
   const id = route.hash.replace(/^#/, '')
   if (!id.startsWith('oracle-adapter-') || !adapterViews.value.some(adapter => oracleAdapterAnchor(adapter.oracle) === id)) return
   section.value?.setOpen(true)
   await nextTick()
-  document.getElementById(id)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  const target = section.value?.$el.querySelector<HTMLElement>(`[id="${id}"]`)
+  if (target?.getClientRects().length) target.scrollIntoView({ block: 'center', behavior: 'smooth' })
 }
 watch([() => route.hash, () => adapterViews.value.length], () => {
   void revealTargetAdapter()
-}, { immediate: true })
+})
+/** After in-app navigation the adapters are already loaded, so the section must exist before the first reveal. */
+onMounted(() => {
+  void revealTargetAdapter()
+})
 
 const { copyToClipboard } = useClipboardCopy()
 

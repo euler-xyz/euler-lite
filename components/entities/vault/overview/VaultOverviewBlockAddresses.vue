@@ -60,7 +60,6 @@ const vaultAddresesInfo = computed(() => {
       {
         title: `Fee receiver`,
         address: vault.fees.governorFeeReceiver,
-        checkSafe: true,
       },
       {
         title: `Oracle router`,

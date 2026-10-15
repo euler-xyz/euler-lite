@@ -3,6 +3,7 @@ import { renderToString } from '@vue/server-renderer'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { getAddress } from 'viem'
 import VaultAssessmentWarningLines from '~/components/entities/vault/VaultAssessmentWarningLines.vue'
+import VaultReference from '~/components/entities/vault/VaultReference.vue'
 
 const usdt = '0x00000000000000000000000000000000000000aa'
 const weth = '0x00000000000000000000000000000000000000bb'
@@ -12,8 +13,21 @@ const assessmentWith = (findings: Array<Record<string, unknown>>) => ({
   assessment: { assessed: true, configStatus: 'verified', checksStatus: 'warning', configContext: { outcome: 'pass', findings }, consistencyContext: null },
 })
 
+const names: Record<string, string> = {
+  '0x00000000000000000000000000000000000000a2': 'Unknown AggregatorV3 Feed',
+  '0x6fe7fa90756434645f0b0428fdff78e99dda0fbc': 'AlphaGrowth Cap USDC',
+}
+
 const render = (entries: Record<string, ReturnType<typeof assessmentWith>>, showSymbol: boolean, unknown: Partial<{ unverified: boolean, cause: string }> = {}) => {
+  const ensureResolved = vi.fn()
   vi.stubGlobal('useClipboardCopy', () => ({ isCopied: () => false, copyToClipboard: vi.fn(async () => {}) }))
+  vi.stubGlobal('useVaultReferences', () => ({
+    ensureResolved,
+    describe: (address: string, fallback?: string) => {
+      const label = names[address.toLowerCase()]
+      return label ? { kind: 'vault', label, to: { path: `/lend/${address}` } } : { kind: 'address', label: fallback ?? address }
+    },
+  }))
   vi.stubGlobal('useEulerLabels', () => ({
     isReady: ref(true),
     source: ref('v3'),
@@ -30,6 +44,8 @@ const render = (entries: Record<string, ReturnType<typeof assessmentWith>>, show
     }),
   })
   app.component('SvgIcon', { render: () => h('span') })
+  app.component('VaultReference', VaultReference)
+  app.component('NuxtLink', { props: { to: Object }, setup: (_props, { slots }) => () => h('a', { 'data-link': 'true' }, slots.default?.()) })
   return renderToString(app)
 }
 
@@ -83,6 +99,18 @@ describe('vault assessment warning lines', () => {
     expect(html).toContain('The quote is stale')
     expect(html).not.toContain('0x0000…00a1')
     expect(html).not.toContain('oracle routes include adapters')
+  })
+
+  it('names the vault a check is about, without a link inside a row that is itself a link', async () => {
+    const strategy = '0x6fe7fa90756434645f0b0428fdff78e99dda0fbc'
+    const html = await render({
+      [usdt]: assessmentWith([{ key: `strategy.${strategy}.visible`, description: 'The strategy is escrow or shown', outcome: 'fail', required: false, cause: { code: 'dependency-deprecated', subject: strategy, summary: 'Strategy 0x6fe7fa…0fbc is deprecated: Deprecated due to low activity.', remedy: 'remove-the-dependency' } }]),
+    }, false)
+    expect(html).toMatch(/Strategy (?:<!--[^>]*-->)*<span[^>]*data-id="vault-reference"/)
+    expect(html).toContain('AlphaGrowth Cap USDC')
+    expect(html).toContain('is deprecated: Deprecated due to low activity.')
+    expect(html).not.toContain('0x6fe7fa…0fbc')
+    expect(html).not.toContain('data-link')
   })
 
   it('renders nothing when no vault has a failing check', async () => {

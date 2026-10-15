@@ -6,6 +6,7 @@ import {
   getVaultChecksCell,
   getVaultChecksStatusLine,
   getWarningAdapterFailures,
+  VAULT_CHECK_LISTING_IMPACT_LABELS,
 } from '~/utils/vault-assessment/presentation'
 import { getExplorerLink } from '~/utils/block-explorer'
 import { shortenAddress } from '~/utils/string-utils'
@@ -18,7 +19,6 @@ const props = defineProps<{
   asset?: { decimals: number, symbol?: string }
   symbol?: string
 }>()
-const route = useRoute()
 const { chainId } = useEulerAddresses()
 const nowMs = useActivityNowMs()
 const { vaultAssessments, loadVaultAssessment, getVaultAssessmentEntry, oracleAdapters, loadOracleAdapters } = useEulerLabels()
@@ -52,6 +52,17 @@ const { isCopied, copyToClipboard } = useClipboardCopy()
 const copyAddress = (address: string) => {
   copyToClipboard(address).catch(() => {})
 }
+const { ensureResolved, oracleLinkFor } = useVaultReferences()
+watch(lines, ensureResolved, { immediate: true })
+const { weightOf } = useVaultCheckWeights(() => props.address)
+const lineViews = computed(() => lines.value.map(line => ({
+  ...line,
+  oracleLink: oracleLinkFor(line, props.address, !!line.anchor && hasAnchor(line.anchor)),
+  details: [
+    line.listingImpact ? VAULT_CHECK_LISTING_IMPACT_LABELS[line.listingImpact] : null,
+    weightOf(line.subject),
+  ].filter(Boolean).join(' · '),
+})))
 
 watch(
   () => [chainId.value, props.address, family.value] as const,
@@ -132,48 +143,47 @@ watch(
       </div>
     </div>
     <ul
-      v-if="lines.length"
+      v-if="lineViews.length"
       class="flex flex-col gap-8"
     >
       <li
-        v-for="finding in lines"
+        v-for="finding in lineViews"
         :key="finding.key"
         class="flex gap-8"
         :class="finding.outcome === 'fail' ? 'text-warning-500' : 'text-content-tertiary'"
+        data-id="vault-check-line"
       >
         <SvgIcon
           name="warning"
           class="!w-16 !h-16 shrink-0 mt-2"
         />
-        <span>
-          <template v-if="finding.parts">
-            <template
-              v-for="(part, index) in finding.parts"
-              :key="index"
-            >
-              <button
-                v-if="part.address"
-                type="button"
-                class="inline-flex items-center gap-2 align-baseline underline decoration-dotted outline-none hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
-                :title="isCopied(part.address) ? 'Copied' : 'Copy full address'"
-                :aria-label="`Copy address ${part.address}`"
-                @click.stop.prevent="copyAddress(part.address)"
+        <span class="flex min-w-0 flex-col gap-2">
+          <span class="break-words">
+            <template v-if="finding.parts">
+              <template
+                v-for="(part, index) in finding.parts"
+                :key="index"
               >
-                <span>{{ part.text }}</span>
-                <SvgIcon
-                  class="!w-14 !h-14"
-                  :name="isCopied(part.address) ? 'check' : 'copy'"
+                <VaultReference
+                  v-if="part.address"
+                  :address="part.address"
+                  :fallback="part.text"
                 />
-              </button>
-              <template v-else>{{ part.text }}</template>
+                <template v-else>{{ part.text }}</template>
+              </template>
             </template>
-          </template>
-          <template v-else>{{ finding.text }}</template>
-          <NuxtLink
-            v-if="finding.anchor && hasAnchor(finding.anchor)"
-            :to="{ query: route.query, hash: `#${finding.anchor}` }"
-            class="ml-6 whitespace-nowrap text-accent-600 underline decoration-dotted hover:text-accent-500"
-          >Show in Oracles</NuxtLink>
+            <template v-else>{{ finding.text }}</template>
+            <NuxtLink
+              v-if="finding.oracleLink"
+              :to="finding.oracleLink"
+              class="ml-6 whitespace-nowrap text-accent-600 underline decoration-dotted hover:text-accent-500"
+            >Show in Oracles</NuxtLink>
+          </span>
+          <span
+            v-if="finding.details"
+            class="text-p4 text-content-tertiary"
+            data-id="vault-check-line-details"
+          >{{ finding.details }}</span>
         </span>
       </li>
     </ul>
