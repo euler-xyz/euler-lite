@@ -1,88 +1,62 @@
 /* eslint-disable no-console -- this script's whole job is console output */
 /**
- * One-off fetcher that calls swap-dev.euler.finance via the SDK's SwapService
- * and writes the validated quotes to `tests/golden/fixtures/`.
+ * Fetches swap quotes from swap-dev.euler.finance via the SDK's SwapService,
+ * validated against the deployment in euler-interfaces `EulerChains.json`, and
+ * writes the quotes and that deployment to `tests/golden/fixtures/`.
  *
- * Run from the main worktree with:
  *   npm run test:golden:fetch-fixtures
  *
- * The committed JSON files are what the parity tests load. Regenerate them
- * whenever an SDK validation rule changes (verifier args, slippage rounding,
- * etc.) or you need to add a new swap scenario.
+ * Regenerate whenever an SDK validation rule changes (verifier args, slippage
+ * rounding, etc.), the deployment is redeployed, or a swap scenario is added.
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { type Address, zeroAddress } from 'viem'
 import {
+  DeploymentService,
   SwapService,
   SwapperMode,
   type Deployment,
-  type IDeploymentService,
   type SwapQuote,
 } from '@eulerxyz/euler-v2-sdk'
 
+import { eulerInterfacesRawUrl } from '../../server/utils/euler-interfaces'
 import { ADDR, CHAIN_ID } from './harness'
+import { DEPLOYMENT_FIXTURE, type GoldenDeployment } from './load-fixture'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const FIXTURES_DIR = resolvePath(__dirname, 'fixtures')
 
 const SWAP_API_URL = process.env.GOLDEN_SWAP_API_URL ?? 'https://swap-dev.euler.finance'
+const DEPLOYMENTS_URL = eulerInterfacesRawUrl('EulerChains.json')
 const SLIPPAGE = 0.5
 const FIXED_DEADLINE = 4_000_000_000 // year ~2096, in seconds — keeps fixtures deterministic across regenerations
-
-const stubDeployment: Deployment = {
-  chainId: CHAIN_ID,
-  name: 'mainnet',
-  status: 'production',
-  addresses: {
-    coreAddrs: {
-      balanceTracker: zeroAddress as Address,
-      eVaultFactory: zeroAddress as Address,
-      eVaultImplementation: zeroAddress as Address,
-      eulerEarnFactory: zeroAddress as Address,
-      evc: ADDR.evc,
-      permit2: ADDR.permit2,
-      protocolConfig: zeroAddress as Address,
-      sequenceRegistry: zeroAddress as Address,
-    },
-    lensAddrs: {
-      accountLens: ADDR.accountLens,
-      eulerEarnVaultLens: zeroAddress as Address,
-      irmLens: zeroAddress as Address,
-      oracleLens: zeroAddress as Address,
-      utilsLens: zeroAddress as Address,
-      vaultLens: zeroAddress as Address,
-    },
-    peripheryAddrs: {
-      swapper: ADDR.swapper,
-      swapVerifier: ADDR.swapVerifier,
-    },
-  },
-}
-
-const deploymentService: IDeploymentService = {
-  getDeploymentChainIds: () => [CHAIN_ID],
-  getDeployment: (chainId) => {
-    if (chainId !== CHAIN_ID) throw new Error(`unexpected chain: ${chainId}`)
-    return stubDeployment
-  },
-  addDeployment: () => { /* noop */ },
-}
-
-const swapService = new SwapService({ swapApiUrl: SWAP_API_URL }, deploymentService)
 
 // JSON serializer that preserves bigint values for round-trip.
 const jsonReplacer = (_k: string, v: unknown): unknown =>
   typeof v === 'bigint' ? { $bigint: v.toString() } : v
 
-const writeFixture = (name: string, request: unknown, quote: SwapQuote) => {
+const writeJsonFixture = (name: string, data: unknown) => {
   mkdirSync(FIXTURES_DIR, { recursive: true })
   const path = resolvePath(FIXTURES_DIR, `${name}.json`)
-  writeFileSync(path, JSON.stringify({ request, quote }, jsonReplacer, 2))
+  writeFileSync(path, JSON.stringify(data, jsonReplacer, 2))
   console.log(`✓ ${name} → ${path}`)
+}
+
+const writeFixture = (name: string, request: unknown, quote: SwapQuote) => writeJsonFixture(name, { request, quote })
+
+const toGoldenDeployment = ({ addresses }: Deployment): GoldenDeployment => {
+  const { swapper, swapVerifier } = addresses.peripheryAddrs ?? {}
+  if (!swapper || !swapVerifier) throw new Error(`chain ${CHAIN_ID}: ${DEPLOYMENTS_URL} has no swapper or swapVerifier`)
+  return {
+    evc: addresses.coreAddrs.evc,
+    permit2: addresses.coreAddrs.permit2,
+    swapper,
+    swapVerifier,
+    accountLens: addresses.lensAddrs.accountLens,
+  }
 }
 
 /** Picks the first non-CoW quote so the on-chain swapper path is exercised. */
@@ -95,6 +69,10 @@ const pickConcreteQuote = (quotes: SwapQuote[], scenario: string): SwapQuote => 
 // Only the two swap quotes the canary suite consumes are fetched here. If the
 // canary is expanded to another swap operation, add its scenario back.
 async function main() {
+  const deploymentService = await DeploymentService.build({ deploymentsUrl: DEPLOYMENTS_URL })
+  const deployment = toGoldenDeployment(deploymentService.getDeployment(CHAIN_ID))
+  const swapService = new SwapService({ swapApiUrl: SWAP_API_URL }, deploymentService)
+
   // --- Collateral swap (planSwapCollateral)
   //
   // SDK fetchDepositQuote with isRepay=false, EXACT_IN. Verify type is SkimMin.
@@ -142,6 +120,8 @@ async function main() {
     const quotes = await swapService.fetchSwapQuotes(args)
     writeFixture('swap-multiply-usdc-to-dai', args, pickConcreteQuote(quotes, 'multiply'))
   }
+
+  writeJsonFixture(DEPLOYMENT_FIXTURE, { chainId: CHAIN_ID, ...deployment })
 }
 
 main().catch((err) => {

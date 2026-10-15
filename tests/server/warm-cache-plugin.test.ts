@@ -77,6 +77,7 @@ const warmedChains = (fn: typeof mocks.refreshTokenList | typeof mocks.refreshCh
 describe('warm-cache plugin deprecated chains', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    vi.stubEnv('DEPRECATED_CHAINS', '')
     Reflect.deleteProperty(globalThis, WARM_LATCH_KEY)
   })
 

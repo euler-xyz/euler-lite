@@ -144,7 +144,8 @@ Three distinct test layers — most day-to-day work only touches the first.
    separate vitest config** — and **runs as part of `npm run test:run`**. Scripts: `npm run test:golden`
    (golden only), `npm run test:golden:update` (`UPDATE_GOLDEN=1`; regenerate `plans/*.json` after a
    deliberate builder change, then review the diff), and `npm run test:golden:fetch-fixtures`
-   (re-fetch the swap-quote fixtures in `tests/golden/fixtures/*.json` via the SDK `SwapService`;
+   (re-fetch the swap-quote fixtures in `tests/golden/fixtures/*.json` via the SDK `SwapService`,
+   plus the mainnet deployment addresses they were validated against in `fixtures/deployment.json`;
    override the endpoint with `GOLDEN_SWAP_API_URL`). Outside update mode a missing fixture is a hard
    failure, so the suite can't mint its own baseline. Details in `tests/golden/README.md`.
 3. **Parity / execution (Playwright, `scripts/*.mjs` + `tests/parity/`, `tests/execution/`).**
