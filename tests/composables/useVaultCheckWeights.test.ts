@@ -74,9 +74,9 @@ describe('useVaultCheckWeights', () => {
       { namespace: 'collateral', address: COLLATERAL },
       undefined,
     ])
-    expect(strategy).toEqual({ label: 'Holds 6% of deposits', value: expect.closeTo(2_334 / 39_009, 6) })
-    expect(empty).toEqual({ label: 'Holds none of the deposits', value: 0 })
-    expect(collateral).toEqual({ label: `Backs ${formatCompactUsdValue(500)} of borrows in this vault's strategies`, value: 500 })
+    expect(strategy).toEqual({ label: 'Holds 6% of deposits', scope: '', value: expect.closeTo(2_334 / 39_009, 6) })
+    expect(empty).toEqual({ label: 'Holds none of the deposits', scope: '', value: 0 })
+    expect(collateral).toEqual({ label: `Backs ${formatCompactUsdValue(500)} of borrows`, scope: ' in this vault\'s strategies', value: 500 })
     expect(none).toBeNull()
   })
 

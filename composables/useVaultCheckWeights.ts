@@ -12,6 +12,8 @@ export const formatDepositShare = (share: number): string => {
 
 export interface VaultCheckWeight {
   label: string
+  /** Appended where nothing else says the borrows are this Earn vault's strategies'. */
+  scope: string
   value: number
 }
 
@@ -44,18 +46,21 @@ export const useVaultCheckWeights = (vaultAddress: MaybeRefOrGetter<string>) => 
       if (subject.namespace === 'strategy') {
         const share = earn ? getStrategyDepositShare(earn, subject.address) : undefined
         if (share === undefined) return null
-        return { value: share, label: share === 0 ? 'Holds none of the deposits' : `Holds ${formatDepositShare(share)} of deposits` }
+        return { value: share, scope: '', label: share === 0 ? 'Holds none of the deposits' : `Holds ${formatDepositShare(share)} of deposits` }
       }
       if (!isLoaded.value) return null
       if (borrowSources === undefined) borrowSources = readBorrowSources(vault, earn)
       if (!borrowSources) return null
       const usd = getCollateralBorrowsUsd(borrowSources, subject.address)
       const scope = earn ? ' in this vault\'s strategies' : ''
-      return { value: usd, label: usd > 0 ? `Backs ${formatCompactUsdValue(usd)} of borrows${scope}` : `Backs no borrows${scope}` }
+      return { value: usd, scope, label: usd > 0 ? `Backs ${formatCompactUsdValue(usd)} of borrows` : 'Backs no borrows' }
     })
   }
 
-  const weightOf = (subject: VaultCheckSubject | undefined): string | null => weighAll([subject])[0]?.label ?? null
+  const weightOf = (subject: VaultCheckSubject | undefined): string | null => {
+    const weight = weighAll([subject])[0]
+    return weight ? `${weight.label}${weight.scope}` : null
+  }
 
   return { weightOf, weighAll }
 }

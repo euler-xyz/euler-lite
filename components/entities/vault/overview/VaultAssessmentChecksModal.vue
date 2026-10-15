@@ -75,7 +75,7 @@ const groups = computed(() => {
   const weightOf = (subject: VaultCheckSubject) => weights.get(vaultCheckSubjectKey(subject)) ?? null
   return shownGroups.value.map(group => ({
     key: group.key,
-    title: group.title,
+    title: group.key === 'collateral' && props.assessment.family === 'earn' ? 'Collateral in strategies' : group.title,
     rows: groupVaultCheckRows(group.findings, subject => weightOf(subject)?.value ?? null).map((row): VaultCheckRowView => ({
       key: row.key,
       subject: row.subject,

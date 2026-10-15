@@ -152,4 +152,9 @@ describe('vault checks pop-up', () => {
     expect(html).not.toContain('<ul')
     expect(html).toMatch(/data-reference="[^"]+"[^>]*>[^<]*<\/span>\s*<span[^>]*data-id="vault-check-finding"[^>]*> · Visible</)
   })
+
+  it('says once, in the group title, that an Earn vault\'s collateral is its strategies\'', async () => {
+    const html = await render([finding(`collateral.${PRIME}.visible`)]).html
+    expect(html).toContain('Collateral in strategies')
+  })
 })
