@@ -66,6 +66,20 @@ describe('useVaultCheckWeights', () => {
     expect(useVaultCheckWeights(EVK).weightOf({ namespace: 'collateral', address: STRATEGY })).toBe('Backs no borrows')
   })
 
+  it('weighs a list of subjects, with the label and the number side by side', () => {
+    const { weighAll } = useVaultCheckWeights(EARN)
+    const [strategy, empty, collateral, none] = weighAll([
+      { namespace: 'strategy', address: STRATEGY },
+      { namespace: 'strategy', address: COLLATERAL },
+      { namespace: 'collateral', address: COLLATERAL },
+      undefined,
+    ])
+    expect(strategy).toEqual({ label: 'Holds 6% of deposits', scope: '', value: expect.closeTo(2_334 / 39_009, 6) })
+    expect(empty).toEqual({ label: 'Holds none of the deposits', scope: '', value: 0 })
+    expect(collateral).toEqual({ label: `Backs ${formatCompactUsdValue(500)} of borrows`, scope: ' in this vault\'s strategies', value: 500 })
+    expect(none).toBeNull()
+  })
+
   it('says nothing about borrows until open interest has loaded, or for a line with no subject', () => {
     isLoaded.value = false
     expect(useVaultCheckWeights(EVK).weightOf({ namespace: 'collateral', address: COLLATERAL })).toBeNull()

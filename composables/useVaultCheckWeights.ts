@@ -1,5 +1,6 @@
-import { isEulerEarn, isEVault } from '@eulerxyz/euler-v2-sdk'
+import { isEulerEarn, isEVault, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { toValue, type MaybeRefOrGetter } from 'vue'
+import type { AnyVault } from '~/composables/useVaultRegistry'
 import { formatCompactUsdValue } from '~/utils/string-utils'
 import { getCollateralBorrowsUsd, getStrategyDepositShare, type VaultCheckSubject } from '~/utils/vault-assessment/subjects'
 
@@ -9,36 +10,57 @@ export const formatDepositShare = (share: number): string => {
   return `${Math.round(percent)}%`
 }
 
+export interface VaultCheckWeight {
+  label: string
+  /** Appended where nothing else says the borrows are this Earn vault's strategies'. */
+  scope: string
+  value: number
+}
+
 export const useVaultCheckWeights = (vaultAddress: MaybeRefOrGetter<string>) => {
   const { get, registryVersion } = useVaultRegistry()
   const { load, isLoaded, getOpenInterestForVault } = useCollateralOpenInterest()
   void load()
 
-  const weightOf = (subject: VaultCheckSubject | undefined): string | null => {
-    if (!subject) return null
-    void registryVersion.value
-    const vault = get(toValue(vaultAddress))?.vault
-    const earn = vault && isEulerEarn(vault) ? vault : null
-    if (subject.namespace === 'strategy') {
-      const share = earn ? getStrategyDepositShare(earn, subject.address) : undefined
-      if (share === undefined) return null
-      return share === 0 ? 'Holds none of the deposits' : `Holds ${formatDepositShare(share)} of deposits`
-    }
-    if (!isLoaded.value) return null
+  const readBorrowSources = (vault: AnyVault | undefined, earn: EulerEarn | null): Record<string, number>[] | null => {
     const borrowVaults = earn
       ? earn.strategies.map(strategy => ({ address: strategy.address, vault: strategy.vault ?? get(strategy.address)?.vault }))
       : [{ address: toValue(vaultAddress), vault }]
     const sources = borrowVaults.map(source => getOpenInterestForVault(source.address))
     const hasMissingSplit = borrowVaults.some((source, index) => {
-      const hasSplit = Object.values(sources[index]).some(usd => Number.isFinite(usd) && usd > 0)
+      const hasSplit = Object.values(sources[index]!).some(usd => Number.isFinite(usd) && usd > 0)
       const hasNoBorrows = source.vault && isEVault(source.vault) && source.vault.totalBorrowed === 0n
       return !hasSplit && !hasNoBorrows
     })
-    if (hasMissingSplit) return null
-    const usd = getCollateralBorrowsUsd(sources, subject.address)
-    const scope = earn ? ' in this vault\'s strategies' : ''
-    return usd > 0 ? `Backs ${formatCompactUsdValue(usd)} of borrows${scope}` : `Backs no borrows${scope}`
+    return hasMissingSplit ? null : sources
   }
 
-  return { weightOf }
+  /** Open interest is scanned once per call, not once per subject. */
+  const weighAll = (subjects: readonly (VaultCheckSubject | undefined)[]): (VaultCheckWeight | null)[] => {
+    void registryVersion.value
+    const vault = get(toValue(vaultAddress))?.vault
+    const earn = vault && isEulerEarn(vault) ? vault : null
+    let borrowSources: Record<string, number>[] | null | undefined
+    return subjects.map((subject) => {
+      if (!subject) return null
+      if (subject.namespace === 'strategy') {
+        const share = earn ? getStrategyDepositShare(earn, subject.address) : undefined
+        if (share === undefined) return null
+        return { value: share, scope: '', label: share === 0 ? 'Holds none of the deposits' : `Holds ${formatDepositShare(share)} of deposits` }
+      }
+      if (!isLoaded.value) return null
+      if (borrowSources === undefined) borrowSources = readBorrowSources(vault, earn)
+      if (!borrowSources) return null
+      const usd = getCollateralBorrowsUsd(borrowSources, subject.address)
+      const scope = earn ? ' in this vault\'s strategies' : ''
+      return { value: usd, scope, label: usd > 0 ? `Backs ${formatCompactUsdValue(usd)} of borrows` : 'Backs no borrows' }
+    })
+  }
+
+  const weightOf = (subject: VaultCheckSubject | undefined): string | null => {
+    const weight = weighAll([subject])[0]
+    return weight ? `${weight.label}${weight.scope}` : null
+  }
+
+  return { weightOf, weighAll }
 }

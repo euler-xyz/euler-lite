@@ -173,17 +173,18 @@ watch(
               </template>
             </template>
             <template v-else>{{ finding.text }}</template>
-            <NuxtLink
-              v-if="finding.oracleLink"
-              :to="finding.oracleLink"
-              class="ml-6 whitespace-nowrap text-accent-600 underline decoration-dotted hover:text-accent-500"
-            >Show in Oracles</NuxtLink>
           </span>
           <span
             v-if="finding.details"
             class="text-p4 text-content-tertiary"
             data-id="vault-check-line-details"
           >{{ finding.details }}</span>
+          <NuxtLink
+            v-if="finding.oracleLink"
+            :to="finding.oracleLink"
+            class="self-start text-p4 text-accent-600 underline decoration-dotted hover:text-accent-500"
+            data-id="vault-check-oracle-link"
+          >View oracle</NuxtLink>
         </span>
       </li>
     </ul>

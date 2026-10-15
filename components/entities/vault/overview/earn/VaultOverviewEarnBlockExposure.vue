@@ -16,7 +16,7 @@ import {
   type CollateralExposureGroup,
 } from '~/utils/vault/collateral-exposure'
 import {
-  getExposureLead,
+  getVaultHeaderAssets,
   resolveVaultExposureDisplay,
   type ExposureValueState,
   type VaultExposureDisplay,
@@ -84,7 +84,6 @@ const load = async () => {
     })
     exposureVaults.value = (await Promise.all(promises)).filter((vlt): vlt is EVault => Boolean(vlt) && isEVault(vlt))
 
-    // Load USD prices for all exposures
     await loadExposureUsdPrices()
   }
   catch (e) {
@@ -240,16 +239,11 @@ const getStrategySupplyApyModalData = (strategyVault: EVault) => ({
   },
 })
 
-const strategyHeaderAssets = (strategyVault: EVault) => {
-  const lead = getExposureLead(getStrategyExposureDisplay(strategyVault))
-  if (!lead) {
-    return { assets: [{ address: strategyVault.asset.address, decimals: strategyVault.asset.decimals, name: strategyVault.asset.name, symbol: strategyVault.asset.symbol }], label: undefined }
-  }
-  return {
-    assets: lead.assets.map(asset => ({ address: getAddress(asset.address), decimals: asset.decimals ?? 18, name: asset.name ?? asset.symbol, symbol: asset.symbol })),
-    label: lead.label,
-  }
-}
+const strategyHeaderAssets = (strategyVault: EVault) => getVaultHeaderAssets(
+  strategyVault,
+  { enabled: isOpenInterestEnabled.value, loaded: isOpenInterestLoaded.value, hasError: hasOpenInterestError.value },
+  () => collateralExposureGroupsByStrategy.value.get(getAddress(strategyVault.address)) ?? [],
+)
 
 const headerAssetsByStrategy = computed(() => new Map(exposureRows.value
   .flatMap(row => row.vault ? [[row.vault.address.toLowerCase(), strategyHeaderAssets(row.vault)] as const] : [])))

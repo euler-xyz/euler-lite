@@ -18,6 +18,9 @@ export const getVaultCheckSubject = (key: string): VaultCheckSubject | null => {
   return match ? { namespace: match[1] as VaultCheckNamespace, address: getAddress(match[2]!) } : null
 }
 
+export const vaultCheckSubjectKey = (subject: VaultCheckSubject): string =>
+  `${subject.namespace}.${subject.address.toLowerCase()}`
+
 export const collectObservedAddresses = (observed: unknown, limit = 200): string[] => {
   const found = new Map<string, string>()
   const visit = (value: unknown, depth: number) => {
