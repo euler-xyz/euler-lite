@@ -45,8 +45,6 @@ const writeJsonFixture = (name: string, data: unknown) => {
   console.log(`✓ ${name} → ${path}`)
 }
 
-const writeFixture = (name: string, request: unknown, quote: SwapQuote) => writeJsonFixture(name, { request, quote })
-
 const toGoldenDeployment = ({ addresses }: Deployment): GoldenDeployment => {
   const { swapper, swapVerifier } = addresses.peripheryAddrs ?? {}
   if (!swapper || !swapVerifier) throw new Error(`chain ${CHAIN_ID}: ${DEPLOYMENTS_URL} has no swapper or swapVerifier`)
@@ -72,6 +70,7 @@ async function main() {
   const deploymentService = await DeploymentService.build({ deploymentsUrl: DEPLOYMENTS_URL })
   const deployment = toGoldenDeployment(deploymentService.getDeployment(CHAIN_ID))
   const swapService = new SwapService({ swapApiUrl: SWAP_API_URL }, deploymentService)
+  const fixtures: Record<string, unknown> = {}
 
   // --- Collateral swap (planSwapCollateral)
   //
@@ -91,7 +90,7 @@ async function main() {
       deadline: FIXED_DEADLINE,
     } as const
     const quotes = await swapService.fetchDepositQuote(args)
-    writeFixture('swap-collateral-usdc-to-dai', args, pickConcreteQuote(quotes, 'swapCollateral'))
+    fixtures['swap-collateral-usdc-to-dai'] = { request: args, quote: pickConcreteQuote(quotes, 'swapCollateral') }
   }
 
   // --- Multiply with swap (planMultiplyWithSwap)
@@ -118,10 +117,12 @@ async function main() {
       deadline: FIXED_DEADLINE,
     } as const
     const quotes = await swapService.fetchSwapQuotes(args)
-    writeFixture('swap-multiply-usdc-to-dai', args, pickConcreteQuote(quotes, 'multiply'))
+    fixtures['swap-multiply-usdc-to-dai'] = { request: args, quote: pickConcreteQuote(quotes, 'multiply') }
   }
 
-  writeJsonFixture(DEPLOYMENT_FIXTURE, { chainId: CHAIN_ID, ...deployment })
+  fixtures[DEPLOYMENT_FIXTURE] = { chainId: CHAIN_ID, ...deployment }
+  // A failed quote request must leave the existing fixture set untouched.
+  for (const [name, data] of Object.entries(fixtures)) writeJsonFixture(name, data)
 }
 
 main().catch((err) => {
