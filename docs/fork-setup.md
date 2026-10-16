@@ -1,23 +1,45 @@
 # Fork setup: your own V3 and labels
 
-Lite supports an operator-owned V3 backend, operator-owned static labels, or static labels with V3 disabled. Label policy and quantitative data are separate choices. The default configuration uses Euler's V3; none of the options in this guide are required for that setup.
+Lite supports an operator-owned V3 backend, operator-owned static labels, or static labels with V3 disabled. Label policy and quantitative data are separate choices.
 
-| Setup | Vault data | Labels, discovery and country rules |
-|---|---|---|
-| Your own V3 | Your V3, with RPC fallback by default | Your V3's published labels and live policies |
-| Static labels with V3 | Your V3 or Euler's V3 | Your authored JSON files |
-| Static labels without V3 | RPC and configured subgraphs | Your authored JSON files |
+**The current Euler deployment needs no environment changes.** Keep its existing V3, labels and chain settings. `DISABLE_V3` defaults to `false`, and `LABELS_IMAGE_ORIGINS` can remain unset or blank. Neither setting needs to be added to the current deployment.
+
+## Required versus optional settings
+
+Starting from `.env.example` and the common app/RPC setup below, apply the source settings for the setup you choose. The examples also show optional defaults for clarity; you do not need to add every displayed variable.
+
+| Setup | Required source settings | Vault data | Labels, discovery and country rules |
+|---|---|---|---|
+| Current Euler setup | No changes to the existing environment | Euler's V3 and configured RPCs | Euler's V3 |
+| Your own V3 | Set `V3_API_URL` to your backend | Your V3, with RPC fallback by default | Your V3's published labels and live policies |
+| Static labels with V3 | Set `LABELS_SOURCE=static` and `STATIC_LABELS_BASE_URL`; keep a configured `V3_API_URL` for quantitative reads | Your V3 or Euler's V3 | Your authored JSON files |
+| Static labels without V3 | Set `LABELS_SOURCE=static`, `STATIC_LABELS_BASE_URL` and `DISABLE_V3=true` | RPC and configured subgraphs | Your authored JSON files |
+
+| Setting | Requirement and default |
+|---|---|
+| `LABELS_SOURCE` | Defaults to `v3`. Explicitly set `static` when using your own files. |
+| `DISABLE_V3` | Optional; defaults to `false`. Set `true` only for the setup without V3. |
+| `LABELS_V3_SET`, `LABELS_V3_VERSION` | Optional; default to `public` and `latest`. Change only to select another published set/version. Ignored in static mode. |
+| `LABELS_VAULT_TAG` | Optional; blank means no additional tag filter. |
+| `LABELS_IMAGE_ORIGINS` | Optional; unset/blank is sufficient for Euler's image hosts, your configured V3 origin, and static-source images. Set only for hosted V3 label images on an additional CDN. It does not configure the labels source or extend static image rules. |
+| `EULER_SDK_V3_API_KEY` | Required only if your V3 backend requires authentication. Otherwise leave blank. |
+| `SERVER_VAULT_CACHE_SOURCE`, `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` | Optional; both default to `fallback`. With `DISABLE_V3=true`, either `fallback` or `onchain` works; `v3` is invalid. |
+| `ONCHAIN_SDK_CHAINS` | Required for every enabled deprecated chain using hosted labels. Keep existing entries; static labels do not require them for label verification. See [Deprecated chains](#deprecated-chains). |
+| `DEPRECATED_CHAINS` | Optional status override; the chain manifest can supply deprecated status. Keep the current deployment's chain configuration. |
+| `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL`, `NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL` | Optional; set only to use your own manifest or ABI source. Otherwise the configured Euler interfaces branch supplies them. |
 
 ## Common setup
 
 Use Node 24, install the locked dependencies with `npm ci`, and copy `.env.example` to `.env`. Apply one of the configurations below. Values under `.example` are placeholders to replace with your own services.
 
 ```dotenv
+# Set to your app's public URL (localhost for development).
 NUXT_PUBLIC_APP_URL=http://localhost:3000
+# Required: one RPC URL for every enabled chain.
 RPC_URL_1=https://rpc.operator.example
-# Account and vault-type discovery use this indexer where available.
+# Needed for indexer-backed account and vault-type discovery on this chain.
 SUBGRAPH_URL_1=https://subgraph.operator.example
-# Needed for wallet connection; read-only browsing can omit it.
+# Required for wallet connection; read-only browsing can omit it.
 NUXT_PUBLIC_APP_KIT_PROJECT_ID=your-reown-project-id
 ```
 
@@ -30,9 +52,11 @@ Run `npm run dev` for local development. For a deployment, run `npm run build`, 
 ## Your own V3
 
 ```dotenv
+# Required to select your backend instead of Euler's.
 V3_API_URL=https://v3.operator.example
-# Optional, according to your backend's authentication policy; server-only.
+# Required only if your backend requires authentication; server-only.
 EULER_SDK_V3_API_KEY=your-server-api-key
+# Optional defaults; omit these if the defaults match your setup.
 DISABLE_V3=false
 LABELS_SOURCE=v3
 LABELS_V3_SET=public
@@ -49,9 +73,12 @@ Use the backend root URL, without a trailing `/v3`: the SDK and proxies append A
 
 ### Images
 
-Return public HTTP(S) URLs in V3 label metadata. The UI and public vault metadata accept Euler's existing image hosts and the origin of your configured custom V3. If your label images use a separate CDN, explicitly allow its origin:
+`LABELS_SOURCE` and `STATIC_LABELS_BASE_URL` select the labels source; static labels already support logos hosted alongside their files. `LABELS_IMAGE_ORIGINS` is an optional allowlist for hosted V3 label images on an additional CDN. It does not replace those source settings or apply to static images.
+
+Return public HTTP(S) URLs in V3 label metadata. The UI and public vault metadata automatically accept Euler's existing image hosts and the origin of your configured custom V3. **Leave `LABELS_IMAGE_ORIGINS` unset or blank for those hosts, or when using static labels with logos on the static source's origin.** Only configure it when hosted label images use a separate CDN outside those accepted hosts:
 
 ```dotenv
+# Optional: needed only for hosted V3 label images on these additional origins.
 LABELS_IMAGE_ORIGINS=https://images.operator.example,https://cdn.operator.example
 ```
 
@@ -74,8 +101,10 @@ The optional `DEPRECATED_CHAINS` variable can add deprecated status; it is not r
 Keep the V3 settings above, or use `V3_API_URL=https://v3.euler.finance` if you deliberately want Euler's quantitative data, and select your files:
 
 ```dotenv
+# Required to select your authored files.
 LABELS_SOURCE=static
 STATIC_LABELS_BASE_URL=https://labels.operator.example
+# Optional; false is the default.
 DISABLE_V3=false
 ```
 
@@ -103,9 +132,11 @@ Static logos use simple filenames such as `curator.svg`, resolved under `logo/`.
 ## Static labels without V3
 
 ```dotenv
+# Required for static labels without V3.
 LABELS_SOURCE=static
 STATIC_LABELS_BASE_URL=https://labels.operator.example
 DISABLE_V3=true
+# Optional: the default fallback value also works with V3 disabled.
 SERVER_VAULT_CACHE_SOURCE=onchain
 NUXT_PUBLIC_BROWSER_VAULT_SOURCE=onchain
 ```
@@ -163,7 +194,7 @@ If you retain Euler's chain manifest, its live status changes still apply to you
 1. Start the server and check for `labels-config` errors. Chain checks follow manifest admission and deployment visibility, so excluded chains are not diagnosed as active label configuration errors. Messages name settings and chain IDs without printing configured URLs or credentials.
 2. Open the app and select each configured chain. Confirm the intended products, labels and governor/owner verification; confirm country rules and any deployment tag filter.
 3. Inspect the app's `/api/internal/public-labels?chainId=1` response in browser developer tools. Check your expected publication or authored content. `source=static` identifies authored files; `source=v3-metadata` identifies deprecated-chain metadata. Assessed V3 bundles may omit `source` or set it to `v3`. Do not treat a successful `/healthz` check as proof that labels are available.
-4. Check logos both in the UI and in `/api/public/metadata?chainId=1`. Custom CDN origins must be configured for hosted public metadata.
+4. Check logos both in the UI and in `/api/public/metadata?chainId=1`. Set `LABELS_IMAGE_ORIGINS` only for hosted label images on additional CDN origins; Euler hosts, your configured V3 origin and static-source images require no extra setting.
 5. With `DISABLE_V3=true`, confirm V3 requests receive a local 503 and no V3 upstream request is made. Verify RPC browsing and token decimals, and expect V3-only sections to be unavailable.
 6. Restart once to check the runtime environment. If using disk checkpoints, mount `GEO_POLICY_CACHE_DIR` on persistent storage for recovery across container replacements.
 
