@@ -13,9 +13,13 @@ const COLLATERAL = '0x55f9bace2c864ac0d3392ea9fa654b605f21a3d3'
 const isLoaded = ref(true)
 let openInterest: Record<string, Record<string, number>>
 let borrowVaults: Record<string, { type: VaultType, address: string, totalBorrowed: bigint }>
+let strategyAllocation: bigint
+let primeAllocation: bigint
 
 beforeEach(() => {
   isLoaded.value = true
+  strategyAllocation = 2_334n
+  primeAllocation = 36_675n
   openInterest = {
     [EVK]: { [COLLATERAL]: 1500 },
     [STRATEGY]: { [COLLATERAL]: 200 },
@@ -27,8 +31,8 @@ beforeEach(() => {
   vi.stubGlobal('useVaultRegistry', () => ({
     get: (address: string) => ({
       [EARN]: { vault: { type: VaultType.EulerEarn, address: EARN, strategies: [
-        { address: STRATEGY, allocatedAssets: 2_334n },
-        { address: PRIME, allocatedAssets: 36_675n },
+        { address: STRATEGY, allocatedAssets: strategyAllocation },
+        { address: PRIME, allocatedAssets: primeAllocation },
         { address: COLLATERAL, allocatedAssets: 0n },
       ] } },
       ...Object.fromEntries(Object.entries(borrowVaults).map(([address, vault]) => [address, { vault }])),
@@ -56,6 +60,15 @@ describe('useVaultCheckWeights', () => {
     expect(weightOf({ namespace: 'strategy', address: STRATEGY })).toBe('Holds 6% of deposits')
     expect(weightOf({ namespace: 'strategy', address: COLLATERAL })).toBe('Holds none of the deposits')
     expect(weightOf({ namespace: 'strategy', address: '0x00000000000000000000000000000000000000ff' })).toBeNull()
+  })
+
+  it('labels a tiny positive strategy allocation as below 1%, while a zero allocation stays none', () => {
+    strategyAllocation = 1_000_000n
+    primeAllocation = 1_999_999_000_000n
+    const { weightOf, weighAll } = useVaultCheckWeights(EARN)
+    expect(weightOf({ namespace: 'strategy', address: STRATEGY })).toBe('Holds <1% of deposits')
+    expect(weighAll([{ namespace: 'strategy', address: STRATEGY }])[0]?.value).toBeGreaterThan(0)
+    expect(weightOf({ namespace: 'strategy', address: COLLATERAL })).toBe('Holds none of the deposits')
   })
 
   it('gives a collateral the borrows it backs, across the Earn vault\'s strategies', () => {

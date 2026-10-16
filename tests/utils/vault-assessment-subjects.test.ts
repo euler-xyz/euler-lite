@@ -52,6 +52,15 @@ describe('getStrategyDepositShare', () => {
     expect(getStrategyDepositShare(earn, strategy)).toBeCloseTo(0.0598, 4)
   })
 
+  it('keeps a positive share below one millionth distinct from no allocation', () => {
+    const tiny = { strategies: [
+      { address: strategy, allocatedAssets: 1_000_000n },
+      { address: collateral, allocatedAssets: 1_999_999_000_000n },
+    ] }
+    expect(getStrategyDepositShare(tiny, strategy)).toBeCloseTo(0.0000005, 10)
+    expect(getStrategyDepositShare(tiny, collateral)).toBeGreaterThan(0)
+  })
+
   it('is zero for a strategy holding nothing or a vault with nothing allocated, and unknown for a removed one', () => {
     expect(getStrategyDepositShare(earn, collateral)).toBe(0)
     expect(getStrategyDepositShare({ strategies: earn.strategies.map(item => ({ ...item, allocatedAssets: 0n })) }, strategy)).toBe(0)

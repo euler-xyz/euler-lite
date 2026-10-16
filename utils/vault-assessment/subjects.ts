@@ -48,7 +48,7 @@ export const getStrategyDepositShare = (
   if (!entry) return undefined
   const allocated = earn.strategies.reduce((sum, item) => sum + item.allocatedAssets, 0n)
   if (allocated <= 0n) return 0
-  return Number((entry.allocatedAssets * 1_000_000n) / allocated) / 1_000_000
+  return Number(entry.allocatedAssets) / Number(allocated)
 }
 
 export const getCollateralBorrowsUsd = (
