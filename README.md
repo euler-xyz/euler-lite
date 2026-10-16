@@ -48,6 +48,7 @@ cp .env.example .env
 | Variable     | Default                       | Description                           |
 | ------------ | ----------------------------- | ------------------------------------- |
 | `V3_API_URL` | `https://v3.euler.finance`    | Euler V3 upstream used by the server `/api/internal/v3` proxy |
+| `DISABLE_V3` | `false` | Explicitly disables V3 adapters, proxying, image discovery and V3 utility reads. Requires static labels. Alias: `EULER_SDK_DISABLE_V3`. See [Fork setup](docs/fork-setup.md). |
 | `EULER_SDK_V3_API_KEY` | —                  | Optional server-side V3 API key forwarded by `/api/internal/v3` as `X-API-Key` |
 | `SWAP_API_URL` or `NUXT_PUBLIC_SWAP_API_URL` | —           | Euler swap API                        |
 | `PYTH_API_KEY` | — | Server-side API key sent to `https://hermes.pyth.network` as Bearer authentication by `/api/internal/pyth/updates` |
@@ -86,6 +87,7 @@ Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for 
 | `LABELS_SOURCE` | `v3` (default) or `static`; selects the shared label snapshot producer. |
 | `LABELS_VAULT_TAG` | Optional exact, case-sensitive tag for discovery and new-target suggestions, e.g. `base` or `governance limited`. Blank disables tag filtering. |
 | `STATIC_LABELS_BASE_URL` | Required directory URL for static authoring files; unused by hosted V3 mode. |
+| `LABELS_IMAGE_ORIGINS` | Optional comma-separated HTTP(S) origins for hosted label images in the UI and public metadata, in addition to the configured custom V3 origin and Euler's image hosts. |
 | `LIQUIDATION_BOT_API_URL` | Optional default liquidation bot API with a `{chainId}` placeholder, e.g. `https://{chainId}-liquidations.euler.finance`. When set, the server reads each enabled chain's `/vault-filter` and borrowable vaults the bot does not cover get a "Not covered by default liquidation bot" badge in lists and portfolio rows and a notice on the vault overview. A chain whose bot has not answered since the server started, or whose last answer is more than 30 minutes old, counts as having no bot, so all its borrowable vaults get the badge. Unset disables the feature. HTTPS only (localhost HTTP allowed for dev). Server-only. |
 | `TURTLE_EARN_API_KEY` | **Required when `NUXT_PUBLIC_CONFIG_ENABLE_TURTLE` is on.** Server-only Turtle Earn API key sent as `X-API-Key` by `/api/internal/proxy/turtle` and by the server-side SDK's rewards adapters (`server/utils/sdk-server.ts`), which call Turtle directly for stream discovery. Turtle rejects unauthenticated requests with 401; without this variable the proxy answers 503 and never calls upstream, and the server SDK disables direct Turtle discovery (`rewardsEnableTurtle: false`) instead of issuing unauthenticated calls, so reward proofs and claims are unavailable. Turtle campaigns sourced from euler-data-v3 may still appear in snapshots and APYs, because the flag only gates the SDK's direct adapter. Configure the secret before rolling out. Never exposed to the browser. |
 
@@ -230,7 +232,7 @@ The resolution order in `getAssetLogoUrl(address, symbol)`:
 
 Vault inventory, products, entities, hosted logos, tags, campaigns, and deprecation metadata come from the versioned Public Labels API at `V3_API_URL`. Lite resolves `version=latest` to one immutable publication before fetching a chain bundle and follows every paginated list through `meta.total`.
 
-Hosted labels, visibility and geo policies come exclusively from V3. Fork deployments can set `LABELS_SOURCE=static` and provide their own authoring files through `STATIC_LABELS_BASE_URL`. See [Static labels](docs/static-labels.md) for the format, failure semantics and on-chain data options.
+Hosted labels, visibility and geo policies come exclusively from V3. Fork deployments can set `LABELS_SOURCE=static` and provide their own authoring files through `STATIC_LABELS_BASE_URL`. Start with [Fork setup](docs/fork-setup.md) for complete examples using your own V3, static labels, or static labels without V3. See [Static labels](docs/static-labels.md) for the authoring format and failure semantics.
 
 ### 4. Development
 

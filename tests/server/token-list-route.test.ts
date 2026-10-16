@@ -105,6 +105,16 @@ describe('/api/internal/token-list logos', () => {
     expect(options.servicesOverrides?.eulerLabelsService).toBeDefined()
   })
 
+  it('retains other token sources without contacting V3 when disabled', async () => {
+    vi.stubEnv('DISABLE_V3', 'true')
+    mocks.fetchWithTimeout.mockClear()
+    routeUpstreams([v3Token(B)])
+    const { refreshTokenList } = await importRoute()
+    const tokens = await refreshTokenList(1)
+    expect(tokens.some(token => token.address.toLowerCase() === A)).toBe(true)
+    expect(tokens.some(token => token.address.toLowerCase() === B)).toBe(false)
+    expect(mocks.fetchWithTimeout.mock.calls.some(([url]) => String(url).includes('v3.example'))).toBe(false)
+  })
   it('replaces a V3 logo only when V3 says it has no image, and never returns the flag', async () => {
     routeUpstreams([
       v3Token(A, { hasLogo: false }),

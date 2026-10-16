@@ -46,7 +46,7 @@ import { refreshPublicLabelsBundle } from '../utils/public-labels-source'
 import { isLiquidationCoverageEnabled, refreshLiquidationCoverage } from '../utils/liquidation-coverage-source'
 import {
   readDisableServerVaultCache,
-  readV3ApiUrl,
+  isV3BackendEnabled,
   warnIfVaultSourceNeedsV3,
 } from '~/utils/api-url-env'
 import { getEnabledChainIds } from '~/utils/chain-env'
@@ -67,7 +67,7 @@ const delay = (ms: number) => new Promise<void>((resolve) => {
 // own cache), so a 1-min rewarm keeps the snapshot tight without
 // hammering upstream. Without V3 the snapshot is built from heavier
 // onchain lens multicalls, so it rides the global 5-min interval.
-const VAULTS_REWARM_INTERVAL_MS = readV3ApiUrl() ? 60_000 : REWARM_INTERVAL_MS
+const VAULTS_REWARM_INTERVAL_MS = isV3BackendEnabled() ? 60_000 : REWARM_INTERVAL_MS
 
 // Nitro dev mode re-imports server plugins across its double-init (Vite
 // client build + Nitro server build), which would fire two warm cycles

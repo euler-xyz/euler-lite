@@ -69,6 +69,7 @@ const importUseEulerSdk = async (
   buildEulerSDK: ReturnType<typeof vi.fn>,
   onchainSdkChainIds: number[] = [],
   buildDeployments = vi.fn(async () => ({ getDeploymentChainIds: () => chainIds.value })),
+  disableV3 = false,
 ) => {
   vi.resetModules()
   vi.doMock('@eulerxyz/euler-v2-sdk', () => ({
@@ -105,6 +106,7 @@ const importUseEulerSdk = async (
   vi.stubGlobal('useEnvConfig', () => ({
     v3ApiUrl: '',
     enableV3Backend: true,
+    disableV3,
     browserVaultSource: 'fallback',
     eulerInterfacesBranch: 'account-lens-update',
   }))
@@ -323,6 +325,26 @@ describe('useEulerSdk', () => {
       vaultTypeAdapter: 'subgraph',
       rewardsServiceAdapter: 'fallback',
     })
+  })
+  it('preserves deployment admission with the V3 opt-out in browsing and plan-time SDKs', async () => {
+    const sdk = {
+      ...createMockSdk('no-v3'),
+      priceService: { setBackendClient: vi.fn() },
+      tokenlistService: { setQueryTokenList: vi.fn() },
+    }
+    const buildEulerSDK = vi.fn().mockResolvedValue(sdk)
+    const deploymentService = { getDeploymentChainIds: () => [1] }
+    const buildDeployments = vi.fn(async () => deploymentService)
+    const { getEulerSdk, getEulerSdkFresh } = await importUseEulerSdk(ref([1, 999999]), buildEulerSDK, [], buildDeployments, true)
+    await getEulerSdk()
+    await getEulerSdkFresh()
+    expect(buildEulerSDK.mock.calls.map(([options]) => options.config.disableV3)).toEqual([true, true])
+    for (const [options] of buildEulerSDK.mock.calls) {
+      expect(options.config.rpcUrls).toEqual({ 1: '/api/internal/rpc/1' })
+      expect(options.servicesOverrides.deploymentService).toBe(deploymentService)
+    }
+    expect(sdk.priceService.setBackendClient).toHaveBeenCalledTimes(2)
+    expect(sdk.tokenlistService.setQueryTokenList).toHaveBeenCalledTimes(2)
   })
 
   it('keeps fresh portfolio reads onchain while resolving rewards through fallback', async () => {

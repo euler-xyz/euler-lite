@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getAddress } from 'viem'
 import { normalizeLabelsBundle } from '~/utils/public-labels'
 import { buildProductDescriptors } from '~/server/utils/labels-view'
@@ -41,6 +41,7 @@ async function metadata(vaultType: 'evk' | 'earn', standalone = false, cleared =
 }
 
 describe('public metadata resolved V3 content', () => {
+  afterEach(() => vi.unstubAllEnvs())
   beforeEach(() => {
     vi.resetModules()
     mocks.verified.mockResolvedValue(new Set())
@@ -57,6 +58,20 @@ describe('public metadata resolved V3 content', () => {
     expect(await metadata('evk', false, false)).toMatchObject({
       description: 'Vault description', portfolioNotice: 'Vault notice', deprecationReason: 'Vault reason',
     })
+  })
+  it.each(['https://v3.fork.test/v3/images/labels/kpk', 'https://cdn.fork.test/kpk.svg'])('preserves a configured hosted curator logo in public metadata: %s', async (logo) => {
+    vi.stubEnv('V3_API_URL', 'https://v3.fork.test')
+    vi.stubEnv('LABELS_IMAGE_ORIGINS', 'https://cdn.fork.test')
+    mocks.verified.mockResolvedValue(new Set([address]))
+    await metadata('evk')
+    const view = await mocks.view()
+    mocks.view.mockResolvedValue({
+      ...view, labelsSource: 'v3', sourceFetchedAt: Date.now(),
+      managingEntityByVault: { [address.toLowerCase()]: 'kpk' },
+      entitiesRaw: { kpk: { name: 'KPK', logo } },
+    })
+    const { refreshChainVaultMetadata } = await import('~/server/utils/vault-metadata')
+    expect((await refreshChainVaultMetadata(1)).get(address)?.entities).toMatchObject([{ name: 'KPK', logo }])
   })
 
   it('does not expose synthetic display groups as V3 product IDs', async () => {
