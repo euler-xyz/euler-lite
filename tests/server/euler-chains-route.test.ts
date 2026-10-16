@@ -225,6 +225,38 @@ describe('/api/internal/euler-chains resolution chain', () => {
     await expect(loadEulerChains()).rejects.toThrow('missing or invalid for enabled chains: 2')
   })
 
+  it('passes the registry status and explorer URL through unchanged', async () => {
+    const upstreamData = [{
+      ...validManifest()[0],
+      status: 'deprecated',
+      explorerUrl: 'https://etherscan.io',
+    }]
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(upstreamData))
+
+    const { loadEulerChains } = await importRoute()
+
+    await expect(loadEulerChains()).resolves.toEqual(upstreamData)
+  })
+
+  it('peeks the cached manifest without fetching, fresh or stale', async () => {
+    vi.useFakeTimers()
+    const upstreamData = validManifest()
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(upstreamData))
+
+    const { loadEulerChains, peekEulerChains } = await importRoute()
+    expect(peekEulerChains()).toBeUndefined()
+
+    await loadEulerChains()
+    expect(peekEulerChains()).toEqual(upstreamData)
+
+    vi.advanceTimersByTime(60 * 60_000)
+    expect(peekEulerChains()).toEqual(upstreamData)
+
+    vi.advanceTimersByTime(8 * 24 * 60 * 60_000)
+    expect(peekEulerChains()).toBeUndefined()
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps serving the last-known-good manifest when a later 200 is unusable', async () => {
     vi.useFakeTimers()
     const upstreamData = validManifest()

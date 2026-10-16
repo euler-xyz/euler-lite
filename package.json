@@ -18,6 +18,7 @@
     "parity:overlay": "node scripts/parity-overlay.mjs",
     "execution:record": "node scripts/execution-record.mjs",
     "execution:suite": "node scripts/execution-suite.mjs",
+    "execution:transfer-min": "node scripts/execution-sdk-transfer-min.mjs",
     "test": "vitest",
     "test:run": "vitest run",
     "test:golden": "vitest run tests/golden",
@@ -35,7 +36,7 @@
     ]
   },
   "dependencies": {
-    "@eulerxyz/euler-v2-sdk": "4.1.0",
+    "@eulerxyz/euler-v2-sdk": "4.2.0",
     "@floating-ui/vue": "2.0.1",
     "@gvade/nuxt3-svg-sprite": "1.0.3",
     "@keyringnetwork/keyring-connect-sdk": "3.3.0",

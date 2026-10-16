@@ -75,7 +75,7 @@ Configuration is split into three mechanisms:
 
 2. **Nuxt `runtimeConfig`** (`useDeployConfig()`) — header resource and social links, feature flags, and static deployment fallbacks. Set via `NUXT_PUBLIC_CONFIG_*` env vars. The temporary visibility/geo compatibility policy is server-only and configured through `EFFECTIVE_POLICY_*`; display content comes from Public Labels V3. Explicit chain and ABI URLs configure their respective upstream sources. Header **Resources** items for Docs / Toolbox / Risk & Analytics / Stargate are omitted when the corresponding `NUXT_PUBLIC_CONFIG_*_URL` is empty; Terms, Privacy, Risk Disclosures, and MiCA use euler.finance fallbacks. `.env.example` sets the public Euler hosts for the four optional resource links.
 
-3. **Chain config** (`useChainConfig()`) — derived dynamically from `RPC_URL_<chainId>` env vars at server startup, injected via `window.__CHAIN_CONFIG__`.
+3. **Chain config** (`useChainConfig()`) — derived dynamically from `RPC_URL_<chainId>` env vars at server startup, filtered by the chain `status` in `EulerChains.json` on each HTML render, injected via `window.__CHAIN_CONFIG__`. Explorer links use the registry `explorerUrl` first, then the chain's AppKit definition (`entities/chainRegistry.ts`).
 
 See the [README](../README.md) for the full env var reference.
 
