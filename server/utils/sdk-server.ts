@@ -43,6 +43,7 @@ import {
 import { parseChainIds } from '~/utils/parseChainIds'
 import { LiteEulerLabelsService } from '~/utils/sdk-labels'
 import { getPublicLabelsBundle } from './public-labels-source'
+import { serverAbiService } from './sdk-abi-service'
 import { resolveRpcUrl } from './rpc'
 import { TURTLE_EARN_API_URL } from './turtle-proxy'
 
@@ -132,6 +133,7 @@ export const getServerSdk = (chainId: number): Promise<EulerSDK> => {
       },
     },
     servicesOverrides: {
+      abiService: serverAbiService,
       eulerLabelsService: new LiteEulerLabelsService(getPublicLabelsBundle),
     },
   }).catch((err) => {

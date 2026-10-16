@@ -140,6 +140,8 @@ Reward provider toggles (`rewardsEnableMerkl`, `rewardsEnableBrevis`, `rewardsEn
 
 The server-side SDK (`server/utils/sdk-server.ts`) differs for Turtle: its rewards adapters call `earn.turtle.xyz` directly, so it receives the server-only `TURTLE_EARN_API_KEY` as `rewardsTurtleApiKey` pinned to the fixed Turtle upstream, and is built with `rewardsEnableTurtle: false` when no usable key is configured. That flag disables the direct adapter's Turtle discovery only; Turtle campaigns sourced from euler-data-v3 may still be returned in fallback mode. The key never enters the browser config. The same builder passes Sonic (`146`) transport tuning to the SDK so it uses a smaller Multicall aggregate while preserving registry `viemName` resolution; other chains keep the SDK transport defaults. See [server-side caching](./server-side-caching.md#server-side-sdk-builder) and [server provider overrides](./server-side-caching.md#server-provider-overrides).
 
+The server snapshot and token-list SDKs use `server/utils/sdk-abi-service.ts` to read ABIs through the same validated `loadAbi` cache as the browser proxy. `NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL` takes precedence over `EULER_SDK_EULER_INTERFACES_BRANCH` and its `NUXT_PUBLIC_EULER_INTERFACES_BRANCH` / `NUXT_PUBLIC_CONFIG_EULER_INTERFACES_BRANCH` aliases. All three paths accept only `AccountLens`, `VaultLens`, and `UtilsLens`, with the shared five-minute freshness and bounded seven-day stale fallback.
+
 ### Reward token decimals
 
 `UserRewardToken.decimals` is optional. The SDK omits it when no source — the

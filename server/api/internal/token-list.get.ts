@@ -2,6 +2,7 @@ import { createError, getQuery, setResponseHeader } from 'h3'
 import { isAddress, zeroAddress, type Address } from 'viem'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { getServerSdk } from '~/server/utils/sdk-server'
+import { serverAbiService } from '~/server/utils/sdk-abi-service'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { createInFlightDedup } from '~/server/utils/in-flight'
@@ -116,7 +117,10 @@ const getSdk = () => {
       tokenlistApiBaseUrl: v3ApiUrl,
       ...(v3ApiKey ? { v3ApiKey } : {}),
     },
-    servicesOverrides: { eulerLabelsService: new LiteEulerLabelsService(getPublicLabelsBundle) },
+    servicesOverrides: {
+      abiService: serverAbiService,
+      eulerLabelsService: new LiteEulerLabelsService(getPublicLabelsBundle),
+    },
   }).then((sdk) => {
     const tokenlistService = sdk.tokenlistService as ConfigurableTokenlistService
     tokenlistService.setQueryTokenList?.(async (url: string) => {
