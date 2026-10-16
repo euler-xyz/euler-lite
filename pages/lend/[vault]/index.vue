@@ -24,7 +24,7 @@ import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { getAddress, type Address, formatUnits, zeroAddress } from 'viem'
-import { VaultUnverifiedDisclaimerModal, VaultApyModal, SwapTokenSelector, SlippageSettingsModal } from '#components'
+import { VaultApyModal, SwapTokenSelector, SlippageSettingsModal } from '#components'
 import { getProjectedRates } from '~/utils/vault/apy'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { getTxErrorMessage } from '~/utils/tx-errors'
@@ -103,7 +103,8 @@ const shareLinkQuery = computed(() => {
 const { getBalance } = useWallets()
 const { runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const vaultAddress = route.params.vault as string
-useOperationGuard([vaultAddress])
+const { warning: assessmentWarning } = useVaultAssessmentWarning(vaultAddress)
+useOperationGuard([vaultAddress], { depositedVaultAddresses: [vaultAddress] })
 const { name } = useEulerProductOfVault(vaultAddress)
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -419,6 +420,7 @@ const buildProjectedSupplyDetails = (rawApy: number): ProjectedYieldDetails | nu
 const lendWarnings = computed(() => {
   if (!eVault.value) return []
   return [
+    assessmentWarning.value,
     getHookDisabledWarning(eVault.value, OP_DEPOSIT),
     getUtilisationWarning(eVault.value, 'lend'),
     getSupplyCapWarning(eVault.value),
@@ -427,12 +429,6 @@ const lendWarnings = computed(() => {
 
 // Check if vault data is loaded
 const isVaultLoaded = computed(() => !!eVault.value || !!securitizeVault.value)
-
-// Check if vault is verified - both EVK and securitize vaults have verified field
-const isVaultVerified = computed(() => {
-  const address = eVault.value?.address ?? securitizeVault.value?.address
-  return address ? useVaultRegistry().isVerifiedVault(address) : true
-})
 
 const load = async () => {
   isLoading.value = true
@@ -445,18 +441,6 @@ const load = async () => {
     else {
       // For vaults without interest rate info, just use rewards
       estimateSupplyAPY.value = totalRewardsAPY.value + intrinsicApy.value
-    }
-
-    // Show warning modal for any unverified vault
-    if (!isVaultVerified.value) {
-      modal.open(VaultUnverifiedDisclaimerModal, {
-        isNotClosable: true,
-        props: {
-          cancelAction: () => {
-            router.replace('/')
-          },
-        },
-      })
     }
   }
   catch (e) {

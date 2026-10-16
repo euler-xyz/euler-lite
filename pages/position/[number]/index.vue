@@ -9,7 +9,8 @@ import { maxUint256 } from 'viem'
 import { formatTtl, ltvToPercent, nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { formatNumber, formatHealthScore, formatUsdValue, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
 import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
-import { getVaultNotice } from '~/utils/eulerLabelsUtils'
+import { getVaultDeprecation, getVaultNotice } from '~/utils/eulerLabelsUtils'
+import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
 import { getPositionCollateralEdge, getPositionRampStatus, getPositionRampTargetTimestamp } from '~/entities/account'
 import { DateTime } from 'luxon'
 import { VaultOverviewModal, VaultApyModal, VaultNetApyModal, PortfolioRoeModal, VaultRampDownModal } from '#components'
@@ -80,6 +81,37 @@ const borrowVault = computed<EVault | undefined>(() => position.value ? position
 const collateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() => position.value ? position.value.collateralVault as EVault | SecuritizeCollateralVault | undefined : undefined)
 const positionCollateralAddresses = computed(() => position.value ? position.value.collateralVaults : [])
 const primaryCollateralAddress = computed(() => collateralVault.value ? getAddress(collateralVault.value.address) : '')
+const deprecatedPosition = computed(() => {
+  getEulerLabelsVersion()
+  const borrow = borrowVault.value ? getVaultDeprecation(borrowVault.value.address) : null
+  const collaterals = positionCollateralAddresses.value
+    .map(address => ({ address, ...getVaultDeprecation(address) }))
+    .filter(item => item.deprecated)
+  const reasons = [...new Set([
+    ...(borrow?.deprecated ? [borrow.reason] : []),
+    ...collaterals.map(item => item.reason),
+  ].filter(Boolean))]
+  return { borrow: borrow?.deprecated ?? false, collaterals, reasons }
+})
+const deprecatedPositionAction = computed(() => {
+  const network = _route.query.network
+  const query: Record<string, string> = {}
+  if (typeof network === 'string') query.network = network
+  if (deprecatedPosition.value.borrow && !hasNoBorrow.value) {
+    return { text: 'Repay debt', to: { path: `/position/${positionIndex}/repay`, query } }
+  }
+  const collateral = deprecatedPosition.value.collaterals[0]
+  if (!collateral) return null
+  if (isEligibleForLiquidation.value || hasQueryFailure.value || isPositionGeoBlocked.value || isPairFullyRestricted.value) {
+    return !hasNoBorrow.value
+      ? { text: 'Repay debt', to: { path: `/position/${positionIndex}/repay`, query } }
+      : null
+  }
+  return {
+    text: 'Withdraw collateral',
+    to: { path: `/position/${positionIndex}/withdraw`, query: { ...query, collateral: collateral.address } },
+  }
+})
 const buildMigrationRoute = computed(() => {
   const query: Record<string, string> = {}
   const network = _route.query.network
@@ -895,6 +927,16 @@ watch([isConnected, isSpyMode, address, activeLayerData, () => _route.params.num
           </span>
         </template>
       </VaultLabelsAndAssets>
+
+      <UiAlert
+        v-if="deprecatedPosition.borrow || deprecatedPosition.collaterals.length"
+        title="Deprecated position"
+        :description="`${deprecatedPosition.reasons.join(' ')} Review whether to withdraw or migrate your collateral and repay or refinance any debt.`"
+        :action-text="deprecatedPositionAction?.text"
+        variant="warning"
+        size="compact"
+        @action="deprecatedPositionAction && router.push(deprecatedPositionAction.to)"
+      />
 
       <UiAlert
         v-if="hasQueryFailure"

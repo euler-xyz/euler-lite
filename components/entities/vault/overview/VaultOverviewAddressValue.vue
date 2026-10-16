@@ -2,8 +2,9 @@
 import { getExplorerLink } from '~/utils/block-explorer'
 import { getSpecialAddressLabel } from '~/utils/special-addresses'
 import { shortenAddress } from '~/utils/string-utils'
+import type { AssessmentSafeEvidence } from '~/utils/vault-assessment/evidence'
 
-const { address, checkSafe = false } = defineProps<{
+const { address, checkSafe = false, safeEvidence } = defineProps<{
   address: string
   /**
    * Probe the address for being a Safe multisig and render the badge.
@@ -11,6 +12,7 @@ const { address, checkSafe = false } = defineProps<{
    * known contracts and would just waste probes.
    */
   checkSafe?: boolean
+  safeEvidence?: AssessmentSafeEvidence | null
 }>()
 
 const { chainId } = useEulerAddresses()
@@ -29,6 +31,7 @@ const onCopyClick = () => {
     <SafeAccountBadge
       v-if="checkSafe"
       :address="address"
+      :evidence="safeEvidence"
     />
     <NuxtLink
       :to="explorerLink"

@@ -57,7 +57,7 @@ const {
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const vaultAddress = route.params.vault as string
-useOperationGuard([vaultAddress])
+useOperationGuard([vaultAddress], { acquiresExposure: false })
 const subAccountIndex = Number(route.params.subAccount)
 const subAccount = computed(() => {
   const addr = effectiveAddress.value

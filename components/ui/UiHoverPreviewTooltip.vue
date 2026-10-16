@@ -2,7 +2,7 @@
 import type { Placement } from '@floating-ui/vue'
 import { UiHoverPreviewTooltipModal } from '#components'
 
-type Section = { title: string, text: string }
+type Section = { title: string, text: string, href?: string }
 type HoverPreviewTooltipCommonProps = {
   placement?: Placement
   ariaLabel?: string
@@ -23,7 +23,7 @@ const resolvedAriaLabel = computed(() => props.ariaLabel || props.title || 'Show
 
 const modalData = computed(() => ({
   props: props.sections
-    ? props.sections.length === 1 && !props.title
+    ? props.sections.length === 1 && !props.title && !props.sections[0].href
       ? {
           modalTitle: props.sections[0].title,
           text: props.sections[0].text,

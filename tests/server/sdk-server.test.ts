@@ -6,7 +6,7 @@ import type { Deployment } from '@eulerxyz/euler-v2-sdk'
 const mocks = vi.hoisted(() => ({
   buildEulerSDK: vi.fn(),
   resolveRpcUrl: vi.fn(),
-  resolveLabelsBaseUrl: vi.fn(),
+  getPublicLabelsBundle: vi.fn(),
 }))
 
 vi.mock('@eulerxyz/euler-v2-sdk', async importOriginal => ({
@@ -18,8 +18,14 @@ vi.mock('~/server/utils/rpc', () => ({
   resolveRpcUrl: mocks.resolveRpcUrl,
 }))
 
-vi.mock('~/server/utils/labels-base-url', () => ({
-  resolveLabelsBaseUrl: mocks.resolveLabelsBaseUrl,
+vi.mock('~/server/utils/public-labels-source', () => ({
+  getPublicLabelsBundle: mocks.getPublicLabelsBundle,
+}))
+
+vi.mock('~/utils/sdk-labels', () => ({
+  LiteEulerLabelsService: class {
+    constructor(readonly loadBundle: unknown) {}
+  },
 }))
 
 describe('getServerSdk', () => {
@@ -27,7 +33,7 @@ describe('getServerSdk', () => {
     vi.resetModules()
     mocks.buildEulerSDK.mockReset()
     mocks.resolveRpcUrl.mockReset()
-    mocks.resolveLabelsBaseUrl.mockReset()
+    mocks.getPublicLabelsBundle.mockReset()
     const sdkModule = await vi.importActual<typeof import('@eulerxyz/euler-v2-sdk')>('@eulerxyz/euler-v2-sdk')
     sdkModule.DeploymentService.setQueryDeployments(async () => [1, 8453, 146, 463].map(chainId => ({
       chainId,
@@ -38,7 +44,6 @@ describe('getServerSdk', () => {
     } as Deployment)))
     mocks.buildEulerSDK.mockImplementation(sdkModule.buildEulerSDK)
     mocks.resolveRpcUrl.mockReturnValue('https://rpc.example')
-    mocks.resolveLabelsBaseUrl.mockReturnValue('https://labels.example')
     process.env.V3_API_URL = 'https://v3.example'
     process.env.SERVER_VAULT_CACHE_SOURCE = 'fallback'
     // Routing is driven by ONCHAIN_SDK_CHAINS only; DEPRECATED_CHAINS is a
@@ -67,6 +72,12 @@ describe('getServerSdk', () => {
       eulerEarnServiceAdapter: 'onchain',
       rewardsServiceAdapter: 'direct',
     })
+    expect(mocks.buildEulerSDK.mock.calls[0]?.[0].servicesOverrides.eulerLabelsService.loadBundle)
+      .toBe(mocks.getPublicLabelsBundle)
+    expect(mocks.buildEulerSDK.mock.calls[1]?.[0].servicesOverrides.eulerLabelsService.loadBundle)
+      .toBe(mocks.getPublicLabelsBundle)
+    expect(sdk.eulerLabelsService)
+      .toBe(mocks.buildEulerSDK.mock.calls[0]?.[0].servicesOverrides.eulerLabelsService)
     const providerService = sdk.providerService
     expect(providerService.getProvider(1).batch.multicall).toEqual({ batchSize: 2048, wait: 10 })
     expect(providerService.getProvider(1)).toBe(providerService.getProvider(1))

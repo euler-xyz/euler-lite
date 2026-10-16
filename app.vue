@@ -14,7 +14,8 @@ let isAnnouncementOpen = false
 const { loadEulerConfig, chainId } = useEulerAddresses()
 const { loadVaults, isReady: isVaultsReady, resetVaultsState, refreshVaults, setShowAllLabelEntries } = useVaults()
 const { loadTokenList, isLoaded: isTokenListLoaded } = useTokenList()
-const { loadLabels, retryLabels, isReady: isLabelsReady, isLoading: isLabelsLoading, loadError: labelsLoadError } = useEulerLabels()
+const { loadLabels, refreshLabelsIfStale, retryLabels, isReady: isLabelsReady, isLoading: isLabelsLoading, loadError: labelsLoadError } = useEulerLabels()
+const backendUnavailableText = 'Vault verification could not be loaded from the Euler backend. Every vault shows as unverified until the connection is back.'
 const { loadCountry } = useGeoBlock()
 const { updateBalances, resetBalances } = useWallets()
 const { isConnected, address } = useWagmi()
@@ -162,6 +163,23 @@ watch([chainId, showAllLabelEntries], () => {
   })
 }, { immediate: true })
 
+// Refresh live label verdicts for an open tab and after returning from a
+// suspended/background tab. The labels store owns freshness and deduplication.
+let labelsRefreshInterval: ReturnType<typeof setInterval> | undefined
+const refreshVisibleLabels = () => {
+  if (document.visibilityState === 'visible') void refreshLabelsIfStale()
+}
+onMounted(() => {
+  labelsRefreshInterval = setInterval(refreshVisibleLabels, POLL_INTERVAL_60S_MS)
+  window.addEventListener('focus', refreshVisibleLabels)
+  document.addEventListener('visibilitychange', refreshVisibleLabels)
+})
+onUnmounted(() => {
+  clearInterval(labelsRefreshInterval)
+  window.removeEventListener('focus', refreshVisibleLabels)
+  document.removeEventListener('visibilitychange', refreshVisibleLabels)
+})
+
 // Refresh balances when token list finishes loading (includes new DefiLlama tokens)
 watch(isTokenListLoaded, (loaded) => {
   if (loaded && (isConnected.value || isVaultsReady.value)) {
@@ -220,8 +238,8 @@ onUnmounted(() => {
         <UiAlert
           v-if="labelsLoadError && !isLabelsReady"
           class="mb-16"
-          title="Vault verification unavailable"
-          :description="labelsLoadError"
+          title="Euler backend unavailable"
+          :description="backendUnavailableText"
           variant="error"
           :action-text="isLabelsLoading ? 'Retrying…' : 'Retry'"
           @action="retryLabels"

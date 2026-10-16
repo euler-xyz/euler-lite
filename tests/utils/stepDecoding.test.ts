@@ -267,6 +267,25 @@ const disableController = () => encodeFunctionData({
 })
 
 describe('buildTransactionPlanDisplaySteps approval rows', () => {
+  it('names the vault on a direct approval that has no permit2 signature beside it', () => {
+    const plan: TransactionPlan = [{
+      type: 'requiredApproval',
+      token: wethAsset,
+      owner: account,
+      spender: wethVault,
+      amount: 1n,
+      resolved: [{ type: 'approve', token: wethAsset, owner: account, spender: wethVault, amount: 1n, data: '0x' }],
+    }]
+    const steps = buildTransactionPlanDisplaySteps(plan, {
+      type: 'borrow',
+      asset: { symbol: 'USDC', address: usdcAsset, decimals: 6 },
+      amount: '1',
+      supplyingAssetForBorrow: { symbol: 'WETH', address: wethAsset, decimals: 18 },
+      supplyingAmount: '2',
+    }, getVault, (address: string, symbol: string) => `logo:${address}:${symbol}`)
+    expect(steps[0]).toMatchObject({ label: 'Approve', labelSuffix: 'for vault', isSeparateTx: true })
+  })
+
   it('uses the approved token for the label and icon without adding approval details', () => {
     const collateralAmount = 2n * 10n ** 18n
     const plan: TransactionPlan = [{
@@ -303,7 +322,7 @@ describe('buildTransactionPlanDisplaySteps approval rows', () => {
     expect(steps).toEqual([{
       index: 1,
       label: 'Approve',
-      labelSuffix: 'for vault',
+      labelSuffix: 'for Permit2',
       isSeparateTx: true,
       assetInfo: {
         symbol: 'WETH',

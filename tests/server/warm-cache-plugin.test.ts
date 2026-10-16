@@ -3,13 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   refreshEulerChains: vi.fn((): Promise<unknown[]> => Promise.resolve([])),
   peekEulerChains: vi.fn((): unknown[] | undefined => undefined),
+  refreshPublicLabelsBundle: vi.fn((_chainId: number) => Promise.resolve()),
   refreshTokenList: vi.fn((_chainId: number) => Promise.resolve([])),
   refreshChainVaults: vi.fn((_chainId: number) => Promise.resolve()),
 }))
 
-vi.mock('~/server/api/internal/labels/[file].get', () => ({
-  LABEL_FILES: [],
-  refreshLabelFile: () => Promise.resolve(),
+vi.mock('~/server/utils/public-labels-source', () => ({
+  refreshPublicLabelsBundle: mocks.refreshPublicLabelsBundle,
 }))
 
 vi.mock('~/server/api/internal/euler-chains.get', () => ({
@@ -71,7 +71,7 @@ const bootPlugin = async () => {
   plugin({} as never)
 }
 
-const warmedChains = (fn: typeof mocks.refreshTokenList | typeof mocks.refreshChainVaults) =>
+const warmedChains = (fn: typeof mocks.refreshPublicLabelsBundle | typeof mocks.refreshTokenList | typeof mocks.refreshChainVaults) =>
   [...new Set(fn.mock.calls.map(([chainId]) => chainId))].sort((a, b) => a - b)
 
 describe('warm-cache plugin deprecated chains', () => {
@@ -89,6 +89,7 @@ describe('warm-cache plugin deprecated chains', () => {
     mocks.peekEulerChains.mockReset().mockReturnValue(undefined)
     mocks.refreshEulerChains.mockReset().mockImplementation(() => Promise.resolve([]))
     mocks.refreshTokenList.mockClear()
+    mocks.refreshPublicLabelsBundle.mockClear()
     mocks.refreshChainVaults.mockClear()
   })
 
@@ -98,6 +99,7 @@ describe('warm-cache plugin deprecated chains', () => {
     await vi.advanceTimersByTimeAsync(0)
 
     expect(warmedChains(mocks.refreshTokenList)).toEqual([1, 8453])
+    expect(warmedChains(mocks.refreshPublicLabelsBundle)).toEqual([1, 8453])
     expect(warmedChains(mocks.refreshChainVaults)).toEqual([1, 8453])
   })
 

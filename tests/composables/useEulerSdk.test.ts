@@ -14,7 +14,6 @@ type BuildEulerSDKOptions = {
     v3ApiUrl?: string
     tokenlistApiBaseUrl?: string
     deploymentsUrl?: string
-    eulerLabelsBaseUrl?: string
     rewardsMerklApiUrl?: string
     rewardsBrevisApiUrl?: string
     rewardsBrevisProofsApiUrl?: string
@@ -35,6 +34,9 @@ type BuildEulerSDKOptions = {
   deploymentServiceConfig?: unknown
   eulerLabelsAdapterConfig?: unknown
   oracleAdapterServiceConfig?: unknown
+  servicesOverrides?: {
+    eulerLabelsService?: unknown
+  }
 }
 
 interface Deferred<T> {
@@ -80,6 +82,11 @@ const importUseEulerSdk = async (
     },
     IntrinsicApyV3Adapter: class IntrinsicApyV3Adapter {
       constructor(readonly config: unknown, readonly buildQuery: unknown) {}
+    },
+  }))
+  vi.doMock('~/utils/sdk-labels', () => ({
+    LiteEulerLabelsService: class LiteEulerLabelsService {
+      fetchEulerLabelsData = vi.fn()
     },
   }))
   vi.stubGlobal('useEulerAddresses', () => ({
@@ -164,6 +171,8 @@ describe('useEulerSdk', () => {
     await expect(result).resolves.toBe(sdk)
     expect(buildEulerSDK.mock.calls[0][0].config.rpcUrls).toEqual({ 1: '/api/internal/rpc/1' })
     expect(buildEulerSDK.mock.calls[0][0].servicesOverrides.deploymentService).toBe(deploymentService)
+    expect(buildEulerSDK.mock.calls[0][0].servicesOverrides.eulerLabelsService.fetchEulerLabelsData)
+      .toEqual(expect.any(Function))
     expect(buildDeployments).toHaveBeenCalledWith(
       { deploymentsUrl: '/api/internal/euler-chains' }, expect.any(Function),
     )
@@ -187,7 +196,6 @@ describe('useEulerSdk', () => {
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
         configEulerChainsUrl: 'https://example.test/EulerChains.json',
-        configLabelsBaseUrl: 'https://labels.example.test/',
       },
     }))
 
@@ -203,11 +211,11 @@ describe('useEulerSdk', () => {
       v3ApiUrl: '/api/internal',
       tokenlistApiBaseUrl: '/api/internal',
       deploymentsUrl: '/api/internal/euler-chains',
-      eulerLabelsBaseUrl: '/api/internal/labels',
     })
     expect(options.rpcUrls).toBeUndefined()
     expect(options.deploymentServiceConfig).toBeUndefined()
     expect(options.eulerLabelsAdapterConfig).toBeUndefined()
+    expect(options.servicesOverrides?.eulerLabelsService).toBeDefined()
     expect(options.oracleAdapterServiceConfig).toBeUndefined()
   })
 
@@ -218,7 +226,6 @@ describe('useEulerSdk', () => {
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
         configEulerChainsUrl: '',
-        configLabelsBaseUrl: '',
       },
     }))
 
@@ -235,7 +242,6 @@ describe('useEulerSdk', () => {
       intrinsicApyV3ApiUrl: '/api/internal',
       eulerInterfacesBranch: 'account-lens-update',
       deploymentsUrl: '/api/internal/euler-chains',
-      eulerLabelsBaseUrl: '/api/internal/labels',
       rewardsMerklApiUrl: '/api/internal/proxy/merkl',
       rewardsBrevisApiUrl: '/api/internal/proxy/incentra/sdk/v1/eulerCampaigns',
       rewardsBrevisProofsApiUrl: '/api/internal/proxy/incentra/v1/getMerkleProofsBatch',
@@ -294,7 +300,6 @@ describe('useEulerSdk', () => {
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
         configEulerChainsUrl: '',
-        configLabelsBaseUrl: '',
       },
     }))
 
@@ -327,7 +332,6 @@ describe('useEulerSdk', () => {
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
         configEulerChainsUrl: '',
-        configLabelsBaseUrl: '',
       },
     }))
 
@@ -353,7 +357,6 @@ describe('useEulerSdk', () => {
     vi.stubGlobal('useRuntimeConfig', () => ({
       public: {
         configEulerChainsUrl: '',
-        configLabelsBaseUrl: '',
       },
     }))
 

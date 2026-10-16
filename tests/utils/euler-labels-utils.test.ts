@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { __setEulerLabelsDataForTest } from '~/composables/useEulerLabels'
 import {
   getActiveProductVaultAddresses,
+  getEntitiesByVault,
   getUniqueEntitiesByVaults,
   isVaultCyclicalNote,
   isVaultGovernanceLimited,
@@ -52,6 +53,24 @@ describe('getActiveProductVaultAddresses', () => {
     })
 
     expect(getActiveProductVaultAddresses()).toEqual([normalizeAddress(active)])
+  })
+})
+
+describe('V3 managing entity', () => {
+  it('uses the published manager even when the on-chain governor has not loaded', () => {
+    const vault = normalizeAddress('0x0000000000000000000000000000000000001101')
+    __setEulerLabelsDataForTest({
+      source: 'v3',
+      managingEntityByVault: { [vault.toLowerCase()]: 'curator' },
+      entities: {
+        curator: {
+          name: 'Curator', logo: '', description: '', url: '', addresses: {},
+          social: { twitter: '', youtube: '', discord: '', telegram: '', github: '' },
+        },
+      },
+    })
+
+    expect(getEntitiesByVault({ address: vault }).map(entity => entity.name)).toEqual(['Curator'])
   })
 })
 

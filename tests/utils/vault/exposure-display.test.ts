@@ -3,7 +3,10 @@ import {
   buildAllocatedVaultExposureDisplayItems,
   buildFallbackVaultExposureDisplay,
   combineVaultExposureDisplays,
+  getExposureLead,
   mergeVaultExposureDisplayItems,
+  getVaultBackingLead,
+  getVaultHeaderAssets,
   resolveVaultExposureDisplay,
   sortVaultExposureDisplayItems,
 } from '~/utils/vault/exposure-display'
@@ -368,5 +371,86 @@ describe('combineVaultExposureDisplays', () => {
     expect(valueState).toBe('unavailable')
     expect(items.map(entry => entry.asset.symbol).sort()).toEqual(['cbBTC', 'wstETH'])
     expect(items.every(entry => entry.valueUsd === 0)).toBe(true)
+  })
+})
+
+describe('getExposureLead', () => {
+  const asset = (symbol: string) => ({ address: `0x${symbol.padStart(40, '0').toLowerCase().replace(/[^0-9a-f]/g, '0')}`, symbol })
+  const item = (symbol: string, valueUsd: number) => ({ asset: asset(symbol), valueUsd })
+
+  it('leads with the collateral backing borrows, largest first, the rest counted', () => {
+    const lead = getExposureLead({ valueState: 'ready', items: [item('WBTC', 10), item('wstETH', 50), item('cbBTC', 5), item('LINK', 1)] })
+    expect(lead?.assets.map(entry => entry.symbol)).toEqual(['wstETH', 'WBTC', 'cbBTC'])
+    expect(lead?.label).toBe('Backed by wstETH, WBTC, cbBTC +1')
+  })
+
+  it('names accepted collateral when the split is unknown', () => {
+    expect(getExposureLead({ valueState: 'unavailable', items: [item('WBTC', 0)] })?.label).toBe('Accepts WBTC')
+  })
+
+  it('has no lead when nothing backs the strategy or it is still loading', () => {
+    expect(getExposureLead({ valueState: 'ready', items: [] })).toBeNull()
+    expect(getExposureLead({ valueState: 'loading', items: [] })).toBeNull()
+  })
+})
+
+describe('getVaultBackingLead', () => {
+  const live = { openInterestEnabled: true, openInterestLoaded: true, hasOpenInterestError: false }
+
+  it('names what backs a vault\'s borrows even when a depositor holds none of it', () => {
+    expect(getVaultBackingLead({
+      ...live,
+      getCollateralGroups: () => [group('WBTC', 10), group('wstETH', 50), group('USDT', 0)],
+      utilization: 23,
+      acceptedCollateralCount: 3,
+    })?.label).toBe('Backed by wstETH, WBTC')
+  })
+
+  it('has no lead for a vault without borrows, or while open interest loads', () => {
+    expect(getVaultBackingLead({
+      ...live,
+      getCollateralGroups: () => [group('WBTC', 0)],
+      utilization: 0,
+      acceptedCollateralCount: 1,
+    })).toBeNull()
+    expect(getVaultBackingLead({
+      ...live,
+      openInterestLoaded: false,
+      getCollateralGroups: () => [group('WBTC', 10)],
+      utilization: 40,
+      acceptedCollateralCount: 1,
+    })).toBeNull()
+  })
+
+  it('names accepted collateral when the borrow split is unknown', () => {
+    expect(getVaultBackingLead({
+      ...live,
+      hasOpenInterestError: true,
+      getCollateralGroups: () => [group('WBTC', 0), group('wstETH', 0)],
+      utilization: 40,
+      acceptedCollateralCount: 2,
+    })?.label).toBe('Accepts WBTC, wstETH')
+  })
+})
+
+describe('getVaultHeaderAssets', () => {
+  const usdc = { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' as const, decimals: 6, name: 'USD Coin', symbol: 'USDC' }
+  const live = { enabled: true, loaded: true, hasError: false }
+
+  it('names a strategy\'s own backing, from its utilization and borrow split alone', () => {
+    const header = getVaultHeaderAssets(
+      { utilization: 23, collaterals: [{}, {}], asset: usdc },
+      live,
+      () => [
+        { ...group('WBTC', 10), asset: { address: '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599', symbol: 'WBTC' } },
+        { ...group('wstETH', 50), asset: { address: '0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0', symbol: 'wstETH' } },
+      ],
+    )
+    expect(header.label).toBe('Backed by wstETH, WBTC')
+    expect(header.assets.map(asset => asset.symbol)).toEqual(['wstETH', 'WBTC'])
+  })
+
+  it('falls back to the vault\'s asset when nothing backs it', () => {
+    expect(getVaultHeaderAssets({ utilization: 0, collaterals: [], asset: usdc }, live, () => [])).toEqual({ assets: [usdc] })
   })
 })

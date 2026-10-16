@@ -5,7 +5,7 @@ import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenS
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatio } from '~/utils/sdk-prices'
 import type { SwapQuote, EVault } from '@eulerxyz/euler-v2-sdk'
-import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useCollateralForm } from '~/composables/position/useCollateralForm'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
@@ -14,6 +14,7 @@ import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/uti
 import { getAddress, type Address, zeroAddress, maxUint256 } from 'viem'
 import { FixedPoint } from '~/utils/fixed-point'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
+import { collectPlannerVaultAddresses } from '~/features/reviewed-execution/planning/requirements'
 
 import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
 
@@ -181,7 +182,10 @@ const form = useCollateralForm({
   },
   usePreparedPipeline: true,
 })
-useOperationGuard(computed(() => [form.collateralVault.value?.address, form.borrowVault.value?.address].filter(Boolean)))
+useOperationGuard(computed(() => collectPlannerVaultAddresses({
+  vaultAddress: form.collateralVault.value?.address,
+  swapQuote: needsSwap.value ? form.swapSelectedQuote.value : undefined,
+})), { acquiresExposure: false })
 const withdrawableCollateralAssets = computed(() => cashLimitedCollateralAssets())
 
 // True when the requested amount covers the entire collateral balance. The Max
@@ -288,10 +292,12 @@ const pairAssetsLabel = usePositionPairLabel(form.position)
 
 // Withdraw-specific computeds
 const withdrawWarnings = computed(() => {
-  if (!form.borrowVault.value) return []
+  const collateralVault = form.collateralVault.value
   return [
     form.hookWarning.value,
-    getUtilisationWarning(form.borrowVault.value, 'borrow'),
+    collateralVault && isEVault(collateralVault)
+      ? getUtilisationWarning(collateralVault, 'lend')
+      : null,
   ]
 })
 
