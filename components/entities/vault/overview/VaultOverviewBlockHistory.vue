@@ -452,6 +452,7 @@ const chartOptions = computed<ChartOptions<'line'>>(() => {
   <VaultOverviewAccordionSection
     v-if="canLoadHistory"
     title="Performance"
+    icon="section-performance"
     :default-open="defaultOpen"
     content-class="flex flex-col gap-16"
   >

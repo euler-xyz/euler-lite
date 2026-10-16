@@ -79,6 +79,7 @@ beforeEach(() => {
   }))
   vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1) }))
   vi.stubGlobal('useEnvConfig', () => ({ v3ImagesUrl: 'https://images.example' }))
+  vi.stubGlobal('useRoute', () => ({ hash: '' }))
   vi.stubGlobal('useEulerOracleRouters', () => ({
     recognizedRouters: ref(new Set()), recognizedRoutersChainId: ref(1), loadRecognizedRouters: vi.fn(),
   }))

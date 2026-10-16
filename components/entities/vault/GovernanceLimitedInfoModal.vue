@@ -7,7 +7,7 @@ defineEmits<{ close: [] }>()
 <template>
   <UiInfoModal
     title="Limited Risk Management"
-    icon="pulse"
+    icon="badge-governance-limited"
     headline="Limited Risk Management"
     :body="vaultTypeDescriptions.governanceLimited"
     @close="$emit('close')"

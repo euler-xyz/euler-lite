@@ -16,7 +16,8 @@ vi.mock('~/server/utils/fetchWithTimeout', () => ({ fetchWithTimeout: mocks.fetc
 vi.mock('~/server/utils/sdk-server', () => ({ getServerSdk: mocks.getServerSdk }))
 vi.mock('~/server/utils/rate-limit', () => ({ createRateLimiter: () => ({ consume: vi.fn() }) }))
 vi.mock('~/server/utils/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }))
-vi.mock('@eulerxyz/euler-v2-sdk', () => ({
+vi.mock('@eulerxyz/euler-v2-sdk', async importOriginal => ({
+  ...await importOriginal<typeof import('@eulerxyz/euler-v2-sdk')>(),
   buildEulerSDK: async () => ({
     tokenlistService: {
       loadTokenlist: async (chainId: number) => (chainId === 1 ? [USDC] : []),

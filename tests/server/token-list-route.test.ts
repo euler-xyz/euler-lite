@@ -36,7 +36,8 @@ vi.mock('~/server/utils/log', () => ({
   reportStatus: vi.fn(),
 }))
 
-vi.mock('@eulerxyz/euler-v2-sdk', () => ({
+vi.mock('@eulerxyz/euler-v2-sdk', async importOriginal => ({
+  ...await importOriginal<typeof import('@eulerxyz/euler-v2-sdk')>(),
   buildEulerSDK: async () => {
     let queryTokenList: (url: string) => Promise<Record<string, unknown>[]> = async () => []
     return {

@@ -132,6 +132,7 @@ const handleInternalClick = (event: MouseEvent) => {
           <VaultDisplayName
             :name="compactVaultName"
             :is-unverified="!isVerifiedVault(resolvedVault.address)"
+            :addresses="[resolvedVault.address]"
           />
         </span>
         <span

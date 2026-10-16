@@ -84,5 +84,13 @@ export function createTtlCache<T>(options: TtlCacheOptions) {
       map.set(key, { data, timestamp: Date.now() })
       evictOldest()
     },
+
+    /** Replace cached data without extending its original freshness window. */
+    replace(key: string, data: T): boolean {
+      const entry = map.get(key)
+      if (!entry) return false
+      map.set(key, { data, timestamp: entry.timestamp })
+      return true
+    },
   }
 }

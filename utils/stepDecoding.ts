@@ -1168,6 +1168,7 @@ export function buildTransactionPlanDisplaySteps(
   for (const item of plan) {
     if (item.type === 'requiredApproval') {
       const resolved = item.resolved ?? []
+      const permit2Tokens = new Set(resolved.filter(r => r.type === 'permit2').map(r => normalizeAddressKey(r.token ?? item.token)))
       for (const r of resolved) {
         index++
         const token = r.token ?? item.token
@@ -1182,7 +1183,7 @@ export function buildTransactionPlanDisplaySteps(
           steps.push({
             index,
             label: 'Approve',
-            labelSuffix: 'for vault',
+            labelSuffix: permit2Tokens.has(normalizeAddressKey(token)) ? 'for Permit2' : 'for vault',
             isSeparateTx: !ctx.bundledApprovals,
             assetInfo,
           })

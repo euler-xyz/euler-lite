@@ -14,6 +14,8 @@ export interface MarketGroup {
   curator?: EulerLabelEntity
   /** Curator entity key from labels */
   curatorKey?: string
+  /** Owner first, followed by display-only co-brand entities. */
+  brandEntities?: EulerLabelEntity[]
   /** Core member vaults */
   vaults: AnyVault[]
   /** Vaults referenced as collateral but not in this group */

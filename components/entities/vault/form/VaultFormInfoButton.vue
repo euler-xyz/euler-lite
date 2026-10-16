@@ -3,15 +3,19 @@ import type { BorrowVaultPair } from '~/types/borrow-pair'
 import { isSecuritizeCollateralVault, type EulerEarn, type SecuritizeCollateralVault, type EVault, type PortfolioBorrowPosition, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { VaultOverviewModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
+import { useMediaQuery } from '@vueuse/core'
 
-const { vault, pair, earnVault, extraVault } = defineProps<{ vault?: EVault | SecuritizeCollateralVault, pair?: BorrowVaultPair | PortfolioBorrowPosition<VaultEntity>, earnVault?: EulerEarn, extraVault?: EVault, disabled?: boolean }>()
+const { vault, pair, earnVault, extraVault, revealOracleLink = false } = defineProps<{ vault?: EVault | SecuritizeCollateralVault, pair?: BorrowVaultPair | PortfolioBorrowPosition<VaultEntity>, earnVault?: EulerEarn, extraVault?: EVault, disabled?: boolean, revealOracleLink?: boolean }>()
 const modal = useModal()
+const route = useRoute()
+const isMobileOverview = useMediaQuery('(max-width: 900px)')
+let infoModalId: number | undefined
 
 const isSecuritize = (v: EVault | SecuritizeCollateralVault | undefined): v is SecuritizeCollateralVault =>
   !!v && isSecuritizeCollateralVault(v)
 
 const onClick = () => {
-  modal.open(VaultOverviewModal, {
+  infoModalId = modal.open(VaultOverviewModal, {
     props: {
       title: 'Vault information',
       pair: pair,
@@ -22,6 +26,14 @@ const onClick = () => {
     },
   })
 }
+
+watch(
+  () => revealOracleLink && pair && isMobileOverview.value ? route.hash : '',
+  (hash) => {
+    if (/^#oracle-adapter-0x[a-fA-F0-9]{40}$/.test(hash) && !modal.list.some(item => item.id === infoModalId)) onClick()
+  },
+  { immediate: true, flush: 'post' },
+)
 </script>
 
 <template>
