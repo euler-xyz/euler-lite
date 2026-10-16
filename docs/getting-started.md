@@ -98,6 +98,7 @@ NUXT_PUBLIC_APP_URL=https://your-domain.com
 # API URLs
 V3_API_URL=https://v3.euler.finance
 EULER_SDK_V3_API_KEY=your-v3-api-key # optional
+LIQUIDATION_BOT_API_URL=https://{chainId}-liquidations.euler.finance # optional
 SWAP_API_URL=https://swap.euler.finance
 
 # Chain RPC endpoints (one per chain you want to enable)

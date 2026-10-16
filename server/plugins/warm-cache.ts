@@ -15,7 +15,8 @@
  * Two timers, each with its own cadence:
  *
  *   • Global cycle (5 min): Euler Chains and runtime ABIs once, then each
- *     chain's labels bundle and token list, serialized across chains. Hosted
+ *     chain's labels bundle, token list and (when LIQUIDATION_BOT_API_URL is
+ *     set) liquidation bot coverage, serialized across chains. Hosted
  *     bundles share the live geo-policy cache.
  *   • Vaults cycle (1 min when V3 is configured, otherwise 5 min):
  *     /api/internal/vaults per chain, serialized.
@@ -42,6 +43,7 @@ import { refreshTokenList } from '../api/internal/token-list.get'
 import { refreshChainVaults } from '../utils/vaults-cache'
 import { UPSTREAM_FETCH_TIMEOUT_MS } from '../utils/fetchWithTimeout'
 import { refreshPublicLabelsBundle } from '../utils/public-labels-source'
+import { isLiquidationCoverageEnabled, refreshLiquidationCoverage } from '../utils/liquidation-coverage-source'
 import {
   readDisableServerVaultCache,
   isV3BackendEnabled,
@@ -121,6 +123,9 @@ const warmPublicLabels = (chainId: number) =>
 const warmTokenList = (chainId: number) =>
   reportWarm(`token-list chain=${chainId}`, refreshTokenList(chainId))
 
+const warmLiquidationCoverage = (chainId: number) =>
+  reportWarm(`liquidation-coverage chain=${chainId}`, refreshLiquidationCoverage(chainId))
+
 // Per-chain consolidated vault snapshot served at /api/internal/vaults?chainId=N.
 // Warmed so the first user navigation to /lend hydrates instantly from
 // cache instead of paying the full lens-multicall + intrinsic-APY fan-out.
@@ -132,6 +137,7 @@ const warmVaults = (chainId: number) =>
 const warmChainTasks = (chainId: number): Promise<unknown>[] => [
   warmPublicLabels(chainId),
   warmTokenList(chainId),
+  ...(isLiquidationCoverageEnabled() ? [warmLiquidationCoverage(chainId)] : []),
 ]
 
 // --- Orchestration ---
