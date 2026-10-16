@@ -134,13 +134,13 @@ const open = () => {
 <style lang="scss">
 .ui-select {
   position: relative;
+  max-width: 100%;
 
   &--chips {
     display: flex;
     align-items: center;
     gap: 8px;
     width: fit-content;
-    max-width: 100%;
 
     &::-webkit-scrollbar {
       display: none;
@@ -152,6 +152,7 @@ const open = () => {
     align-items: center;
     gap: 6px;
     flex-grow: 1;
+    max-width: 100%;
     min-height: 36px;
     color: var(--ui-select-field-color);
     font-size: 14px;
@@ -177,6 +178,7 @@ const open = () => {
   }
 
   &__icon {
+    flex-shrink: 0;
     width: 16px;
     height: 16px;
   }

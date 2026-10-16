@@ -80,13 +80,14 @@ describe('readChainRegistry', () => {
     ])
 
     expect(registry).toEqual({
+      chainIds: [1, 137, 146, 8453],
       statuses: { 1: 'production', 137: 'unlisted', 146: 'staging' },
       explorerUrls: { 1: 'https://etherscan.io' },
     })
   })
 
   it('is empty when no manifest is available', () => {
-    expect(readChainRegistry(undefined)).toEqual({ statuses: {}, explorerUrls: {} })
+    expect(readChainRegistry(undefined)).toEqual({ chainIds: undefined, statuses: {}, explorerUrls: {} })
   })
 })
 
@@ -148,6 +149,19 @@ describe('applyChainRegistry', () => {
     expect(config.deprecatedChainIds).toEqual([146])
     expect(config.onchainSdkChainIds).toEqual([1])
     expect(config.eVaultFetchChunkChainIds).toEqual([146])
+  })
+
+  it('excludes chains without admitted deployments from every configured list', () => {
+    const config = applyChainRegistry(envConfig({
+      deprecatedChainIds: [146],
+      onchainSdkChainIds: [1, 146],
+      eVaultFetchChunkChainIds: [1, 146],
+    }), readChainRegistry([{ chainId: 1 }]), false)
+
+    expect(config.enabledChainIds).toEqual([1])
+    expect(config.deprecatedChainIds).toEqual([])
+    expect(config.onchainSdkChainIds).toEqual([1])
+    expect(config.eVaultFetchChunkChainIds).toEqual([1])
   })
 
   it('keeps the env-derived config when the registry is unavailable', () => {

@@ -29,7 +29,6 @@
  */
 import {
   buildEulerSDK,
-  ProviderService,
   type EulerSDK,
   type EulerSDKConfig,
 } from '@eulerxyz/euler-v2-sdk'
@@ -44,9 +43,9 @@ import {
 import { parseChainIds } from '~/utils/parseChainIds'
 import { LiteEulerLabelsService } from '~/utils/sdk-labels'
 import { getPublicLabelsBundle } from './public-labels-source'
+import { serverAbiService } from './sdk-abi-service'
 import { resolveRpcUrl } from './rpc'
 import { TURTLE_EARN_API_URL } from './turtle-proxy'
-import { createServerProviderService } from './server-provider-service'
 
 const sdkByChain = new Map<number, Promise<EulerSDK>>()
 
@@ -122,11 +121,19 @@ export const getServerSdk = (chainId: number): Promise<EulerSDK> => {
   const existing = sdkByChain.get(chainId)
   if (existing) return existing
   const config = buildServerSdkConfig(chainId)
-  const providerService = createServerProviderService(config.rpcUrls, new ProviderService(config.rpcUrls))
   const promise = buildEulerSDK({
     config,
+    // Let the SDK resolve registry viemNames before applying server-only tuning.
+    chains: {
+      146: {
+        transport: {
+          multicall: { batchSize: 128, wait: 10 },
+          http: { batch: { batchSize: 100, wait: 10 } },
+        },
+      },
+    },
     servicesOverrides: {
-      providerService,
+      abiService: serverAbiService,
       eulerLabelsService: new LiteEulerLabelsService(getPublicLabelsBundle),
     },
   }).catch((err) => {

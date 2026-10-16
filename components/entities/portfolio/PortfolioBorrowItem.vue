@@ -438,6 +438,10 @@ const openPositionInformationModal = () => {
                     </span>
                   </UiHoverPreviewTooltip>
                   <VaultDeprecatedBadge :addresses="[borrowAddress, primaryCollateralAddress].filter(Boolean)" />
+                  <LiquidationCoverageBadge
+                    :vault="borrowVault"
+                    context="borrow"
+                  />
                 </div>
                 <VaultVisibilityNotice :address="borrowAddress" />
                 <VaultVisibilityNotice

@@ -21,13 +21,14 @@ This document covers the per-host proxies, the vault snapshot pipeline, the warm
 | `server/api/internal/proxy/subgraph/[chainId].post.ts` | Proxies the per-chain Goldsky subgraph (hand-rolled: router param, per-chain URL, not built with the factory) |
 | `server/api/internal/public-labels.get.ts` | Chain/version-scoped aggregate Public Labels endpoint |
 | `server/utils/public-labels-source.ts` | Public Labels V3 pagination, 5-minute cache, in-flight dedup, and bounded stale fallback |
+| `server/api/internal/liquidation-coverage.get.ts` | Chain-scoped default liquidation bot coverage |
+| `server/utils/liquidation-coverage-source.ts` | Reads each bot's `/vault-filter`, 5-minute cache, 30-minute last-good window, one-minute retry floor |
 | `server/utils/static-labels-source.ts` | Atomic static authoring snapshots, used only in static mode |
 | `server/api/internal/v3/[...path].ts` | Rate-limited V3 backend proxy for SDK browser endpoints (`/api/internal/v3/...` → `v3.euler.finance/v3/...`) |
 | `server/api/internal/proxy/intrinsic-apy-overrides.get.ts` | Lite intrinsic-APY overlay for HyperEVM / Monad; chain-keyed 5-min cache |
 | `server/api/internal/vaults.get.ts` | Per-chain consolidated vault snapshot endpoint |
 | `server/utils/vaults-cache.ts` | `refreshChainVaults` + `vaultsCache` |
-| `server/utils/sdk-server.ts` | Lazy per-chain server-side SDK builder |
-| `server/utils/server-provider-service.ts` | Chain-specific server `IProviderService` overrides (Sonic Multicall throttle); all other chains stay on the SDK provider |
+| `server/utils/sdk-server.ts` | Lazy per-chain server-side SDK builder, including Sonic transport tuning |
 | `server/plugins/warm-cache.ts` | Boot + interval warm cycles for labels, token-list, vault snapshot |
 | `utils/snapshot-codec.ts` | Bigint-safe JSON wire format |
 | `utils/snapshot-types.ts` | Wire-shape types shared client + server |
@@ -96,6 +97,12 @@ Turtle is the only provider whose credential is required: Turtle rejects unauthe
 `/api/internal/public-labels?chainId=N` is the browser's single label read. `server/utils/public-labels-source.ts` reads the admitted `EulerChains.json` manifest, then paginates vaults, products, entities, entity governance addresses, and geo policies directly from V3. Enabled deprecated chains use metadata with on-chain verification; other enabled chains use V3 visibility verdicts. Results are cached for five minutes by chain, version, and verification mode; concurrent misses share one in-flight operation. Bundle and geo-policy stale fallback is bounded to 24 hours. Geo separately retains a validated, fetchedAt-stamped disk checkpoint; cold starts without valid geo policies cannot publish a bundle. Mount `GEO_POLICY_CACHE_DIR` for cross-container persistence.
 
 `LABELS_SOURCE=v3` performs no label-file reads. `LABELS_SOURCE=static` reads the operator-owned authoring files on the same warm/refresh cycle and uses one atomic disk checkpoint for the entire collection. See [Static labels](./static-labels.md).
+
+### Liquidation bot coverage
+
+`/api/internal/liquidation-coverage?chainId=N` answers which vaults the default liquidation bot (`LIQUIDATION_BOT_API_URL`) leaves out on that chain. `server/utils/liquidation-coverage-source.ts` fetches `{base}/vault-filter` with one 5 s deadline covering the headers and the body, follows no redirects, keeps the mode and the listed addresses and drops the bot's reasons. An answer is fresh for 5 minutes; after that it is still served at once while a background refresh runs, until 30 minutes after it was fetched. Past that, or when the bot has not answered since the server started, the chain is `no-bot` and the browser badges every borrowable vault on it. A failing chain is retried at most once a minute. The browser asks again after a minute for a `no-bot` answer and before an answer reaches 30 minutes. With the variable unset the route answers `{ enabled: false }` and nothing is fetched.
+
+The browser removes expired answers when checking for a refresh, including the visible-tab poll and focus/visibility handlers, and when a request settles. If the Lite endpoint cannot be reached, expired coverage becomes unknown and renders no badge. The browser uses `no-bot` only when the server returns that state.
 
 ### V3 proxy
 
@@ -248,19 +255,15 @@ The server SDK's labels service reads `getPublicLabelsBundle` directly. The toke
 
 Every server-side SDK build resolves the deployments manifest through the euler-chains cache chain rather than fetching euler-interfaces directly: `server/plugins/sdk-deployments.ts` installs `DeploymentService.setQueryDeployments(loadEulerChains)` at boot, so all server SDK builds share one cached copy with its 7-day stale window instead of issuing their own GitHub fetches.
 
+Deployment admission is per chain: valid rows refresh independently, present invalid rows retain their last-good entry only within its original 7-day stale window, and omitted rows leave the admitted set. Empty, malformed, or entirely invalid responses keep the bounded stale fallback. An RPC-configured chain without an admitted deployment is excluded from the injected browser chain lists; without any cached manifest, the env-derived config applies. The browser also intersects its initial RPC list with the fetched deployment IDs before constructing providers, so a slow registry boot read cannot enable an incomplete chain. Address loading keeps only that intersection and selects an admitted chain if the initial selection is unavailable.
+
 ### Server provider overrides
 
-`getServerSdk` does **not** use the browser JSON-RPC proxy (`/api/internal/rpc/{chainId}`). It talks to `RPC_URL_<chainId>` through an `IProviderService` installed as `servicesOverrides.providerService`.
+`getServerSdk` talks directly to `RPC_URL_<chainId>` through the SDK's provider. The SDK resolves chain metadata using the registry's `viemName` before applying Lite's `chains` transport options.
 
-`createServerProviderService(rpcUrls, delegate)` in `server/utils/server-provider-service.ts` wraps the SDK `ProviderService`:
+Sonic (`146`) is the only transport override. Other chains keep the SDK defaults (Ethereum in tests: Multicall `batchSize: 2048`, `wait: 10`). Each server SDK is built with only that chain's RPC URL, so asking its provider for another chain throws.
 
-- Chains **without** an override keep the SDK client (Ethereum in tests: Multicall `batchSize: 2048`, `wait: 10`).
-- Chains **with** an override get a Lite-constructed viem `PublicClient` that reuses the SDK provider's `chain` metadata — including its Multicall3 address — because the SDK ships its own viem and Lite cannot assign that `Chain` type directly.
-- `getSupportedChainIds()` still comes from the delegate. Each `getServerSdk(chainId)` instance is built with only that chain's `rpcUrls`, so asking it for another chain throws.
-
-Overrides are a code map, not an env flag. Add a row to `providerOverrides` and cover it in `tests/server/sdk-server.test.ts`. Because the server SDK is cached per chain at first use, a changed override needs a process restart.
-
-**Sonic (`146`) is the only override today.** Sonic's public RPC / lens path rejects the SDK's default Multicall aggregates, so the replacement client uses:
+Transport overrides are a code map in `server/utils/sdk-server.ts`, covered by `tests/server/sdk-server.test.ts`. Because the server SDK is cached per chain at first use, a changed override needs a process restart. Sonic's public RPC / lens path uses:
 
 | Layer | Value | Effect |
 |---|---|---|
@@ -273,7 +276,7 @@ This is a different throttle from `EVAULT_FETCH_CHUNK_CHAINS`, which splits Lite
 
 | Symptom | First check |
 |---|---|
-| Sonic snapshot / server label reads fail with oversized Multicall or RPC batch errors | Confirm `createServerProviderService` still wraps chain `146` and the process was restarted after a change |
+| Sonic snapshot / server label reads fail with oversized Multicall or RPC batch errors | Confirm `getServerSdk` sets transport tuning for chain `146` and the process was restarted after a change |
 | Other chains suddenly issue tiny Multicall aggregates | An override was added too broadly — only list the chain that needs it |
 | `EVAULT_FETCH_CHUNK_CHAINS=146` does not stop Sonic Multicall failures | Expected: that env only chunks `fetchVaults`, it does not change viem Multicall size |
 
@@ -371,6 +374,8 @@ Global cycle (5 min)                   Vaults cycle (1 min if V3, else 5 min)
 - per-chain Public Labels bundle
 - per-chain labels snapshot
 - per-chain token list
+- per-chain liquidation bot coverage
+  (when LIQUIDATION_BOT_API_URL is set)
 ```
 
 Vault snapshot has its own faster timer because V3-backed refreshes are cheap — one batched POST per chain hitting V3's own cache. Pulling a fresh snapshot every minute keeps it tight without hammering upstream. Without V3, the snapshot is built from heavier onchain lens multicalls, so it falls back to the global 5-min cadence.
