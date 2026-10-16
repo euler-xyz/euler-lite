@@ -463,7 +463,7 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
                 'text-warning-500': check.outcome !== OracleAdapterCheckOutcome.Fail || check.severity !== OracleAdapterCheckSeverity.High,
               }"
             />
-            <div>
+            <div class="min-w-0 break-words">
               <span class="text-content-primary font-medium">{{ formatOracleCheckTitle(check.id) }}: </span>
               <span class="text-content-secondary">{{ check.message }}</span>
             </div>
