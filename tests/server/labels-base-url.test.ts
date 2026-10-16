@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { readLabelsOnchainVerificationChains, readLabelsSource, resolveLabelsBaseUrl } from '~/server/utils/labels-base-url'
+import { isLabelsOnchainVerificationChain, readLabelsSource, resolveLabelsBaseUrl } from '~/server/utils/labels-base-url'
+import { readChainRegistry } from '~/utils/chain-status'
 
 describe('label source configuration', () => {
   afterEach(() => vi.unstubAllEnvs())
@@ -31,20 +32,26 @@ describe('deprecated-chain labels verification selection', () => {
     vi.stubEnv('RPC_URL_1', 'https://rpc.example.test')
     vi.stubEnv('ONCHAIN_SDK_CHAINS', '1,146')
     vi.stubEnv('DEPRECATED_CHAINS', '146,146')
-    expect(readLabelsOnchainVerificationChains()).toEqual([146])
+    expect(isLabelsOnchainVerificationChain(146, readChainRegistry(undefined))).toBe(true)
+    expect(isLabelsOnchainVerificationChain(1, readChainRegistry(undefined))).toBe(false)
     vi.stubEnv('DEPRECATED_CHAINS', '')
-    expect(readLabelsOnchainVerificationChains()).toEqual([])
+    expect(isLabelsOnchainVerificationChain(146, readChainRegistry([{ chainId: 146, status: 'deprecated' }]))).toBe(true)
+    expect(isLabelsOnchainVerificationChain(146, readChainRegistry([{ chainId: 146, status: 'production' }]))).toBe(false)
   })
   it('ignores deprecated chains without an enabled RPC', () => {
     vi.stubEnv('RPC_URL_1923', '')
     vi.stubEnv('ONCHAIN_SDK_CHAINS', '')
     vi.stubEnv('DEPRECATED_CHAINS', '1923')
-    expect(readLabelsOnchainVerificationChains()).toEqual([])
+    expect(isLabelsOnchainVerificationChain(1923, readChainRegistry([{ chainId: 1923, status: 'deprecated' }]))).toBe(false)
   })
   it('rejects an enabled deprecated chain without on-chain SDK reads', () => {
     vi.stubEnv('RPC_URL_146', 'https://rpc.example.test')
     vi.stubEnv('ONCHAIN_SDK_CHAINS', '1')
     vi.stubEnv('DEPRECATED_CHAINS', '146')
-    expect(() => readLabelsOnchainVerificationChains()).toThrow('ONCHAIN_SDK_CHAINS: 146')
+    expect(() => isLabelsOnchainVerificationChain(146, readChainRegistry(undefined))).toThrow('ONCHAIN_SDK_CHAINS: 146')
+    vi.stubEnv('DEPRECATED_CHAINS', '')
+    const registry = readChainRegistry([{ chainId: 146, status: 'deprecated' }])
+    expect(() => isLabelsOnchainVerificationChain(146, registry)).toThrow('ONCHAIN_SDK_CHAINS: 146')
+    expect(isLabelsOnchainVerificationChain(1, registry)).toBe(false)
   })
 })

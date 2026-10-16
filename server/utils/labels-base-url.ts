@@ -1,5 +1,6 @@
 import { getEnabledChainIds } from '~/utils/chain-env'
 import { parseChainIds } from '~/utils/parseChainIds'
+import type { ChainRegistry } from '~/utils/chain-status'
 
 export const readLabelsVaultTag = (): string | undefined =>
   process.env.LABELS_VAULT_TAG?.trim() || undefined
@@ -32,13 +33,15 @@ export const readV3LabelsSelection = () => {
 }
 
 /** Deprecated enabled chains retain metadata with on-chain verification. */
-export const readLabelsOnchainVerificationChains = (): number[] => {
+export const isLabelsOnchainVerificationChain = (chainId: number, registry: ChainRegistry): boolean => {
   const enabled = new Set(getEnabledChainIds())
-  const deprecated = [...new Set(parseChainIds(process.env.DEPRECATED_CHAINS, enabled))]
+  if (!enabled.has(chainId)) return false
+  const deprecated = registry.statuses[chainId] === 'deprecated'
+    || parseChainIds(process.env.DEPRECATED_CHAINS, enabled).includes(chainId)
+  if (!deprecated) return false
   const onchain = new Set(parseChainIds(process.env.ONCHAIN_SDK_CHAINS))
-  const missing = deprecated.filter(id => !onchain.has(id))
-  if (missing.length) {
-    throw new Error(`Deprecated labels chains must be in ONCHAIN_SDK_CHAINS: ${missing.join(',')}`)
+  if (!onchain.has(chainId)) {
+    throw new Error(`Deprecated labels chains must be in ONCHAIN_SDK_CHAINS: ${chainId}`)
   }
-  return deprecated
+  return true
 }

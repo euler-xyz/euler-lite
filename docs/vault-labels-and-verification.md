@@ -328,7 +328,7 @@ On assessed chains, V3 supplies the managing entity and effective visibility ver
 
 ## Archived chains: V3 metadata with on-chain verification
 
-Enabled `DEPRECATED_CHAINS` select the SDK's `PublicLabelsV3MetadataAdapter`. Each must also be in `ONCHAIN_SDK_CHAINS`; a missing entry is a configuration error. Chains without a configured RPC are ignored, and other enabled chains keep V3 assessments even if they use on-chain SDK reads. No separate labels chain variable is required. The archived-chain configuration is `DEPRECATED_CHAINS=146,239,60808,80094`; restart after configuration changes. Swellchain is not selected unless enabled and added to the deprecated/on-chain lists.
+Enabled chains marked `deprecated` in `EulerChains.json` select the SDK's `PublicLabelsV3MetadataAdapter`. `DEPRECATED_CHAINS` is an optional override with the same effect. Each selected chain must also be in `ONCHAIN_SDK_CHAINS`; a missing entry is a configuration error. Chains without a configured RPC are ignored, and other enabled chains keep V3 assessments even if they use on-chain SDK reads. The shared server labels loader reads the admitted Euler interfaces manifest before selecting or serving a cached adapter result. If no manifest is available, hosted labels remain unavailable until it loads. No separate labels chain variable is required.
 
 The SDK shares metadata fetching and display mapping between its adapters. Metadata-only bundles carry `source: 'v3-metadata'` and contain no visibility verdicts. They use the same label set/publication selection, live entity addresses and live geo policies as the assessed path. Candidate addresses are separate from verified membership.
 

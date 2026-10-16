@@ -8,6 +8,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   fetchWithTimeout: vi.fn(),
   warn: vi.fn(),
+  loadEulerChains: vi.fn(),
+  peekEulerChains: vi.fn(),
+}))
+
+vi.mock('~/server/api/internal/euler-chains.get', () => ({
+  loadEulerChains: mocks.loadEulerChains,
+  peekEulerChains: mocks.peekEulerChains,
 }))
 
 vi.mock('~/server/utils/fetchWithTimeout', async (importOriginal) => {
@@ -62,6 +69,9 @@ describe('public labels server source', () => {
     vi.stubEnv('LABELS_V3_VERSION', '')
     vi.stubEnv('LABELS_VAULT_TAG', '')
     vi.stubEnv('V3_API_URL', 'https://v3.example.test')
+    const manifest = [{ chainId: 1, status: 'production' }, { chainId: 146, status: 'production' }]
+    mocks.loadEulerChains.mockReset().mockResolvedValue(manifest)
+    mocks.peekEulerChains.mockReset().mockReturnValue(manifest)
     mocks.fetchWithTimeout.mockReset().mockImplementation(async (url: string) =>
       new URL(url).pathname.endsWith('/versions')
         ? versionsResponse()
@@ -76,10 +86,12 @@ describe('public labels server source', () => {
     vi.unstubAllEnvs()
   })
 
-  it('selects metadata-only for deprecated chains, isolates its cache and never falls back after assessment failure', async () => {
+  it('uses registry deprecation for metadata-only labels and changes cache modes with the registry', async () => {
     vi.stubEnv('RPC_URL_146', 'https://rpc.example.test')
     vi.stubEnv('ONCHAIN_SDK_CHAINS', '146')
-    vi.stubEnv('DEPRECATED_CHAINS', '146')
+    const deprecated = [{ chainId: 146, status: 'deprecated' }]
+    mocks.loadEulerChains.mockResolvedValue(deprecated)
+    mocks.peekEulerChains.mockReturnValue(deprecated)
     mocks.fetchWithTimeout.mockImplementation(async (input: string) => {
       const url = new URL(input)
       if (url.pathname.startsWith('/v3/evk/') || url.pathname.startsWith('/v3/earn/') || url.searchParams.get('include') === 'visibility') {
@@ -87,13 +99,27 @@ describe('public labels server source', () => {
       }
       return url.pathname.endsWith('/versions') ? versionsResponse() : emptyListResponse()
     })
-    const { getPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
+    const { getCachedPublicLabelsBundle, getPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
     const bundle = await getPublicLabelsBundle(146)
     expect(bundle.source).toBe('v3-metadata')
     expect(bundle).not.toHaveProperty('publicLabels.visibility')
+    expect(getCachedPublicLabelsBundle(146)).toEqual(bundle)
     expect(mocks.fetchWithTimeout.mock.calls.some(([url]) => /\/(evk|earn)\//.test(new URL(url).pathname) || new URL(url).searchParams.has('include'))).toBe(false)
-    vi.stubEnv('DEPRECATED_CHAINS', '')
+    const active = [{ chainId: 146, status: 'production' }]
+    mocks.loadEulerChains.mockResolvedValue(active)
+    mocks.peekEulerChains.mockReturnValue(active)
+    expect(getCachedPublicLabelsBundle(146)).toBeUndefined()
     await expect(getPublicLabelsBundle(146)).rejects.toThrow('404')
+  })
+
+  it('does not choose the assessed adapter before the chain registry is available', async () => {
+    vi.stubEnv('RPC_URL_146', 'https://rpc.example.test')
+    mocks.loadEulerChains.mockRejectedValue(new Error('registry unavailable'))
+    mocks.peekEulerChains.mockReturnValue(undefined)
+    const { getCachedPublicLabelsBundle, getPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
+    expect(getCachedPublicLabelsBundle(146)).toBeUndefined()
+    await expect(getPublicLabelsBundle(146)).rejects.toThrow('registry unavailable')
+    expect(mocks.fetchWithTimeout).not.toHaveBeenCalled()
   })
 
   it('deduplicates concurrent loads and serves the aggregate from cache', async () => {
@@ -243,7 +269,7 @@ describe('public labels server source', () => {
   ])('rejects invalid %s before making requests', async (key, value) => {
     vi.stubEnv(key, value)
     const { getPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
-    expect(() => getPublicLabelsBundle(1)).toThrow(key)
+    await expect(getPublicLabelsBundle(1)).rejects.toThrow(key)
     expect(mocks.fetchWithTimeout).not.toHaveBeenCalled()
   })
 
