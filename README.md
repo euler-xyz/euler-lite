@@ -63,8 +63,8 @@ Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for 
 | `SERVER_VAULT_CACHE_SOURCE` | `fallback` | Server snapshot builder adapter chain: `fallback`, `onchain`, or `v3`. |
 | `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` | `fallback` | Browser "fast" SDK adapter chain: `fallback`, `onchain`, or `v3`. The plan-time SDK is always on-chain. |
 | `DISABLE_SERVER_VAULT_CACHE` | `false` | Set to `true` to disable `/api/internal/vaults` snapshots and let the browser fall through to the normal RPC pipeline. |
-| `DEPRECATED_CHAINS` | — | Comma-separated chain IDs shown collapsed in the chain selector and skipped by startup warm-cache cycles. A chain with status `deprecated` in `EulerChains.json` is treated the same way. |
-| `ONCHAIN_SDK_CHAINS` | — | Comma-separated chain IDs pinned to the onchain SDK adapter config for chain-aware browser reads and the server vault snapshot, bypassing V3. Independent of `DEPRECATED_CHAINS`; list a chain in both to deprecate it and route it onchain. |
+| `DEPRECATED_CHAINS` | — | Optional comma-separated deprecated-chain override. Enabled chains marked `deprecated` here or in `EulerChains.json` appear collapsed in the chain selector, skip warm-cache cycles, and use V3 metadata with on-chain labels verification. They must also be in `ONCHAIN_SDK_CHAINS`. |
+| `ONCHAIN_SDK_CHAINS` | — | Comma-separated chain IDs pinned to the onchain SDK adapter config for chain-aware browser reads and the server vault snapshot, bypassing V3. Independent of deprecated status; include every enabled chain using metadata-only labels verification. |
 | `EVAULT_FETCH_CHUNK_CHAINS` | — | Comma-separated chain IDs whose EVault list reads are split into small sequential SDK calls. Use for RPC/lens endpoints that fail under larger concurrent onchain EVault fetches. |
 | `EULER_SDK_EULER_INTERFACES_BRANCH` | `master` | Euler interfaces branch used for runtime ABIs and `EulerChains.json`. Explicit `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` and `NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL` overrides take precedence over the branch for their respective manifests. |
 
