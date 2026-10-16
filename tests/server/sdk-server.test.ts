@@ -1,11 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { decodeFunctionData, encodeFunctionResult, multicall3Abi, parseAbi, type Address, type Hex, type PublicClient } from 'viem'
 import { sonic } from 'viem/chains'
+import type { Deployment } from '@eulerxyz/euler-v2-sdk'
 
 const mocks = vi.hoisted(() => ({
   buildEulerSDK: vi.fn(),
   resolveRpcUrl: vi.fn(),
   getPublicLabelsBundle: vi.fn(),
+  fetchWithTimeout: vi.fn(),
 }))
 
 vi.mock('@eulerxyz/euler-v2-sdk', async importOriginal => ({
@@ -21,19 +23,48 @@ vi.mock('~/server/utils/public-labels-source', () => ({
   getPublicLabelsBundle: mocks.getPublicLabelsBundle,
 }))
 
+vi.mock('~/server/utils/fetchWithTimeout', () => ({
+  fetchWithTimeout: mocks.fetchWithTimeout,
+}))
+
 vi.mock('~/utils/sdk-labels', () => ({
   LiteEulerLabelsService: class {
     constructor(readonly loadBundle: unknown) {}
   },
 }))
 
+const ABI_ENV_KEYS = [
+  'EULER_SDK_EULER_INTERFACES_BRANCH',
+  'NUXT_PUBLIC_EULER_INTERFACES_BRANCH',
+  'NUXT_PUBLIC_CONFIG_EULER_INTERFACES_BRANCH',
+  'NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL',
+] as const
+
+const accountLensAbi = parseAbi([
+  'function getEVCAccountInfo(address evc, address account) view returns (bytes)',
+  'function getVaultAccountInfo(address vault, address account) view returns (bytes)',
+])
+
 describe('getServerSdk', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules()
     mocks.buildEulerSDK.mockReset()
     mocks.resolveRpcUrl.mockReset()
     mocks.getPublicLabelsBundle.mockReset()
-    mocks.buildEulerSDK.mockImplementation(async options => ({ options }))
+    mocks.fetchWithTimeout.mockReset()
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new Error('Unexpected direct fetch in server SDK test')
+    }))
+    for (const key of ABI_ENV_KEYS) vi.stubEnv(key, '')
+    const sdkModule = await vi.importActual<typeof import('@eulerxyz/euler-v2-sdk')>('@eulerxyz/euler-v2-sdk')
+    sdkModule.DeploymentService.setQueryDeployments(async () => [1, 8453, 146, 463].map(chainId => ({
+      chainId,
+      name: `Chain ${chainId}`,
+      viemName: chainId === 463 ? 'areonNetwork' : undefined,
+      status: 'production',
+      addresses: { coreAddrs: {}, lensAddrs: {} },
+    } as Deployment)))
+    mocks.buildEulerSDK.mockImplementation(sdkModule.buildEulerSDK)
     mocks.resolveRpcUrl.mockReturnValue('https://rpc.example')
     process.env.V3_API_URL = 'https://v3.example'
     process.env.SERVER_VAULT_CACHE_SOURCE = 'fallback'
@@ -44,10 +75,80 @@ describe('getServerSdk', () => {
     delete process.env.TURTLE_EARN_API_KEY
   })
 
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  it('reads a custom ABI host through the shared proxy cache for every server SDK', async () => {
+    vi.stubEnv('EULER_SDK_EULER_INTERFACES_BRANCH', 'other-branch')
+    vi.stubEnv('NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL', 'https://abis.example/mirror/')
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(accountLensAbi))
+    const { getServerSdk } = await import('~/server/utils/sdk-server')
+    const sdk = await getServerSdk(1)
+    const otherSdk = await getServerSdk(8453)
+
+    await expect(Promise.all([
+      sdk.abiService.fetchABI(1, 'AccountLens'),
+      otherSdk.abiService.fetchABI(8453, 'AccountLens'),
+    ])).resolves.toEqual([accountLensAbi, accountLensAbi])
+    const { loadAbi } = await import('~/server/api/internal/abis/[contract].get')
+    await expect(loadAbi('AccountLens')).resolves.toEqual(accountLensAbi)
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledExactlyOnceWith('https://abis.example/mirror/AccountLens.json')
+  })
+
+  it.each(ABI_ENV_KEYS.slice(0, 3))('uses %s for server SDK ABI reads without a URL override', async (key) => {
+    vi.stubEnv(key, 'custom-branch')
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(accountLensAbi))
+    const { getServerSdk } = await import('~/server/utils/sdk-server')
+    const sdk = await getServerSdk(1)
+
+    await expect(sdk.abiService.fetchABI(1, 'AccountLens')).resolves.toEqual(accountLensAbi)
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledExactlyOnceWith(
+      'https://raw.githubusercontent.com/euler-xyz/euler-interfaces/refs/heads/custom-branch/abis/AccountLens.json',
+    )
+  })
+
+  it('rejects invalid ABI data and retries through the same server SDK', async () => {
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json([]))
+    const { getServerSdk } = await import('~/server/utils/sdk-server')
+    const sdk = await getServerSdk(1)
+
+    await expect(sdk.abiService.fetchABI(1, 'AccountLens')).rejects.toThrow('invalid ABI payload')
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(accountLensAbi))
+    await expect(sdk.abiService.fetchABI(1, 'AccountLens')).resolves.toEqual(accountLensAbi)
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(2)
+  })
+
+  it('preserves bounded stale ABI fallback without caching invalid replacements', async () => {
+    const { getServerSdk } = await import('~/server/utils/sdk-server')
+    const sdk = await getServerSdk(1)
+    vi.useFakeTimers()
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(accountLensAbi))
+    await expect(sdk.abiService.fetchABI(1, 'AccountLens')).resolves.toEqual(accountLensAbi)
+
+    vi.advanceTimersByTime(6 * 60_000)
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json([]))
+    await expect(sdk.abiService.fetchABI(1, 'AccountLens')).resolves.toEqual(accountLensAbi)
+
+    vi.advanceTimersByTime(8 * 24 * 60 * 60_000)
+    mocks.fetchWithTimeout.mockRejectedValueOnce(new Error('upstream down'))
+    await expect(sdk.abiService.fetchABI(1, 'AccountLens')).rejects.toThrow('upstream down')
+  })
+
+  it('rejects unknown ABI contracts without falling back to upstream', async () => {
+    const { getServerSdk } = await import('~/server/utils/sdk-server')
+    const sdk = await getServerSdk(1)
+
+    await expect(sdk.abiService.fetchABI(1, 'UnknownLens')).rejects.toThrow('Unknown ABI contract')
+    expect(mocks.fetchWithTimeout).not.toHaveBeenCalled()
+  })
+
   it('forces ONCHAIN_SDK_CHAINS chains to onchain while other chains use the configured source', async () => {
     const { getServerSdk } = await import('~/server/utils/sdk-server')
 
-    await getServerSdk(1)
+    const sdk = await getServerSdk(1)
     await getServerSdk(8453)
 
     expect(mocks.buildEulerSDK).toHaveBeenCalledTimes(2)
@@ -67,7 +168,9 @@ describe('getServerSdk', () => {
       .toBe(mocks.getPublicLabelsBundle)
     expect(mocks.buildEulerSDK.mock.calls[1]?.[0].servicesOverrides.eulerLabelsService.loadBundle)
       .toBe(mocks.getPublicLabelsBundle)
-    const providerService = mocks.buildEulerSDK.mock.calls[0]?.[0].servicesOverrides.providerService
+    expect(sdk.eulerLabelsService)
+      .toBe(mocks.buildEulerSDK.mock.calls[0]?.[0].servicesOverrides.eulerLabelsService)
+    const providerService = sdk.providerService
     expect(providerService.getProvider(1).batch.multicall).toEqual({ batchSize: 2048, wait: 10 })
     expect(providerService.getProvider(1)).toBe(providerService.getProvider(1))
     expect(() => providerService.getProvider(146)).toThrow('No provider configured for chainId 146')
@@ -111,21 +214,33 @@ describe('getServerSdk', () => {
     delete process.env.TURTLE_EARN_API_URL
   })
 
-  it('passes the Sonic provider override with the configured RPC URL and caches the server SDK', async () => {
+  it('passes Sonic transport tuning with the configured RPC URL and caches the server SDK', async () => {
     mocks.resolveRpcUrl.mockReturnValue('https://custom-sonic.example/rpc')
     const { getServerSdk } = await import('~/server/utils/sdk-server')
 
     const first = getServerSdk(146)
     expect(getServerSdk(146)).toBe(first)
-    await first
+    const sdk = await first
 
     expect(mocks.buildEulerSDK).toHaveBeenCalledOnce()
     const options = mocks.buildEulerSDK.mock.calls[0]?.[0]
     expect(options.config.rpcUrls).toEqual({ 146: 'https://custom-sonic.example/rpc' })
-    expect(options.servicesOverrides.providerService.getProvider(146)).toBe(
-      options.servicesOverrides.providerService.getProvider(146),
+    expect(sdk.providerService.getProvider(146)).toBe(
+      sdk.providerService.getProvider(146),
     )
-    expect(options.servicesOverrides.providerService.getSupportedChainIds()).toEqual([146])
+    expect(sdk.providerService.getSupportedChainIds()).toEqual([146])
+  })
+
+  it('uses registry viemName to resolve a chain ID shared by distinct viem definitions', async () => {
+    const { ProviderService } = await vi.importActual<typeof import('@eulerxyz/euler-v2-sdk')>('@eulerxyz/euler-v2-sdk')
+    expect(() => new ProviderService({ 463: 'https://rpc.example' })).toThrow('several chains with id 463')
+    const { getServerSdk } = await import('~/server/utils/sdk-server')
+
+    const sdk = await getServerSdk(463)
+
+    expect(sdk.providerService.getProvider(463).chain?.name).toBe('Areon Network')
+    expect(sdk.providerService.getSupportedChainIds()).toEqual([463])
+    expect(mocks.buildEulerSDK.mock.calls[0]?.[0].servicesOverrides?.providerService).toBeUndefined()
   })
 
   it('retries after a failed SDK build', async () => {
@@ -185,8 +300,8 @@ describe('getServerSdk', () => {
     vi.stubGlobal('fetch', fetchMock)
     try {
       const { getServerSdk } = await import('~/server/utils/sdk-server')
-      await getServerSdk(146)
-      const provider = mocks.buildEulerSDK.mock.calls[0]?.[0].servicesOverrides.providerService.getProvider(146) as PublicClient
+      const sdk = await getServerSdk(146)
+      const provider = sdk.providerService.getProvider(146) as unknown as PublicClient
       const results = await Promise.all(vaults.map(vault => provider.readContract({
         address: lensAddress,
         abi: lensAbi,

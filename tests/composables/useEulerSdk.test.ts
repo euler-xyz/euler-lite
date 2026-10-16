@@ -68,10 +68,12 @@ const importUseEulerSdk = async (
   chainIds: Ref<number[]>,
   buildEulerSDK: ReturnType<typeof vi.fn>,
   onchainSdkChainIds: number[] = [],
+  buildDeployments = vi.fn(async () => ({ getDeploymentChainIds: () => chainIds.value })),
 ) => {
   vi.resetModules()
   vi.doMock('@eulerxyz/euler-v2-sdk', () => ({
     buildEulerSDK,
+    DeploymentService: { build: buildDeployments },
     serializeQueryArgs: (args: readonly unknown[]) => JSON.stringify(args),
     createKeyringPlugin: vi.fn(() => ({ name: 'keyring' })),
     createPythPlugin: vi.fn(() => ({ name: 'pyth' })),
@@ -150,6 +152,42 @@ describe('useEulerSdk', () => {
     await expect(getEulerSdk()).resolves.toBe(sdkB)
     expect(buildEulerSDK).toHaveBeenCalledTimes(2)
   }, 20_000)
+
+  it('waits for a delayed deployment manifest and excludes a premature RPC chain before building providers', async () => {
+    // The HTML boot read timed out, so the initial allowed list still comes from env.
+    const chainIds = ref([1, 999999])
+    const sdk = createMockSdk('admitted')
+    const buildEulerSDK = vi.fn().mockResolvedValue(sdk)
+    const pending = createDeferred<{ getDeploymentChainIds: () => number[] }>()
+    const buildDeployments = vi.fn(() => pending.promise)
+    const { getEulerSdk } = await importUseEulerSdk(chainIds, buildEulerSDK, [], buildDeployments)
+
+    const result = getEulerSdk()
+    await vi.waitFor(() => expect(buildDeployments).toHaveBeenCalledOnce())
+    expect(buildEulerSDK).not.toHaveBeenCalled()
+
+    const deploymentService = { getDeploymentChainIds: () => [1] }
+    pending.resolve(deploymentService)
+    await expect(result).resolves.toBe(sdk)
+    expect(buildEulerSDK.mock.calls[0][0].config.rpcUrls).toEqual({ 1: '/api/internal/rpc/1' })
+    expect(buildEulerSDK.mock.calls[0][0].servicesOverrides.deploymentService).toBe(deploymentService)
+    expect(buildEulerSDK.mock.calls[0][0].servicesOverrides.eulerLabelsService.fetchEulerLabelsData)
+      .toEqual(expect.any(Function))
+    expect(buildDeployments).toHaveBeenCalledWith(
+      { deploymentsUrl: '/api/internal/euler-chains' }, expect.any(Function),
+    )
+    await expect(getEulerSdk()).resolves.toBe(sdk)
+    expect(buildDeployments).toHaveBeenCalledOnce()
+  })
+
+  it('fails closed when no configured chain has admitted deployment metadata', async () => {
+    const buildEulerSDK = vi.fn()
+    const { getEulerSdk } = await importUseEulerSdk(ref([999999]), buildEulerSDK, [],
+      vi.fn(async () => ({ getDeploymentChainIds: () => [1] })))
+
+    await expect(getEulerSdk()).rejects.toThrow('No enabled chains have usable deployment metadata')
+    expect(buildEulerSDK).not.toHaveBeenCalled()
+  })
 
   it('passes runtime values through the SDK config object', async () => {
     const chainIds = ref([1, 8453])
