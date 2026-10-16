@@ -1,4 +1,4 @@
-import { buildEulerSDK, createKeyringPlugin, createPythPlugin, IntrinsicApyService, IntrinsicApyV3Adapter } from '@eulerxyz/euler-v2-sdk'
+import { buildEulerSDK, DeploymentService, createKeyringPlugin, createPythPlugin, IntrinsicApyService, IntrinsicApyV3Adapter } from '@eulerxyz/euler-v2-sdk'
 import type { BuildQueryFn, EulerSDK, EulerSDKConfig } from '@eulerxyz/euler-v2-sdk'
 import { INTERNAL_API_BASE } from '~/utils/api-url-env'
 import { logWarn } from '~/utils/errorHandling'
@@ -299,7 +299,19 @@ interface InstanceBuildArgs {
 const buildInstance = async ({ backend, buildQuery }: InstanceBuildArgs): Promise<SdkInstance> => {
   const rpcUrls = buildRpcUrls()
   const { config: staticConfig } = buildSdkStaticConfig(backend)
-  const config: EulerSDKConfig = { ...staticConfig, rpcUrls }
+  // HTML may reach the browser before the server's bounded registry boot read.
+  // Resolve deployments before providers so a premature RPC setting is isolated.
+  const deploymentService = await DeploymentService.build(
+    { deploymentsUrl: staticConfig.deploymentsUrl! },
+    buildQuery,
+  )
+  const deploymentChainIds = new Set(deploymentService.getDeploymentChainIds())
+  const admittedRpcUrls = Object.fromEntries(Object.entries(rpcUrls)
+    .filter(([chainId]) => deploymentChainIds.has(Number(chainId))))
+  if (!Object.keys(admittedRpcUrls).length) {
+    throw new Error('No enabled chains have usable deployment metadata')
+  }
+  const config: EulerSDKConfig = { ...staticConfig, rpcUrls: admittedRpcUrls }
   const { buildSdkKeyringHookTargets, getSdkKeyringCredential } = await loadSdkKeyringModule()
   const keyringHookTargets = buildSdkKeyringHookTargets()
   const intrinsicApyService = createYuzuIntrinsicApyService(
@@ -319,7 +331,7 @@ const buildInstance = async ({ backend, buildQuery }: InstanceBuildArgs): Promis
       morpho: { morphoGraphqlUrl: buildMorphoProxyApiPath() },
       aave: { graphqlEndpoint: buildAaveProxyApiPath() },
     },
-    servicesOverrides: { intrinsicApyService },
+    servicesOverrides: { intrinsicApyService, deploymentService },
     plugins: [
       createPythPlugin({ buildQuery, fetchFn: pythProxyFetch, maxUpdateFee: PYTH_MAX_UPDATE_FEE }),
       createKeyringPlugin({

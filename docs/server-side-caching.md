@@ -25,8 +25,7 @@ This document covers the per-host proxies, the vault snapshot pipeline, the warm
 | `server/api/internal/proxy/intrinsic-apy-overrides.get.ts` | Lite intrinsic-APY overlay for HyperEVM / Monad; chain-keyed 5-min cache |
 | `server/api/internal/vaults.get.ts` | Per-chain consolidated vault snapshot endpoint |
 | `server/utils/vaults-cache.ts` | `refreshChainVaults` + `vaultsCache` |
-| `server/utils/sdk-server.ts` | Lazy per-chain server-side SDK builder |
-| `server/utils/server-provider-service.ts` | Chain-specific server `IProviderService` overrides (Sonic Multicall throttle); all other chains stay on the SDK provider |
+| `server/utils/sdk-server.ts` | Lazy per-chain server-side SDK builder, including Sonic transport tuning |
 | `server/plugins/warm-cache.ts` | Boot + interval warm cycles for labels, token-list, vault snapshot |
 | `utils/snapshot-codec.ts` | Bigint-safe JSON wire format |
 | `utils/snapshot-types.ts` | Wire-shape types shared client + server |
@@ -253,19 +252,15 @@ A boot-time warning fires if `SERVER_VAULT_CACHE_SOURCE` (or `NUXT_PUBLIC_BROWSE
 
 Every server-side SDK build resolves the deployments manifest through the euler-chains cache chain rather than fetching euler-interfaces directly: `server/plugins/sdk-deployments.ts` installs `DeploymentService.setQueryDeployments(loadEulerChains)` at boot, so all server SDK builds share one cached copy with its 7-day stale window instead of issuing their own GitHub fetches.
 
+Deployment admission is per chain: valid rows refresh independently, present invalid rows retain their last-good entry only within its original 7-day stale window, and omitted rows leave the admitted set. Empty, malformed, or entirely invalid responses keep the bounded stale fallback. An RPC-configured chain without an admitted deployment is excluded from the injected browser chain lists; without any cached manifest, the env-derived config applies. The browser also intersects its initial RPC list with the fetched deployment IDs before constructing providers, so a slow registry boot read cannot enable an incomplete chain. Address loading keeps only that intersection and selects an admitted chain if the initial selection is unavailable.
+
 ### Server provider overrides
 
-`getServerSdk` does **not** use the browser JSON-RPC proxy (`/api/internal/rpc/{chainId}`). It talks to `RPC_URL_<chainId>` through an `IProviderService` installed as `servicesOverrides.providerService`.
+`getServerSdk` talks directly to `RPC_URL_<chainId>` through the SDK's provider. The SDK resolves chain metadata using the registry's `viemName` before applying Lite's `chains` transport options.
 
-`createServerProviderService(rpcUrls, delegate)` in `server/utils/server-provider-service.ts` wraps the SDK `ProviderService`:
+Sonic (`146`) is the only transport override. Other chains keep the SDK defaults (Ethereum in tests: Multicall `batchSize: 2048`, `wait: 10`). Each server SDK is built with only that chain's RPC URL, so asking its provider for another chain throws.
 
-- Chains **without** an override keep the SDK client (Ethereum in tests: Multicall `batchSize: 2048`, `wait: 10`).
-- Chains **with** an override get a Lite-constructed viem `PublicClient` that reuses the SDK provider's `chain` metadata — including its Multicall3 address — because the SDK ships its own viem and Lite cannot assign that `Chain` type directly.
-- `getSupportedChainIds()` still comes from the delegate. Each `getServerSdk(chainId)` instance is built with only that chain's `rpcUrls`, so asking it for another chain throws.
-
-Overrides are a code map, not an env flag. Add a row to `providerOverrides` and cover it in `tests/server/sdk-server.test.ts`. Because the server SDK is cached per chain at first use, a changed override needs a process restart.
-
-**Sonic (`146`) is the only override today.** Sonic's public RPC / lens path rejects the SDK's default Multicall aggregates, so the replacement client uses:
+Transport overrides are a code map in `server/utils/sdk-server.ts`, covered by `tests/server/sdk-server.test.ts`. Because the server SDK is cached per chain at first use, a changed override needs a process restart. Sonic's public RPC / lens path uses:
 
 | Layer | Value | Effect |
 |---|---|---|
@@ -278,7 +273,7 @@ This is a different throttle from `EVAULT_FETCH_CHUNK_CHAINS`, which splits Lite
 
 | Symptom | First check |
 |---|---|
-| Sonic snapshot / server label reads fail with oversized Multicall or RPC batch errors | Confirm `createServerProviderService` still wraps chain `146` and the process was restarted after a change |
+| Sonic snapshot / server label reads fail with oversized Multicall or RPC batch errors | Confirm `getServerSdk` sets transport tuning for chain `146` and the process was restarted after a change |
 | Other chains suddenly issue tiny Multicall aggregates | An override was added too broadly — only list the chain that needs it |
 | `EVAULT_FETCH_CHUNK_CHAINS=146` does not stop Sonic Multicall failures | Expected: that env only chunks `fetchVaults`, it does not change viem Multicall size |
 

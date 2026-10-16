@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { decodeFunctionData, encodeFunctionResult, multicall3Abi, parseAbi, type Address, type Hex, type PublicClient } from 'viem'
 import { sonic } from 'viem/chains'
+import type { Deployment } from '@eulerxyz/euler-v2-sdk'
 
 const mocks = vi.hoisted(() => ({
   buildEulerSDK: vi.fn(),
@@ -22,12 +23,20 @@ vi.mock('~/server/utils/labels-base-url', () => ({
 }))
 
 describe('getServerSdk', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules()
     mocks.buildEulerSDK.mockReset()
     mocks.resolveRpcUrl.mockReset()
     mocks.resolveLabelsBaseUrl.mockReset()
-    mocks.buildEulerSDK.mockImplementation(async options => ({ options }))
+    const sdkModule = await vi.importActual<typeof import('@eulerxyz/euler-v2-sdk')>('@eulerxyz/euler-v2-sdk')
+    sdkModule.DeploymentService.setQueryDeployments(async () => [1, 8453, 146, 463].map(chainId => ({
+      chainId,
+      name: `Chain ${chainId}`,
+      viemName: chainId === 463 ? 'areonNetwork' : undefined,
+      status: 'production',
+      addresses: { coreAddrs: {}, lensAddrs: {} },
+    } as Deployment)))
+    mocks.buildEulerSDK.mockImplementation(sdkModule.buildEulerSDK)
     mocks.resolveRpcUrl.mockReturnValue('https://rpc.example')
     mocks.resolveLabelsBaseUrl.mockReturnValue('https://labels.example')
     process.env.V3_API_URL = 'https://v3.example'
@@ -42,7 +51,7 @@ describe('getServerSdk', () => {
   it('forces ONCHAIN_SDK_CHAINS chains to onchain while other chains use the configured source', async () => {
     const { getServerSdk } = await import('~/server/utils/sdk-server')
 
-    await getServerSdk(1)
+    const sdk = await getServerSdk(1)
     await getServerSdk(8453)
 
     expect(mocks.buildEulerSDK).toHaveBeenCalledTimes(2)
@@ -58,7 +67,7 @@ describe('getServerSdk', () => {
       eulerEarnServiceAdapter: 'onchain',
       rewardsServiceAdapter: 'direct',
     })
-    const providerService = mocks.buildEulerSDK.mock.calls[0]?.[0].servicesOverrides.providerService
+    const providerService = sdk.providerService
     expect(providerService.getProvider(1).batch.multicall).toEqual({ batchSize: 2048, wait: 10 })
     expect(providerService.getProvider(1)).toBe(providerService.getProvider(1))
     expect(() => providerService.getProvider(146)).toThrow('No provider configured for chainId 146')
@@ -102,21 +111,33 @@ describe('getServerSdk', () => {
     delete process.env.TURTLE_EARN_API_URL
   })
 
-  it('passes the Sonic provider override with the configured RPC URL and caches the server SDK', async () => {
+  it('passes Sonic transport tuning with the configured RPC URL and caches the server SDK', async () => {
     mocks.resolveRpcUrl.mockReturnValue('https://custom-sonic.example/rpc')
     const { getServerSdk } = await import('~/server/utils/sdk-server')
 
     const first = getServerSdk(146)
     expect(getServerSdk(146)).toBe(first)
-    await first
+    const sdk = await first
 
     expect(mocks.buildEulerSDK).toHaveBeenCalledOnce()
     const options = mocks.buildEulerSDK.mock.calls[0]?.[0]
     expect(options.config.rpcUrls).toEqual({ 146: 'https://custom-sonic.example/rpc' })
-    expect(options.servicesOverrides.providerService.getProvider(146)).toBe(
-      options.servicesOverrides.providerService.getProvider(146),
+    expect(sdk.providerService.getProvider(146)).toBe(
+      sdk.providerService.getProvider(146),
     )
-    expect(options.servicesOverrides.providerService.getSupportedChainIds()).toEqual([146])
+    expect(sdk.providerService.getSupportedChainIds()).toEqual([146])
+  })
+
+  it('uses registry viemName to resolve a chain ID shared by distinct viem definitions', async () => {
+    const { ProviderService } = await vi.importActual<typeof import('@eulerxyz/euler-v2-sdk')>('@eulerxyz/euler-v2-sdk')
+    expect(() => new ProviderService({ 463: 'https://rpc.example' })).toThrow('several chains with id 463')
+    const { getServerSdk } = await import('~/server/utils/sdk-server')
+
+    const sdk = await getServerSdk(463)
+
+    expect(sdk.providerService.getProvider(463).chain?.name).toBe('Areon Network')
+    expect(sdk.providerService.getSupportedChainIds()).toEqual([463])
+    expect(mocks.buildEulerSDK.mock.calls[0]?.[0].servicesOverrides?.providerService).toBeUndefined()
   })
 
   it('retries after a failed SDK build', async () => {
@@ -176,8 +197,8 @@ describe('getServerSdk', () => {
     vi.stubGlobal('fetch', fetchMock)
     try {
       const { getServerSdk } = await import('~/server/utils/sdk-server')
-      await getServerSdk(146)
-      const provider = mocks.buildEulerSDK.mock.calls[0]?.[0].servicesOverrides.providerService.getProvider(146) as PublicClient
+      const sdk = await getServerSdk(146)
+      const provider = sdk.providerService.getProvider(146) as unknown as PublicClient
       const results = await Promise.all(vaults.map(vault => provider.readContract({
         address: lensAddress,
         abi: lensAbi,

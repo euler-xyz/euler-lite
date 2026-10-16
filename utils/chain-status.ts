@@ -1,6 +1,8 @@
 export type ChainStatus = 'staging' | 'production' | 'unlisted' | 'deprecated'
 
 export interface ChainRegistry {
+  /** Admitted deployment IDs; undefined only when the manifest is unavailable. */
+  chainIds: readonly number[] | undefined
   statuses: Readonly<Record<number, ChainStatus>>
   explorerUrls: Readonly<Record<number, string>>
 }
@@ -55,6 +57,7 @@ const readRegistryEntry = (entry: unknown): RegistryEntry[] => {
 export const readChainRegistry = (entries: readonly unknown[] | undefined): ChainRegistry => {
   const parsed = (entries ?? []).flatMap(readRegistryEntry)
   return {
+    chainIds: entries === undefined ? undefined : parsed.map(({ chainId }) => chainId),
     statuses: Object.fromEntries(parsed.flatMap(({ chainId, status }) => status ? [[chainId, status]] : [])),
     explorerUrls: Object.fromEntries(parsed.flatMap(({ chainId, explorerUrl }) => explorerUrl ? [[chainId, explorerUrl]] : [])),
   }
@@ -73,7 +76,9 @@ export const applyChainRegistry = <T extends ChainIdLists>(
   registry: ChainRegistry,
   isProduction: boolean,
 ): T & { explorerUrls: Record<number, string> } => {
-  const enabledChainIds = config.enabledChainIds.filter(id => isChainShown(registry.statuses[id], isProduction))
+  const admitted = registry.chainIds === undefined ? undefined : new Set(registry.chainIds)
+  const enabledChainIds = config.enabledChainIds.filter(id =>
+    (!admitted || admitted.has(id)) && isChainShown(registry.statuses[id], isProduction))
   const shown = new Set(enabledChainIds)
   const isShown = (id: number) => shown.has(id)
   const deprecatedChainIds = [...new Set([...config.deprecatedChainIds, ...getRegistryDeprecatedChainIds(registry)])]
