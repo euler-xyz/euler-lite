@@ -110,7 +110,7 @@ All listed endpoints use rate limiting. Local-TTL endpoints (everything in the t
 - **Global cycle (5 min)**: `/api/internal/euler-chains` once, the runtime ABI manifests once, cross-chain `labels/all/assets.json` once, then per-chain `/api/internal/labels/*` and `/api/internal/token-list` for every enabled non-deprecated chain, serialized so cross-chain upstreams dedupe via the in-flight cache.
 - **Vaults cycle (1 min when V3 is configured, otherwise 5 min)**: `/api/internal/vaults` per chain, also serialized.
 
-Each warm task is a **direct function call** (`refreshX()`) that bypasses any handler fresh-cache short-circuit and forces an upstream fetch, so the entry is always overwritten before it can expire. Handlers that read through the cache (query-shape labels, vault snapshot, and similar) keep serving the still-fresh previous entry during that refresh. The path-shape labels handler does not: it calls `refreshLabelFile()` and joins the in-flight refresh instead. Warming runs in the background — Nitro's node-server preset doesn't await plugins before starting the HTTP listener, so users arriving in the first ~5 s of a freshly-booted instance's lifetime pay the usual cold-upstream latency for whichever endpoints they hit; everyone after that sees cached responses from read-through handlers.
+Each warm task is a **direct function call** (`refreshX()`) that bypasses any handler fresh-cache short-circuit and forces an upstream fetch, so the entry is always overwritten before it can expire. Handlers that read through the cache (query-shape labels, vault snapshot, and similar) keep serving the still-fresh previous entry during that refresh. The path-shape labels handler does not: it calls `refreshLabelFile()` and joins the in-flight refresh instead. Warming runs in the background — Nitro's node-server preset doesn't await plugins before starting the HTTP listener, so users arriving in the first ~5 s of a freshly-booted instance's lifetime pay the usual cold-upstream latency for whichever endpoints they hit; everyone after that sees cached responses from read-through handlers. The first per-chain labels/token-list and vaults cycles wait up to 10 s for the EulerChains manifest so registry `deprecated` status is applied; a failed read keeps the env list. See [Server-Side Caching → Boot behaviour](./server-side-caching.md#boot-behaviour).
 
 For the full setup — per-host proxies, vault snapshot pipeline, two-pass client hydration, V3-conditional cadence, and the bigint wire codec — see [Server-Side Caching](./server-side-caching.md).
 
@@ -123,7 +123,7 @@ The `/api/internal/token-list` endpoint aggregates four token sources, all fetch
 3. **Uniswap** (`NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL`) — baseline token list
 4. **Merkl** — reward tokens
 
-Priority for deduplication: Euler SDK token list > DefiLlama > Uniswap > Merkl. If any source fails, the endpoint still returns data from the remaining sources. The client consumes this via the `useTokenList` composable.
+Priority for deduplication: Euler SDK token list > DefiLlama > Uniswap > Merkl. If any source fails, the endpoint still returns data from the remaining sources. The client consumes this via the `useTokenList` composable. After merge, the handler reads `decimals()` on-chain with a 5 s deadline: confirmed missing contracts are dropped, unread tokens keep list-source decimals and retry on the next build. See [Token List](./token-list.md).
 
 ### Pyth Proxy Endpoint Details
 

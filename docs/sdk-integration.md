@@ -169,6 +169,11 @@ the intent, the plan and the review payload — is built from the snapshot, and
 Without that guard the review can show one reward's amount beside another
 reward's claim intent.
 
+`rewardClaimId` distinguishes Incentra/Brevis epochs (`provider === 'brevis'`)
+that share a campaign, token, and unclaimed amount. Other providers ignore
+`epoch` so a leftover field cannot split or collide their claims. Details:
+[Transaction Building → Reward claim identity](./transaction-building.md#reward-claim-identity).
+
 The full object is serialized into `staticCacheKey`, so any change produces a new instance.
 
 ## Query Policy (single source of truth)

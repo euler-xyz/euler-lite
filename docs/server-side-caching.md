@@ -393,6 +393,8 @@ User requests arriving during a refresh continue to read the still-fresh previou
 
 Nitro's node-server preset calls `server.listen()` synchronously without awaiting plugins, so warming runs in the background. Caches are typically hot within ~5 s of boot. Users arriving before that pay the usual cold-upstream latency for whichever endpoints they hit (the cold-path branch in each handler handles it). Everyone after sees cached responses.
 
+Per-chain selection also reads `deprecated` from the cached `EulerChains.json` (`getRegistryDeprecatedChainIds`). The first labels / token-list cycle and the first vaults cycle both `await` `firstManifestRead`: `refreshEulerChains()` raced against `UPSTREAM_FETCH_TIMEOUT_MS` (10 s). A failed or slow first read leaves the env `DEPRECATED_CHAINS` list unchanged rather than warming the wrong set or blocking boot. Later cycles re-read the cached manifest as before. See [Adding a Chain](./adding-a-chain.md#how-the-registry-status-shows-in-lite).
+
 ### Per-chain serialization
 
 Chains are warmed sequentially, not in parallel. Cross-chain upstreams (DefiLlama, Pendle, etc.) dedupe via their own in-flight caches, so chains 2..N hit warm upstream caches rather than re-fetching. Parallel chain fan-out would trigger ~250 simultaneous HTTPS requests at cold boot (all chains × all upstream providers) and overshoot upstream timeouts on slow first-hit DNS/TLS handshakes.
