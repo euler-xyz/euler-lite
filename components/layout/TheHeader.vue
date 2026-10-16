@@ -203,7 +203,7 @@ onClickOutside(wrapperRef, () => {
 
     <!-- Navigation -->
     <div class="hidden laptop:block min-w-0 tablet:absolute tablet:left-1/2 tablet:-translate-x-1/2">
-      <div class="flex gap-8">
+      <div class="flex gap-4">
         <NuxtLink
           v-for="item in menuItems"
           :key="item.name"
