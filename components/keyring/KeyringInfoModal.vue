@@ -11,7 +11,7 @@ const bullets = [
 <template>
   <UiInfoModal
     title="Private Vault"
-    icon="shield"
+    icon="badge-keyring"
     headline="Identity Verification Required"
     body="This vault requires identity verification through Keyring Network before you can interact with it."
     :bullets="bullets"

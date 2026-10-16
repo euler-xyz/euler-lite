@@ -8,9 +8,10 @@ import { setBatchPrefetchedBaseAccount } from '~/composables/batchPrefetchState'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createAddressRefreshCoordinator } from '~/utils/address-refresh-coordinator'
 import { logWarn } from '~/utils/errorHandling'
-import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
+import { buildVisiblePortfolioPositionFilter, hydrateHeldMetadataVaults } from '~/utils/portfolioPositionFilter'
 import { portfolioPricingGaps } from '~/utils/portfolio-pricing'
 import { createRaceGuard } from '~/utils/race-guard'
+import { liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
 import {
   activeLayerPortfolioRef,
   activeLayerPortfolioAllRef,
@@ -150,16 +151,24 @@ export const useEulerAccount = () => {
       const sdk = refreshOptions.source === 'fast'
         ? await getEulerSdkForChain(targetChainId)
         : await getEulerSdkFresh()
-      const fetched = await sdk.portfolioService.fetchPortfolio(
+      const fetched = await sdk.accountService.fetchAccount(
         targetChainId,
         getAddress(walletAddress) as Address,
+        {
+          populateVaults: true,
+          populateMarketPrices: true,
+          populateUserRewards: true,
+          vaultFetchOptions: liteVaultFetchOptions,
+        },
       )
       fetched.errors.forEach(issue => logWarn('useEulerAccount/fetchPortfolio', issue))
 
       if (positionGuard.isStale(gen)) return
 
-      const nextAllPortfolio = fetched.result
-      const nextVisiblePortfolio = sdk.portfolioService.buildPortfolio(fetched.result.account, {
+      const nextAllPortfolio = sdk.portfolioService.buildPortfolio(fetched.result)
+      await hydrateHeldMetadataVaults(nextAllPortfolio)
+      if (positionGuard.isStale(gen)) return
+      const nextVisiblePortfolio = sdk.portfolioService.buildPortfolio(fetched.result, {
         positionFilter: buildVisiblePortfolioPositionFilter(),
       })
 

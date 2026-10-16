@@ -89,6 +89,10 @@ const navigateToBorrow = (collateralAddress: string, borrowVaultAddress: string)
 const closeForMarketNavigation = () => {
   emits('close')
 }
+watch(() => route.path, () => emits('close'))
+watch(() => route.hash, (hash) => {
+  if (pair && /^#oracle-adapter-0x[a-fA-F0-9]{40}$/.test(hash)) tab.value = undefined
+})
 </script>
 
 <template>

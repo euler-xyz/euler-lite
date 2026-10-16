@@ -238,7 +238,7 @@ describe('reviewed execution coordinator', () => {
 
     const result = await execute(prepared.coordinator, execution)
 
-    expect(result).toMatchObject({ status: 'failed', message: expect.stringMatching(/Wallet connection.*changed/) })
+    expect(result).toMatchObject({ status: 'failed', message: expect.stringMatching(/Wallet binding changed after review/) })
     expect(dispatch).not.toHaveBeenCalled()
   })
 
@@ -426,7 +426,7 @@ describe('reviewed execution coordinator', () => {
 
     await expect(resultPromise).resolves.toMatchObject({
       status: 'failed',
-      message: expect.stringMatching(/Wallet connection.*changed/),
+      message: expect.stringMatching(/Wallet binding changed after review/),
     })
     expect(sendTransaction).not.toHaveBeenCalled()
   })

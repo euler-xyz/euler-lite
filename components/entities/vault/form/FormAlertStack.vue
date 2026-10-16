@@ -24,14 +24,14 @@ defineProps<{
     size="compact"
   />
   <UiAlert
-    v-if="assetRestricted"
+    v-if="!isGeoBlocked && assetRestricted"
     title="Asset restricted"
     :description="assetRestrictedDescription"
     variant="warning"
     size="compact"
   />
   <UiAlert
-    v-if="swapRestricted"
+    v-if="!isGeoBlocked && swapRestricted"
     title="Swap restricted"
     :description="swapRestrictedDescription"
     variant="warning"

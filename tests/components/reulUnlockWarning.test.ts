@@ -64,6 +64,7 @@ beforeEach(() => {
   vi.stubGlobal('useTxBatch', () => ({ entryCount: ref(0), clearBatch: vi.fn() }))
   vi.stubGlobal('useOperationIntentFactory', () => ({ create: (input: unknown) => input }))
   vi.stubGlobal('useExecutionReview', () => ({ capture }))
+  vi.stubGlobal('useReviewedExecution', () => ({ approvalReadIssues: ref([]) }))
   vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1), eulerCoreAddresses: ref({}) }))
   vi.stubGlobal('useWagmi', () => ({ chainId: ref(1), switchChain: vi.fn() }))
   vi.stubGlobal('useTransactionPlanSimulation', () => ({ runSimulation: async () => true, simulationError: ref(null) }))

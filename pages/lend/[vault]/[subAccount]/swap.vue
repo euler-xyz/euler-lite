@@ -59,7 +59,9 @@ const projectionToVault = computed(() => {
   const fallback = toVault.value
   return fallback ? getLayeredVault(fallback.address, fallback) : undefined
 })
-useOperationGuard(computed(() => [fromVault.value?.address, toVault.value?.address].filter(Boolean)))
+useOperationGuard(computed(() => [fromVault.value?.address, toVault.value?.address].filter(Boolean)), {
+  depositedVaultAddresses: computed(() => [toVault.value?.address].filter(Boolean)),
+})
 
 const fromVaultAsRegular = computed(() => fromVault.value as EVault | undefined)
 const { collateralOptions, collateralVaults } = useSwapCollateralOptions({ currentVault: fromVaultAsRegular })
