@@ -175,6 +175,10 @@ const rampDownModalData = computed(() => ({
     content-class="flex flex-col gap-20"
   >
     <VaultDeprecationBanner :addresses="[collateralVault.address, borrowVault.address]" />
+    <LiquidationCoverageNotice
+      :vault="borrowVault"
+      context="borrow"
+    />
     <VaultPublicNotice :addresses="[collateralVault.address, borrowVault.address]" />
     <UiAlert
       v-if="isRestricted"

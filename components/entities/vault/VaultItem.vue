@@ -219,6 +219,7 @@ watchEffect(async () => {
           <CyclicalNoteBadge v-if="isCyclicalNote && isGovernorVerified" />
           <RestrictedBadge v-if="isGeoBlocked" />
           <VaultDeprecatedBadge :addresses="[vault.address]" />
+          <LiquidationCoverageBadge :vault="vault" />
           <VaultAssessmentWarning
             :address="vault.address"
             :hide-deprecated="isDeprecated"
