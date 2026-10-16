@@ -604,8 +604,8 @@ const clearBorrowFilters = () => {
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
     <div class="mb-16 flex items-start justify-between gap-16 mobile:flex-col">
       <BasePageHeader
-        title="Borrow/Multiply"
-        description="Borrow against your assets in isolated lending markets."
+        title="Borrow / Multiply"
+        description="Borrow against your assets or multiply your exposure with leverage in isolated lending markets."
         icon="nav-borrow"
       />
     </div>
@@ -623,7 +623,7 @@ const clearBorrowFilters = () => {
         <VaultSortButton
           v-model="sortBy"
           v-model:dir="sortDir"
-          class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
+          class="shrink-0"
           :options="[
             { label: 'Active', icon: 'sparks' },
             { label: 'Liquidity', icon: 'sort-liquidity' },
@@ -641,7 +641,7 @@ const clearBorrowFilters = () => {
           v-if="enableEntityBranding"
           :key="`curators-${chainId}`"
           v-model="selectedCurators"
-          class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
+          class="shrink-0"
           :options="curatorOptions"
           placeholder="Curator"
           title="Curator"
@@ -653,7 +653,7 @@ const clearBorrowFilters = () => {
           v-if="enableEntityBranding"
           :key="`markets-${chainId}`"
           v-model="selectedMarkets"
-          class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
+          class="shrink-0"
           :options="marketOptions"
           placeholder="Market"
           title="Market"
@@ -664,7 +664,7 @@ const clearBorrowFilters = () => {
         <UiSelect
           :key="`collateral-${chainId}`"
           v-model="selectedCollateral"
-          class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
+          class="shrink-0"
           :options="collateralAssetOptions.options"
           :quick-filters="collateralAssetOptions.quickFilters"
           placeholder="Collateral asset"
@@ -677,7 +677,7 @@ const clearBorrowFilters = () => {
         <UiSelect
           :key="`debt-${chainId}`"
           v-model="selectedDebt"
-          class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
+          class="shrink-0"
           :options="debtAssetOptions.options"
           :quick-filters="debtAssetOptions.quickFilters"
           placeholder="Debt asset"
