@@ -8,6 +8,8 @@ import {
 import { isV3LabelsVersionSelector } from '~/server/utils/labels-base-url'
 import { isInternalRequest } from '~/server/utils/internal-headers'
 import { resolveRpcUrl } from '~/server/utils/rpc'
+import { LabelsConfigurationError } from '~/server/utils/labels-configuration-error'
+import { logger } from '~/server/utils/logger'
 
 /** A forced refresh is honoured once per window per chain; the warm cycle already refreshes every five minutes. */
 const FORCED_REFRESH_MIN_INTERVAL_MS = 30_000
@@ -40,12 +42,25 @@ export default defineEventHandler(async (event) => {
     version = query.version
   }
 
-  setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
-  const cached = getCachedPublicLabelsBundle(chainId, version)
-  const recentlyRefreshed = cached?.source !== 'static' && typeof cached?.sourceFetchedAt === 'number'
-    && Date.now() - cached.sourceFetchedAt < FORCED_REFRESH_MIN_INTERVAL_MS
-  const forceRefresh = getHeader(event, 'cache-control')?.toLowerCase().includes('no-cache') === true && !recentlyRefreshed
-  return forceRefresh
-    ? refreshPublicLabelsBundle(chainId, version)
-    : getPublicLabelsBundle(chainId, version)
+  try {
+    const cached = getCachedPublicLabelsBundle(chainId, version)
+    const recentlyRefreshed = cached?.source !== 'static' && typeof cached?.sourceFetchedAt === 'number'
+      && Date.now() - cached.sourceFetchedAt < FORCED_REFRESH_MIN_INTERVAL_MS
+    const forceRefresh = getHeader(event, 'cache-control')?.toLowerCase().includes('no-cache') === true && !recentlyRefreshed
+    const bundle = await (forceRefresh ? refreshPublicLabelsBundle(chainId, version) : getPublicLabelsBundle(chainId, version))
+    setResponseHeader(event, 'Cache-Control', 'public, max-age=30, stale-while-revalidate=30')
+    return bundle
+  }
+  catch (error) {
+    setResponseHeader(event, 'Cache-Control', 'no-store')
+    if (error instanceof LabelsConfigurationError) {
+      logger.error({ ctx: 'public-labels', chainId, message: error.message }, 'Invalid labels configuration')
+      throw createError({
+        statusCode: 503,
+        statusMessage: 'Labels configuration error',
+        data: { code: 'LABELS_CONFIGURATION_ERROR', message: error.message },
+      })
+    }
+    throw error
+  }
 })

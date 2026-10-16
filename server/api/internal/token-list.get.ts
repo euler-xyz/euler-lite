@@ -9,7 +9,7 @@ import { createInFlightDedup } from '~/server/utils/in-flight'
 import { reportStatus } from '~/server/utils/log'
 import { MERKL_API_BASE_URL } from '~/entities/constants'
 import { buildEulerSDK, type EulerSDK, type TokenListItem } from '@eulerxyz/euler-v2-sdk'
-import { readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-url-env'
+import { readDisableV3, readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-url-env'
 import { LiteEulerLabelsService } from '~/utils/sdk-labels'
 import { getPublicLabelsBundle } from '~/server/utils/public-labels-source'
 import { preferFallbackLogos, replaceV3LogoFlags } from '~/server/utils/token-list-logos'
@@ -114,6 +114,7 @@ const getSdk = () => {
   sdkPromise ??= buildEulerSDK({
     config: {
       v3ApiUrl,
+      disableV3: readDisableV3(),
       tokenlistApiBaseUrl: v3ApiUrl,
       ...(v3ApiKey ? { v3ApiKey } : {}),
     },
@@ -158,6 +159,7 @@ const stripUntrustedTokenTags = (token: TokenEntry): TokenEntry => ({
 })
 
 function refreshEulerSdkTokenList(chainId: number): Promise<TokenEntry[]> {
+  if (readDisableV3()) return Promise.resolve([])
   const key = String(chainId)
 
   return eulerInFlight.run(key, () => getSdk()
@@ -176,6 +178,7 @@ function refreshEulerSdkTokenList(chainId: number): Promise<TokenEntry[]> {
 }
 
 function fetchEulerSdkTokenList(chainId: number): Promise<TokenEntry[]> {
+  if (readDisableV3()) return Promise.resolve([])
   const cached = eulerSdkCache.get(String(chainId))
   if (cached) return Promise.resolve(cached)
   return refreshEulerSdkTokenList(chainId)

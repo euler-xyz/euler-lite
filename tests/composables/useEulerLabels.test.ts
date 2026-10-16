@@ -210,6 +210,16 @@ describe('useEulerLabels chain-scoped loading', () => {
     expect(labels.loadError.value).toBeUndefined()
     expect(currentProductKeys()).toEqual(['recovered'])
   })
+  it('distinguishes an operator configuration error without displaying server details', async () => {
+    mocks.fetchPublicLabelsBundle.mockRejectedValueOnce({ data: { data: {
+      code: 'LABELS_CONFIGURATION_ERROR', message: 'STATIC_LABELS_BASE_URL is required',
+    } } })
+    const labels = useEulerLabels()
+    await labels.loadLabels()
+    expect(labels.isReady.value).toBe(false)
+    expect(labels.loadError.value).toContain('Contact the app operator')
+    expect(labels.loadError.value).not.toContain('STATIC_LABELS_BASE_URL')
+  })
 
   it('retains a successful same-chain snapshot when a refresh fails', async () => {
     mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('cached')))

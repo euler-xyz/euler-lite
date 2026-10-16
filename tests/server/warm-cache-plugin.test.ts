@@ -32,7 +32,7 @@ vi.mock('~/server/utils/vaults-cache', () => ({
 
 vi.mock('~/utils/api-url-env', () => ({
   readDisableServerVaultCache: () => false,
-  readV3ApiUrl: () => '',
+  isV3BackendEnabled: () => false,
   warnIfVaultSourceNeedsV3: () => {},
 }))
 
