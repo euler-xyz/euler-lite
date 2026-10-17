@@ -10,6 +10,7 @@
     "preview": "nuxt preview",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "csp:probe": "node scripts/csp-page-probe.mjs",
     "parity:compare": "node scripts/parity-compare.mjs",
     "parity:full": "node scripts/parity-compare.mjs --scenarios tests/parity/full-run.scenarios.json --rate-limit-retries 3",
     "parity:links": "node scripts/parity-links.mjs",

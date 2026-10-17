@@ -1,4 +1,5 @@
 import { WagmiPlugin } from '@wagmi/vue'
+import { baseAccount, coinbaseWallet } from '@wagmi/vue/connectors'
 import { fallback, http, type Transport } from 'viem'
 import { createAppKit } from '@reown/appkit/vue'
 import type { AppKitNetwork } from '@reown/appkit/networks'
@@ -65,10 +66,16 @@ export default defineNuxtPlugin((nuxtApp) => {
     )
   }
 
+  // AppKit's own Coinbase Wallet and Base Account connectors leave the SDKs' telemetry on, which inserts
+  // Coinbase's analytics bundle as an inline script on page load; 'strict-dynamic' would let it run.
   const wagmiAdapter = new WagmiAdapter({
     networks,
     projectId: projectId || '',
     transports,
+    connectors: [
+      coinbaseWallet({ preference: { options: 'all', telemetry: false } }),
+      baseAccount({ preference: { telemetry: false } }),
+    ],
   })
 
   let appKitInstance: ReturnType<typeof createAppKit> | null = null
@@ -80,6 +87,8 @@ export default defineNuxtPlugin((nuxtApp) => {
       networks,
       projectId: projectId || '',
       metadata,
+      enableCoinbase: false,
+      enableBaseAccount: false,
       themeVariables: {
         '--w3m-font-family': 'inherit',
       },

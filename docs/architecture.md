@@ -464,6 +464,21 @@ The app is a wallet-bearing DeFi interface. Loading it inside an attacker-contro
 
 `tests/server/security.test.ts` locks in all four layers with pure-function unit tests (no Nitro boot required). The tests assert that `frame-ancestors 'none'`, `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy`, and the frame-busting script content cannot silently regress. Do not weaken these assertions without reviewing the threat model above.
 
+### Injected Script and Frame Defenses
+
+A third-party script that reaches the page could draw a fake wallet prompt in an `<iframe>` it adds, or load more code. The policy in `server/plugins/csp.ts` limits both:
+
+| Directive | Sources | Why |
+|---|---|---|
+| `script-src` | `'self'`, the response's nonce, `'strict-dynamic'` | Only scripts the server stamped with this response's nonce run, together with any script they load or insert; a parser-inserted inline script without the nonce is refused. No `'unsafe-inline'`, `'unsafe-eval'` or `'wasm-unsafe-eval'`, and no host. Cloudflare documents copying the nonce onto its JavaScript detections script. On production (checked 2026-10-01) the edge also stamped it on the Web Analytics beacon, which Cloudflare does not document; a beacon that arrives without the nonce is refused. |
+| `frame-src` | `https://verify.walletconnect.org`, `https://secure.walletconnect.org` | The only frames the wallet flows load: WalletConnect's Verify attestation page, framed when a session is proposed, and AppKit's secure frame, which runs email and social login. Same-origin frames are allowed on the local dev server only, for Nuxt DevTools. |
+| `child-src`, `worker-src`, `object-src` | `'none'` | The app runs no worker and embeds no plugin. |
+| `base-uri`, `form-action` | `'self'` | A script cannot rebase relative URLs or post a form elsewhere. |
+
+`'strict-dynamic'` also lets code the nonce trusts insert inline scripts, so a dependency's own script insertion is not stopped by the policy. The Coinbase Wallet and Base Account connectors are therefore created in `plugins/00.wagmi.ts` with their SDKs' telemetry off, which keeps Coinbase's analytics bundle from being inserted; `npm run csp:probe -- --url <deployment>` checks a deployed page for CSP violations and for that bundle.
+
+Every fixed `connect-src` and `font-src` origin is one the app or a library it ships contacts directly; an API the app reaches through its own `/api/internal` proxies stays out of the policy. Origins a deployment configures (`CSP_EXTRA_CONNECT_SRC`, `RPC_URL_<chainId>`, the swap API URL) and the enabled chains' public RPCs only reach `connect-src`, reduced to an `https://` or `wss://` origin; any other value is dropped. The nonce is 16 random bytes drawn per response, and page responses are `no-store` at the browser and the CDN, so no nonce is served twice. The header is enforced, not report-only.
+
 ## 📱 Mobile-First Architecture
 
 ### Responsive Design Principles
