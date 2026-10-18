@@ -7,7 +7,7 @@ import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { createRaceGuard } from '~/utils/race-guard'
-import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
+import { getVaultGeoUnavailableReason, isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { isEVault, SwapperMode, type EVault, type PortfolioBorrowPosition, type SwapQuote, type TransactionPlan, type TransactionPlanPrepared, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
@@ -1049,22 +1049,18 @@ const isMultiplySubmitDisabled = computed(() => {
   }
   return false
 })
-const isGeoBlocked = computed(() => {
-  const addresses: string[] = []
-  if (multiplyLongVault.value) addresses.push(multiplyLongVault.value.address)
-  if (multiplyShortVault.value) addresses.push(multiplyShortVault.value.address)
-  return isAnyVaultBlockedByCountry(...addresses)
-})
+const geoUnavailableReason = computed(() => getVaultGeoUnavailableReason(multiplyLongVault.value, multiplyShortVault.value))
+const isGeoBlocked = computed(() => isAnyVaultBlockedByCountry(multiplyLongVault.value, multiplyShortVault.value))
 const isMultiplyRestricted = computed(() => {
   const long = multiplyLongVault.value
   const short = multiplyShortVault.value
-  return (long && isVaultRestrictedByCountry(long.address))
-    || (short && isVaultRestrictedByCountry(short.address))
+  return (long && isVaultRestrictedByCountry(long))
+    || (short && isVaultRestrictedByCountry(short))
 })
 const reviewMultiplyDisabled = computed(() => isGeoBlocked.value || isMultiplyRestricted.value || isMultiplySubmitDisabled.value)
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: geoUnavailableReason.value || 'This operation is not available in your region', variant: 'warning' }
   if (isMultiplyRestricted.value) return { message: 'Multiply is not available for this pair in your region', variant: 'warning' }
   if (multiplyErrorText.value) return { message: multiplyErrorText.value, variant: 'error' }
   if (multiplySimulationError.value) return { message: multiplySimulationError.value, variant: 'error' }
@@ -1208,8 +1204,8 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
 
             <UiAlert
               v-if="isGeoBlocked"
-              title="Region restricted"
-              description="This operation is not available in your region. You can still repay existing debt."
+              :title="geoUnavailableReason ? 'Availability not confirmed' : 'Region restricted'"
+              :description="geoUnavailableReason || 'This operation is not available in your region. You can still repay existing debt.'"
               variant="warning"
               size="compact"
             />

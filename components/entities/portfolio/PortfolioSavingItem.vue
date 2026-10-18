@@ -4,7 +4,7 @@ import { getAddress } from 'viem'
 
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { getAssetUsdValue, formatAssetValue } from '~/utils/sdk-prices'
-import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
+import { getVaultGeoBlockReason } from '~/composables/useGeoBlock'
 import { getVaultNotice } from '~/utils/eulerLabelsUtils'
 import { formatNumber, formatCompactUsdValue, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
@@ -31,9 +31,11 @@ const { getSupplyRewardCampaignsFromVault } = useRewardsApy()
 const { viewer, visibleTotal, visibleBreakdown } = useApyVisibility()
 
 const { getVault: getRegistryVault, getVaultCategory, isVerifiedVault } = useVaultRegistry()
-const vault = computed(() =>
-  (getRegistryVault(position.vault!.address) as VaultEntity | undefined) ?? position.vault!,
-)
+const vault = computed(() => {
+  const registered = getRegistryVault(position.vault!.address)
+  return registered?.chainId === position.vault!.chainId ? registered : position.vault!
+})
+
 const positionKey = computed(() => `${position.subAccount.toLowerCase()}:${vault.value.address.toLowerCase()}`)
 // Positions the active simulated batch layer modified get a dotted border.
 const { modifiedKeys, removedKeys } = useTxBatch()
@@ -54,7 +56,7 @@ const supplyApyWithRewards = computed(() => visibleTotal(apyBreakdown.value) ?? 
 const visibleApyBreakdown = computed(() => visibleBreakdown(apyBreakdown.value))
 
 const product = useEulerProductOfVault(computed(() => vault.value.address))
-const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.value.address))
+const isGeoBlocked = computed(() => getVaultGeoBlockReason(vault.value) === 'region')
 const isEscrow = computed(() => getVaultCategory(vault.value.address) === 'escrow')
 const isUnverified = computed(() => !isVerifiedVault(vault.value.address))
 const vaultNotice = computed(() => getVaultNotice(vault.value.address))

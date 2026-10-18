@@ -115,11 +115,13 @@ The browser tracks geo-rule and labels timestamps separately. Hosted geo rules b
 
 ## Helper functions
 
-- `isVaultBlockedByCountry(address, { asset? })` combines sanctions and matching V3 block policies.
-- `isVaultRestrictedByCountry(address, { asset?, counterpart? })` evaluates soft restrictions.
+- `isVaultBlockedByCountry(vaultOrAddress, { asset? })` combines sanctions and matching V3 block policies. Portfolio, detail and position callers pass resolved SDK vaults with their chain and asset; registry membership is not required. Stale vault or policy chain context fails closed.
+- `getVaultGeoBlockReason(vaultOrAddress)` distinguishes a confirmed `region` restriction from unavailable country, policy or asset data and chain mismatches. Portfolio badges and detail headers display geographic restrictions only for `region`; eligibility helpers retain missing-data safeguards and the policy-outage exit exception.
+- `getVaultGeoUnavailableReason(...vaults)` supplies availability-specific action warnings while eligibility checks keep unresolved operations guarded.
+- `isVaultRestrictedByCountry(vaultOrAddress, { asset?, counterpart? })` evaluates soft restrictions.
 - `isAnyVaultBlockedByCountry` / `isAnyVaultRestrictedByCountry` combine decisions across vaults.
 - `isAssetBlockedByCountry` / `isAssetRestrictedByCountry` evaluate standalone asset choices.
-- `getVaultTags(address, context)` presents restrictions and deprecation. `swap-target` disables soft-restricted destinations; `supply-source` permits existing exposure to be used for repayment.
+- `getVaultTags(vaultOrAddress, context)` presents restrictions and deprecation. `swap-target` disables soft-restricted destinations; `supply-source` permits existing exposure to be used for repayment.
 - `useGeoBlock().isPolicyAvailable` distinguishes successful empty data from unavailable data.
 
 ## UI Enforcement

@@ -51,7 +51,7 @@ import { createRaceGuard } from '~/utils/race-guard'
 import { ltvToPercent, nanoToValue } from '~/utils/crypto-utils'
 import { getVaultProductName, isEarnVaultNotExplorable, isVaultNotExplorableLend, isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
 import { buildCollateralOption, computeBorrowApy, computeSupplyApy } from '~/utils/collateralOptions'
-import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
+import { getVaultGeoUnavailableReason, isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 import type { DisplayStep } from '~/utils/stepDecoding'
 import {
@@ -2404,7 +2404,12 @@ const { guardWithPriceImpact } = usePriceImpactGate({
   shouldGateUnknown: shouldGateUnknownPriceImpact,
 })
 
-const isGeoBlocked = computed(() => isAnyVaultBlockedByCountry(...getOperationVaultAddresses()))
+const operationGeoVaults = computed(() => getOperationVaultAddresses().map(address =>
+  [sourceDebtVault.value, sourceCollateralVault.value, targetDebtVault.value, targetCollateralVault.value]
+    .find(vault => vault?.address.toLowerCase() === address.toLowerCase()) ?? address))
+const isGeoBlocked = computed(() => isAnyVaultBlockedByCountry(...operationGeoVaults.value))
+const geoUnavailableReason = computed(() => getVaultGeoUnavailableReason(...operationGeoVaults.value))
+
 const isBatchActive = computed(() => batchEntryCount.value > 0)
 const directInboundMigrationDisabledReason = computed(() =>
   isExternalSourceRoute.value && isBatchActive.value ? BATCH_ACTIVE_REASON : null,
@@ -2472,7 +2477,7 @@ const reviewRefinanceLabel = computed(() => {
   return 'Review Refinance'
 })
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: geoUnavailableReason.value || 'This operation is not available in your region', variant: 'warning' }
   if (validationError.value) return { message: validationError.value, variant: validationError.value === healthError.value ? 'error' : 'warning' }
   if (activeCollateralQuoteError.value && collateralNeedsSwap.value) return { message: activeCollateralQuoteError.value, variant: 'warning' }
   if (activeDebtQuoteError.value && debtNeedsSwap.value) return { message: activeDebtQuoteError.value, variant: 'warning' }
@@ -2610,7 +2615,7 @@ const inboundMigrationDisabledReason = computed(() => {
   if (debtNeedsSwap.value && selectedExternalDebtQuote.value && getQuoteAmount(selectedExternalDebtQuote.value, 'amountOutMin') < currentDebt.value) {
     return 'Selected debt swap route does not cover the external debt'
   }
-  if (isGeoBlocked.value) return 'This operation is not available in your region'
+  if (isGeoBlocked.value) return geoUnavailableReason.value || 'This operation is not available in your region'
   if (simulationError.value) return simulationError.value
   return null
 })
@@ -4300,8 +4305,8 @@ function getOperationVaultAddresses(): string[] {
 
             <UiAlert
               v-if="isGeoBlocked"
-              title="Region restricted"
-              description="This operation is not available in your region. You can still repay existing debt."
+              :title="geoUnavailableReason ? 'Availability not confirmed' : 'Region restricted'"
+              :description="geoUnavailableReason || 'This operation is not available in your region. You can still repay existing debt.'"
               variant="warning"
               size="compact"
             />

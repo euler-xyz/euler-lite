@@ -7,7 +7,7 @@ import { isOpDisabled, OP_BORROW } from '~/utils/vault-hooks'
 import { getAssetUsdValueForEstimate, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatio } from '~/utils/sdk-prices'
 import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
+import { getVaultGeoUnavailableReason, isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import type { PortfolioBorrowPosition, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import type { Address } from 'viem'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros } from '~/utils/string-utils'
@@ -179,18 +179,14 @@ const isSubmitDisabled = computed(() => {
     || isLoading.value || !isProjectedRiskAvailable.value || !(+collateralAmount.value)
     || ((borrowVault.value?.availableLiquidity ?? 0n) < valueToNano(borrowAmount.value, borrowVault.value?.asset.decimals))
 })
-const isGeoBlocked = computed(() => {
-  const addresses: string[] = []
-  if (pair.value?.borrow) addresses.push(pair.value.borrow.address)
-  if (pair.value?.collateral) addresses.push(pair.value.collateral.address)
-  return isAnyVaultBlockedByCountry(...addresses)
-})
+const geoUnavailableReason = computed(() => getVaultGeoUnavailableReason(pair.value?.borrow, pair.value?.collateral))
+const isGeoBlocked = computed(() => isAnyVaultBlockedByCountry(pair.value?.borrow, pair.value?.collateral))
 const isBorrowRestricted = computed(() =>
-  pair.value?.borrow ? isVaultRestrictedByCountry(pair.value.borrow.address) : false)
+  pair.value?.borrow ? isVaultRestrictedByCountry(pair.value.borrow) : false)
 const reviewBorrowDisabled = computed(() => isGeoBlocked.value || isBorrowRestricted.value || isSubmitDisabled.value)
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: geoUnavailableReason.value || 'This operation is not available in your region', variant: 'warning' }
   if (isBorrowRestricted.value) return { message: 'Borrowing this asset is not available in your region', variant: 'warning' }
   if (!isProjectedRiskAvailable.value) return { message: 'Projected risk estimates are unavailable', variant: 'warning' }
   if (errorText.value) return { message: errorText.value, variant: 'error' }
@@ -841,8 +837,8 @@ watch([rewardsVersion, enableIntrinsicApy], async () => {
 
             <UiAlert
               v-if="isGeoBlocked"
-              title="Region restricted"
-              description="This operation is not available in your region. You can still repay existing debt."
+              :title="geoUnavailableReason ? 'Availability not confirmed' : 'Region restricted'"
+              :description="geoUnavailableReason || 'This operation is not available in your region. You can still repay existing debt.'"
               variant="warning"
               size="compact"
             />

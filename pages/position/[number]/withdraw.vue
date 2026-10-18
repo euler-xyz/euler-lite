@@ -279,7 +279,7 @@ const addToBatch = async () => {
 }
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (form.isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (form.isGeoBlocked.value) return { message: form.geoUnavailableReason.value || 'This operation is not available in your region', variant: 'warning' }
   if (form.isOutputAssetBlocked.value || form.isOutputAssetRestricted.value) return { message: 'Receiving this asset is not available in your region', variant: 'warning' }
   if (form.isSwapRestricted.value) return { message: 'Swapping from this vault is not available in your region', variant: 'warning' }
   if (form.estimatesError.value) return { message: form.estimatesError.value, variant: 'error' }
@@ -433,6 +433,7 @@ watch(selectedOutputAsset, () => {
 
             <FormAlertStack
               :is-geo-blocked="form.isGeoBlocked.value"
+              :geo-unavailable-reason="form.geoUnavailableReason.value"
               :asset-restricted="!form.isGeoBlocked.value && (form.isOutputAssetBlocked.value || form.isOutputAssetRestricted.value)"
               asset-restricted-description="Receiving this asset is not available in your region. Pick a different token."
               :swap-restricted="!form.isGeoBlocked.value && !form.isOutputAssetBlocked.value && !form.isOutputAssetRestricted.value && form.isSwapRestricted.value"

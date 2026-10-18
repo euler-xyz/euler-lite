@@ -6,6 +6,7 @@
 // props to keep the rendered DOM byte-identical per page.
 defineProps<{
   isGeoBlocked?: boolean
+  geoUnavailableReason?: string
   assetRestricted?: boolean
   assetRestrictedDescription?: string
   swapRestricted?: boolean
@@ -18,8 +19,8 @@ defineProps<{
 <template>
   <UiAlert
     v-if="isGeoBlocked"
-    title="Region restricted"
-    description="This operation is not available in your region. You can still repay existing debt."
+    :title="geoUnavailableReason ? 'Availability not confirmed' : 'Region restricted'"
+    :description="geoUnavailableReason || 'This operation is not available in your region. You can still repay existing debt.'"
     variant="warning"
     size="compact"
   />

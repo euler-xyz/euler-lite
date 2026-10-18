@@ -254,7 +254,7 @@ const swap = useSwapPageLogic({
 const {
   isLoading, isSubmitting, isPreparing, fromAmount, toAmount, slippage,
   isSameAsset, sameVaultError, errorText,
-  isGeoBlocked, reviewSwapDisabled, reviewSwapLabel, simulationError,
+  isGeoBlocked, geoUnavailableReason, reviewSwapDisabled, reviewSwapLabel, simulationError,
   isQuoteLoading, quoteError, quotesStatusLabel, selectedProvider, selectedQuote,
   quoteCardsSorted, effectiveQuoteFetchedAt,
   fromProduct, toProduct, currentPrice, swapSummary, priceImpact, routedVia,
@@ -409,7 +409,7 @@ const addToBatch = async () => {
 }
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: geoUnavailableReason.value || 'This operation is not available in your region', variant: 'warning' }
   if (sameVaultError.value) return { message: sameVaultError.value, variant: 'error' }
   if (errorText.value) return { message: errorText.value, variant: 'error' }
   if (quoteError.value) return { message: quoteError.value, variant: 'warning' }
@@ -540,8 +540,8 @@ watch(
 
             <UiAlert
               v-if="isGeoBlocked"
-              title="Region restricted"
-              description="This operation is not available in your region. You can still withdraw existing deposits."
+              :title="geoUnavailableReason ? 'Availability not confirmed' : 'Region restricted'"
+              :description="geoUnavailableReason || 'This operation is not available in your region. You can still withdraw existing deposits.'"
               variant="warning"
               size="compact"
             />

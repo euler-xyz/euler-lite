@@ -1,0 +1,69 @@
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
+import { renderToString } from '@vue/server-renderer'
+import { createSSRApp, defineComponent, h, ref } from 'vue'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import FormAlertStack from '~/components/entities/vault/form/FormAlertStack.vue'
+import VaultLabelsAndAssets from '~/components/entities/vault/VaultLabelsAndAssets.vue'
+import { __setEulerLabelsDataForTest } from '~/composables/useEulerLabels'
+import { getVaultGeoUnavailableReason, useGeoBlock } from '~/composables/useGeoBlock'
+
+const registry = vi.hoisted(() => ({ getVault: () => undefined, getVaultCategory: () => 'standard', isVerifiedVault: () => false }))
+vi.mock('~/composables/useVaultRegistry', () => ({ useVaultRegistry: () => registry }))
+vi.mock('~/composables/useEulerLabels', async original => ({
+  ...await original<typeof import('~/composables/useEulerLabels')>(),
+  useEulerProductOfVault: () => ({ name: 'Unlisted SDK-resolved vault' }),
+}))
+const vault = {
+  type: 'EVault', address: '0x63bA834bFf27Dd1d80533a56cA27Aa058AAA1130', chainId: 1,
+  shares: { name: 'Cozy USDC' },
+  asset: { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', name: 'USD Coin', symbol: 'USDC', decimals: 6 },
+}
+const resolvedVault = vault as unknown as EVault
+const chainId = ref(1)
+const render = async () => {
+  const app = createSSRApp({ render: () => h(VaultLabelsAndAssets, { vault: resolvedVault, assets: [resolvedVault.asset] }) })
+  app.config.warnHandler = () => {}
+  app.component('RestrictedBadge', { render: () => h('span', 'Restricted') })
+  return renderToString(app)
+}
+beforeEach(() => {
+  chainId.value = 1
+  vi.stubGlobal('useEulerAddresses', () => ({ chainId }))
+  vi.stubGlobal('useVaultRegistry', () => registry)
+  useGeoBlock().country.value = 'NL'
+  __setEulerLabelsDataForTest({ geoContext: { chainId: 1, policies: [], productByVault: {} } })
+})
+describe('detail header geo badge', () => {
+  it('does not render a restriction for an unlisted vault with a resolved asset', async () => {
+    expect(await render()).not.toContain('Restricted')
+  })
+  it.each([null, undefined])('does not claim a confirmed restriction for country %s', async (country) => {
+    useGeoBlock().country.value = country
+    expect(await render()).not.toContain('Restricted')
+  })
+  it('does not claim a confirmed restriction for a stale vault after switching chains', async () => {
+    chainId.value = 8453
+    expect(await render()).not.toContain('Restricted')
+  })
+  it('renders a confirmed sanction restriction', async () => {
+    useGeoBlock().country.value = 'IR'
+    expect(await render()).toContain('Restricted')
+  })
+})
+
+describe('action availability warning', () => {
+  it.each([null, undefined])('keeps missing country %s separate from an affirmative restriction', async (country) => {
+    useGeoBlock().country.value = country
+    const app = createSSRApp({ render: () => h(FormAlertStack, {
+      isGeoBlocked: true, geoUnavailableReason: getVaultGeoUnavailableReason(resolvedVault),
+    }) })
+    app.component('UiAlert', defineComponent({
+      props: { title: String, description: String },
+      setup: props => () => h('p', `${props.title}: ${props.description}`),
+    }))
+    const html = await renderToString(app)
+    expect(html).toContain('Availability not confirmed')
+    expect(html).toContain('Your country could not be determined')
+    expect(html).not.toContain('Region restricted')
+  })
+})

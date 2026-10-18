@@ -5,7 +5,7 @@ import { SlippageSettingsModal } from '#components'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { isAnyVaultBlockedByCountry, getVaultTags, useGeoBlock } from '~/composables/useGeoBlock'
+import { getVaultGeoUnavailableReason, isAnyVaultBlockedByCountry, getVaultTags, useGeoBlock } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel, type SwapQuoteIncludeCowSwap, type SwapQuotePlanAccount, type SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
 import { getQuoteAmount, type SwapQuoteAmountField, type SwapQuoteCompare } from '~/utils/swapQuotes'
@@ -419,11 +419,13 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     return additionalErrors.some(err => !!err.value)
   })
 
-  const isGeoBlocked = computed(() => {
-    const addresses = getGeoBlockedAddresses().filter(Boolean)
-    return isAnyVaultBlockedByCountry(...addresses)
-      || (!!toVault.value && getVaultTags(toVault.value.address, 'swap-target').disabled)
-  })
+  const geoVaults = computed(() => getGeoBlockedAddresses().filter(Boolean).map(address =>
+    [fromVault.value, toVault.value].find(vault => vault?.address.toLowerCase() === address.toLowerCase()) ?? address))
+  const geoUnavailableReason = computed(() => getVaultGeoUnavailableReason(...geoVaults.value))
+  const isGeoBlocked = computed(() =>
+    isAnyVaultBlockedByCountry(...geoVaults.value)
+    || (!!toVault.value && getVaultTags(toVault.value, 'swap-target').disabled),
+  )
 
   const reviewSwapLabel = computed(() => {
     if (isSameAsset.value) return 'Review Transfer'
@@ -651,6 +653,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     errorText,
     isSubmitDisabled,
     isGeoBlocked,
+    geoUnavailableReason,
     reviewSwapDisabled,
     reviewSwapLabel,
     simulationError,

@@ -6,7 +6,7 @@ import { getHookDisabledWarning, getUtilisationWarning, getSupplyCapWarning } fr
 import { getAssetOraclePrice, getTokenUsdPrice } from '~/utils/sdk-prices'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo, combineApyWithIntrinsic, resolveVaultIntrinsicApySource } from '~/utils/vault-intrinsic-apy'
-import { isVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
+import { getVaultGeoUnavailableReason, isVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
@@ -344,15 +344,16 @@ const isSubmitDisabled = computed(() => {
   if (isSupplyCapReached.value) return true
   return false
 })
-const isGeoBlocked = computed(() => isVaultBlockedByCountry(vaultAddress))
-const isSwapRestricted = computed(() => needsSwap.value && isVaultRestrictedByCountry(vaultAddress))
+const geoUnavailableReason = computed(() => getVaultGeoUnavailableReason(securitizeVault.value ?? vault.value ?? vaultAddress))
+const isGeoBlocked = computed(() => isVaultBlockedByCountry(securitizeVault.value ?? vault.value ?? vaultAddress))
+const isSwapRestricted = computed(() => needsSwap.value && isVaultRestrictedByCountry(securitizeVault.value ?? vault.value ?? vaultAddress))
 // Swap-deposit source: user is giving up the selected asset (reducing exposure),
 // so only hard-block applies. Soft-restrict intentionally does not apply here.
 // Pass the asset object so symbol/name pattern rules also apply.
 const isSourceAssetBlocked = computed(() => needsSwap.value && isAssetBlockedByCountry(selectedAsset.value))
 const reviewSupplyDisabled = computed(() => isGeoBlocked.value || isSwapRestricted.value || isSourceAssetBlocked.value || isSubmitDisabled.value)
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: geoUnavailableReason.value || 'This operation is not available in your region', variant: 'warning' }
   if (isSourceAssetBlocked.value) return { message: 'Paying with this asset is not available in your region', variant: 'warning' }
   if (isSwapRestricted.value) return { message: 'Swap deposits are not available in your region', variant: 'warning' }
   if (eVault.value && isOpDisabled(eVault.value, OP_DEPOSIT)) return { message: 'Deposits are currently disabled for this vault', variant: 'warning' }
@@ -1188,8 +1189,8 @@ watch([
 
             <UiAlert
               v-if="isGeoBlocked"
-              title="Region restricted"
-              description="This operation is not available in your region. You can still withdraw existing deposits."
+              :title="geoUnavailableReason ? 'Availability not confirmed' : 'Region restricted'"
+              :description="geoUnavailableReason || 'This operation is not available in your region. You can still withdraw existing deposits.'"
               variant="warning"
               size="compact"
             />

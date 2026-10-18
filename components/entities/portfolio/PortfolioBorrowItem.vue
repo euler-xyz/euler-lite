@@ -13,7 +13,7 @@ import { getPositionRampStatus, getPositionRampTargetTimestamp } from '~/entitie
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { toUsdAmount, type UsdAmount } from '~/utils/sdk-prices'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
+import { getVaultGeoBlockReason } from '~/composables/useGeoBlock'
 import { getVaultNotice, isVaultNoticeSpecific } from '~/utils/eulerLabelsUtils'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -138,7 +138,7 @@ const collateralSymbolLabel = computed(() => {
 })
 const pairSymbols = computed(() => `${collateralSymbolLabel.value}/${borrowVault.value?.asset.symbol ?? ''}`)
 
-const isGeoBlocked = computed(() => isAnyVaultBlockedByCountry(primaryCollateralAddress.value, borrowAddress.value))
+const isGeoBlocked = computed(() => [collateralVault.value, borrowVault.value].some(vault => vault && getVaultGeoBlockReason(vault) === 'region'))
 const getSymbolForAddress = (addr: string): string => {
   if (normalizeAddress(addr) === normalizeAddress(borrowAddress.value)) {
     return borrowVault.value.asset.symbol

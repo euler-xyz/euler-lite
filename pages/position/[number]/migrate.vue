@@ -28,7 +28,7 @@ import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { formatCompactUsdValue, formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
 import { MODAL_CLOSE_REDIRECT_DELAY_MS } from '~/entities/tuning-constants'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
-import { isAnyVaultBlockedByCountry, useGeoBlock } from '~/composables/useGeoBlock'
+import { getVaultGeoUnavailableReason, isAnyVaultBlockedByCountry, useGeoBlock } from '~/composables/useGeoBlock'
 import { OP_REDEEM, OP_REPAY, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import type { DisplayStep } from '~/utils/stepDecoding'
 import {
@@ -405,11 +405,10 @@ const plannedOps = computed<PlannedOp[]>(() => {
 })
 const hookWarning = computed(() => getPlanHookDisabledWarning(plannedOps.value))
 const { isPolicyAvailable } = useGeoBlock()
+const geoUnavailableReason = computed(() => getVaultGeoUnavailableReason(sourceDebtVault.value, sourceCollateralVault.value))
 const isGeoBlocked = computed(() => isAnyVaultBlockedByCountry(
-  ...[
-    sourceDebtVault.value?.address,
-    sourceCollateralVault.value?.address,
-  ].filter((value): value is Address => !!value),
+  sourceDebtVault.value,
+  sourceCollateralVault.value,
 ))
 const canLoadTargets = computed(() =>
   enableExternalMigrations.value
@@ -421,7 +420,7 @@ const canLoadTargets = computed(() =>
 const pageDisabledReason = computed(() => {
   if (!enableExternalMigrations.value) return 'Enable advanced mode in settings'
   if (!isPolicyAvailable.value) return 'Compliance data unavailable. Please retry.'
-  if (isGeoBlocked.value) return 'This operation is not available in your region'
+  if (isGeoBlocked.value) return geoUnavailableReason.value || 'This operation is not available in your region'
   if (!sourceDebtVault.value || !sourceCollateralEVault.value || !migrationAccount.value) return 'Migration requires standard Euler collateral and debt vaults'
   if (!planAccount.value) return 'Account data is loading'
   if (currentDebt.value <= 0n) return 'This position has no debt to migrate out'

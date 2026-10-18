@@ -396,7 +396,7 @@ const { guardWithPriceImpact: guardWithWalletSwapPriceImpact } = usePriceImpactG
 
 const isWalletSwapRestricted = computed(() =>
   walletSwap.needsSwap.value && isVaultRestrictedByCountry(
-    borrowVault.value?.address || '',
+    borrowVault.value || '',
     { counterpart: walletSwap.selectedAsset.value },
   ),
 )

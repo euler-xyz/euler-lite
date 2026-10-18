@@ -8,7 +8,7 @@ import { getBorrowPositionEffectiveLiquidationLTV, getBorrowPositionTimeToLiquid
 import { maxUint256 } from 'viem'
 import { formatTtl, ltvToPercent, nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { formatNumber, formatHealthScore, formatUsdValue, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
-import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
+import { getVaultGeoUnavailableReason, isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { getVaultDeprecation, getVaultNotice } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
 import { getPositionCollateralEdge, getPositionRampStatus, getPositionRampTargetTimestamp } from '~/entities/account'
@@ -180,14 +180,15 @@ const pairLiquidationLTVPercent = computed(() => {
   if (!position.value || position.value.liquidationLTV === undefined) return null
   return ltvToPercent(position.value.liquidationLTV)
 })
-const isPositionGeoBlocked = computed(() => {
-  if (!position.value) return false
-  if (!borrowVault.value) return false
-  const addresses: string[] = [borrowVault.value.address]
-  const collateralAddresses = positionCollateralAddresses.value
-  addresses.push(...collateralAddresses)
-  return isAnyVaultBlockedByCountry(...addresses)
-})
+const positionGeoVaults = computed(() => [
+  borrowVault.value,
+  ...positionCollateralAddresses.value.map(address =>
+    collateralItems.value.find(item => item.vault.address.toLowerCase() === address.toLowerCase())?.vault
+    ?? position.value?.collaterals.find(item => item.vault?.address.toLowerCase() === address.toLowerCase())?.vault
+    ?? address),
+])
+const isPositionGeoBlocked = computed(() => isAnyVaultBlockedByCountry(...positionGeoVaults.value))
+const geoUnavailableReason = computed(() => getVaultGeoUnavailableReason(...positionGeoVaults.value))
 
 const isOverBorrowLTV = computed(() => {
   if (!position.value || hasNoBorrow.value) return false
@@ -199,26 +200,26 @@ const isOverBorrowLTV = computed(() => {
 })
 
 const isBorrowRestricted = computed(() =>
-  borrowVault.value ? isVaultRestrictedByCountry(borrowVault.value.address) : false)
+  borrowVault.value ? isVaultRestrictedByCountry(borrowVault.value) : false)
 
 const isMultiplyRestricted = computed(() => {
   if (!position.value) return false
   return !!borrowVault.value && !!collateralVault.value
-    && (isVaultRestrictedByCountry(borrowVault.value.address)
-      || isVaultRestrictedByCountry(collateralVault.value.address))
+    && (isVaultRestrictedByCountry(borrowVault.value)
+      || isVaultRestrictedByCountry(collateralVault.value))
 })
 
 // Both vaults restricted = pair effectively blocked (no borrow, no multiply, no useful swaps)
 const isPairFullyRestricted = computed(() => {
   if (!position.value) return false
   return !!borrowVault.value && !!collateralVault.value
-    && isVaultRestrictedByCountry(borrowVault.value.address)
-    && isVaultRestrictedByCountry(collateralVault.value.address)
+    && isVaultRestrictedByCountry(borrowVault.value)
+    && isVaultRestrictedByCountry(collateralVault.value)
 })
 const migrationDisabledReason = computed(() => {
   if (!enableExternalMigrations.value) return 'Enable advanced mode in settings'
   if (hasNoBorrow.value) return 'This position has no debt to migrate out'
-  if (isPositionGeoBlocked.value || isPairFullyRestricted.value) return 'This position is not available in your region'
+  if (isPositionGeoBlocked.value || isPairFullyRestricted.value) return geoUnavailableReason.value || 'This position is not available in your region'
   if (hasQueryFailure.value) return 'Position data is incomplete'
   if (!collateralVault.value || isSecuritizeCollateralVault(collateralVault.value)) return 'Migration requires standard Euler collateral'
   // buildMigrationRoute only carries the primary collateral, so a multi-collateral
@@ -1289,8 +1290,8 @@ watch([isConnected, isSpyMode, address, activeLayerData, () => _route.params.num
             <UiAlert
               v-if="isPositionGeoBlocked || isPairFullyRestricted"
               class="my-12"
-              title="Region restricted"
-              description="This pair is not available in your region. You can still repay existing debt."
+              :title="geoUnavailableReason ? 'Availability not confirmed' : 'Region restricted'"
+              :description="geoUnavailableReason || 'This pair is not available in your region. You can still repay existing debt.'"
               variant="warning"
               size="compact"
             />

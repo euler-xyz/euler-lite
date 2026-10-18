@@ -215,7 +215,7 @@ useOperationGuard(computed(() => [form.collateralVault.value?.address].filter(Bo
 })
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (form.isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (form.isGeoBlocked.value) return { message: form.geoUnavailableReason.value || 'This operation is not available in your region', variant: 'warning' }
   if (form.isInputAssetBlocked.value) return { message: 'Paying with this asset is not available in your region', variant: 'warning' }
   if (form.isSwapRestricted.value) return { message: 'Swapping into this vault is not available in your region', variant: 'warning' }
   if (form.estimatesError.value) return { message: form.estimatesError.value, variant: 'error' }
@@ -451,6 +451,7 @@ watch(selectedAsset, async () => {
 
             <FormAlertStack
               :is-geo-blocked="form.isGeoBlocked.value"
+              :geo-unavailable-reason="form.geoUnavailableReason.value"
               :asset-restricted="!form.isGeoBlocked.value && form.isInputAssetBlocked.value"
               asset-restricted-description="Paying with this asset is not available in your region. Pick a different token."
               :swap-restricted="!form.isGeoBlocked.value && !form.isInputAssetBlocked.value && form.isSwapRestricted.value"

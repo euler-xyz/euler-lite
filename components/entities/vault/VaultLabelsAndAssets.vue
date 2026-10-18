@@ -2,7 +2,7 @@
 import { isEulerEarn, isSecuritizeCollateralVault, type SecuritizeCollateralVault, type EVault, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
+import { getVaultGeoBlockReason } from '~/composables/useGeoBlock'
 import { getAddress } from 'viem'
 
 const { vault, assets, size, assetsLabel, pairVault, back, backFallback } = defineProps<{
@@ -39,13 +39,9 @@ const displayName = computed(() => {
 const pairVaultAddress = computed(() => pairVault ? normalizeAddress(pairVault.address) : '')
 const pairProduct = useEulerProductOfVault(pairVaultAddress)
 
-const isRestricted = computed(() => {
-  const addresses: string[] = []
-  if (vault?.address) addresses.push(vault.address)
-  if (pairVault?.address) addresses.push(pairVault.address)
-  if (!addresses.length) return false
-  return isAnyVaultBlockedByCountry(...addresses)
-})
+const isRestricted = computed(() =>
+  [vault, pairVault].some(value => value && getVaultGeoBlockReason(value) === 'region'),
+)
 
 const getVaultLabel = (v?: EVault | EulerEarn | SecuritizeCollateralVault) => {
   if (!v) return ''
