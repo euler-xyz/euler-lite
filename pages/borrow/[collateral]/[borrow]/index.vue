@@ -78,6 +78,7 @@ getBorrowVaultPair(collateralAddress, borrowAddress).then((p) => {
   logWarn('[borrow] failed to load vault pair', e)
   void router.replace({ path: '/borrow', query: route.query })
 })
+useVaultOpeningNotice(() => pair.value ? [pair.value.collateral.address, pair.value.borrow.address] : [])
 
 const borrowVault = computed(() => pair.value?.borrow)
 const collateralVault = computed(() => pair.value?.collateral)

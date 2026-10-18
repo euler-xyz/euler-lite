@@ -429,6 +429,7 @@ const lendWarnings = computed(() => {
 
 // Check if vault data is loaded
 const isVaultLoaded = computed(() => !!eVault.value || !!securitizeVault.value)
+useVaultOpeningNotice(() => isVaultLoaded.value ? [vaultAddress] : [])
 
 const load = async () => {
   isLoading.value = true
