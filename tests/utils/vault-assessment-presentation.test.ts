@@ -195,13 +195,24 @@ describe('vault checks presentation', () => {
     ])
   })
 
-  it('names why an unknown vault is unknown without calling a labelled vault unlisted', () => {
-    expect(getUnknownVaultCause(undefined)).toBe('This vault is not listed in the published vault labels.')
-    expect(getUnknownVaultCause({ status: 'hidden', reason: 'A required check failed', decidedBy: 'config-failed' })).toBe('Euler\'s checks flagged this vault: A required check failed.')
-    expect(getUnknownVaultCause({ status: 'hidden', reason: null, decidedBy: 'config-failed' })).toBe('Euler\'s checks flagged this vault.')
-    expect(getUnknownVaultCause({ status: 'pending_review', decidedBy: 'unclaimed' })).toBe('This vault is not listed in the published vault labels.')
-    expect(getUnknownVaultCause({ status: 'pending_review', decidedBy: 'awaiting-verification' })).toBe('This vault has not been checked yet, so it is not listed.')
-    expect(getUnknownVaultCause({ status: 'warning', reason: 'Deprecated due to low activity.', decidedBy: 'deprecated' })).toBe('This vault is in the published vault labels but could not be verified.')
+  it('names why an unknown vault is unknown without calling it not listed', () => {
+    const causes = [
+      getUnknownVaultCause(undefined),
+      getUnknownVaultCause({ status: 'hidden', reason: 'A required check failed', decidedBy: 'config-failed' }),
+      getUnknownVaultCause({ status: 'hidden', reason: null, decidedBy: 'config-failed' }),
+      getUnknownVaultCause({ status: 'pending_review', decidedBy: 'unclaimed' }),
+      getUnknownVaultCause({ status: 'pending_review', decidedBy: 'awaiting-verification' }),
+      getUnknownVaultCause({ status: 'warning', reason: 'Deprecated due to low activity.', decidedBy: 'deprecated' }),
+    ]
+    expect(causes).toEqual([
+      'This vault has not been checked yet.',
+      'Euler\'s checks flagged this vault: A required check failed.',
+      'Euler\'s checks flagged this vault.',
+      'This vault is not in the published vault labels.',
+      'This vault has not been checked yet.',
+      'This vault is in the published vault labels but could not be verified.',
+    ])
+    for (const cause of causes) expect(cause).not.toMatch(/not listed/i)
   })
 
   it('colours a finding red only when it keeps the vault from being listed', () => {

@@ -81,7 +81,7 @@ describe('vault form verification prerequisites', () => {
       isAcknowledgmentRequired: true,
       flaggedNotice: 'This transaction uses a flagged vault: A required check failed.',
     })
-    expect(html).toContain('Vault flagged')
+    expect(html).toContain('Review flagged vault')
     expect(html).not.toContain('Acknowledge Unverified Vault Risk')
     expect(html).not.toContain('Review listing status')
   })
@@ -91,7 +91,7 @@ describe('vault form verification prerequisites', () => {
     walletChain.value = 143
     const html = await renderSubmit({ isAcknowledgmentRequired: true })
     expect(html).toContain('Acknowledge Unverified Vault Risk')
-    expect(html).not.toContain('Vault flagged')
+    expect(html).not.toContain('Review flagged vault')
   })
 
   it('asks for the flagged-vault confirmation before adding to an existing batch', async () => {
@@ -101,11 +101,11 @@ describe('vault form verification prerequisites', () => {
     batchEntries.value = 1
     const flaggedNotice = 'This transaction uses a flagged vault: A required check failed.'
     const beforeConsent = await renderSubmit({ isAcknowledgmentRequired: true, flaggedNotice }, true)
-    expect(beforeConsent).toContain('Vault flagged')
+    expect(beforeConsent).toContain('Review flagged vault')
     expect(beforeConsent).not.toContain('data-testid="add-to-batch"')
 
     const afterConsent = await renderSubmit({ isAcknowledgmentRequired: false, flaggedNotice }, true)
     expect(afterConsent).toContain('data-testid="add-to-batch"')
-    expect(afterConsent).not.toContain('Vault flagged')
+    expect(afterConsent).not.toContain('Review flagged vault')
   })
 })

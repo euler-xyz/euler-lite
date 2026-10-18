@@ -11,7 +11,7 @@ import type { TosGuardState } from '~/composables/guards/useTosGuard'
 import type { UnverifiedVaultGuardState } from '~/composables/guards/useUnverifiedVaultGuard'
 import { useStateOverrideResolution } from '~/composables/useStateOverrideOptions'
 import { BATCH_ACTIVE_REASON } from '~/utils/tx-batch-messages'
-import { FLAGGED_VAULT_TITLE } from '~/utils/vault-assessment/flagged'
+import { FLAGGED_VAULT_ACTION } from '~/utils/vault-assessment/flagged'
 
 interface KeyringGuardState {
   needsVerification: boolean
@@ -320,7 +320,7 @@ const handleAddToBatch = () => {
           variant="red"
           @click="openUnverifiedVaultModal"
         >
-          {{ unverifiedVaultGuard?.flaggedNotice ? FLAGGED_VAULT_TITLE : 'Acknowledge Unverified Vault Risk' }}
+          {{ unverifiedVaultGuard?.flaggedNotice ? FLAGGED_VAULT_ACTION : 'Acknowledge Unverified Vault Risk' }}
         </UiButton>
       </template>
       <template v-else-if="showDeprecatedDepositFlow">

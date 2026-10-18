@@ -123,13 +123,13 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
           :address="vault.address"
           :family="isEulerEarn(vault) ? 'earn' : isSecuritizeCollateralVault(vault) ? null : 'evk'"
           hide-deprecated
-          :badge-label="pairVault ? 'Collateral warning' : undefined"
+          :pair-side="pairVault ? 'collateral' : undefined"
         />
         <VaultAssessmentWarning
           v-if="pairVault"
           :address="pairVault.address"
           hide-deprecated
-          badge-label="Borrow warning"
+          pair-side="borrow"
         />
         <RestrictedBadge v-if="isRestricted" />
         <slot />

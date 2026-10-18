@@ -14,7 +14,7 @@ const line = computed(() => {
   <p
     v-if="line"
     class="text-p4 text-content-tertiary"
-    data-id="vault-not-listed"
+    data-id="vault-flagged"
   >
     {{ line }}
   </p>

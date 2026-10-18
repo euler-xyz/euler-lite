@@ -431,9 +431,9 @@ export const getUpcomingVaultChanges = (
 
 export const getUnknownVaultCause = (verdict: VaultVerdictLike | undefined): string => {
   if (verdict?.status === 'hidden') return getFlaggedVaultLine(verdict.reason)
-  if (verdict?.status === 'pending_review' && verdict.decidedBy !== 'unclaimed') return 'This vault has not been checked yet, so it is not listed.'
+  if (verdict?.status === 'pending_review' && verdict.decidedBy === 'unclaimed') return 'This vault is not in the published vault labels.'
   if (verdict && verdict.status !== 'pending_review') return 'This vault is in the published vault labels but could not be verified.'
-  return 'This vault is not listed in the published vault labels.'
+  return 'This vault has not been checked yet.'
 }
 
 /** One risk explanation at the point of action, shared by forms and batch review. */

@@ -5,7 +5,7 @@ import VaultAssessmentWarning from '~/components/entities/vault/VaultAssessmentW
 
 const address = '0x00000000000000000000000000000000000000aa'
 
-const renderWarning = (ready: boolean, options: { loadError?: string, status?: string, decidedBy?: string, reason?: string | null, hideChecks?: boolean, findings?: Array<{ key: string, description: string, outcome: string, required: boolean, exempted?: boolean }> } = {}) => {
+const renderWarning = (ready: boolean, options: { loadError?: string, status?: string, decidedBy?: string, reason?: string | null, hideChecks?: boolean, pairSide?: 'collateral' | 'borrow', findings?: Array<{ key: string, description: string, outcome: string, required: boolean, exempted?: boolean }> } = {}) => {
   vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1) }))
   vi.stubGlobal('useEulerLabels', () => ({
     isReady: ref(ready),
@@ -20,7 +20,7 @@ const renderWarning = (ready: boolean, options: { loadError?: string, status?: s
       [address]: { status: options.status || 'warning', decidedBy: options.decidedBy || 'assessment', reason: options.reason === undefined ? 'Review the oracle.' : options.reason },
     }),
   }))
-  const app = createSSRApp({ render: () => h(VaultAssessmentWarning, { address, hideChecks: options.hideChecks }) })
+  const app = createSSRApp({ render: () => h(VaultAssessmentWarning, { address, hideChecks: options.hideChecks, pairSide: options.pairSide }) })
   app.component('UiHoverPreviewTooltip', defineComponent({
     props: { title: String, text: String },
     setup: (props, { slots }) => () => h('div', { 'data-title': props.title, 'data-text': props.text }, slots.default?.()),
@@ -75,5 +75,20 @@ describe('flagged vault badge', () => {
     const html = await renderWarning(true, { status: 'warning', decidedBy: 'deprecated', reason: 'Deprecated.' })
     expect(html).toMatch(/\sDeprecated<\/span>/)
     expect(html).not.toContain('Flagged')
+  })
+})
+
+describe('borrow pair badge', () => {
+  it.each([
+    ['collateral', 'Collateral'],
+    ['borrow', 'Borrow'],
+  ] as const)('names a flagged %s side flagged and keeps warning for a real warning', async (pairSide, label) => {
+    const flagged = await renderWarning(true, { status: 'hidden', decidedBy: 'config-failed', reason: 'A required check failed.', pairSide })
+    expect(flagged).toMatch(new RegExp(`\\s${label} flagged</span>`))
+    expect(flagged).toContain('data-title="Vault flagged"')
+    expect(flagged).not.toContain(`${label} warning`)
+    const warning = await renderWarning(true, { status: 'warning', decidedBy: 'assessment', pairSide })
+    expect(warning).toMatch(new RegExp(`\\s${label} warning</span>`))
+    expect(warning).not.toContain('flagged')
   })
 })

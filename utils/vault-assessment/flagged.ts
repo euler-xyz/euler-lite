@@ -8,6 +8,14 @@ export type VaultVisibilityMap = Readonly<Record<string, VaultVerdictLike>> | un
 
 export const FLAGGED_VAULT_LABEL = 'Flagged'
 export const FLAGGED_VAULT_TITLE = 'Vault flagged'
+export const FLAGGED_VAULT_ACTION = 'Review flagged vault'
+
+export type VaultPairSide = 'collateral' | 'borrow'
+
+export const PAIR_SIDE_BADGE_LABELS: Readonly<Record<VaultPairSide, { warning: string, flagged: string }>> = {
+  collateral: { warning: 'Collateral warning', flagged: 'Collateral flagged' },
+  borrow: { warning: 'Borrow warning', flagged: 'Borrow flagged' },
+}
 
 const withReason = (lead: string, reason?: string | null): string => {
   const text = reason?.trim()
