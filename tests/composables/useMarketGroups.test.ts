@@ -171,3 +171,29 @@ describe('hosted publication refresh', () => {
     finally { scope.stop() }
   })
 })
+
+describe('held portfolio metadata isolation', () => {
+  afterEach(() => vi.unstubAllGlobals())
+  it('keeps static held-only entries out of groups while retaining collateral lookups', () => {
+    const listed = makeEVault(LEND_VAULT)
+    const held = makeEVault(WRAPPER)
+    __setEulerLabelsDataForTest({ source: 'static' })
+    vi.stubGlobal('useVaultRegistry', () => ({
+      getAll: () => [{ vault: listed }, { vault: held, verified: false, portfolioOnly: true }],
+      isKnownEscrowAddress: () => false,
+    }))
+    vi.stubGlobal('useEulerLabels', () => ({ products: {}, entities: {}, isReady: ref(true) }))
+    vi.stubGlobal('useVaults', () => ({
+      isVaultGovernorVerified: () => false, isCollateralResolved: ref(true),
+      isMarketDataResolved: ref(true), isReady: ref(true),
+    }))
+    vi.stubGlobal('useShowAllLabelEntries', () => ref(true))
+    const scope = effectScope()
+    try {
+      const groups = scope.run(useMarketGroups)!
+      expect(groups.allVaults.value).toEqual([listed])
+      expect(groups.marketGroupsSync.value.flatMap(group => group.vaults)).toEqual([listed])
+    }
+    finally { scope.stop() }
+  })
+})

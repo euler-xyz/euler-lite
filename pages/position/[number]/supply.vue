@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { getVaultGeoUnavailableReason } from '~/composables/useGeoBlock'
 import { captureSwapReview } from '~/utils/swapReview'
 import type { VaultAsset } from '~/types/asset'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
@@ -215,7 +216,7 @@ useOperationGuard(computed(() => [form.collateralVault.value?.address].filter(Bo
 })
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (form.isGeoBlocked.value) return { message: form.geoUnavailableReason.value || 'This operation is not available in your region', variant: 'warning' }
+  if (form.isGeoBlocked.value) return { message: getVaultGeoUnavailableReason(form.borrowVault.value?.address, form.collateralVault.value?.address) || 'This operation is not available in your region', variant: 'warning' }
   if (form.isInputAssetBlocked.value) return { message: 'Paying with this asset is not available in your region', variant: 'warning' }
   if (form.isSwapRestricted.value) return { message: 'Swapping into this vault is not available in your region', variant: 'warning' }
   if (form.estimatesError.value) return { message: form.estimatesError.value, variant: 'error' }
@@ -450,8 +451,8 @@ watch(selectedAsset, async () => {
             />
 
             <FormAlertStack
+              :vault-addresses="[form.borrowVault.value?.address, form.collateralVault.value?.address]"
               :is-geo-blocked="form.isGeoBlocked.value"
-              :geo-unavailable-reason="form.geoUnavailableReason.value"
               :asset-restricted="!form.isGeoBlocked.value && form.isInputAssetBlocked.value"
               asset-restricted-description="Paying with this asset is not available in your region. Pick a different token."
               :swap-restricted="!form.isGeoBlocked.value && !form.isInputAssetBlocked.value && form.isSwapRestricted.value"

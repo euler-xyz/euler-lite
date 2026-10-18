@@ -3,7 +3,7 @@ import type { Account, EVault, IHasVaultAddress, SecuritizeCollateralVault, Tran
 import { isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { getAssetUsdValueForEstimate } from '~/utils/sdk-prices'
-import { getVaultGeoUnavailableReason, isAnyVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
+import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { withProjectedVaultIntrinsicApy, withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
@@ -672,12 +672,16 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   }
 
   // --- Validation computeds ---
-  const geoUnavailableReason = computed(() => getVaultGeoUnavailableReason(borrowVault.value, collateralVault.value))
-  const isGeoBlocked = computed(() => isAnyVaultBlockedByCountry(borrowVault.value, collateralVault.value))
+  const isGeoBlocked = computed(() => {
+    const addresses: string[] = []
+    if (borrowVault.value) addresses.push(borrowVault.value.address)
+    if (collateralVault.value) addresses.push(collateralVault.value.address)
+    return isAnyVaultBlockedByCountry(...addresses)
+  })
 
   const isSwapRestricted = computed(() =>
     options.needsSwap.value && isVaultRestrictedByCountry(
-      collateralVault.value || '',
+      collateralVault.value?.address || '',
       { counterpart: options.effectiveAsset.value },
     ),
   )
@@ -1312,7 +1316,6 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
 
     // Validation
     isGeoBlocked,
-    geoUnavailableReason,
     isSwapRestricted,
     isInputAssetBlocked,
     isOutputAssetBlocked,

@@ -414,13 +414,13 @@ const updateEarnVaults = async (vaultAddresses: string[], generation?: number, s
  * or as strategies in Earn vaults).
  */
 const extractNeededEscrowAddresses = (): string[] => {
-  const { getEVaults, getEarnVaults, isKnownEscrowAddress } = useVaultRegistry()
+  const { getEVaults, getEarnVaults, get, isKnownEscrowAddress } = useVaultRegistry()
   const needed = new Set<string>()
 
   // 1. Escrow vaults used as collateral in EVaults — include any live edge,
   //    not just borrowable ones, so escrows mid-liquidation-LTV-ramp (where
   //    borrowLTV is already 0) still get fetched and shown in discovery.
-  getEVaults().forEach((vault) => {
+  getEVaults().filter(vault => !get(vault.address)?.portfolioOnly).forEach((vault) => {
     vault.collaterals.forEach((ltv) => {
       if (isLiveCollateralEdge(ltv) && isKnownEscrowAddress(ltv.address)) {
         needed.add(getAddress(ltv.address))
@@ -429,7 +429,7 @@ const extractNeededEscrowAddresses = (): string[] => {
   })
 
   // 2. Escrow vaults used as strategies in Earn vaults
-  getEarnVaults().forEach((earnVault) => {
+  getEarnVaults().filter(vault => !get(vault.address)?.portfolioOnly).forEach((earnVault) => {
     earnVault.strategies.forEach((strategyInfo) => {
       if (isKnownEscrowAddress(strategyInfo.address)) {
         needed.add(getAddress(strategyInfo.address))
@@ -536,13 +536,13 @@ const fetchUnresolvedCollaterals = async (addresses: string[], generation: numbe
 }
 
 const resolveUnresolvedCollaterals = async (generation: number, targetChainId = resolveTargetChainId()): Promise<void> => {
-  const { getEVaults, has: registryHas } = useVaultRegistry()
+  const { getEVaults, get, has: registryHas } = useVaultRegistry()
   // Do not apply the explorable-product filter here. The matrix/group builders
   // still exclude non-explorable vaults as market members, but they need live
   // collateral references loaded in the registry so those vaults can render as
   // external collateral rows.
   const unresolvedAddresses = extractUnresolvedCollateralAddresses(
-    getEVaults(),
+    getEVaults().filter(vault => !get(vault.address)?.portfolioOnly),
     registryHas,
   )
 
@@ -1036,12 +1036,12 @@ const updateVault = async (vaultAddress: string): Promise<EVault | SecuritizeCol
  * Used for periodic polling to keep interest rates, supply/borrow totals, and prices fresh.
  */
 const refreshVaults = async () => {
-  const { getEVaults, getEarnVaults, getSecuritizeVaults } = useVaultRegistry()
+  const { getEVaults, getEarnVaults, getSecuritizeVaults, get } = useVaultRegistry()
   const gen = loadGeneration.value
   const targetChainId = resolveTargetChainId()
 
   try {
-    await updateEVaults(getEVaults().map(v => v.address), gen, true, { chainId: targetChainId })
+    await updateEVaults(getEVaults().filter(v => !get(v.address)?.portfolioOnly).map(v => v.address), gen, true, { chainId: targetChainId })
     if (!isCurrentVaultLoad(gen, targetChainId)) return
 
     await resolveUnresolvedCollaterals(gen, targetChainId)
@@ -1058,10 +1058,10 @@ const refreshVaults = async () => {
 
   if (!isCurrentVaultLoad(gen, targetChainId)) return
 
-  await updateEarnVaults(getEarnVaults().map(v => v.address), gen, true, targetChainId)
+  await updateEarnVaults(getEarnVaults().filter(v => !get(v.address)?.portfolioOnly).map(v => v.address), gen, true, targetChainId)
   if (!isCurrentVaultLoad(gen, targetChainId)) return
 
-  await updateSecuritizeVaults(getSecuritizeVaults().map(v => v.address), gen, true, targetChainId)
+  await updateSecuritizeVaults(getSecuritizeVaults().filter(v => !get(v.address)?.portfolioOnly).map(v => v.address), gen, true, targetChainId)
 }
 
 const updateEarnVault = async (vaultAddress: string): Promise<EulerEarn> => {

@@ -117,7 +117,6 @@ vi.mock('~/utils/sdk-prices', () => ({
 
 vi.mock('~/composables/useGeoBlock', () => ({
   isAnyVaultBlockedByCountry: vi.fn(() => false),
-  getVaultGeoUnavailableReason: vi.fn(() => undefined),
   isVaultRestrictedByCountry: vi.fn(() => false),
   isAssetBlockedByCountry: vi.fn(() => false),
   isAssetRestrictedByCountry: vi.fn(() => false),

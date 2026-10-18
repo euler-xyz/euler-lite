@@ -1,6 +1,7 @@
 import { renderToString } from '@vue/server-renderer'
 import { createSSRApp, h, ref, type Component } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import RestrictedBadge from '~/components/entities/vault/RestrictedBadge.vue'
 import PortfolioBorrowItem from '~/components/entities/portfolio/PortfolioBorrowItem.vue'
 import PortfolioSavingItem from '~/components/entities/portfolio/PortfolioSavingItem.vue'
 import PortfolioEarnItem from '~/components/entities/portfolio/PortfolioEarnItem.vue'
@@ -14,7 +15,7 @@ vi.mock('~/composables/useEulerLabels', async original => ({
   ...await original<typeof import('~/composables/useEulerLabels')>(),
   useEulerProductOfVault: () => ({ name: 'Unlisted vault' }),
 }))
-vi.mock('#components', () => ({ VaultOverviewModal: {}, VaultApyModal: {}, VaultNetApyModal: {}, PortfolioRoeModal: {}, UiModalPreviewTrigger: { template: '<span><slot /></span>' } }))
+vi.mock('#components', () => ({ RestrictedInfoModal: {}, VaultOverviewModal: {}, VaultApyModal: {}, VaultNetApyModal: {}, PortfolioRoeModal: {}, UiModalPreviewTrigger: { template: '<span><slot /></span>' } }))
 vi.mock('~/components/ui/composables/useModal', () => ({ useModal: () => ({ open: vi.fn() }) }))
 vi.mock('~/composables/useVaultWarnings', () => ({ getUtilisationWarning: () => null }))
 vi.mock('~/utils/sdk-prices', () => ({ toUsdAmount: () => ({ hasPrice: true, usd: 10 }), getAssetUsdValue: async () => 10, formatAssetValue: async () => ({ hasPrice: true, usdValue: 10 }) }))
@@ -37,12 +38,13 @@ const render = async (component: Component) => {
   const app = createSSRApp({ render: () => h(component, { position, clickable: false }) })
   app.config.warnHandler = () => {}
   app.config.globalProperties.$route = { query: { network: '1' }, params: {}, path: '/', fullPath: '/', hash: '', name: 'test', matched: [], meta: {}, redirectedFrom: undefined }
+  app.component('RestrictedBadge', RestrictedBadge)
   app.component('UiHoverPreviewTooltip', { template: '<span><slot /></span>' })
   return renderToString(app)
 }
 beforeEach(() => {
   chainId.value = 1
-  registry.getVault.mockReturnValue(undefined)
+  registry.getVault.mockReturnValue(vault)
   useGeoBlock().country.value = 'NL'
   __setEulerLabelsDataForTest({ geoContext: { chainId: 1, policies: [], productByVault: {} } })
   vi.stubGlobal('useEulerAddresses', () => ({ chainId }))

@@ -3,7 +3,7 @@ import type { EulerEarn, PortfolioSavingsPosition, VaultEntity } from '@eulerxyz
 import { computeSupplyApyBreakdown, getSubAccountId as getSubAccountIndex } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
 import { formatAssetValue, getAssetUsdValue } from '~/utils/sdk-prices'
-import { getVaultGeoBlockReason } from '~/composables/useGeoBlock'
+import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { getVaultNotice } from '~/utils/eulerLabelsUtils'
 
 import { VaultOverviewModal, VaultApyModal, UiModalPreviewTrigger } from '#components'
@@ -31,11 +31,9 @@ const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { viewer, visibleTotal, visibleBreakdown } = useApyVisibility()
 
 const { getVault: getRegistryVault, isVerifiedVault } = useVaultRegistry()
-const vault = computed(() => {
-  const registered = getRegistryVault(position.vault!.address)
-  return (registered?.chainId === position.vault!.chainId ? registered : position.vault!) as EulerEarn
-})
-
+const vault = computed(() =>
+  (getRegistryVault(position.vault!.address) as EulerEarn | undefined) ?? (position.vault as EulerEarn),
+)
 const positionKey = computed(() => `${position.subAccount.toLowerCase()}:${vault.value.address.toLowerCase()}`)
 const { modifiedKeys, removedKeys } = useTxBatch()
 const isSimulatedRemoved = computed(() => removedKeys.value.has(positionKey.value))
@@ -46,7 +44,7 @@ const rewardsExist = computed(() =>
 )
 
 const product = useEulerProductOfVault(computed(() => vault.value.address))
-const isGeoBlocked = computed(() => getVaultGeoBlockReason(vault.value) === 'region')
+const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.value.address))
 const isUnverified = computed(() => !isVerifiedVault(vault.value.address))
 const vaultNotice = computed(() => getVaultNotice(vault.value.address))
 const displayName = computed(() => product.name || vault.value.shares.name)
@@ -156,20 +154,11 @@ const onClick = () => {
                 family="earn"
                 hide-deprecated
               />
-              <UiHoverPreviewTooltip
+              <RestrictedBadge
                 v-if="isGeoBlocked"
-                title="Region restricted"
-                text="This vault is not available in your region"
-                placement="top-start"
-              >
-                <span class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5">
-                  <SvgIcon
-                    name="warning"
-                    class="!w-14 !h-14"
-                  />
-                  Restricted
-                </span>
-              </UiHoverPreviewTooltip>
+                :vault-addresses="[vault.address]"
+                :chain-id="position.vault?.chainId"
+              />
               <VaultDeprecatedBadge :addresses="[vault.address]" />
             </div>
             <VaultVisibilityNotice :address="vault.address" />

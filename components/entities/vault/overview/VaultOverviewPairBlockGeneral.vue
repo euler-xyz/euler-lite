@@ -180,12 +180,10 @@ const rampDownModalData = computed(() => ({
       context="borrow"
     />
     <VaultPublicNotice :addresses="[collateralVault.address, borrowVault.address]" />
-    <UiAlert
+    <GeoBlockAlert
       v-if="isRestricted"
-      title="Region restricted"
+      :vault-addresses="[collateralVault.address, borrowVault.address]"
       description="This vault is not available in your region."
-      variant="warning"
-      size="compact"
     />
     <div class="flex flex-col gap-12">
       <div class="grid grid-cols-2 gap-x-32 gap-y-20">

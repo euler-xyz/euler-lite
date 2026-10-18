@@ -1,12 +1,9 @@
 <script setup lang="ts">
-// Shared warning stack for the collateral supply/withdraw forms: region /
-// asset / swap restriction alerts followed by the estimate and simulation
-// error alerts. The restriction alerts differ only in their (already
-// composed) visibility condition and their copy, so those are passed as
-// props to keep the rendered DOM byte-identical per page.
+// Each form supplies its operation-specific guards; shared alerts distinguish
+// missing compliance context from a confirmed geographic restriction.
 defineProps<{
   isGeoBlocked?: boolean
-  geoUnavailableReason?: string
+  vaultAddresses?: (string | undefined)[]
   assetRestricted?: boolean
   assetRestrictedDescription?: string
   swapRestricted?: boolean
@@ -17,26 +14,22 @@ defineProps<{
 </script>
 
 <template>
-  <UiAlert
+  <GeoBlockAlert
     v-if="isGeoBlocked"
-    :title="geoUnavailableReason ? 'Availability not confirmed' : 'Region restricted'"
-    :description="geoUnavailableReason || 'This operation is not available in your region. You can still repay existing debt.'"
-    variant="warning"
-    size="compact"
+    :vault-addresses="vaultAddresses ?? []"
+    description="This operation is not available in your region. You can still repay existing debt."
   />
-  <UiAlert
+  <GeoBlockAlert
     v-if="!isGeoBlocked && assetRestricted"
+    :vault-addresses="vaultAddresses ?? []"
     title="Asset restricted"
     :description="assetRestrictedDescription"
-    variant="warning"
-    size="compact"
   />
-  <UiAlert
+  <GeoBlockAlert
     v-if="!isGeoBlocked && swapRestricted"
+    :vault-addresses="vaultAddresses ?? []"
     title="Swap restricted"
     :description="swapRestrictedDescription"
-    variant="warning"
-    size="compact"
   />
   <UiAlert
     v-show="estimatesError"

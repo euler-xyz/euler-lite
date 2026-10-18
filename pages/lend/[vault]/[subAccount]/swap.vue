@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { getVaultGeoUnavailableReason } from '~/composables/useGeoBlock'
 import { captureSwapReview } from '~/utils/swapReview'
 import type { SecuritizeCollateralVault, EVault, SwapQuote, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { getSubAccountAddress, isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
@@ -254,7 +255,7 @@ const swap = useSwapPageLogic({
 const {
   isLoading, isSubmitting, isPreparing, fromAmount, toAmount, slippage,
   isSameAsset, sameVaultError, errorText,
-  isGeoBlocked, geoUnavailableReason, reviewSwapDisabled, reviewSwapLabel, simulationError,
+  isGeoBlocked, reviewSwapDisabled, reviewSwapLabel, simulationError,
   isQuoteLoading, quoteError, quotesStatusLabel, selectedProvider, selectedQuote,
   quoteCardsSorted, effectiveQuoteFetchedAt,
   fromProduct, toProduct, currentPrice, swapSummary, priceImpact, routedVia,
@@ -409,7 +410,7 @@ const addToBatch = async () => {
 }
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: geoUnavailableReason.value || 'This operation is not available in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: getVaultGeoUnavailableReason(fromVault.value?.address, toVault.value?.address) || 'This operation is not available in your region', variant: 'warning' }
   if (sameVaultError.value) return { message: sameVaultError.value, variant: 'error' }
   if (errorText.value) return { message: errorText.value, variant: 'error' }
   if (quoteError.value) return { message: quoteError.value, variant: 'warning' }
@@ -538,12 +539,10 @@ watch(
               No asset swap options available
             </div>
 
-            <UiAlert
+            <GeoBlockAlert
               v-if="isGeoBlocked"
-              :title="geoUnavailableReason ? 'Availability not confirmed' : 'Region restricted'"
-              :description="geoUnavailableReason || 'This operation is not available in your region. You can still withdraw existing deposits.'"
-              variant="warning"
-              size="compact"
+              :vault-addresses="[fromVault?.address, toVault?.address]"
+              description="This operation is not available in your region. You can still withdraw existing deposits."
             />
             <UiAlert
               v-show="errorText"

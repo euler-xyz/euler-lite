@@ -2,18 +2,22 @@ import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { renderToString } from '@vue/server-renderer'
 import { createSSRApp, defineComponent, h, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import GeoBlockAlert from '~/components/entities/vault/GeoBlockAlert.vue'
+import RestrictedBadge from '~/components/entities/vault/RestrictedBadge.vue'
 import FormAlertStack from '~/components/entities/vault/form/FormAlertStack.vue'
 import VaultLabelsAndAssets from '~/components/entities/vault/VaultLabelsAndAssets.vue'
 import { __setEulerLabelsDataForTest } from '~/composables/useEulerLabels'
-import { getVaultGeoUnavailableReason, useGeoBlock } from '~/composables/useGeoBlock'
+import { useGeoBlock } from '~/composables/useGeoBlock'
 import { staticGeoLabels } from '~/tests/fixtures/static-geo-labels'
 
-const registry = vi.hoisted(() => ({ getVault: () => undefined, getVaultCategory: () => 'standard', isVerifiedVault: () => false }))
+const registry = vi.hoisted(() => ({ getVault: vi.fn(() => undefined), getVaultCategory: () => 'standard', isVerifiedVault: () => false }))
 vi.mock('~/composables/useVaultRegistry', () => ({ useVaultRegistry: () => registry }))
 vi.mock('~/composables/useEulerLabels', async original => ({
   ...await original<typeof import('~/composables/useEulerLabels')>(),
   useEulerProductOfVault: () => ({ name: 'Unlisted SDK-resolved vault' }),
 }))
+vi.mock('#components', () => ({ RestrictedInfoModal: {} }))
+vi.mock('~/components/ui/composables/useModal', () => ({ useModal: () => ({ open: vi.fn() }) }))
 const vault = {
   type: 'EVault', address: '0x63bA834bFf27Dd1d80533a56cA27Aa058AAA1130', chainId: 1,
   shares: { name: 'Cozy USDC' },
@@ -24,11 +28,13 @@ const chainId = ref(1)
 const render = async () => {
   const app = createSSRApp({ render: () => h(VaultLabelsAndAssets, { vault: resolvedVault, assets: [resolvedVault.asset] }) })
   app.config.warnHandler = () => {}
-  app.component('RestrictedBadge', { render: () => h('span', 'Restricted') })
+  app.component('RestrictedBadge', RestrictedBadge)
+  app.component('UiHoverPreviewTooltip', { template: '<span><slot /></span>' })
   return renderToString(app)
 }
 beforeEach(() => {
   chainId.value = 1
+  registry.getVault.mockReturnValue(vault)
   vi.stubGlobal('useEulerAddresses', () => ({ chainId }))
   vi.stubGlobal('useVaultRegistry', () => registry)
   useGeoBlock().country.value = 'NL'
@@ -65,8 +71,9 @@ describe('action availability warning', () => {
   it.each([null, undefined])('keeps missing country %s separate from an affirmative restriction', async (country) => {
     useGeoBlock().country.value = country
     const app = createSSRApp({ render: () => h(FormAlertStack, {
-      isGeoBlocked: true, geoUnavailableReason: getVaultGeoUnavailableReason(resolvedVault),
+      isGeoBlocked: true, vaultAddresses: [resolvedVault.address],
     }) })
+    app.component('GeoBlockAlert', GeoBlockAlert)
     app.component('UiAlert', defineComponent({
       props: { title: String, description: String },
       setup: props => () => h('p', `${props.title}: ${props.description}`),

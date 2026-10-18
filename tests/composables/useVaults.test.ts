@@ -89,6 +89,21 @@ describe('useVaults EVault verification metadata', () => {
     vi.unstubAllGlobals()
   })
 
+  it('keeps held-only entries and their collateral graph out of periodic discovery refresh', async () => {
+    const registry = useVaultRegistry()
+    const held = makeVault(DYNAMIC_EVAULT)
+    held.collaterals.push({
+      address: ESCROW_EVAULT, borrowLTV: 0.8, liquidationLTV: 0.9,
+      currentLiquidationLTV: 0.9, isLiquidationLTVRamping: false, rampTimeRemaining: 0n, oraclePriceRaw: undefined,
+    })
+    registry.set(DYNAMIC_EVAULT, held, 'evk', { verified: false, portfolioOnly: true })
+    registry.set(LABELED_EVAULT, makeVault(LABELED_EVAULT), 'evk', { verified: true })
+    await useVaults().refreshVaults()
+    expect(fetchVaults.mock.calls.flatMap(call => call[1])).toEqual([getAddress(LABELED_EVAULT)])
+    expect(registry.get(DYNAMIC_EVAULT)).toMatchObject({ vault: held, verified: false, portfolioOnly: true })
+    expect(registry.getVault(ESCROW_EVAULT)).toBeUndefined()
+  })
+
   it('refreshes SDK classification without promoting an unverified vault', async () => {
     const registry = useVaultRegistry()
     registry.set(DYNAMIC_EVAULT, makeVault(DYNAMIC_EVAULT), 'evk')

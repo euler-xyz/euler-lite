@@ -13,7 +13,7 @@ import { getPositionRampStatus, getPositionRampTargetTimestamp } from '~/entitie
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { toUsdAmount, type UsdAmount } from '~/utils/sdk-prices'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { getVaultGeoBlockReason } from '~/composables/useGeoBlock'
+import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { getVaultNotice, isVaultNoticeSpecific } from '~/utils/eulerLabelsUtils'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -138,7 +138,7 @@ const collateralSymbolLabel = computed(() => {
 })
 const pairSymbols = computed(() => `${collateralSymbolLabel.value}/${borrowVault.value?.asset.symbol ?? ''}`)
 
-const isGeoBlocked = computed(() => [collateralVault.value, borrowVault.value].some(vault => vault && getVaultGeoBlockReason(vault) === 'region'))
+const isGeoBlocked = computed(() => isAnyVaultBlockedByCountry(primaryCollateralAddress.value, borrowAddress.value))
 const getSymbolForAddress = (addr: string): string => {
   if (normalizeAddress(addr) === normalizeAddress(borrowAddress.value)) {
     return borrowVault.value.asset.symbol
@@ -423,20 +423,11 @@ const openPositionInformationModal = () => {
                     :address="primaryCollateralAddress"
                     hide-deprecated
                   />
-                  <UiHoverPreviewTooltip
+                  <RestrictedBadge
                     v-if="isGeoBlocked"
-                    title="Region restricted"
-                    text="This vault is not available in your region"
-                    placement="top-start"
-                  >
-                    <span class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5 shrink-0">
-                      <SvgIcon
-                        name="warning"
-                        class="!w-14 !h-14"
-                      />
-                      Restricted
-                    </span>
-                  </UiHoverPreviewTooltip>
+                    :vault-addresses="[primaryCollateralAddress, borrowAddress]"
+                    :chain-id="position.borrowVault?.chainId"
+                  />
                   <VaultDeprecatedBadge :addresses="[borrowAddress, primaryCollateralAddress].filter(Boolean)" />
                   <LiquidationCoverageBadge
                     :vault="borrowVault"

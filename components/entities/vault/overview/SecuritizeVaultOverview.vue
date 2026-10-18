@@ -127,12 +127,10 @@ const supplyCapPercentageDisplay = computed(() => {
     >
       <VaultDeprecationBanner :addresses="[vault.address]" />
       <VaultPublicNotice :addresses="[vault.address]" />
-      <UiAlert
+      <GeoBlockAlert
         v-if="isRestricted"
-        title="Region restricted"
+        :vault-addresses="[vault.address]"
         description="This vault is not available in your region."
-        variant="warning"
-        size="compact"
       />
       <div
         v-if="description"

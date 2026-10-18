@@ -2,7 +2,7 @@
 import { isEulerEarn, isSecuritizeCollateralVault, type SecuritizeCollateralVault, type EVault, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { getVaultGeoBlockReason } from '~/composables/useGeoBlock'
+import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { getAddress } from 'viem'
 
 const { vault, assets, size, assetsLabel, pairVault, back, backFallback } = defineProps<{
@@ -39,9 +39,13 @@ const displayName = computed(() => {
 const pairVaultAddress = computed(() => pairVault ? normalizeAddress(pairVault.address) : '')
 const pairProduct = useEulerProductOfVault(pairVaultAddress)
 
-const isRestricted = computed(() =>
-  [vault, pairVault].some(value => value && getVaultGeoBlockReason(value) === 'region'),
-)
+const isRestricted = computed(() => {
+  const addresses: string[] = []
+  if (vault?.address) addresses.push(vault.address)
+  if (pairVault?.address) addresses.push(pairVault.address)
+  if (!addresses.length) return false
+  return isAnyVaultBlockedByCountry(...addresses)
+})
 
 const getVaultLabel = (v?: EVault | EulerEarn | SecuritizeCollateralVault) => {
   if (!v) return ''
@@ -127,7 +131,11 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
           hide-deprecated
           badge-label="Borrow warning"
         />
-        <RestrictedBadge v-if="isRestricted" />
+        <RestrictedBadge
+          v-if="isRestricted"
+          :vault-addresses="[vault?.address, pairVault?.address]"
+          :chain-id="vault?.chainId ?? pairVault?.chainId"
+        />
         <slot />
       </div>
 

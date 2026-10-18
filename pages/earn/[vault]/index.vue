@@ -117,11 +117,10 @@ const isSubmitDisabled = computed(() => {
   return balance.value < valueToNano(amount.value, asset.value?.decimals)
     || isLoading.value || !(+amount.value)
 })
-const geoUnavailableReason = computed(() => getVaultGeoUnavailableReason(vault.value ?? vaultAddress))
-const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.value ?? vaultAddress))
+const isGeoBlocked = computed(() => isVaultBlockedByCountry(vaultAddress))
 const reviewSupplyDisabled = computed(() => isGeoBlocked.value || isSubmitDisabled.value)
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: geoUnavailableReason.value || 'This operation is not available in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: getVaultGeoUnavailableReason(vaultAddress) || 'This operation is not available in your region', variant: 'warning' }
   if (errorText.value) return { message: errorText.value, variant: 'error' }
   return undefined
 })
@@ -344,12 +343,10 @@ watch(amount, () => {
               maxable
             />
 
-            <UiAlert
+            <GeoBlockAlert
               v-if="isGeoBlocked"
-              :title="geoUnavailableReason ? 'Availability not confirmed' : 'Region restricted'"
-              :description="geoUnavailableReason || 'This operation is not available in your region. You can still withdraw existing deposits.'"
-              variant="warning"
-              size="compact"
+              :vault-addresses="[vaultAddress]"
+              description="This operation is not available in your region. You can still withdraw existing deposits."
             />
             <UiAlert
               v-show="errorText"

@@ -9,7 +9,7 @@ import { getCollateralOracleRouteSteps, getDebtOracleRouteSteps, getOracleRouteA
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { getNewSubAccount } from '~/composables/useSubAccounts'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
+import { getVaultGeoUnavailableReason, isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
@@ -237,10 +237,10 @@ const reviewBorrowDisabled = computed(() => isGeoBlocked.value || isBorrowRestri
 const reviewMultiplyDisabled = computed(() => isGeoBlocked.value || isMultiplyRestricted.value || multiply.isMultiplySubmitDisabled.value)
 
 const borrowDisabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
-  if (isBorrowRestricted.value) return { message: 'Borrowing this asset is not available in your region', variant: 'warning' }
-  if (borrow.isBorrowPayWithBlocked.value) return { message: 'Paying with this asset is not available in your region', variant: 'warning' }
-  if (borrow.isBorrowSwapRestricted.value) return { message: 'Swapping into this collateral vault is not available in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: getVaultGeoUnavailableReason(collateralAddress, borrowAddress) || 'This operation is not available in your region', variant: 'warning' }
+  if (isBorrowRestricted.value) return { message: getVaultGeoUnavailableReason(collateralAddress, borrowAddress) || 'Borrowing this asset is not available in your region', variant: 'warning' }
+  if (borrow.isBorrowPayWithBlocked.value) return { message: getVaultGeoUnavailableReason(collateralAddress, borrowAddress) || 'Paying with this asset is not available in your region', variant: 'warning' }
+  if (borrow.isBorrowSwapRestricted.value) return { message: getVaultGeoUnavailableReason(collateralAddress, borrowAddress) || 'Swapping into this collateral vault is not available in your region', variant: 'warning' }
   if (borrow.errorText.value) return { message: borrow.errorText.value, variant: 'error' }
   if (borrow.borrowSimulationError.value) return { message: borrow.borrowSimulationError.value, variant: 'error' }
   if (borrow.borrowNeedsSwap.value && borrow.isBorrowSwapQuoteLoading.value && +borrow.collateralAmount.value > 0) return { message: 'Fetching swap quotes...', variant: 'warning' }
@@ -249,8 +249,8 @@ const borrowDisabledReasonInfo = computed((): DisabledReasonInfo | undefined => 
 })
 
 const multiplyDisabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
-  if (isMultiplyRestricted.value) return { message: 'Multiply is not available for this pair in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: getVaultGeoUnavailableReason(collateralAddress, borrowAddress) || 'This operation is not available in your region', variant: 'warning' }
+  if (isMultiplyRestricted.value) return { message: getVaultGeoUnavailableReason(collateralAddress, borrowAddress) || 'Multiply is not available for this pair in your region', variant: 'warning' }
   if (multiply.multiplyErrorText.value) return { message: multiply.multiplyErrorText.value, variant: 'error' }
   if (multiply.multiplyCapErrorText.value) return { message: multiply.multiplyCapErrorText.value, variant: 'error' }
   if (multiply.multiplySimulationError.value) return { message: multiply.multiplySimulationError.value, variant: 'error' }
@@ -764,40 +764,33 @@ watch(
                   @input="borrow.onBorrowInput"
                 />
 
-                <UiAlert
+                <GeoBlockAlert
                   v-if="isGeoBlocked"
-                  title="Region restricted"
+                  :vault-addresses="[collateralAddress, borrowAddress]"
                   description="This operation is not available in your region. You can still repay existing debt."
-                  variant="warning"
-                  size="compact"
                 />
-                <UiAlert
+                <GeoBlockAlert
                   v-if="!isGeoBlocked && isPairFullyRestricted"
-                  title="Region restricted"
+                  :vault-addresses="[collateralAddress, borrowAddress]"
                   description="This pair is not available in your region."
-                  variant="warning"
-                  size="compact"
                 />
-                <UiAlert
+                <GeoBlockAlert
                   v-if="!isGeoBlocked && !isPairFullyRestricted && isBorrowRestricted"
+                  :vault-addresses="[collateralAddress, borrowAddress]"
                   title="Asset restricted"
                   description="Borrowing this asset is not available in your region."
-                  variant="warning"
-                  size="compact"
                 />
-                <UiAlert
+                <GeoBlockAlert
                   v-if="!isGeoBlocked && !isPairFullyRestricted && !isBorrowRestricted && borrow.isBorrowPayWithBlocked.value"
+                  :vault-addresses="[collateralAddress, borrowAddress]"
                   title="Asset restricted"
                   description="Paying with this asset is not available in your region. Pick a different token."
-                  variant="warning"
-                  size="compact"
                 />
-                <UiAlert
+                <GeoBlockAlert
                   v-if="!isGeoBlocked && !isPairFullyRestricted && !isBorrowRestricted && !borrow.isBorrowPayWithBlocked.value && borrow.isBorrowSwapRestricted.value"
+                  :vault-addresses="[collateralAddress, borrowAddress]"
                   title="Swap restricted"
                   description="Swapping into this collateral vault is not available in your region. You can provide the vault's underlying asset directly."
-                  variant="warning"
-                  size="compact"
                 />
                 <UiAlert
                   v-show="borrow.errorText.value"
@@ -926,26 +919,21 @@ watch(
                       :readonly="true"
                     />
 
-                    <UiAlert
+                    <GeoBlockAlert
                       v-if="isGeoBlocked"
-                      title="Region restricted"
+                      :vault-addresses="[collateralAddress, borrowAddress]"
                       description="This operation is not available in your region. You can still repay existing debt."
-                      variant="warning"
-                      size="compact"
                     />
-                    <UiAlert
+                    <GeoBlockAlert
                       v-if="!isGeoBlocked && isPairFullyRestricted"
-                      title="Region restricted"
+                      :vault-addresses="[collateralAddress, borrowAddress]"
                       description="This pair is restricted in your region."
-                      variant="warning"
-                      size="compact"
                     />
-                    <UiAlert
+                    <GeoBlockAlert
                       v-if="!isGeoBlocked && !isPairFullyRestricted && isMultiplyRestricted"
+                      :vault-addresses="[collateralAddress, borrowAddress]"
                       title="Asset restricted"
                       description="Multiply is not available for this pair in your region."
-                      variant="warning"
-                      size="compact"
                     />
                     <UiAlert
                       v-show="multiply.multiplyErrorText.value"

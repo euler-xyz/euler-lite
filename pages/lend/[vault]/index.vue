@@ -344,18 +344,17 @@ const isSubmitDisabled = computed(() => {
   if (isSupplyCapReached.value) return true
   return false
 })
-const geoUnavailableReason = computed(() => getVaultGeoUnavailableReason(securitizeVault.value ?? vault.value ?? vaultAddress))
-const isGeoBlocked = computed(() => isVaultBlockedByCountry(securitizeVault.value ?? vault.value ?? vaultAddress))
-const isSwapRestricted = computed(() => needsSwap.value && isVaultRestrictedByCountry(securitizeVault.value ?? vault.value ?? vaultAddress))
+const isGeoBlocked = computed(() => isVaultBlockedByCountry(vaultAddress))
+const isSwapRestricted = computed(() => needsSwap.value && isVaultRestrictedByCountry(vaultAddress))
 // Swap-deposit source: user is giving up the selected asset (reducing exposure),
 // so only hard-block applies. Soft-restrict intentionally does not apply here.
 // Pass the asset object so symbol/name pattern rules also apply.
 const isSourceAssetBlocked = computed(() => needsSwap.value && isAssetBlockedByCountry(selectedAsset.value))
 const reviewSupplyDisabled = computed(() => isGeoBlocked.value || isSwapRestricted.value || isSourceAssetBlocked.value || isSubmitDisabled.value)
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: geoUnavailableReason.value || 'This operation is not available in your region', variant: 'warning' }
-  if (isSourceAssetBlocked.value) return { message: 'Paying with this asset is not available in your region', variant: 'warning' }
-  if (isSwapRestricted.value) return { message: 'Swap deposits are not available in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: getVaultGeoUnavailableReason(vaultAddress) || 'This operation is not available in your region', variant: 'warning' }
+  if (isSourceAssetBlocked.value) return { message: getVaultGeoUnavailableReason(vaultAddress) || 'Paying with this asset is not available in your region', variant: 'warning' }
+  if (isSwapRestricted.value) return { message: getVaultGeoUnavailableReason(vaultAddress) || 'Swap deposits are not available in your region', variant: 'warning' }
   if (eVault.value && isOpDisabled(eVault.value, OP_DEPOSIT)) return { message: 'Deposits are currently disabled for this vault', variant: 'warning' }
   if (isSupplyCapReached.value) return { message: 'Supply cap has been reached', variant: 'warning' }
   if (errorText.value) return { message: errorText.value, variant: 'error' }
@@ -1187,26 +1186,22 @@ watch([
               />
             </template>
 
-            <UiAlert
+            <GeoBlockAlert
               v-if="isGeoBlocked"
-              :title="geoUnavailableReason ? 'Availability not confirmed' : 'Region restricted'"
-              :description="geoUnavailableReason || 'This operation is not available in your region. You can still withdraw existing deposits.'"
-              variant="warning"
-              size="compact"
+              :vault-addresses="[vaultAddress]"
+              description="This operation is not available in your region. You can still withdraw existing deposits."
             />
-            <UiAlert
+            <GeoBlockAlert
               v-if="!isGeoBlocked && isSourceAssetBlocked"
+              :vault-addresses="[vaultAddress]"
               title="Asset restricted"
               description="Paying with this asset is not available in your region. Pick a different token."
-              variant="warning"
-              size="compact"
             />
-            <UiAlert
+            <GeoBlockAlert
               v-if="!isGeoBlocked && !isSourceAssetBlocked && isSwapRestricted"
+              :vault-addresses="[vaultAddress]"
               title="Swap restricted"
               description="Swapping into this vault is not available in your region. You can deposit the vault's underlying asset directly."
-              variant="warning"
-              size="compact"
             />
             <UiAlert
               v-show="errorText"
