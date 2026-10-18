@@ -9,9 +9,7 @@ import {
   adapterFailureWarnsVault,
   getVaultCheckWarningLines,
   getCriticalAssessmentWarning,
-  getKnownUnlistedActionNotice,
   getUnverifiedActionCopy,
-  getNotListedLine,
   getUpcomingVaultChanges,
   getVaultAssessmentCheckDetails,
   getVaultCheckFindings,
@@ -199,9 +197,10 @@ describe('vault checks presentation', () => {
 
   it('names why an unknown vault is unknown without calling a labelled vault unlisted', () => {
     expect(getUnknownVaultCause(undefined)).toBe('This vault is not listed in the published vault labels.')
-    expect(getUnknownVaultCause({ status: 'hidden', reason: 'Deprecated due to low activity.', decidedBy: 'deprecated' })).toBe('This vault is not listed: Deprecated due to low activity.')
+    expect(getUnknownVaultCause({ status: 'hidden', reason: 'A required check failed', decidedBy: 'config-failed' })).toBe('Euler\'s checks flagged this vault: A required check failed.')
+    expect(getUnknownVaultCause({ status: 'hidden', reason: null, decidedBy: 'config-failed' })).toBe('Euler\'s checks flagged this vault.')
     expect(getUnknownVaultCause({ status: 'pending_review', decidedBy: 'unclaimed' })).toBe('This vault is not listed in the published vault labels.')
-    expect(getUnknownVaultCause({ status: 'pending_review', decidedBy: 'checks' })).toBe('This vault has not been checked yet, so it is not listed.')
+    expect(getUnknownVaultCause({ status: 'pending_review', decidedBy: 'awaiting-verification' })).toBe('This vault has not been checked yet, so it is not listed.')
     expect(getUnknownVaultCause({ status: 'warning', reason: 'Deprecated due to low activity.', decidedBy: 'deprecated' })).toBe('This vault is in the published vault labels but could not be verified.')
   })
 
@@ -276,23 +275,12 @@ describe('vault checks presentation', () => {
     })]))?.message).toBe('Exits disabled')
   })
 
-  it('uses distinct non-phishing copy for hidden and pending review', () => {
-    expect(getNotListedLine('hidden', 'The check failed')).toBe('This vault is not listed: The check failed.')
-    expect(getNotListedLine('pending_review')).toBe('This vault has not been checked yet, so it is not listed.')
-    expect(getNotListedLine('pending_review', null, 'unclaimed')).toBe('This vault is not listed in the published vault labels.')
-    const address = '0x0000000000000000000000000000000000000001'
-    const visibility = { [address]: { status: 'hidden', reason: 'The check failed' } }
-    expect(getKnownUnlistedActionNotice([address], 'v3', visibility)).toBe('This vault is not listed: The check failed.')
-    expect(getKnownUnlistedActionNotice([address], 'v3', { [address]: { status: 'pending_review' } })).toBe('This vault has not been checked yet, so it is not listed.')
-    expect(getKnownUnlistedActionNotice([address], 'v3', { [address]: { status: 'pending_review', decidedBy: 'unclaimed' } })).toBe('This vault is not listed in the published vault labels.')
-    expect(getKnownUnlistedActionNotice([address], 'static', visibility)).toBeNull()
-    expect(getKnownUnlistedActionNotice([address, '0x0000000000000000000000000000000000000002'], 'v3', visibility)).toBeNull()
-  })
-
   it('gives forms and batch review one non-duplicated action explanation', () => {
-    expect(getUnverifiedActionCopy('These vaults are not listed.').description).toBe(
-      'These vaults are not listed. Review the vault details and confirm you trust the source before continuing.',
-    )
+    expect(getUnverifiedActionCopy('This transaction uses a flagged vault: The check failed.')).toEqual({
+      title: 'Vault flagged',
+      description: 'This transaction uses a flagged vault: The check failed.',
+    })
+    expect(getUnverifiedActionCopy(null).title).toBe('Unverified vault')
     expect(getUnverifiedActionCopy(null, ['Vault A']).description).toContain('Vault A')
     expect(getUnverifiedActionCopy(null, ['Vault A']).description).toContain('phishing attempts')
   })

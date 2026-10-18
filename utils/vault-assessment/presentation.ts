@@ -3,6 +3,7 @@ import { getAddress, isAddress } from 'viem'
 import type { VaultWarning } from '~/composables/useVaultWarnings'
 import { formatExactAmount, shortenAddress } from '~/utils/string-utils'
 import { collectObservedAddresses, getVaultCheckSubject, type VaultCheckSubject } from './subjects'
+import { FLAGGED_VAULT_TITLE, getFlaggedVaultLine, type VaultVerdictLike } from './flagged'
 
 export type VaultCheckListingImpact = 'affects-listing' | 'does-not-affect-listing'
 
@@ -428,45 +429,19 @@ export const getUpcomingVaultChanges = (
     })
 }
 
-export const getNotListedLine = (status: string | undefined, reason?: string | null, decidedBy?: string | null): string | null => {
-  if (status === 'pending_review' && decidedBy === 'unclaimed') return 'This vault is not listed in the published vault labels.'
-  if (status === 'pending_review') return 'This vault has not been checked yet, so it is not listed.'
-  if (status === 'hidden') return `This vault is not listed${reason ? `: ${reason}` : '.'}${reason && !/[.!?]$/.test(reason) ? '.' : ''}`
-  return null
-}
-
-/** The line under an unknown vault's row. A row that exists in the labels is never called "not listed". */
-export const getUnknownVaultCause = (verdict: { status: string, reason?: string | null, decidedBy?: string | null } | undefined): string => {
-  const line = getNotListedLine(verdict?.status, verdict?.reason, verdict?.decidedBy)
-  if (line) return line
-  if (verdict) return 'This vault is in the published vault labels but could not be verified.'
+export const getUnknownVaultCause = (verdict: VaultVerdictLike | undefined): string => {
+  if (verdict?.status === 'hidden') return getFlaggedVaultLine(verdict.reason)
+  if (verdict?.status === 'pending_review' && verdict.decidedBy !== 'unclaimed') return 'This vault has not been checked yet, so it is not listed.'
+  if (verdict && verdict.status !== 'pending_review') return 'This vault is in the published vault labels but could not be verified.'
   return 'This vault is not listed in the published vault labels.'
-}
-
-export const getKnownUnlistedActionNotice = (
-  addresses: readonly string[],
-  source: string | undefined,
-  visibility: Record<string, { status: string, reason?: string | null, decidedBy?: string | null }> | undefined,
-): string | null => {
-  if (source !== 'v3' || !addresses.length) return null
-  const lines = addresses.map((address) => {
-    const verdict = visibility?.[address.toLowerCase()]
-    return getNotListedLine(verdict?.status, verdict?.reason, verdict?.decidedBy)
-  })
-  if (lines.some(line => line === null)) return null
-  return lines.length === 1
-    ? lines[0]!
-    : 'These vaults are not listed.'
 }
 
 /** One risk explanation at the point of action, shared by forms and batch review. */
 export const getUnverifiedActionCopy = (
-  unlistedNotice: string | null | undefined,
+  flaggedNotice: string | null | undefined,
   vaultNames: readonly string[] = [],
 ): { title: string, description: string } => {
-  if (unlistedNotice) {
-    return { title: 'Vault not listed', description: `${unlistedNotice} Review the vault details and confirm you trust the source before continuing.` }
-  }
+  if (flaggedNotice) return { title: FLAGGED_VAULT_TITLE, description: flaggedNotice }
   const subject = vaultNames.length ? `This action includes ${vaultNames.join(', ')}. ` : ''
   return {
     title: 'Unverified vault',

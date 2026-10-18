@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
 import { hasOnlyAcceptedVaultCheckFindings } from '~/utils/vault-assessment/presentation'
+import { FLAGGED_VAULT_LABEL, FLAGGED_VAULT_TITLE, getFlaggedVaultLine } from '~/utils/vault-assessment/flagged'
 
 const { address, hideDeprecated = false, hideChecks = false, badgeLabel, family = 'evk' } = defineProps<{
   address: string
@@ -49,11 +50,15 @@ const warning = computed(() => {
       description: verdict.value.reason || 'Some checks could not be completed for this vault.',
     }
   }
+  if (verdict.value.status === 'hidden') {
+    return {
+      title: FLAGGED_VAULT_TITLE,
+      description: verdict.value.reason || getFlaggedVaultLine(null),
+    }
+  }
   return {
-    title: verdict.value.status === 'hidden' ? 'Vault not listed' : 'Vault checks',
-    description: verdict.value.reason || (verdict.value.status === 'hidden'
-      ? 'This vault is not listed.'
-      : 'One or more vault checks need review.'),
+    title: 'Vault checks',
+    description: verdict.value.reason || 'One or more vault checks need review.',
   }
 })
 </script>
@@ -75,7 +80,7 @@ const warning = computed(() => {
         name="warning"
         class="!h-14 !w-14"
       />
-      {{ badgeLabel || (verdict?.decidedBy === 'deprecated' ? 'Deprecated' : verdict?.status === 'hidden' ? 'Not listed' : 'Warning') }}
+      {{ badgeLabel || (verdict?.decidedBy === 'deprecated' ? 'Deprecated' : verdict?.status === 'hidden' ? FLAGGED_VAULT_LABEL : 'Warning') }}
     </span>
   </UiHoverPreviewTooltip>
 </template>

@@ -2,12 +2,12 @@
 import { getUnverifiedActionCopy } from '~/utils/vault-assessment/presentation'
 
 const emits = defineEmits(['close'])
-const { cancelAction, acceptAction, unlistedNotice } = defineProps<{
+const { cancelAction, acceptAction, flaggedNotice } = defineProps<{
   cancelAction?: () => void
   acceptAction?: () => void
-  unlistedNotice?: string | null
+  flaggedNotice?: string | null
 }>()
-const actionCopy = computed(() => getUnverifiedActionCopy(unlistedNotice))
+const actionCopy = computed(() => getUnverifiedActionCopy(flaggedNotice))
 
 const handleAccept = () => {
   acceptAction?.()
@@ -22,12 +22,15 @@ const handleCancel = () => {
 
 <template>
   <BaseModalWrapper
-    title="Important!"
+    :title="flaggedNotice ? actionCopy.title : 'Important!'"
     warning
     @close="handleCancel"
   >
     <div class="flex flex-col gap-12 text-content-primary mb-24">
-      <h4 class="text-white text-h4">
+      <h4
+        v-if="!flaggedNotice"
+        class="text-white text-h4"
+      >
         {{ actionCopy.title }}
       </h4>
       <p class="pb-8">
@@ -41,7 +44,7 @@ const handleCancel = () => {
         variant="primary-stroke"
         @click="handleAccept"
       >
-        Yes
+        {{ flaggedNotice ? 'Confirm' : 'Yes' }}
       </UiButton>
       <UiButton
         size="large"

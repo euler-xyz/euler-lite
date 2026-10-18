@@ -7,6 +7,7 @@ import { useEulerEntitiesOfEarnVault, useEulerProductOfVault } from '~/composabl
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { getEarnVaultDescription } from '~/utils/eulerLabelsUtils'
 import { autoLink } from '~/utils/autoLink'
+import { FLAGGED_VAULT_LABEL } from '~/utils/vault-assessment/flagged'
 
 const { vault, defaultOpen = true } = defineProps<{ vault: EulerEarn, defaultOpen?: boolean }>()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
@@ -15,7 +16,7 @@ const { isEarnVaultOwnerVerified } = useVaults()
 const vaultAddress = computed(() => getAddress(vault.address))
 const product = useEulerProductOfVault(vaultAddress)
 const entities = useEulerEntitiesOfEarnVault(vault)
-const isKnownUnlisted = useKnownUnlistedVault(() => vault.address)
+const isFlagged = useFlaggedVault(() => vault.address)
 const isOwnerVerified = computed(() => isEarnVaultOwnerVerified(vault))
 const earnDescription = computed(() => getEarnVaultDescription(vault.address))
 
@@ -99,7 +100,7 @@ const feeDisplay = computed(() => {
           </div>
         </div>
         <VaultTypeChip
-          v-else-if="!isKnownUnlisted"
+          v-else-if="!isFlagged"
           :vault="vault"
           type="unknown"
           nudge
@@ -108,14 +109,14 @@ const feeDisplay = computed(() => {
         <span
           v-else
           class="text-p2 text-content-tertiary"
-        >-</span>
+        >{{ FLAGGED_VAULT_LABEL }}</span>
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue
         v-if="enableVaultTypeDisplay"
         label="Vault type"
       >
         <VaultTypeBadges
-          v-if="!isKnownUnlisted"
+          v-if="!isFlagged"
           :vault="vault"
           nudge
         />

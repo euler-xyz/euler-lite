@@ -74,18 +74,16 @@ describe('vault form verification prerequisites', () => {
     expect(html).not.toContain('Acknowledge Unverified Vault Risk')
   })
 
-  it.each([
-    'This vault is not listed: A required check failed.',
-    'This vault is not listed in the published vault labels.',
-  ])('uses the listing-status acknowledgement action for %s', async (unlistedNotice) => {
+  it('uses the flagged-vault action when every vault in the transaction is flagged', async () => {
     connected.value = true
     walletChain.value = 143
     const html = await renderSubmit({
       isAcknowledgmentRequired: true,
-      unlistedNotice,
+      flaggedNotice: 'This transaction uses a flagged vault: A required check failed.',
     })
-    expect(html).toContain('Review listing status')
+    expect(html).toContain('Vault flagged')
     expect(html).not.toContain('Acknowledge Unverified Vault Risk')
+    expect(html).not.toContain('Review listing status')
   })
 
   it('keeps the unverified-risk action for a vault with no known listing verdict', async () => {
@@ -93,21 +91,21 @@ describe('vault form verification prerequisites', () => {
     walletChain.value = 143
     const html = await renderSubmit({ isAcknowledgmentRequired: true })
     expect(html).toContain('Acknowledge Unverified Vault Risk')
-    expect(html).not.toContain('Review listing status')
+    expect(html).not.toContain('Vault flagged')
   })
 
-  it('offers listing acknowledgement before adding to an existing batch', async () => {
+  it('asks for the flagged-vault confirmation before adding to an existing batch', async () => {
     connected.value = true
     walletChain.value = 143
     advancedMode.value = true
     batchEntries.value = 1
-    const unlistedNotice = 'This vault is not listed in the published vault labels.'
-    const beforeConsent = await renderSubmit({ isAcknowledgmentRequired: true, unlistedNotice }, true)
-    expect(beforeConsent).toContain('Review listing status')
+    const flaggedNotice = 'This transaction uses a flagged vault: A required check failed.'
+    const beforeConsent = await renderSubmit({ isAcknowledgmentRequired: true, flaggedNotice }, true)
+    expect(beforeConsent).toContain('Vault flagged')
     expect(beforeConsent).not.toContain('data-testid="add-to-batch"')
 
-    const afterConsent = await renderSubmit({ isAcknowledgmentRequired: false, unlistedNotice }, true)
+    const afterConsent = await renderSubmit({ isAcknowledgmentRequired: false, flaggedNotice }, true)
     expect(afterConsent).toContain('data-testid="add-to-batch"')
-    expect(afterConsent).not.toContain('Review listing status')
+    expect(afterConsent).not.toContain('Vault flagged')
   })
 })

@@ -12,6 +12,7 @@ import { VaultApyModal } from '#components'
 import { getAddress, maxUint256, zeroAddress } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
+import { FLAGGED_VAULT_LABEL } from '~/utils/vault-assessment/flagged'
 
 const { vault } = defineProps<{ vault: SecuritizeCollateralVault, desktopOverview?: boolean }>()
 const emit = defineEmits<{
@@ -25,7 +26,7 @@ const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getSupplyRewardCampaigns, hasSupplyRewards } = useRewardsApy()
 const vaultAddress = computed(() => getAddress(vault.address))
-const isKnownUnlisted = useKnownUnlistedVault(() => vault.address)
+const isFlagged = useFlaggedVault(() => vault.address)
 const product = useEulerProductOfVault(vaultAddress)
 const description = computed(() => {
   return product.vaultOverrides?.[vaultAddress.value]?.description ?? product.description
@@ -196,13 +197,13 @@ const supplyCapPercentageDisplay = computed(() => {
           </div>
         </div>
         <VaultTypeChip
-          v-else-if="!isGovernorVerified && !isKnownUnlisted"
+          v-else-if="!isGovernorVerified && !isFlagged"
           :vault="vault"
           type="unknown"
           nudge
         />
         <div v-else>
-          -
+          {{ isFlagged ? FLAGGED_VAULT_LABEL : '-' }}
         </div>
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue
@@ -210,7 +211,7 @@ const supplyCapPercentageDisplay = computed(() => {
         label="Vault type"
       >
         <VaultTypeBadges
-          v-if="!isKnownUnlisted || isUngoverned"
+          v-if="!isFlagged || isUngoverned"
           :vault="vault"
           nudge
         />
