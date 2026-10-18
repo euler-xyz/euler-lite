@@ -6,6 +6,7 @@ import PortfolioSavingItem from '~/components/entities/portfolio/PortfolioSaving
 import PortfolioEarnItem from '~/components/entities/portfolio/PortfolioEarnItem.vue'
 import { __setEulerLabelsDataForTest } from '~/composables/useEulerLabels'
 import { useGeoBlock } from '~/composables/useGeoBlock'
+import { staticGeoLabels } from '~/tests/fixtures/static-geo-labels'
 
 const registry = vi.hoisted(() => ({ getVault: vi.fn<(address: string) => { chainId: number } | undefined>(() => undefined), getVaultCategory: () => 'standard', isVerifiedVault: () => false }))
 vi.mock('~/composables/useVaultRegistry', () => ({ useVaultRegistry: () => registry }))
@@ -55,24 +56,38 @@ beforeEach(() => {
   vi.stubGlobal('useRewardsApy', () => new Proxy({}, { get: () => () => 0 }))
   for (const key of ['getVaultSupplyApy', 'getVaultBorrowApy', 'ltvToPercent']) vi.stubGlobal(key, () => 0)
 })
-describe.each([
-  ['borrow', PortfolioBorrowItem], ['saving', PortfolioSavingItem], ['earn', PortfolioEarnItem],
-] as const)('%s portfolio badge', (_name, component) => {
-  it('does not turn missing registry membership into a region badge', async () => {
-    expect(await render(component)).not.toContain('Restricted')
+describe.each(['hosted', 'static'] as const)('%s labels', (source) => {
+  beforeEach(() => {
+    if (source === 'static') __setEulerLabelsDataForTest(staticGeoLabels())
   })
-  it('does not label missing country as a confirmed restriction', async () => {
-    useGeoBlock().country.value = null
-    expect(await render(component)).not.toContain('Restricted')
-  })
-  it('does not use stale chain metadata as a restriction', async () => {
-    chainId.value = 8453
-    __setEulerLabelsDataForTest({ geoContext: { chainId: 8453, policies: [{ id: 'other-chain', chainId: 8453, productId: null, vaultAddress: null, assetAddress: vault.asset.address, policyType: 'block', countries: ['NL'], countriesResolved: ['NL'], reason: null, createdAt: '' }], productByVault: {} } })
-    registry.getVault.mockReturnValue({ ...vault, chainId: 8453 })
-    expect(await render(component)).not.toContain('Restricted')
-  })
-  it('still displays actual geographic restrictions', async () => {
-    useGeoBlock().country.value = 'IR'
-    expect(await render(component)).toContain('Restricted')
+
+  describe.each([
+    ['borrow', PortfolioBorrowItem], ['saving', PortfolioSavingItem], ['earn', PortfolioEarnItem],
+  ] as const)('%s portfolio badge', (_name, component) => {
+    it('does not turn missing registry membership into a region badge', async () => {
+      expect(await render(component)).not.toContain('Restricted')
+    })
+    it('does not label missing country as a confirmed restriction', async () => {
+      useGeoBlock().country.value = null
+      expect(await render(component)).not.toContain('Restricted')
+    })
+    it('does not use stale chain metadata as a restriction', async () => {
+      chainId.value = 8453
+      __setEulerLabelsDataForTest(source === 'static'
+        ? staticGeoLabels({ assets: [{ address: vault.asset.address, block: ['NL'] }] })
+        : { geoContext: { chainId: 8453, policies: [{ id: 'other-chain', chainId: 8453, productId: null, vaultAddress: null, assetAddress: vault.asset.address, policyType: 'block', countries: ['NL'], countriesResolved: ['NL'], reason: null, createdAt: '' }], productByVault: {} } })
+      registry.getVault.mockReturnValue({ ...vault, chainId: 8453 })
+      expect(await render(component)).not.toContain('Restricted')
+    })
+    it('displays an authored asset block without discovery membership', async () => {
+      __setEulerLabelsDataForTest(source === 'static'
+        ? staticGeoLabels({ assets: [{ address: vault.asset.address, block: ['EEA'] }] })
+        : { geoContext: { chainId: 1, policies: [{ id: 'asset', chainId: 1, productId: null, vaultAddress: null, assetAddress: vault.asset.address, policyType: 'block', countries: ['NL'], countriesResolved: ['NL'], reason: null, createdAt: '' }], productByVault: {} } })
+      expect(await render(component)).toContain('Restricted')
+    })
+    it('still displays actual geographic restrictions', async () => {
+      useGeoBlock().country.value = 'IR'
+      expect(await render(component)).toContain('Restricted')
+    })
   })
 })

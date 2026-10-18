@@ -115,7 +115,7 @@ The browser tracks geo-rule and labels timestamps separately. Hosted geo rules b
 
 ## Helper functions
 
-- `isVaultBlockedByCountry(vaultOrAddress, { asset? })` combines sanctions and matching V3 block policies. Portfolio, detail and position callers pass resolved SDK vaults with their chain and asset; registry membership is not required. Stale vault or policy chain context fails closed.
+- `isVaultBlockedByCountry(vaultOrAddress, { asset? })` combines sanctions and matching V3 block policies. Portfolio, detail and position callers pass resolved SDK vaults with their chain and asset; registry membership is not required. Stale vault or policy chain context fails closed, including address-only calls while a hosted policy snapshot belongs to another chain.
 - `getVaultGeoBlockReason(vaultOrAddress)` distinguishes a confirmed `region` restriction from unavailable country, policy or asset data and chain mismatches. Portfolio badges and detail headers display geographic restrictions only for `region`; eligibility helpers retain missing-data safeguards and the policy-outage exit exception.
 - `getVaultGeoUnavailableReason(...vaults)` supplies availability-specific action warnings while eligibility checks keep unresolved operations guarded.
 - `isVaultRestrictedByCountry(vaultOrAddress, { asset?, counterpart? })` evaluates soft restrictions.

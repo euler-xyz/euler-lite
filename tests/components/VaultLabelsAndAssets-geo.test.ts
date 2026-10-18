@@ -6,6 +6,7 @@ import FormAlertStack from '~/components/entities/vault/form/FormAlertStack.vue'
 import VaultLabelsAndAssets from '~/components/entities/vault/VaultLabelsAndAssets.vue'
 import { __setEulerLabelsDataForTest } from '~/composables/useEulerLabels'
 import { getVaultGeoUnavailableReason, useGeoBlock } from '~/composables/useGeoBlock'
+import { staticGeoLabels } from '~/tests/fixtures/static-geo-labels'
 
 const registry = vi.hoisted(() => ({ getVault: () => undefined, getVaultCategory: () => 'standard', isVerifiedVault: () => false }))
 vi.mock('~/composables/useVaultRegistry', () => ({ useVaultRegistry: () => registry }))
@@ -33,7 +34,10 @@ beforeEach(() => {
   useGeoBlock().country.value = 'NL'
   __setEulerLabelsDataForTest({ geoContext: { chainId: 1, policies: [], productByVault: {} } })
 })
-describe('detail header geo badge', () => {
+describe.each(['hosted', 'static'] as const)('%s detail header geo badge', (source) => {
+  beforeEach(() => {
+    if (source === 'static') __setEulerLabelsDataForTest(staticGeoLabels())
+  })
   it('does not render a restriction for an unlisted vault with a resolved asset', async () => {
     expect(await render()).not.toContain('Restricted')
   })
@@ -44,6 +48,12 @@ describe('detail header geo badge', () => {
   it('does not claim a confirmed restriction for a stale vault after switching chains', async () => {
     chainId.value = 8453
     expect(await render()).not.toContain('Restricted')
+  })
+  it('renders an authored asset restriction without discovery membership', async () => {
+    __setEulerLabelsDataForTest(source === 'static'
+      ? staticGeoLabels({ assets: [{ address: vault.asset.address, block: ['EEA'] }] })
+      : { geoContext: { chainId: 1, policies: [{ id: 'asset', chainId: 1, productId: null, vaultAddress: null, assetAddress: vault.asset.address, policyType: 'block', countries: ['NL'], countriesResolved: ['NL'], reason: null, createdAt: '' }], productByVault: {} } })
+    expect(await render()).toContain('Restricted')
   })
   it('renders a confirmed sanction restriction', async () => {
     useGeoBlock().country.value = 'IR'

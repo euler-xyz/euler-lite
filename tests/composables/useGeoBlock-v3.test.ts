@@ -13,6 +13,7 @@ const set = (policies: PublicGeoPolicy[] | undefined, productId = 'current', cha
 
 describe('V3 geo enforcement', () => {
   beforeEach(() => {
+    vi.stubGlobal('useEulerAddresses', () => ({ chainId: { value: 1 } }))
     set([])
     useGeoBlock().country.value = 'NO'
   })

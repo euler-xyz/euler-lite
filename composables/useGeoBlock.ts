@@ -233,10 +233,9 @@ const computeAssetRestricted = (
 }
 
 const isStaleVaultGeoInput = (vault: VaultGeoInput): boolean => {
-  if (typeof vault === 'string') return false
   const activeChainId = useEulerAddresses().chainId.value
   const hosted = getEulerGeoContext()
-  return vault.chainId !== activeChainId
+  return (typeof vault !== 'string' && vault.chainId !== activeChainId)
     || (hosted?.chainId != null && hosted.chainId !== activeChainId)
 }
 

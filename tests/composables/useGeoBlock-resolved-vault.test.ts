@@ -87,6 +87,26 @@ describe('SDK-resolved portfolio vault outside discovery', () => {
     expect(geo.isVaultRestrictedByCountry(current)).toBe(true)
   })
 
+  it.each([false, true])('rejects stale policies for address inputs (explicit asset: %s)', (explicitAsset) => {
+    chainId.value = 8453
+    registry.set(cozy.address.toLowerCase(), { ...cozy, chainId: 8453 })
+    setPolicies([rule({ chainId: 8453, assetAddress: cozy.asset.address })], 1)
+    const opts = explicitAsset ? { asset: cozy.asset } : undefined
+    expect(geo.getVaultGeoBlockReason(cozy.address, opts)).toBe('chain-mismatch')
+    expect(geo.isVaultBlockedByCountry(cozy.address, opts)).toBe(true)
+    expect(geo.isVaultRestrictedByCountry(cozy.address, { ...opts, counterpart: cozy.asset })).toBe(true)
+    expect(geo.getVaultTags(cozy.address, 'swap-target')).toEqual({ tags: [], disabled: true })
+    expect(geo.getVaultTags(cozy.address, 'supply-source')).toEqual({ tags: [], disabled: true })
+    expect(geo.getVaultGeoUnavailableReason(cozy.address)).toContain('Vault data is unavailable')
+
+    setPolicies([rule({ chainId: 8453, assetAddress: cozy.asset.address })])
+    expect(geo.getVaultGeoBlockReason(cozy.address, opts)).toBe('region')
+    setPolicies([])
+    expect(geo.isVaultBlockedByCountry(cozy.address, opts)).toBe(false)
+    expect(geo.isVaultRestrictedByCountry(cozy.address, opts)).toBe(false)
+    expect(geo.getVaultTags(cozy.address, 'swap-target')).toEqual({ tags: [], disabled: false })
+  })
+
   it('preserves simple exits when cold policy context has no chain yet', () => {
     __setEulerLabelsDataForTest({ geoContext: { chainId: null, policies: undefined, productByVault: {} } })
     expect(geo.isVaultBlockedByCountry(cozy)).toBe(false)
