@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { computed } from 'vue'
+import { toReactive } from '@vueuse/core'
 import type { PublicEntityLabel } from '@eulerxyz/euler-v2-sdk/public-labels'
 import type { EulerLabelEntity, EulerLabelProduct } from '~/entities/euler/labels'
 import {
@@ -127,6 +129,18 @@ describe('curator profile helpers', () => {
     expect(getEulerLabelEntityId(entities, { ...k3 })).toBe('')
     expect(getEulerLabelEntityId(entities, { ...k3, id: 'k3' })).toBe('k3')
     expect(getEulerLabelEntityId(entities, { ...k3, id: 'unknown' })).toBe('')
+  })
+
+  it('resolves ID-less static entities across raw and reactive label maps', () => {
+    const k3 = entity('K3')
+    const entities = { k3 }
+    const reactiveEntities = toReactive(computed(() => entities))
+
+    expect(reactiveEntities.k3).not.toBe(k3)
+    expect(getEulerLabelEntityId(reactiveEntities, k3)).toBe('k3')
+    expect(getEulerLabelEntityId(entities, reactiveEntities.k3)).toBe('k3')
+    expect(getEulerLabelEntityId(reactiveEntities, reactiveEntities.k3)).toBe('k3')
+    expect(getEulerLabelEntityId(reactiveEntities, { ...k3 })).toBe('')
   })
 
   it('formats compact curator labels', () => {

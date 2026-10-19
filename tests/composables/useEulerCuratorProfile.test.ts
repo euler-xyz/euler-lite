@@ -112,8 +112,9 @@ describe('useEulerCuratorProfile', () => {
     expect(profile.earnVaults.value.map(vault => vault.address)).toEqual([good.address, hidden.address])
   })
 
-  it('uses exact entity identity in static mode and exposes a retry state on label failure', () => {
+  it('matches raw ID-less static entities and exposes a retry state on label failure', () => {
     const k3 = entity('k3')
+    delete k3.id
     const good = earn('1')
     state.source = 'static'
     state.staticEarnEntity = k3

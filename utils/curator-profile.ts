@@ -1,4 +1,5 @@
 import type { PublicEntityLabel } from '@eulerxyz/euler-v2-sdk/public-labels'
+import { toRaw } from 'vue'
 import type { EulerLabelEntity, EulerLabelProduct } from '~/entities/euler/labels'
 
 export type CuratorProfileData = {
@@ -151,7 +152,8 @@ export const getEulerLabelEntityId = (
   entity: EulerLabelEntity,
 ): string => {
   if (entity.id && entities[entity.id]) return entity.id
-  return Object.entries(entities).find(([, value]) => value === entity)?.[0] ?? ''
+  const rawEntity = toRaw(entity)
+  return Object.entries(entities).find(([, value]) => toRaw(value) === rawEntity)?.[0] ?? ''
 }
 
 export const getEulerLabelEntityDisplayName = (entities: EulerLabelEntity[]): string => {
