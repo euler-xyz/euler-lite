@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { VaultTypeSubgraphAdapter, type BuildQueryFn } from '@eulerxyz/euler-v2-sdk'
+import { getAddress, type Address } from 'viem'
+import { AccountVaultsSubgraphAdapter } from '../../node_modules/@eulerxyz/euler-v2-sdk/dist/src/services/accountService/adapters/accountOnchainAdapter/accountVaultsSubgraphAdapter.js'
 import { withCheckedSubgraphQueries, requireSubgraphBlock } from '~/utils/subgraph-queries'
 import { advanceSdkQueryGeneration, sdkBuildQuery, sdkQueryClient } from '~/utils/sdk-query-cache'
 import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
@@ -104,5 +106,124 @@ describe('checked published-SDK subgraph queries', () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: { vaults: [{ id: address, factory: address }] } })))
     const adapter = new VaultTypeSubgraphAdapter({ subgraphURLs: { 1: '/fixture/factories' } }, withCheckedSubgraphQueries(sdkBuildQuery, { 1: '/fixture/factories' }))
     await expect(adapter.fetchVaultFactories(1, [address])).resolves.toEqual([{ id: address, factory: address }])
+  })
+})
+
+const owners = (count: number) => Array.from({ length: count }, (_, i) => `0x${(i + 1).toString(16).padStart(38, '0')}00` as Address)
+const accountPage = (ids: string[], block = 100, deployment = 'A') => ({
+  data: {
+    _meta: { deployment, block: { number: block } },
+    trackingActiveAccounts: ids.map(id => ({ id, deposits: [`${id}00${address.slice(2)}`], borrows: [] })),
+  },
+})
+const readAccountRequest = (init: RequestInit) => JSON.parse(init.body as string) as { query: string, variables: { ids: string[] } }
+const accountAdapter = (sources: Parameters<typeof withCheckedSubgraphQueries>[1] = { 1: '/fixture/account-pages' }) => new AccountVaultsSubgraphAdapter(
+  { subgraphURLs: { 1: '/fixture/account-pages', 2: '/fixture/account-pages/2' } },
+  withCheckedSubgraphQueries(sdkBuildQuery, sources),
+)
+
+describe('checked account pagination through the published SDK adapter', () => {
+  it.each([101, 1001, 2001])('discovers all %i owners with explicit bounded page sizes', async (count) => {
+    const requests: string[][] = []
+    const fetch = vi.fn(async (_url: string, init: RequestInit) => {
+      const { query, variables: { ids } } = readAccountRequest(init)
+      requests.push(ids)
+      // Match the Graph's default first: 100 when a caller omits the limit.
+      const first = Number(query.match(/trackingActiveAccounts\(first: (\d+)/)?.[1] ?? 100)
+      expect(first).toBe(1000)
+      expect(ids.length).toBeLessThanOrEqual(1000)
+      return Response.json(accountPage(ids.slice(0, first)))
+    })
+    vi.stubGlobal('fetch', fetch)
+    const adapter = accountAdapter()
+    const accounts = owners(count)
+    const results = await Promise.all(accounts.map(account => adapter.fetchAccountVaults(1, account)))
+    expect(requests.flat()).toEqual(accounts.map(account => account.slice(0, 40)))
+    expect(requests.map(page => page.length)).toEqual(count === 101 ? [101] : count === 1001 ? [1000, 1] : [1000, 1000, 1])
+    expect(results).toEqual(accounts.map(account => ({ [getAddress(account)]: { deposits: [address], borrows: [] } })))
+  })
+
+  it('deduplicates mixed-case owner prefixes and accepts genuinely missing owners', async () => {
+    const owner = '0xabcdefabcdefabcdefabcdefabcdefabcdefab00' as Address
+    const sameOwner = '0xABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFAB01' as Address
+    const absent = owners(1)[0]
+    const fetch = vi.fn(async (_url: string, init: RequestInit) => {
+      const { variables: { ids } } = readAccountRequest(init)
+      expect(ids).toEqual([owner.slice(0, 40), absent.slice(0, 40)])
+      return Response.json(accountPage([`0x${owner.slice(2, 40).toUpperCase()}`]))
+    })
+    vi.stubGlobal('fetch', fetch)
+    const adapter = accountAdapter()
+    const results = await Promise.all([owner, sameOwner, absent].map(account => adapter.fetchAccountVaults(1, account)))
+    expect(results).toEqual([
+      { [getAddress(owner)]: { deposits: [address], borrows: [] } },
+      { [getAddress(owner)]: { deposits: [address], borrows: [] } },
+      {},
+    ])
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
+  it.each(['header', 'deployment', 'resolver'] as const)('rejects all pages when the %s identity changes', async (kind) => {
+    let page = 0
+    const fetch = vi.fn(async (_url: string, init: RequestInit) => {
+      const { variables: { ids } } = readAccountRequest(init)
+      page++
+      return Response.json(accountPage(ids, 100, kind === 'deployment' && page === 2 ? 'B' : 'A'), {
+        headers: { 'x-subgraph-source': kind === 'header' && page === 2 ? 'B' : 'A' },
+      })
+    })
+    vi.stubGlobal('fetch', fetch)
+    const adapter = accountAdapter(kind === 'resolver'
+      ? async () => ({ endpoint: '/fixture/account-pages', identity: page === 0 ? 'A' : 'B', deploymentId: 'A' })
+      : undefined)
+    const results = await Promise.allSettled(owners(1001).map(account => adapter.fetchAccountVaults(1, account)))
+    expect(results.every(result => result.status === 'rejected' && result.reason.message === 'Subgraph source changed during lookup')).toBe(true)
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('validates account membership against each page and isolates a failed chain', async () => {
+    const accounts = owners(1001)
+    let page = 0
+    const fetch = vi.fn(async (url: string, init: RequestInit) => {
+      const { variables: { ids } } = readAccountRequest(init)
+      if (url.endsWith('/2')) return Response.json(accountPage(ids))
+      page++
+      return Response.json(accountPage(page === 2 ? [accounts[0].slice(0, 40)] : ids))
+    })
+    vi.stubGlobal('fetch', fetch)
+    const adapter = accountAdapter({ 1: '/fixture/account-pages', 2: '/fixture/account-pages/2' })
+    const results = await Promise.allSettled([
+      ...accounts.map(account => adapter.fetchAccountVaults(1, account)),
+      adapter.fetchAccountVaults(2, accounts[0]),
+    ])
+    expect(results.slice(0, -1).every(result => result.status === 'rejected' && result.reason.message === 'Invalid subgraph account')).toBe(true)
+    expect(results.at(-1)).toEqual({ status: 'fulfilled', value: { [accounts[0]]: { deposits: [address], borrows: [] } } })
+    expect(fetch).toHaveBeenCalledTimes(3)
+  })
+
+  it('checks the confirmed block watermark on every page before returning accounts', async () => {
+    vi.useFakeTimers()
+    const url = '/fixture/account-pages/watermark'
+    requireSubgraphBlock(url, 100n)
+    let request = 0
+    const fetch = vi.fn(async (_url: string, init: RequestInit) => {
+      const { variables: { ids } } = readAccountRequest(init)
+      request++
+      return Response.json(accountPage(ids, request === 2 ? 99 : 100))
+    })
+    vi.stubGlobal('fetch', fetch)
+    const adapter = accountAdapter({ 1: url })
+    const pending = Promise.all(owners(1001).map(account => adapter.fetchAccountVaults(1, account)))
+    let settled = false
+    void pending.then(() => {
+      settled = true
+    })
+    await vi.advanceTimersByTimeAsync(50)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(5000)
+    await expect(pending).resolves.toHaveLength(1001)
+    expect(fetch).toHaveBeenCalledTimes(3)
+    expect(readAccountRequest(fetch.mock.calls[1][1]).variables.ids).toEqual(readAccountRequest(fetch.mock.calls[2][1]).variables.ids)
   })
 })

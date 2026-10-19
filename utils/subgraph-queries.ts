@@ -85,16 +85,20 @@ export const withCheckedSubgraphQueries = (buildQuery: BuildQueryFn, sources: So
     const results = new Map<string, Record<string, unknown>>()
     for (const chainId of new Set(keys.map(key => key.chainId))) {
       const ids = [...new Set(keys.filter(key => key.chainId === chainId).map(key => key.account.toLowerCase().slice(0, 40)))]
-      const data = await querySubgraph(sources, chainId, `query AccountVaults($ids: [String!]!) {
-        _meta { deployment block { number } }
-        trackingActiveAccounts(where: { id_in: $ids }) { id deposits borrows }
-      }`, ids)
-      if (!Array.isArray(data.trackingActiveAccounts)) throw new Error('Invalid subgraph accounts')
-      for (const entry of data.trackingActiveAccounts) {
-        if (!object(entry) || typeof entry.id !== 'string' || !ids.includes(entry.id.toLowerCase())
-          || !Array.isArray(entry.deposits) || !entry.deposits.every(isPosition)
-          || !Array.isArray(entry.borrows) || !entry.borrows.every(isPosition)) throw new Error('Invalid subgraph account')
-        results.set(`${chainId}:${entry.id.toLowerCase()}`, entry)
+      const selection: { identity?: string } = {}
+      for (let offset = 0; offset < ids.length; offset += 1000) {
+        const page = ids.slice(offset, offset + 1000)
+        const data = await querySubgraph(sources, chainId, `query AccountVaults($ids: [String!]!) {
+          _meta { deployment block { number } }
+          trackingActiveAccounts(first: 1000, where: { id_in: $ids }) { id deposits borrows }
+        }`, page, selection)
+        if (!Array.isArray(data.trackingActiveAccounts)) throw new Error('Invalid subgraph accounts')
+        for (const entry of data.trackingActiveAccounts) {
+          if (!object(entry) || typeof entry.id !== 'string' || !page.includes(entry.id.toLowerCase())
+            || !Array.isArray(entry.deposits) || !entry.deposits.every(isPosition)
+            || !Array.isArray(entry.borrows) || !entry.borrows.every(isPosition)) throw new Error('Invalid subgraph account')
+          results.set(`${chainId}:${entry.id.toLowerCase()}`, entry)
+        }
       }
     }
     return keys.map(key => ({ data: { trackingActiveAccount: results.get(`${key.chainId}:${key.account.toLowerCase().slice(0, 40)}`) ?? null } }))
