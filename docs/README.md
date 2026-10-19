@@ -11,6 +11,12 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Development environment setup
 - Quick start guide
 
+### [Fork Setup](./fork-setup.md)
+
+- Operator-owned V3 and static labels, with complete environment examples
+- Explicit V3 opt-out, custom image hosts, SDK/Lite settings and remaining external services
+- Configuration diagnostics and verification steps
+
 ### 🏗️ [Architecture Overview](./architecture.md)
 
 - High-level system architecture

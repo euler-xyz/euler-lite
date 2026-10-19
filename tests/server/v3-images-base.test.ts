@@ -22,6 +22,10 @@ const answer = (publicBaseUrl: unknown, status = 200) =>
   new Response(JSON.stringify({ data: { publicBaseUrl } }), { status })
 
 describe('readV3ImagesBaseUrl', () => {
+  it('does not fetch when V3 is explicitly disabled', async () => {
+    await expect(readV3ImagesBaseUrl({ ...env, DISABLE_V3: 'true' })).resolves.toEqual({ status: 'disabled' })
+    expect(mocks.fetchWithTimeout).not.toHaveBeenCalled()
+  })
   afterEach(() => {
     mocks.fetchWithTimeout.mockReset()
   })

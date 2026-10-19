@@ -31,7 +31,7 @@ export type {
 
 export type PublicEulerLabelsData = Omit<SdkPublicEulerLabelsData, 'visibility' | 'managingEntityByVault'>
   & Partial<Pick<SdkPublicEulerLabelsData, 'visibility' | 'managingEntityByVault'>>
-  & { geoContext?: HostedGeoContext, source?: 'v3' | 'v3-metadata' | 'static', sourceFetchedAt?: number, geoFetchedAt?: number, logoBaseUrl?: string, candidateVaultAddresses?: string[], candidateEarnVaultAddresses?: string[], vaultTagAddresses?: Set<string> }
+  & { geoContext?: HostedGeoContext, source?: 'v3' | 'v3-metadata' | 'static', sourceFetchedAt?: number, geoFetchedAt?: number, logoBaseUrl?: string, logoOrigins?: readonly string[], candidateVaultAddresses?: string[], candidateEarnVaultAddresses?: string[], vaultTagAddresses?: Set<string> }
 
 export const PUBLIC_LABELS_FIXTURE_VERSION = 'v20260804151305236'
 
@@ -53,7 +53,10 @@ export interface StaticLabelsBundle {
 }
 
 export type V3MetadataLabelsBundle = PublicLabelsMetadataSnapshot & { sourceFetchedAt: number, geoFetchedAt?: number }
-export type HostedLabelsBundle = V3LabelsBundle | V3MetadataLabelsBundle
+export type HostedLabelsBundle = (V3LabelsBundle | V3MetadataLabelsBundle) & {
+  /** Server-approved public origins already used by this snapshot's logos. */
+  logoOrigins?: string[]
+}
 export type PublicLabelsBundle = (HostedLabelsBundle | StaticLabelsBundle) & { vaultTag?: string }
 
 /** V3 owns hosted membership, published content and per-side visibility. */
@@ -118,6 +121,7 @@ export const normalizeLabelsBundle = (chainId: number, bundle: PublicLabelsBundl
     ...normalizeLabelsSource(chainId, bundle),
     sourceFetchedAt: bundle.source === 'static' ? undefined : bundle.sourceFetchedAt,
     geoFetchedAt: bundle.source === 'static' ? undefined : bundle.geoFetchedAt,
+    logoOrigins: bundle.source === 'static' ? undefined : bundle.logoOrigins,
   }
   const tag = bundle.vaultTag?.trim()
   if (!tag) return data

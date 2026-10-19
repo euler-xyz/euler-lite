@@ -30,6 +30,7 @@ describe('static authoring source', () => {
     await rm(directory, { recursive: true, force: true })
   })
   it('feeds authored membership, governance, points, logos, explorability and geo into the same snapshot without V3', async () => {
+    vi.stubEnv('DISABLE_V3', 'true')
     const { getPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
     const raw = await getPublicLabelsBundle(1)
     const data = normalizeLabelsBundle(1, raw)
@@ -75,6 +76,12 @@ describe('static authoring source', () => {
     fetchMock.mockImplementation(async () => new Response(null, { status }))
     const { getStaticLabelsBundle } = await import('~/server/utils/static-labels-source')
     await expect(getStaticLabelsBundle(1)).rejects.toThrow('products and entities are both missing')
+  })
+  it('keeps a complete previous snapshot when both required membership files disappear', async () => {
+    const { getStaticLabelsBundle } = await import('~/server/utils/static-labels-source')
+    const first = await getStaticLabelsBundle(1)
+    fetchMock.mockImplementation(async () => new Response(null, { status: 404 }))
+    expect(await getStaticLabelsBundle(1, true)).toEqual(first)
   })
   it.each([401, 429, 500, 503])('fails cold on HTTP %s instead of treating it as an omitted file', async (status) => {
     fetchMock.mockImplementation(async () => new Response(null, { status }))

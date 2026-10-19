@@ -1,4 +1,5 @@
 import { resolveLabelLogo } from '~/utils/label-logo'
+import { readHostedLabelImageOrigins } from './labels-base-url'
 import type { Address } from 'viem'
 import { createTtlCache } from './cache'
 import { tryChecksum } from './labels-helpers'
@@ -113,7 +114,7 @@ function buildEntityInfo(entityKey: string, entities: Record<string, EntityEntry
   const url = strOrNull(entity.url)
   return {
     name,
-    logo: logoFile ? resolveLabelLogo(logoFile, logoBaseUrl) : '',
+    logo: logoFile ? resolveLabelLogo(logoFile, logoBaseUrl, logoBaseUrl ? [] : readHostedLabelImageOrigins()) : '',
     description: strOrNull(entity.description),
     url: url && /^https?:\/\//i.test(url) ? url : null,
   }
