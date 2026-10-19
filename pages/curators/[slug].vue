@@ -328,7 +328,7 @@ const profileDetails = computed(() => (profileInformation.value?.fields ?? [])
             </span>
           </h2>
           <p class="text-p3 text-content-tertiary">
-            Published label counts include vaults that may be hidden or deprecated. Select a network to see what is currently listed in Lite.
+            Published label counts include vaults that may be hidden or deprecated. Select a network to see what is currently listed in the app.
           </p>
           <div
             v-if="networkRows.length"
