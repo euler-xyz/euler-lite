@@ -106,6 +106,14 @@ const profileCompleteness = computed(() => profileData.value?.source === 'v3'
   && profileStatus.value === 'success' && !profileError.value
   ? profileInformation.value
   : null)
+const profileCompletenessTooltip = computed(() => {
+  if (!profileCompleteness.value) return ''
+  const explanation = 'Eight fields count equally: description, website, legal entity, risk methodology, security, terms of service, licenses and disclaimers. This measures information provided without assessing its content. An explicit statement that something does not apply counts as provided.'
+  const missing = profileCompleteness.value.total - profileCompleteness.value.provided
+  return missing
+    ? `${profileEntity.value.name} has not provided ${missing} profile ${missing === 1 ? 'detail' : 'details'}. ${explanation}`
+    : explanation
+})
 const profileDescription = computed(() => profileInformation.value?.fields.find(field => field.key === 'description'))
 const profileWebsite = computed(() => profileInformation.value?.fields.find(field => field.key === 'url'))
 const profileDetails = computed(() => (profileInformation.value?.fields ?? [])
@@ -252,7 +260,7 @@ const profileDetails = computed(() => (profileInformation.value?.fields ?? [])
               <UiHoverPreviewTooltip
                 v-if="profileCompleteness"
                 title="Profile completeness"
-                text="Eight fields count equally: description, website, legal entity, risk methodology, security, terms of service, licenses and disclaimers. This measures information provided without assessing its content. An explicit statement that something does not apply counts as provided."
+                :text="profileCompletenessTooltip"
               />
             </h2>
             <div
@@ -276,12 +284,6 @@ const profileDetails = computed(() => (profileInformation.value?.fields ?? [])
             :aria-valuemax="100"
             :aria-valuetext="`${profileCompleteness.provided} of ${profileCompleteness.total} details provided`"
           />
-          <p
-            v-if="profileCompleteness && profileCompleteness.provided < profileCompleteness.total"
-            class="text-p3 text-content-secondary"
-          >
-            {{ profileEntity.name }} has not provided {{ profileCompleteness.total - profileCompleteness.provided }} profile {{ profileCompleteness.total - profileCompleteness.provided === 1 ? 'detail' : 'details' }}.
-          </p>
           <div class="grid grid-cols-2 gap-12 mobile:grid-cols-1">
             <div
               v-for="detail in profileDetails"
