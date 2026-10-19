@@ -15,6 +15,7 @@ import { AccessControlBadge, CyclicalNoteBadge, GovernanceLimitedBadge, KeyringB
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
 import { resolveVaultExposureDisplay, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
 import { getAssessmentSafeEvidence } from '~/utils/vault-assessment/evidence'
+import { FLAGGED_VAULT_LABEL } from '~/utils/vault-assessment/flagged'
 
 const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
 const emit = defineEmits<{
@@ -38,7 +39,7 @@ const vaultAddress = computed(() => getAddress(vault.address))
 const vaultRef = computed(() => vault)
 const product = useEulerProductOfVault(vaultAddress)
 const entities = useEulerEntitiesOfVault(vault)
-const isKnownUnlisted = useKnownUnlistedVault(() => vault.address)
+const isFlagged = useFlaggedVault(() => vault.address)
 const { badges, governanceType, isVerified: isGovernorVerified, verificationVault } = useVaultTypeBadges(vaultRef)
 const governanceVault = computed(() => verificationVault.value as EVault)
 const marketProductKey = computed(() => getProductKeyByVault(vault.address))
@@ -171,7 +172,7 @@ watchEffect(() => {
         label="Vault type"
       >
         <span
-          v-if="isKnownUnlisted && governanceType !== 'ungoverned' && governanceType !== 'escrow'"
+          v-if="isFlagged && governanceType !== 'ungoverned' && governanceType !== 'escrow'"
           class="text-p2 text-content-tertiary"
         >-</span>
         <VaultTypeChip
@@ -209,7 +210,7 @@ watchEffect(() => {
           class="w-fit"
         />
         <VaultTypeChip
-          v-else-if="!isGovernorVerified && !isKnownUnlisted"
+          v-else-if="!isGovernorVerified && !isFlagged"
           :vault="governanceVault"
           type="unknown"
           nudge
@@ -251,7 +252,7 @@ watchEffect(() => {
           v-else
           class="text-p2 text-content-tertiary"
         >
-          {{ isKnownUnlisted ? 'Not listed' : '-' }}
+          {{ isFlagged ? FLAGGED_VAULT_LABEL : '-' }}
         </div>
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue label="Can be borrowed">

@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { getAddress } from 'viem'
 import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
-import { planVaultTargets } from '~/utils/plan-vault-targets'
+import { collectUnverifiedPlanVaults } from '~/utils/plan-vault-targets'
 import { buildModifiedPositionKeySets, buildRemovedPositionKeySets, filterPositionKeysByOwner, useTxBatch } from '~/composables/useTxBatch'
 import { useTokenSymbolResolver } from '~/composables/useTokenSymbolResolver'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
@@ -21,7 +21,8 @@ import { BatchPreviewNotReadyError, ReviewedPlanDivergenceError } from '~/featur
 import { finalizeSuccessfulSubmission } from '~/features/reviewed-execution/review/submission-completion'
 import { useToast } from '~/components/ui/composables/useToast'
 import { getPositionTag, getSourcePositionTag } from '~/utils/positionTag'
-import { getKnownUnlistedActionNotice, getUnverifiedActionCopy } from '~/utils/vault-assessment/presentation'
+import { getUnverifiedActionCopy } from '~/utils/vault-assessment/presentation'
+import { getFlaggedActionNotice } from '~/utils/vault-assessment/flagged'
 import { useEulerLabels } from '~/composables/useEulerLabels'
 
 // Whole-batch review: required approvals, then the operations as rows that roll
@@ -222,40 +223,17 @@ const restorationSummaryGroups = computed(() => {
   ]
 })
 
-// Unverified vaults the batch touches — surfaced as a warning. A vault is the
-// target of an op's core action; we read targets off each op's contextual plan
-// and check the registry's verification flag (same source the forms use).
-const unverifiedVaults = computed(() => {
-  const vaults = new Map<string, string>()
-  for (const entry of entries.value) {
-    const plan = entryPlans.value[entry.id]
-    if (!plan) continue
-    for (const target of planVaultTargets(plan)) {
-      try {
-        const addr = getAddress(target)
-        const vault = getVault(addr) as { shares?: { name?: string }, asset?: { symbol?: string } } | undefined
-        if (vault && !isVerifiedVault(addr)) {
-          const name = vault.shares?.name || vault.asset?.symbol || ''
-          if (name) vaults.set(addr.toLowerCase(), name)
-        }
-      }
-      catch { /* skip malformed address */ }
-    }
-  }
-  return [...vaults].map(([address, name]) => ({ address, name }))
-})
+const unverifiedVaults = computed(() => collectUnverifiedPlanVaults(
+  entries.value.map(entry => entryPlans.value[entry.id]).filter((plan): plan is TransactionPlan => !!plan),
+  { getVault, isVerifiedVault },
+))
 const unverifiedVaultNames = computed(() => [...new Set(unverifiedVaults.value.map(vault => vault.name))])
 const { isReady: labelsReady, source: labelsSource, visibility: vaultVisibility } = useEulerLabels()
 const hasUnverified = computed(() => (labelsReady.value || labelsSource.value !== 'v3') && unverifiedVaultNames.value.length > 0)
-const unlistedNotice = computed(() => {
-  if (!labelsReady.value) return null
-  return getKnownUnlistedActionNotice(
-    unverifiedVaults.value.map(vault => vault.address),
-    labelsSource.value,
-    vaultVisibility.value,
-  )
-})
-const unverifiedActionCopy = computed(() => getUnverifiedActionCopy(unlistedNotice.value, unverifiedVaultNames.value))
+const flaggedNotice = computed(() => labelsReady.value
+  ? getFlaggedActionNotice(unverifiedVaults.value.map(vault => vault.address), labelsSource.value, vaultVisibility.value)
+  : null)
+const unverifiedActionCopy = computed(() => getUnverifiedActionCopy(flaggedNotice.value, unverifiedVaultNames.value))
 
 interface REULUnlockInfo {
   hasBurn: boolean

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { getFlaggedVerdict } from '~/utils/vault-assessment/flagged'
+
 const props = defineProps<{
   name: string
   isUnverified?: boolean
@@ -7,19 +9,16 @@ const props = defineProps<{
 
 const { isReady, source, visibility } = useEulerLabels()
 const { isVerifiedVault } = useVaultRegistry()
-const hasKnownUnlistedVerdict = computed(() => {
-  if (!props.isUnverified || !isReady.value || source.value !== 'v3') return false
+const isFlaggedOnly = computed(() => {
+  if (!props.isUnverified || !isReady.value) return false
   const unverified = props.addresses?.filter(address => address && !isVerifiedVault(address)) ?? []
-  return unverified.length > 0 && unverified.every((address) => {
-    const status = visibility.value?.[address.toLowerCase()]?.status
-    return status === 'hidden' || status === 'pending_review'
-  })
+  return unverified.length > 0 && unverified.every(address => getFlaggedVerdict(address, source.value, visibility.value))
 })
 </script>
 
 <template>
   <span
-    v-if="props.isUnverified && (isReady || source !== 'v3') && !hasKnownUnlistedVerdict"
+    v-if="props.isUnverified && (isReady || source !== 'v3') && !isFlaggedOnly"
     class="flex text-error-500 items-center gap-4"
   >
     <SvgIcon

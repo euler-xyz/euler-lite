@@ -344,13 +344,13 @@ const linkPath = computed(() => ({
               :family="isSecuritizeBorrowPair(pair) ? null : 'evk'"
               :hide-deprecated="isAnyDeprecated"
               :hide-checks="assessmentUi !== 'badge'"
-              badge-label="Collateral warning"
+              pair-side="collateral"
             />
             <VaultAssessmentWarning
               :address="pair.borrow.address"
               :hide-deprecated="isAnyDeprecated"
               :hide-checks="assessmentUi !== 'badge'"
-              badge-label="Borrow warning"
+              pair-side="borrow"
             />
           </div>
           <div
