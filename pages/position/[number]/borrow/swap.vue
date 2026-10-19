@@ -51,7 +51,7 @@ import { createRaceGuard } from '~/utils/race-guard'
 import { ltvToPercent, nanoToValue } from '~/utils/crypto-utils'
 import { getVaultProductName, isEarnVaultNotExplorable, isVaultNotExplorableLend, isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
 import { buildCollateralOption, computeBorrowApy, computeSupplyApy } from '~/utils/collateralOptions'
-import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
+import { getVaultGeoUnavailableReason, isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 import type { DisplayStep } from '~/utils/stepDecoding'
 import {
@@ -135,7 +135,7 @@ const {
 const { viewer } = useApyVisibility()
 const { getTokenCategoryTags } = useTokenList()
 const { borrowList } = useVaults()
-const { getVaultCategory, getVault, getVerifiedEVaults, getEarnVaults } = useVaultRegistry()
+const { getVaultCategory, getVault, getVerifiedEVaults, getEarnVaults, get: getRegistryEntry } = useVaultRegistry()
 const showAllLabelEntries = useShowAllLabelEntries()
 const cowSwapExecution = useCowSwapCollateralSwapExecution()
 const cowSwapOrderStatus = useCowSwapOrderStatus(
@@ -580,7 +580,8 @@ const externalSupplyOnlyTargetVaults = computed<SupplyTargetVault[]>(() => {
   // Earn vaults have no hook-based op gating; geo/deprecation restrictions are
   // applied per option via getVaultTags in buildCollateralOption.
   const earnVaults = getEarnVaults().filter(vault =>
-    isVaultSelectedByTag(vault.address) && (showAllLabelEntries.value || !isEarnVaultNotExplorable(vault.address)),
+    !getRegistryEntry(vault.address)?.portfolioOnly
+    && isVaultSelectedByTag(vault.address) && (showAllLabelEntries.value || !isEarnVaultNotExplorable(vault.address)),
   )
   return [...lendVaults, ...earnVaults]
 })
@@ -2472,7 +2473,7 @@ const reviewRefinanceLabel = computed(() => {
   return 'Review Refinance'
 })
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: getVaultGeoUnavailableReason(...getOperationVaultAddresses()) || 'This operation is not available in your region', variant: 'warning' }
   if (validationError.value) return { message: validationError.value, variant: validationError.value === healthError.value ? 'error' : 'warning' }
   if (activeCollateralQuoteError.value && collateralNeedsSwap.value) return { message: activeCollateralQuoteError.value, variant: 'warning' }
   if (activeDebtQuoteError.value && debtNeedsSwap.value) return { message: activeDebtQuoteError.value, variant: 'warning' }
@@ -2610,7 +2611,7 @@ const inboundMigrationDisabledReason = computed(() => {
   if (debtNeedsSwap.value && selectedExternalDebtQuote.value && getQuoteAmount(selectedExternalDebtQuote.value, 'amountOutMin') < currentDebt.value) {
     return 'Selected debt swap route does not cover the external debt'
   }
-  if (isGeoBlocked.value) return 'This operation is not available in your region'
+  if (isGeoBlocked.value) return getVaultGeoUnavailableReason(...getOperationVaultAddresses()) || 'This operation is not available in your region'
   if (simulationError.value) return simulationError.value
   return null
 })
@@ -4298,12 +4299,10 @@ function getOperationVaultAddresses(): string[] {
               @refresh="onRefreshDebtQuotes"
             />
 
-            <UiAlert
+            <GeoBlockAlert
               v-if="isGeoBlocked"
-              title="Region restricted"
+              :vault-addresses="getOperationVaultAddresses()"
               description="This operation is not available in your region. You can still repay existing debt."
-              variant="warning"
-              size="compact"
             />
             <UiAlert
               v-if="validationError"

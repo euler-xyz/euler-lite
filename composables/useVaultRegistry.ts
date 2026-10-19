@@ -40,11 +40,14 @@ export interface VaultEntry {
   vault: AnyVault
   type: VaultType
   verified: boolean
+  /** Held metadata is available to lookups without entering discovery. */
+  portfolioOnly?: boolean
   vaultCategory?: 'standard' | 'escrow'
 }
 
 interface VaultEntryMetadata {
   verified?: boolean
+  portfolioOnly?: boolean
 }
 
 // Registry state
@@ -131,30 +134,34 @@ const set = (
   // with no metadata; without this they'd downgrade an already-verified vault
   // to verified:false, dropping it from getVerifiedEVaults() and the lists.
   const existing = registry.value.get(key)
+  // Discovery may finish while a held-vault fallback is awaiting the SDK.
+  if (metadata?.portfolioOnly && existing && !existing.portfolioOnly) return
   const verified = metadata?.verified ?? existing?.verified ?? false
   const vaultCategory = type === 'evk' ? resolveEVaultCategory(vault) : undefined
   registry.value.set(key, {
     vault,
     type,
     verified,
+    ...((metadata?.portfolioOnly ?? existing?.portfolioOnly) ? { portfolioOnly: true } : {}),
     ...(vaultCategory ? { vaultCategory } : {}),
   })
   registry.value = new Map(registry.value) // Trigger reactivity
   registryVersion.value++
 }
 
-// Register multiple vaults
+// Bulk discovery loads promote held-only entries. Refreshes use discovery entries only.
 const setMany = (
   entries: Array<{ address: string, vault: AnyVault, type: VaultType } & VaultEntryMetadata>,
   targetChainId = getActiveChainId(),
 ): void => {
   if (!targetChainId) throw new Error('Cannot register vaults without a chain')
-  entries.forEach(({ address, vault, type, verified }) => {
+  entries.forEach(({ address, vault, type, verified, portfolioOnly }) => {
     const vaultCategory = type === 'evk' ? resolveEVaultCategory(vault) : undefined
     registry.value.set(registryKey(targetChainId, address), {
       vault,
       type,
       verified: verified ?? false,
+      ...(portfolioOnly ? { portfolioOnly: true } : {}),
       ...(vaultCategory ? { vaultCategory } : {}),
     })
   })
@@ -227,7 +234,7 @@ const getSecuritizeVaults = (): SecuritizeCollateralVault[] => getByType('securi
 // Escrow vaults are EVaults with vaultCategory: 'escrow'
 const getEscrowVaults = (): EVault[] => {
   return activeEntries()
-    .filter(entry => entry.type === 'evk' && entry.vaultCategory === 'escrow')
+    .filter(entry => entry.type === 'evk' && entry.vaultCategory === 'escrow' && !entry.portfolioOnly)
     .map(entry => entry.vault) as EVault[]
 }
 
@@ -243,6 +250,7 @@ const getVerifiedEVaults = (includeNotExplorable = false): EVault[] => {
   return activeEntries()
     .filter(entry =>
       entry.type === 'evk'
+      && !entry.portfolioOnly
       && isVerifiedVault(entry.vault.address)
       && isVaultSelectedByTag(entry.vault.address)
       && (includeNotExplorable || !isVaultNotExplorable(entry.vault.address)),
@@ -360,6 +368,7 @@ const resolveUnknown = async (
   address: string,
   targetChainId = getActiveChainId(),
   generation = targetChainId ? getResolutionGeneration(targetChainId) : 0,
+  metadata?: VaultEntryMetadata,
 ): Promise<VaultEntry | undefined> => {
   if (!targetChainId) return undefined
   const normalized = normalizeAddress(address)
@@ -384,7 +393,7 @@ const resolveUnknown = async (
     try {
       const vault = await fetchVaultByType(normalized, 'securitize', targetChainId)
       if (!isCurrentResolution(targetChainId, generation)) return undefined
-      set(normalized, vault, 'securitize', undefined, targetChainId)
+      set(normalized, vault, 'securitize', metadata, targetChainId)
       return getForChain(targetChainId, normalized)
     }
     catch {
@@ -395,13 +404,13 @@ const resolveUnknown = async (
   if (type === 'evk' && category === 'escrow') {
     const vault = await fetchVaultByType(normalized, 'evk', targetChainId)
     if (!isCurrentResolution(targetChainId, generation)) return undefined
-    set(normalized, vault, 'evk', { verified: true }, targetChainId)
+    set(normalized, vault, 'evk', { verified: true, ...metadata }, targetChainId)
     return getForChain(targetChainId, normalized)
   }
 
   const vault = await fetchVaultByType(normalized, type, targetChainId)
   if (!isCurrentResolution(targetChainId, generation)) return undefined
-  set(normalized, vault, type, undefined, targetChainId)
+  set(normalized, vault, type, metadata, targetChainId)
   return getForChain(targetChainId, normalized)
 }
 
@@ -409,7 +418,7 @@ const resolveUnknown = async (
  * Get vault from registry, or fetch and cache if not found.
  * Primary method for vault resolution. After calling, use getType(address) if you need the type.
  */
-const getOrFetch = async (address: string): Promise<VaultEntity | undefined> => {
+const getOrFetch = async (address: string, options?: { portfolioOnly?: boolean }): Promise<VaultEntity | undefined> => {
   const targetChainId = getActiveChainId()
   if (!targetChainId) return undefined
   // Check registry first
@@ -429,7 +438,7 @@ const getOrFetch = async (address: string): Promise<VaultEntity | undefined> => 
   }
 
   // Create and track new resolution promise
-  const resolution = resolveUnknown(address, targetChainId, generation)
+  const resolution = resolveUnknown(address, targetChainId, generation, options?.portfolioOnly ? { portfolioOnly: true, verified: false } : undefined)
     .then(entry => entry?.vault as VaultEntity | undefined)
     .catch((e) => {
       logWarn('vaultRegistry/resolve', e)

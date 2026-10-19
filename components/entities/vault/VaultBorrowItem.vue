@@ -324,10 +324,14 @@ const linkPath = computed(() => ({
             <CyclicalNoteBadge v-if="isCyclicalNote && !isAnyGovernorUnverified" />
             <RestrictedBadge
               v-if="isGeoBlocked"
+              :vault-addresses="[pair.collateral.address, pair.borrow.address]"
+              :chain-id="pair.borrow.chainId"
               variant="blocked"
             />
             <RestrictedBadge
               v-else-if="isGeoRestricted"
+              :vault-addresses="[pair.collateral.address, pair.borrow.address]"
+              :chain-id="pair.borrow.chainId"
               variant="restricted"
             />
             <VaultDeprecatedBadge :addresses="[pair.collateral.address, pair.borrow.address]" />

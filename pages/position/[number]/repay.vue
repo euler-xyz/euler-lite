@@ -11,7 +11,7 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
-import { isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
+import { getVaultGeoUnavailableReason, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useWalletRepay } from '~/composables/repay/useWalletRepay'
 import { useWalletSwapRepay } from '~/composables/repay/useWalletSwapRepay'
 import { useCollateralSwapRepay } from '~/composables/repay/useCollateralSwapRepay'
@@ -530,8 +530,8 @@ const reviewRepayDisabled = computed(() => {
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (formTab.value === 'wallet') {
     if (walletSwap.needsSwap.value) {
-      if (isPayWithAssetBlocked.value) return { message: 'Paying with this asset is not available in your region', variant: 'warning' }
-      if (isWalletSwapRestricted.value) return { message: 'Swapping into this vault is not available in your region', variant: 'warning' }
+      if (isPayWithAssetBlocked.value) return { message: getVaultGeoUnavailableReason(borrowVault.value?.address) || 'Paying with this asset is not available in your region', variant: 'warning' }
+      if (isWalletSwapRestricted.value) return { message: getVaultGeoUnavailableReason(borrowVault.value?.address) || 'Swapping into this vault is not available in your region', variant: 'warning' }
       if (walletSwap.disabledReason.value) return { message: walletSwap.disabledReason.value, variant: 'error' }
       if (walletSwap.estimatesError.value) return { message: walletSwap.estimatesError.value, variant: 'error' }
     }
@@ -793,19 +793,17 @@ watch(formTab, () => {
                 @refresh="walletSwap.onRefreshSwapQuotes"
               />
 
-              <UiAlert
+              <GeoBlockAlert
                 v-if="isPayWithAssetBlocked"
+                :vault-addresses="[borrowVault?.address]"
                 title="Asset restricted"
                 description="Paying with this asset is not available in your region. Pick a different asset."
-                variant="warning"
-                size="compact"
               />
-              <UiAlert
+              <GeoBlockAlert
                 v-if="!isPayWithAssetBlocked && isWalletSwapRestricted"
+                :vault-addresses="[borrowVault?.address]"
                 title="Swap restricted"
                 description="Swapping into this vault is not available in your region. You can repay with the vault's underlying asset directly."
-                variant="warning"
-                size="compact"
               />
               <UiAlert
                 v-if="walletSwap.needsSwap.value && !isWalletSwapRestricted && !isPayWithAssetBlocked && walletSwap.disabledReason.value"

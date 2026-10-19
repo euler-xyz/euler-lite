@@ -131,7 +131,11 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
           hide-deprecated
           badge-label="Borrow warning"
         />
-        <RestrictedBadge v-if="isRestricted" />
+        <RestrictedBadge
+          v-if="isRestricted"
+          :vault-addresses="[vault?.address, pairVault?.address]"
+          :chain-id="vault?.chainId ?? pairVault?.chainId"
+        />
         <slot />
       </div>
 

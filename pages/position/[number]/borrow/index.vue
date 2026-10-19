@@ -7,7 +7,7 @@ import { isOpDisabled, OP_BORROW } from '~/utils/vault-hooks'
 import { getAssetUsdValueForEstimate, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatio } from '~/utils/sdk-prices'
 import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
+import { getVaultGeoUnavailableReason, isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import type { PortfolioBorrowPosition, VaultEntity, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import type { Address } from 'viem'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros } from '~/utils/string-utils'
@@ -190,8 +190,8 @@ const isBorrowRestricted = computed(() =>
 const reviewBorrowDisabled = computed(() => isGeoBlocked.value || isBorrowRestricted.value || isSubmitDisabled.value)
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
-  if (isBorrowRestricted.value) return { message: 'Borrowing this asset is not available in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: getVaultGeoUnavailableReason(pair.value?.borrow.address, pair.value?.collateral.address) || 'This operation is not available in your region', variant: 'warning' }
+  if (isBorrowRestricted.value) return { message: getVaultGeoUnavailableReason(pair.value?.borrow.address, pair.value?.collateral.address) || 'Borrowing this asset is not available in your region', variant: 'warning' }
   if (!isProjectedRiskAvailable.value) return { message: 'Projected risk estimates are unavailable', variant: 'warning' }
   if (errorText.value) return { message: errorText.value, variant: 'error' }
   if (simulationError.value) return { message: simulationError.value, variant: 'error' }
@@ -839,19 +839,16 @@ watch([rewardsVersion, enableIntrinsicApy], async () => {
               @update:model-value="onLtvInput"
             />
 
-            <UiAlert
+            <GeoBlockAlert
               v-if="isGeoBlocked"
-              title="Region restricted"
+              :vault-addresses="[pair?.borrow.address, pair?.collateral.address]"
               description="This operation is not available in your region. You can still repay existing debt."
-              variant="warning"
-              size="compact"
             />
-            <UiAlert
+            <GeoBlockAlert
               v-if="!isGeoBlocked && isBorrowRestricted"
+              :vault-addresses="[pair?.borrow.address, pair?.collateral.address]"
               title="Asset restricted"
               description="Borrowing this asset is not available in your region."
-              variant="warning"
-              size="compact"
             />
             <UiAlert
               v-show="errorText"

@@ -397,7 +397,7 @@ export const useMarketGroups = () => {
     const published = labels.source === 'v3' || labels.source === 'v3-metadata'
       ? new Set([...candidates.vaults, ...candidates.earn].map(address => address.toLowerCase()))
       : null
-    return registryVaults.value.filter((vault) => {
+    return getAll().filter(entry => !entry.portfolioOnly).map(entry => entry.vault).filter((vault) => {
       const address = getVaultAddress(vault)
       if (!address) return false
       // Escrow perspective membership is an independent discovery source.

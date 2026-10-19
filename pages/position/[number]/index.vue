@@ -8,7 +8,7 @@ import { getBorrowPositionEffectiveLiquidationLTV, getBorrowPositionTimeToLiquid
 import { maxUint256 } from 'viem'
 import { formatTtl, ltvToPercent, nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { formatNumber, formatHealthScore, formatUsdValue, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
-import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
+import { getVaultGeoUnavailableReason, isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { getVaultDeprecation, getVaultNotice } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
 import { getPositionCollateralEdge, getPositionRampStatus, getPositionRampTargetTimestamp } from '~/entities/account'
@@ -218,7 +218,7 @@ const isPairFullyRestricted = computed(() => {
 const migrationDisabledReason = computed(() => {
   if (!enableExternalMigrations.value) return 'Enable advanced mode in settings'
   if (hasNoBorrow.value) return 'This position has no debt to migrate out'
-  if (isPositionGeoBlocked.value || isPairFullyRestricted.value) return 'This position is not available in your region'
+  if (isPositionGeoBlocked.value || isPairFullyRestricted.value) return getVaultGeoUnavailableReason(borrowVault.value?.address, ...positionCollateralAddresses.value) || 'This position is not available in your region'
   if (hasQueryFailure.value) return 'Position data is incomplete'
   if (!collateralVault.value || isSecuritizeCollateralVault(collateralVault.value)) return 'Migration requires standard Euler collateral'
   // buildMigrationRoute only carries the primary collateral, so a multi-collateral
@@ -1286,21 +1286,18 @@ watch([isConnected, isSpyMode, address, activeLayerData, () => _route.params.num
               variant="warning"
               size="compact"
             />
-            <UiAlert
+            <GeoBlockAlert
               v-if="isPositionGeoBlocked || isPairFullyRestricted"
+              :vault-addresses="[borrowVault?.address, ...positionCollateralAddresses]"
               class="my-12"
-              title="Region restricted"
               description="This pair is not available in your region. You can still repay existing debt."
-              variant="warning"
-              size="compact"
             />
-            <UiAlert
+            <GeoBlockAlert
               v-if="!isPositionGeoBlocked && !isPairFullyRestricted && (isBorrowRestricted || isMultiplyRestricted)"
+              :vault-addresses="[borrowVault?.address, ...positionCollateralAddresses]"
               class="my-12"
               title="Asset restricted"
               description="Some operations on this pair are restricted in your region. Supply, withdraw, and repay remain available."
-              variant="warning"
-              size="compact"
             />
             <div
               class="flex justify-between gap-8 mt-4"
