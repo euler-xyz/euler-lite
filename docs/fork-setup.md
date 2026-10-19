@@ -1,6 +1,6 @@
-# Fork setup: your own V3 and labels
+# Fork setup: your own data sources
 
-Lite supports an operator-owned V3 backend, operator-owned static labels, or static labels with V3 disabled. Label policy and quantitative data are separate choices.
+Lite supports an operator-owned V3 backend, operator-owned static labels, or static labels with V3 disabled. Label policy, quantitative data and subgraph discovery are separate choices. Direct subgraph URLs work without a catalog; a custom catalog is optional.
 
 **The current Euler deployment needs no environment changes.** Keep its existing V3, labels and chain settings. `DISABLE_V3` defaults to `false`, and `LABELS_IMAGE_ORIGINS` can remain unset or blank. Neither setting needs to be added to the current deployment.
 
@@ -37,8 +37,7 @@ Use Node 24, install the locked dependencies with `npm ci`, and copy `.env.examp
 NUXT_PUBLIC_APP_URL=http://localhost:3000
 # Required: one RPC URL for every enabled chain.
 RPC_URL_1=https://rpc.operator.example
-# Needed for indexer-backed account and vault-type discovery on this chain.
-SUBGRAPH_URL_1=https://subgraph.operator.example
+# Choose direct subgraph URLs or a custom catalog below.
 # Required for wallet connection; read-only browsing can omit it.
 NUXT_PUBLIC_APP_KIT_PROJECT_ID=your-reown-project-id
 ```
@@ -48,6 +47,56 @@ Configure an RPC for every chain you serve. A chain must also be supported by th
 Lite admits deployments per chain before constructing browser SDK providers. If a usable manifest contains a missing or incomplete chain deployment, that chain is excluded while valid chains remain available. A present but invalid row can retain its cached addresses only within the bounded stale window; a removed row is excluded. Set the manifest's `viemName` when multiple network definitions share a chain ID. Browser and server SDKs use that selection, and both use the configured ABI source.
 
 Run `npm run dev` for local development. For a deployment, run `npm run build`, then `node .output/server/index.mjs` with the environment supplied to the server. Restart the server after changing these settings. Lite requires its Nitro server for the internal proxies and runtime configuration; serving only the generated HTML is not the deployment described here.
+
+## Your own subgraphs
+
+Lite's browser reads use `/api/internal/proxy/subgraph/{chainId}`. Server SDK reads use the same source resolver directly. Both support explicit per-chain URLs; a catalog is optional metadata for discovering those URLs, not a requirement for running your fork.
+
+Resolution follows this order for each chain:
+
+1. `SUBGRAPH_DISABLED_<chainId>=true` disables subgraph reads, including explicitly configured URLs.
+2. A nonempty `SUBGRAPH_URL_<chainId>` selects that endpoint.
+3. Otherwise, a nonempty `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` selects that endpoint. Despite its prefix, this compatibility variable is read only on the server.
+4. Otherwise, a nonempty `SUBGRAPH_CATALOG_URL` selects the chain's stable `euler-simple` record, unless `SUBGRAPH_CATALOG_DISABLED=true`.
+5. Without a catalog URL or either explicit disable, the **server SDK** can use the published SDK's bundled Euler endpoint. The **browser proxy** instead reports a missing source.
+
+**`SUBGRAPH_CATALOG_DISABLED=true` prevents both catalog resolution and bundled server SDK subgraph fallback, while retaining explicit URLs.** Leaving `SUBGRAPH_CATALOG_URL` blank alone does not prevent that server fallback. Empty URL variables mean unset; a missing, retired, invalid or unavailable opted-in catalog entry does not fall back to a bundled endpoint. The resolver can reuse a last-good catalog snapshot for up to five minutes during refresh failures; see [Catalog cache and query checks](./sdk-integration.md#subgraph-catalog-resolution).
+
+### Direct URLs without Euler subgraph fallback
+
+In your copied `.env` and any deployment environment, first remove **all** copied `SUBGRAPH_URL_*` and `NUXT_PUBLIC_SUBGRAPH_URI_*` assignments pointing to Euler. The shipped `.env.example` contains explicit Euler URLs, and disabling the catalog does not disable those explicit URLs. Add only your intended endpoints:
+
+```dotenv
+# Direct-only subgraph resolution; no catalog or bundled server SDK fallback.
+SUBGRAPH_CATALOG_URL=
+SUBGRAPH_CATALOG_DISABLED=true
+# Repeat for each chain that needs indexer-backed discovery.
+SUBGRAPH_URL_1=https://subgraph.operator.example/mainnet/query
+NUXT_PUBLIC_SUBGRAPH_URI_1=
+# Leave unset/false for chains with an endpoint; true overrides the URL above.
+SUBGRAPH_DISABLED_1=false
+```
+
+Replace the placeholder URL with your compatible subgraph. An unconfigured chain's subgraph reads fail explicitly rather than reaching a bundled Euler endpoint. This does not disable the chain's RPC or V3 reads. If you intentionally disable subgraph discovery on one chain, set `SUBGRAPH_DISABLED_<chainId>=true`; account and vault-type flows that require discovery will be unavailable.
+
+### Custom catalog instead of per-chain URLs
+
+Remove the copied Euler URL assignments as described above, then select your catalog:
+
+```dotenv
+SUBGRAPH_CATALOG_URL=https://config.operator.example/subgraphs/catalog.json
+SUBGRAPH_CATALOG_DISABLED=false
+# Unset both aliases for every chain whose endpoint should come from the catalog.
+SUBGRAPH_URL_1=
+NUXT_PUBLIC_SUBGRAPH_URI_1=
+SUBGRAPH_DISABLED_1=false
+```
+
+The catalog must follow [the v1 contract and validation rules](./sdk-integration.md#subgraph-catalog-resolution), contain your intended endpoints, and advertise both `account-vault-discovery` and `vault-factory-lookup`. Merely hosting a catalog yourself does not make its listed endpoints operator-owned. Public catalog entries use HTTPS without URL credentials, query strings or fragments; explicit operator URL overrides follow the separate trusted configuration path. No official catalog is fetched implicitly.
+
+To pin one chain while using the catalog for others, set its `SUBGRAPH_URL_<chainId>` to your endpoint. That pin wins even if the catalog retires the corresponding entry. Use the per-chain disable when you need to suppress a pin as well. A successful retirement of a catalog-selected chain stops that source without resurrecting a bundled endpoint.
+
+These settings isolate **subgraph** resolution only. Configure [your V3](#your-own-v3), or [static labels without V3](#static-labels-without-v3), and review [other external services](#other-external-services) for RPC fallbacks, labels, deployment/ABI sources, rewards and other SDK defaults. `DISABLE_V3` does not disable subgraphs; subgraph controls do not disable V3. Catalog membership does not enable RPC chains or change `ONCHAIN_SDK_CHAINS` or chain lifecycle policy. Restart Lite after changing the environment.
 
 ## Your own V3
 
@@ -154,24 +203,30 @@ Lite replaces the SDK's labels service so its UI, API and SDK cannot silently us
 | Concern | Lite deployment | Standalone SDK |
 |---|---|---|
 | V3 backend | `V3_API_URL` and aliases above | `config.v3ApiUrl` or `EULER_SDK_V3_API_URL` |
-| Static labels | `LABELS_SOURCE=static` and `STATIC_LABELS_BASE_URL` | `config.eulerLabelsBaseUrl` or `EULER_SDK_EULER_LABELS_BASE_URL`; individual file/URL overrides are also available |
+| Static labels | `LABELS_SOURCE=static` and `STATIC_LABELS_BASE_URL` | Supply an application-owned `IEulerLabelsService` through `servicesOverrides.eulerLabelsService`; the application owns file loading and validation |
 | Chain deployments | `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` | `config.deploymentsUrl` or `EULER_SDK_DEPLOYMENTS_URL` |
 | V3 opt-out | `DISABLE_V3` covers Lite routes and its SDK utilities | `config.disableV3` controls SDK adapters; configure optional pricing, token-list and intrinsic-APY services separately |
 
-A standalone SDK using your V3 for quantitative data and your static labels can be constructed with:
+The following standalone SDK example selects V3, labels and deployment sources only; it does not isolate subgraph or other SDK defaults. Lite's `SUBGRAPH_*` controls belong to Lite, so consult the configuration documentation for your installed SDK version when configuring subgraphs directly.
+
+A standalone SDK using your V3 for quantitative data and an application-owned labels service can be constructed with:
 
 ```ts
-const sdk = await buildEulerSDK({
-  config: {
-    rpcUrls: { 1: 'https://rpc.operator.example' },
-    v3ApiUrl: 'https://v3.operator.example',
-    eulerLabelsBaseUrl: 'https://labels.operator.example',
-    deploymentsUrl: 'https://config.operator.example/EulerChains.json',
-  },
-})
+import { buildEulerSDK, type IEulerLabelsService } from '@eulerxyz/euler-v2-sdk'
+
+export function createSdk(eulerLabelsService: IEulerLabelsService) {
+  return buildEulerSDK({
+    config: {
+      rpcUrls: { 1: 'https://rpc.operator.example' },
+      v3ApiUrl: 'https://v3.operator.example',
+      deploymentsUrl: 'https://config.operator.example/EulerChains.json',
+    },
+    servicesOverrides: { eulerLabelsService },
+  })
+}
 ```
 
-Import `buildEulerSDK` from `@eulerxyz/euler-v2-sdk`. SDK file adapters and service overrides have their own contracts; Lite's validation, atomic checkpoints and V3 opt-out guards belong to Lite. Consult the SDK's configuration documentation when using it independently.
+Pass your implementation of `IEulerLabelsService`; this example does not implement a static-file loader. The service must satisfy the installed SDK's labels contract, including data fetching, logo resolution and label population. See the [SDK labels documentation](https://github.com/euler-xyz/euler-sdks/blob/main/packages/euler-v2-sdk/docs/labels.md) for custom service guidance. Lite's static-file loading, validation, atomic checkpoints and V3 opt-out guards belong to Lite.
 
 ## Other external services
 
@@ -180,7 +235,8 @@ Owning V3 and labels does not automatically replace these sources:
 | Source | How to configure it |
 |---|---|
 | Chain manifest and runtime ABIs | Set `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` and `NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL` to your files. Otherwise Lite uses the selected branch of Euler's interfaces repository. |
-| RPC and subgraphs | Set `RPC_URL_<chainId>` and `SUBGRAPH_URL_<chainId>`. Wallet transports can also use the network's public RPC fallback. |
+| RPC | Set `RPC_URL_<chainId>`. Wallet transports can also use the network's public RPC fallback. |
+| Subgraphs | Choose [direct URLs or an optional custom catalog](#your-own-subgraphs). Use the explicit controls above to prevent bundled subgraph fallback. |
 | Swap quotes | Configure `SWAP_API_URL` for your compatible swap service. See the SDK integration docs for the swap flow. |
 | Extra token lists | `NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL` and `NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL` replace those sources; the latter is a directory serving `tokenlists-{chainId}.json`. Merkl reward tokens are another independent source. |
 | Rewards and external migrations | Review the reward-provider flags in `.env.example` and the Aave/Morpho integrations for the features you enable. These providers are separate from V3. |
@@ -196,6 +252,7 @@ If you retain Euler's chain manifest, its live status changes still apply to you
 3. Inspect the app's `/api/internal/public-labels?chainId=1` response in browser developer tools. Check your expected publication or authored content. `source=static` identifies authored files; `source=v3-metadata` identifies deprecated-chain metadata. Assessed V3 bundles may omit `source` or set it to `v3`. Do not treat a successful `/healthz` check as proof that labels are available.
 4. Check logos both in the UI and in `/api/public/metadata?chainId=1`. Set `LABELS_IMAGE_ORIGINS` only for hosted label images on additional CDN origins; Euler hosts, your configured V3 origin and static-source images require no extra setting.
 5. With `DISABLE_V3=true`, confirm V3 requests receive a local 503 and no V3 upstream request is made. Verify RPC browsing and token decimals, and expect V3-only sections to be unavailable.
-6. Restart once to check the runtime environment. If using disk checkpoints, mount `GEO_POLICY_CACHE_DIR` on persistent storage for recovery across container replacements.
+6. For direct-only subgraphs, verify all explicit URL assignments belong to your intended services and `SUBGRAPH_CATALOG_DISABLED=true`. For catalog mode, verify a configured chain resolves from your catalog and an omitted/retired chain fails rather than selecting a bundled endpoint. Observe upstream requests at your own service; the browser only sees Lite's proxy.
+7. Restart once to check the runtime environment. If using disk checkpoints, mount `GEO_POLICY_CACHE_DIR` on persistent storage for recovery across container replacements.
 
 Labels configuration failures return HTTP 503 with `data.code=LABELS_CONFIGURATION_ERROR` and a setting-specific `data.message`. The UI tells the user to contact the app operator. Fix the configuration and restart; repeated retries cannot fix an invalid setting. An ordinary upstream outage retains the retry message and follows the source's cache policy.
