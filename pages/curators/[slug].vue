@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { CuratorNetworkIndex, CuratorProfileData } from '~/utils/curator-profile'
 import { autoLink } from '~/utils/autoLink'
-import { getEulerLabelEntityLogo, type EulerLabelEntity } from '~/entities/euler/labels'
+import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { getChainById } from '~/entities/chainRegistry'
 import { getChainLogoUrl } from '~/utils/chain-logo'
 import {
@@ -14,9 +14,9 @@ defineOptions({
 
 const route = useRoute()
 const entityId = computed(() => route.params.slug as string)
-const { chainId } = useEulerAddresses()
+const { chainId, allowedChainIds } = useEulerAddresses()
 const {
-  entity: chainEntity,
+  fallbackEntity,
   managedMarkets,
   earnVaults,
   isUnavailable,
@@ -33,25 +33,12 @@ const {
   { server: false, timeout: 20_000 },
 )
 
-// Static labels remain chain-scoped; retain their last profile during a network switch.
-const staticProfile = shallowRef<{ id: string, entity: EulerLabelEntity } | null>(null)
-watch([entityId, chainEntity], ([id, current]) => {
-  if (current) {
-    staticProfile.value = { id, entity: current }
-  }
-  else if (staticProfile.value?.id !== id) {
-    staticProfile.value = null
-  }
-}, { immediate: true, flush: 'sync' })
 const profileEntity = computed(() => {
   if (profileData.value?.source === 'v3') {
     return profileData.value.entity?.id === entityId.value ? profileData.value.entity : null
   }
-  if (profileData.value?.source === 'static') {
-    return staticProfile.value?.id === entityId.value ? staticProfile.value.entity : null
-  }
-  if (profileError.value) {
-    return staticProfile.value?.id === entityId.value ? staticProfile.value.entity : null
+  if (profileData.value?.source === 'static' || profileError.value) {
+    return fallbackEntity.value
   }
   return null
 })
@@ -73,6 +60,7 @@ const {
 
 const networkRows = computed(() =>
   (networkIndex.value?.networks ?? [])
+    .filter(network => allowedChainIds.value.includes(network.chainId))
     .map(network => ({
       ...network,
       name: getChainById(network.chainId)?.name ?? `Chain ${network.chainId}`,

@@ -12,6 +12,8 @@ import { createPublicLabelsRequest } from './public-labels-source'
 import { readResolvedV3ApiUrl } from '~/utils/api-url-env'
 import { getEnabledChainIds } from '~/utils/chain-env'
 import { getKnownChainIds } from '~/entities/chainRegistry'
+import { peekEulerChains } from '~/server/api/internal/euler-chains.get'
+import { applyChainRegistry, readChainRegistry } from '~/utils/chain-status'
 import type { CuratorNetworkIndex, CuratorNetworkSummary } from '~/utils/curator-profile'
 
 const cache = createTtlCache<CuratorNetworkIndex>({ ttlMs: 5 * 60_000, maxEntries: 128 })
@@ -51,7 +53,12 @@ export const getCuratorNetworkIndex = async (entityId: string): Promise<CuratorN
   if (readLabelsSource() === 'static') return { source: 'static', networks: [] }
 
   const selection = readV3LabelsSelection()
-  const enabledChainIds = getKnownChainIds(getEnabledChainIds())
+  const { enabledChainIds } = applyChainRegistry({
+    enabledChainIds: getKnownChainIds(getEnabledChainIds()),
+    deprecatedChainIds: [],
+    onchainSdkChainIds: [],
+    eVaultFetchChunkChainIds: [],
+  }, readChainRegistry(peekEulerChains()), process.env.DOPPLER_ENVIRONMENT === 'prd')
   const key = JSON.stringify([
     readResolvedV3ApiUrl(), selection.labelSet, selection.version, entityId, enabledChainIds,
   ])

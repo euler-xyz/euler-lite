@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ref } from 'vue'
+import { effectScope, reactive, ref, type EffectScope } from 'vue'
 import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import type { EulerLabelEntity, EulerLabelProduct } from '~/entities/euler/labels'
 import type { MarketGroup } from '~/entities/lend-discovery'
@@ -48,8 +48,16 @@ const market = (id: string): MarketGroup => ({
   metrics: { totalTVL: 100 },
 }) as MarketGroup
 
+const scopes: EffectScope[] = []
+const createProfile = (entityId = ref('k3')) => {
+  const scope = effectScope()
+  scopes.push(scope)
+  return scope.run(() => useEulerCuratorProfile(entityId))!
+}
+
 describe('useEulerCuratorProfile', () => {
   afterEach(() => {
+    scopes.splice(0).forEach(scope => scope.stop())
     vi.unstubAllGlobals()
     state.source = 'v3'
     state.managingEntityByVault = {}
@@ -96,7 +104,7 @@ describe('useEulerCuratorProfile', () => {
       isReady: ref(true), isResolvingTVL: ref(false),
     }))
 
-    const profile = useEulerCuratorProfile(ref('k3'))
+    const profile = createProfile()
     expect(profile.managedMarkets.value.map(group => group.id)).toEqual(['owned'])
     expect(profile.earnVaults.value.map(vault => vault.address)).toEqual([good.address])
 
@@ -113,21 +121,55 @@ describe('useEulerCuratorProfile', () => {
     const labelsReady = ref(true)
     const loadError = ref<string | undefined>()
     const retryLabels = vi.fn()
+    const entities = reactive<Record<string, EulerLabelEntity>>({ k3 })
     vi.stubGlobal('useEulerLabels', () => ({
-      entities: { k3 }, products: {}, isReady: labelsReady, loadError, retryLabels,
+      entities, products: {}, isReady: labelsReady, loadError, retryLabels,
     }))
     vi.stubGlobal('useVaults', () => ({ isEarnUpdating: ref(false), isEarnVaultOwnerVerified: () => true }))
     vi.stubGlobal('useVaultRegistry', () => ({ getEarnVaults: () => [good], isVerifiedVault: () => true }))
     vi.stubGlobal('useShowAllLabelEntries', () => ref(false))
     vi.stubGlobal('useMarketGroups', () => ({ marketGroups: ref([]), isReady: ref(true), isResolvingTVL: ref(false) }))
 
-    const profile = useEulerCuratorProfile(ref('k3'))
+    const profile = createProfile()
     expect(profile.earnVaults.value.map(vault => vault.address)).toEqual([good.address])
+    expect(profile.fallbackEntity.value?.name).toBe('k3')
     labelsReady.value = false
+    delete entities.k3
+    expect(profile.isLoading.value).toBe(true)
+    expect(profile.fallbackEntity.value?.name).toBe('k3')
     loadError.value = 'Unable to load labels'
     expect(profile.isUnavailable.value).toBe(true)
     expect(profile.isLoading.value).toBe(false)
+    expect(profile.fallbackEntity.value?.name).toBe('k3')
     void profile.retryLabels()
     expect(retryLabels).toHaveBeenCalledOnce()
+
+    loadError.value = undefined
+    labelsReady.value = true
+    expect(profile.fallbackEntity.value).toBeNull()
+  })
+
+  it('replaces a retained profile with current labels and clears it when the entity ID changes', () => {
+    const entities = reactive<Record<string, EulerLabelEntity>>({ k3: entity('k3') })
+    const labelsReady = ref(true)
+    vi.stubGlobal('useEulerLabels', () => ({
+      entities, products: {}, isReady: labelsReady, loadError: ref(undefined), retryLabels: vi.fn(),
+    }))
+    vi.stubGlobal('useVaults', () => ({ isEarnUpdating: ref(false), isEarnVaultOwnerVerified: () => true }))
+    vi.stubGlobal('useVaultRegistry', () => ({ getEarnVaults: () => [], isVerifiedVault: () => true }))
+    vi.stubGlobal('useShowAllLabelEntries', () => ref(false))
+    vi.stubGlobal('useMarketGroups', () => ({ marketGroups: ref([]), isReady: ref(true), isResolvingTVL: ref(false) }))
+
+    const entityId = ref('k3')
+    const profile = createProfile(entityId)
+    labelsReady.value = false
+    delete entities.k3
+    entities.k3 = { ...entity('k3'), name: 'Current chain profile' }
+    labelsReady.value = true
+    expect(profile.fallbackEntity.value?.name).toBe('Current chain profile')
+
+    labelsReady.value = false
+    entityId.value = 'other'
+    expect(profile.fallbackEntity.value).toBeNull()
   })
 })

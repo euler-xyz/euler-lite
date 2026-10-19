@@ -1,6 +1,6 @@
 import type { EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import type { MarketGroup } from '~/entities/lend-discovery'
-import type { EulerLabelProduct } from '~/entities/euler/labels'
+import type { EulerLabelEntity, EulerLabelProduct } from '~/entities/euler/labels'
 import { getEntitiesByEarnVault, isEarnVaultNotExplorable, isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelsSourceData } from '~/composables/useEulerLabels'
 import { getEulerLabelEntityId, isEulerLabelProductManagedBy } from '~/utils/curator-profile'
@@ -22,6 +22,11 @@ export const useEulerCuratorProfile = (entityId: Ref<string>) => {
   } = useMarketGroups()
 
   const entity = computed(() => entities[entityId.value] ?? null)
+  const fallbackEntity = shallowRef<EulerLabelEntity | null>(null)
+  // Retain the profile while chain labels load or fail; a successful absence clears it.
+  watch([entityId, entity, labelsReady], ([id, current, ready], [previousId]) => {
+    if (current || ready || id !== previousId) fallbackEntity.value = current
+  }, { immediate: true, flush: 'sync' })
 
   const productEntries = computed<CuratorProductEntry[]>(() =>
     Object.entries(products)
@@ -70,6 +75,7 @@ export const useEulerCuratorProfile = (entityId: Ref<string>) => {
 
   return {
     entity,
+    fallbackEntity,
     productEntries,
     managedMarkets,
     earnVaults,
