@@ -108,7 +108,7 @@ allVaultsPriced / portfolioPricingGaps
 
 ### Vault rows
 
-`VaultItem`, `VaultEarnItem`, and `VaultBorrowItem` track an `ExposureValueState` of `loading` / `ready` / `unavailable`. `unavailable` shows `VaultNoUsdPriceHint` ("This asset has no USD price right now, so amounts show in tokens.") next to the metric label. Do not swap that hint for a `$0`.
+`VaultItem`, `VaultEarnItem`, and `VaultBorrowItem` fall back to token amounts when the USD price for the displayed supply or liquidity metric is unavailable. They show `VaultNoUsdPriceHint` ("This asset has no USD price right now, so amounts show in tokens.") next to the affected metric label. Do not swap that hint for a `$0`.
 
 ### Market groups
 

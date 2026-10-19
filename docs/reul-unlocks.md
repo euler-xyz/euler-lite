@@ -53,7 +53,7 @@ Two clocks:
 | Unlock button + helper copy | Wall clock via `useNow({ scheduler: cb => useIntervalFn(cb, POLL_INTERVAL_60S_MS) })` | Disables Unlock and shows "Rewards received today are still being added…" until the UTC close, formatted `MMMM dd, HH:mm` |
 | Review click + plan build | Latest block timestamp from `sdk.providerService.getProvider(chainId).getBlock()` | Click aborts with `Early unlock for this rEUL lock opens … UTC`. `buildUnlockREULPlan` sets `allowRemainderLoss: !isREULLockOpen(...)` |
 
-The contract takes **no maximum loss**. While the lock can still grow, `allowRemainderLoss` is `false` so any extra remainder reverts instead of burning more than was reviewed. After the UTC day closes, the SDK plan sets `allowRemainderLoss: true`; Lite still pins `remainderLossMaximum` to the quoted `amountToBeBurned` and rejects an rEUL intent that omits that bound.
+The contract takes **no maximum-loss amount**. While the lock can still grow, `allowRemainderLoss` is `false`, so **any remainder** reverts. After the UTC day closes, the SDK plan sets `allowRemainderLoss: true`. The SDK builder receives the lock timestamp and that boolean, not the captured `remainderLossMaximum`; it does not enforce a numerical burn cap. Safety relies on the closed-day gate and the quote-freshness assumptions below.
 
 Chain time is read **before** the quote refresh so the quoted lock can no longer receive deliveries. Those two reads can hit different RPC nodes. In the first seconds after UTC midnight a lagging node can still quote the lock before its last delivery. Closing that gap would need block-pinned reads outside the SDK — known and accepted.
 
@@ -76,7 +76,7 @@ A strictly **better** quote (higher unlockable, lower burn, same amount) is acce
 
 ## Review and burn warning
 
-The intent pins `lockTimestamps`, `lockAmounts`, and `remainderLossMaximum: amountToBeBurned`, plus a `remainder-loss` constraint on the rEUL token. Validators reject an rEUL intent that does not bound remainder loss.
+The intent captures `lockTimestamps`, `lockAmounts`, and `remainderLossMaximum: amountToBeBurned`, plus a `remainder-loss` constraint on the rEUL token with `maximumLoss: amountToBeBurned`. Validators require the `remainder-loss` constraint to be present.
 
 `hasBurn` is `amountToBeBurned > 0n` on that raw bigint. Do **not** gate the warning on formatted days remaining or on a display amount that rounds to zero: a 1-wei burn with `daysUntilMaturity === 0` still shows **rEUL burn mechanics**.
 
