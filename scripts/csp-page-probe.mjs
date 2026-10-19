@@ -9,19 +9,25 @@
  * Usage:
  *   node scripts/csp-page-probe.mjs --url https://dev-build-euler-lite-pr-909.up.railway.app/ [--wait 10000] [--channel chrome]
  */
+import { parseArgs } from 'node:util'
 import { chromium } from 'playwright'
 
-const args = process.argv.slice(2)
-const flag = (name, def) => {
-  const i = args.indexOf(`--${name}`)
-  if (i < 0) return def
-  const v = args[i + 1]
-  return v?.startsWith('--') ? def : (v ?? def)
-}
+const { values } = parseArgs({
+  options: {
+    url: { type: 'string' },
+    wait: { type: 'string', default: '10000' },
+    channel: { type: 'string' },
+  },
+})
+const URL_ARG = values.url
+const WAIT_MS = Number(values.wait)
+const CHANNEL = values.channel
 
-const URL_ARG = flag('url')
-const WAIT_MS = Number(flag('wait', '10000'))
-const CHANNEL = flag('channel')
+// Node timers overflow above this limit and would silently skip the observation window.
+if (!Number.isInteger(WAIT_MS) || WAIT_MS <= 0 || WAIT_MS > 2_147_483_647) {
+  console.error('--wait must be an integer between 1 and 2147483647 milliseconds')
+  process.exit(1)
+}
 
 if (!URL_ARG) {
   console.error('Usage: --url <url> [--wait ms] [--channel chrome]')
