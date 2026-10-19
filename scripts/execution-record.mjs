@@ -15,6 +15,7 @@ import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { cspFailures, installCspMonitor } from './lib/csp-monitor.mjs'
 import {
   createWalletClient,
   encodeFunctionData,
@@ -165,6 +166,7 @@ async function main() {
           }
         : {}),
     })
+    const securityMonitor = args['assert-csp'] ? await installCspMonitor(context) : null
     const activeScenarioState = {
       scenario: null,
       successfulWalletTransactions: 0,
@@ -196,6 +198,7 @@ async function main() {
       activeScenarioState.pendingWalletTransactions = 0
       activeScenarioState.lastWalletTransactionAt = 0
       console.log(`[execution-record] ▶ ${scenario.id} — ${scenario.label ?? ''}`)
+      const securityCheckpoint = securityMonitor?.checkpoint()
       const page = await context.newPage()
       attachNetworkRecorder(page, run.network)
       attachConsoleRecorder(page, run.console, scenario.id)
@@ -223,6 +226,16 @@ async function main() {
           lastActivityAt: activeScenarioState.lastWalletTransactionAt,
         }),
       })
+
+      if (securityMonitor) {
+        scenarioResult.security = await securityMonitor.snapshot(securityCheckpoint)
+        const failures = cspFailures(scenarioResult.security, appUrl)
+        scenarioResult.security.failures = failures
+        if (failures.length) {
+          scenarioResult.status = 'failed'
+          scenarioResult.error ??= { name: 'CspSmokeError', message: failures.join('; ') }
+        }
+      }
 
       if (!args['keep-open']) {
         await closePageAndAttachVideo({

@@ -385,6 +385,13 @@ server/
 | `npm run typecheck`   | Type-check the project            |
 | `npm run postinstall` | Prepare Nuxt (runs automatically) |
 
+### CSP smoke testing
+
+Use `npm run csp:controls -- --url <production-build URL>` for browser-enforced
+security controls and `npm run csp:probe -- --url <page URL>` to observe a real
+page. Wallet readiness, fork execution, and deployment checks are described in
+[docs/csp-smoke-testing.md](docs/csp-smoke-testing.md).
+
 ## Configuration Checklist
 
 Before deploying:

@@ -103,3 +103,25 @@ at the recorder's separate fork-only transaction gas limit.
 
 `execution:suite` writes a top-level `report.html`, `report.md`, and
 `summary.json` in addition to each group's artifact directory.
+
+## CSP smoke checks
+
+Run the production build (`npm run build` then `node .output/server/index.mjs`)
+with the fork configuration above and add `--assert-csp` to `execution:record`
+or `execution:suite`. Each scenario then records `security` in `run.json` and
+fails if the app document lacks enforced CSP, any frame or popup reports a CSP
+violation, or Coinbase `ClientAnalytics` appears. Transaction success and UI
+assertions still apply independently. Request failures and page errors are
+recorded for diagnosis; an aborted navigation is not itself a CSP violation.
+
+Use an explicit local `NUXT_PUBLIC_APP_URL` and matching `CORS_ALLOWED_ORIGINS`
+when running on a port outside the development defaults. Historical fork
+fixtures require compatible deployment addresses and labels. A lens address
+from a current registry may have no code at an old fork block. Check contract
+code before running, and use matching metadata or a compatible fork block.
+The fixture signer must also match its expected account type: a public test
+address can have EIP-7702 delegated code on the fork, which changes Permit2
+signature verification. Use a fresh test signer or restore its expected EOA
+state only on the disposable fork. Unverified vaults need explicit scenario
+actions for the risk prompt. See [CSP smoke testing](../../docs/csp-smoke-testing.md)
+for browser controls and deployed wallet checks.
