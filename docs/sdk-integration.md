@@ -336,3 +336,61 @@ How fresh that snapshot actually is depends on the path taken:
 | A new plan-critical query | Same row, add a shorter `formStaleTimeMs` (`0` to bypass the plan-time cache entirely) and/or `invalidateAfterTx: true`. |
 | A new app-side proxy that SDK calls through | Add a same-origin proxy under `server/api/internal/proxy/...`, point the corresponding SDK config field at it in `buildSdkStaticConfig`. Build it with `createProviderProxy` — the pipeline, rules and checklist are in [Server-Side Caching → Adding a provider](./server-side-caching.md#adding-a-provider). |
 | A new planner | Add the wrapper in `composables/useEulerTx.ts` using `freshPlanContext()` to get a fresh SDK + `Account` |
+
+
+## Subgraph catalog resolution
+
+`SUBGRAPH_CATALOG_URL` opts into a server-only v1 catalog. Leave it empty for
+URL-only proxy configuration. The future official publication target is
+`https://raw.githubusercontent.com/euler-xyz/euler-subgraph/catalog/v1/catalog.json`;
+configure it only after an operator publishes it. The repository fixture is not
+a live endpoint or an assertion of service health.
+
+Resolution is per chain: `SUBGRAPH_DISABLED_<chainId>=true` disables subgraph
+reads; otherwise `SUBGRAPH_URL_<chainId>`, then `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`,
+then the catalog default wins. Empty values mean unset. `SUBGRAPH_CATALOG_DISABLED=true`
+disables catalog defaults while retaining explicit URLs. Private HTTP endpoints
+and authenticated/custom URL overrides remain operator-controlled; catalog rows
+require credential-free HTTPS URLs without query strings/fragments. Redirects are
+rejected. The browser only receives same-origin proxy URLs and an opaque source
+identity, never configured upstream credentials.
+
+The resolver selects stable `euler-simple` records with both
+`account-vault-discovery` and `vault-factory-lookup`. Candidate/other-family rows
+are ignored. Duplicate or invalid selected identities are quarantined per chain.
+Retirement is authoritative; no bundled endpoint is resurrected. Missing sources
+return HTTP 404; disabled, retired, malformed, unsupported-capability, or unavailable
+catalog sources return HTTP 503 with a reason. Upstream and deployment-identity
+failures return HTTP 502. These failures are not successful empty discovery.
+
+Catalog metadata is fresh for 60 seconds. A failed refresh can reuse the last
+successful snapshot for at most five minutes from that success; retries are
+single-flight with a ten-second failure backoff. Failures never extend that age.
+A successful retirement replaces active metadata immediately. Query responses
+remain `no-store` and are only deduplicated while in flight.
+
+Browser SDK subgraph queries use checked transport through the existing proxy.
+Server snapshot/labels SDK subgraph queries use the same resolver directly,
+without self-HTTP. Before catalog opt-in, server SDK reads without explicit URLs
+retain the published SDK's bundled defaults; either explicit disable prevents this
+compatibility fallback. An opted-in catalog's missing/retired/invalid records never
+fall back. The browser proxy retains its missing-URL 404 behavior. V3 remains the configured primary where applicable. Both
+paths validate HTTP/GraphQL payloads and the actual response's `_meta.deployment`
+against a catalog deployment ID. Lite retains the published SDK dependency and
+provides these checks at its `buildQuery` boundary for the two subgraph leaf
+queries (`queryAccountVaults`, `queryVaultFactories`). Other queries retain their
+existing caching policy. The checked leaf queries do not cache results, so source
+switches and retirement cannot reuse old discovery/factory responses.
+
+After a confirmed transaction, the browser retains a minimum indexed block per
+proxy URL/chain for its session. The immediate refresh and subsequent discovery
+reads validate `_meta.block.number` in the same response as the data. If catalog
+selection changes after catch-up polling, a lagging replacement is retried within
+the catch-up timeout and then fails explicitly. Post-catch-up cache generation
+advancement still refreshes RPC/V3 values; portfolio generation guards discard
+preempted reads. Successful empty arrays are accepted only after response checks.
+
+Catalog membership does not enable RPC chains, change Interfaces lifecycle or
+production staging filtering, or replace `ONCHAIN_SDK_CHAINS`, V3, custom/static
+labels, ABI overrides, or deployment services. Publication/deployment remains a
+separate operator action.

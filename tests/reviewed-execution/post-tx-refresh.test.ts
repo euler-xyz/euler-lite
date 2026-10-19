@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   buildSubgraphProxyApiPath: vi.fn((chainId: number) => `/api/internal/proxy/subgraph/${chainId}`),
   invalidateSdkQueries: vi.fn(async () => {}),
   logWarn: vi.fn(),
+  requireSubgraphBlock: vi.fn(),
   waitForSubgraphBlock: vi.fn(async () => true),
 }))
 
@@ -18,6 +19,7 @@ vi.mock('~/utils/sdk-query-cache', () => ({
   advanceSdkQueryGeneration: mocks.advanceSdkQueryGeneration,
   invalidateSdkQueries: mocks.invalidateSdkQueries,
 }))
+vi.mock('~/utils/subgraph-queries', () => ({ requireSubgraphBlock: mocks.requireSubgraphBlock }))
 vi.mock('~/utils/subgraph', () => ({ waitForSubgraphBlock: mocks.waitForSubgraphBlock }))
 
 describe('refreshPortfolioAfterReviewedSubmission', () => {
@@ -35,6 +37,8 @@ describe('refreshPortfolioAfterReviewedSubmission', () => {
       triggerPortfolioRefresh,
     })
 
+    expect(mocks.requireSubgraphBlock).toHaveBeenCalledWith('/api/internal/proxy/subgraph/1', 123n)
+    expect(mocks.requireSubgraphBlock.mock.invocationCallOrder[0]).toBeLessThan(triggerPortfolioRefresh.mock.invocationCallOrder[0]!)
     expect(mocks.waitForSubgraphBlock).toHaveBeenCalledWith('/api/internal/proxy/subgraph/1', 123n)
     expect(mocks.invalidateSdkQueries).toHaveBeenCalledOnce()
     expect(mocks.invalidateSdkQueries).toHaveBeenCalledWith([...INVALIDATE_AFTER_TX])

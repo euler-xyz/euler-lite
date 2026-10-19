@@ -1,3 +1,4 @@
+import { requireSubgraphBlock } from '~/utils/subgraph-queries'
 import { buildSubgraphProxyApiPath } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
 import { advanceSdkQueryGeneration, invalidateSdkQueries } from '~/utils/sdk-query-cache'
@@ -27,6 +28,7 @@ export const refreshPortfolioAfterReviewedSubmission = async ({
   confirmedBlockNumber?: bigint
   triggerPortfolioRefresh: () => void
 }) => {
+  if (confirmedBlockNumber !== undefined) requireSubgraphBlock(buildSubgraphProxyApiPath(chainId), confirmedBlockNumber)
   triggerRefresh(triggerPortfolioRefresh)
   if (confirmedBlockNumber === undefined) return
 
