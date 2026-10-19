@@ -110,7 +110,7 @@ All listed endpoints use rate limiting. Local-TTL endpoints (everything in the t
 - **Global cycle (5 min)**: Euler Chains and runtime ABIs once, the cross-chain effective asset policy once, then each enabled non-deprecated chain's Public Labels bundle, effective product/Earn/asset policy, token list and, when `LIQUIDATION_BOT_API_URL` is set, liquidation bot coverage.
 - **Vaults cycle (1 min when V3 is configured, otherwise 5 min)**: `/api/internal/vaults` per chain, also serialized.
 
-Each warm task is a **direct function call** (`refreshX()`) that forces an upstream fetch and replaces the cached value before expiry. Concurrent refreshes join the same in-flight operation; request paths continue to use the previous fresh value or the bounded stale fallback. Warming runs in the background — Nitro's node-server preset does not await plugins before starting the HTTP listener, so users arriving in the first few seconds of a freshly booted instance may pay the cold-upstream latency.
+Each warm task is a **direct function call** (`refreshX()`) that forces an upstream fetch and replaces the cached value before expiry. Concurrent refreshes join the same in-flight operation; request paths continue to use the previous fresh value or the bounded stale fallback. Warming runs in the background — Nitro's node-server preset does not await plugins before starting the HTTP listener, so users arriving in the first few seconds of a freshly booted instance may pay the cold-upstream latency. The first per-chain labels/token-list and vaults cycles wait up to 10 s for the EulerChains manifest so registry `deprecated` status is applied; a failed read keeps the env list. See [Server-Side Caching → Boot behaviour](./server-side-caching.md#boot-behaviour).
 
 For the full setup — per-host proxies, vault snapshot pipeline, two-pass client hydration, V3-conditional cadence, and the bigint wire codec — see [Server-Side Caching](./server-side-caching.md).
 
@@ -123,7 +123,7 @@ The `/api/internal/token-list` endpoint aggregates four token sources, all fetch
 3. **Uniswap** (`NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL`) — baseline token list
 4. **Merkl** — reward tokens
 
-Priority for deduplication: Euler SDK token list > DefiLlama > Uniswap > Merkl. If any source fails, the endpoint still returns data from the remaining sources. The client consumes this via the `useTokenList` composable.
+Priority for deduplication: Euler SDK token list > DefiLlama > Uniswap > Merkl. If any source fails, the endpoint still returns data from the remaining sources. The client consumes this via the `useTokenList` composable. After merge, the handler reads `decimals()` on-chain with a 5 s deadline: tokens with missing or reverting `decimals()` are dropped, unread tokens keep list-source decimals and retry on the next build. See [Token List](./token-list.md).
 
 ### Pyth Proxy Endpoint Details
 
