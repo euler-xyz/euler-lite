@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import type {
   SecuritizeCollateralVault,
   EVault,
@@ -11,6 +12,8 @@ import { getOracleRouteStepKey, useOracleAdapterPrices } from '~/composables/use
 import { isOracleAdapterRouteStep } from '~/utils/oracle-route-steps'
 import { buildOracleAdapterViews, collectOracleRouteSteps, type OracleAdapterView } from '~/utils/oracle-adapter-views'
 import { OracleAdapterChecksModal } from '#components'
+import { oracleAdapterAnchor } from '~/utils/vault-assessment/presentation'
+import { registerOracleAdapterAnchors } from '~/composables/useOracleAdapterAnchors'
 
 const props = defineProps<{
   vault?: EVault
@@ -104,6 +107,27 @@ const routerRecognition = computed(() => {
 })
 
 const resolveSymbol = (address: string) => resolveTokenSymbol(address, knownSymbols.value)
+registerOracleAdapterAnchors(computed(() => oracleAssessmentsStatus.value === 'available'
+  ? adapterViews.value.map(adapter => oracleAdapterAnchor(adapter.oracle))
+  : []))
+const route = useRoute()
+const section = ref<{ setOpen: (open: boolean) => void, $el: HTMLElement } | null>(null)
+const revealTargetAdapter = async () => {
+  if (!import.meta.client) return
+  const id = route.hash.replace(/^#/, '')
+  if (!id.startsWith('oracle-adapter-') || !adapterViews.value.some(adapter => oracleAdapterAnchor(adapter.oracle) === id)) return
+  section.value?.setOpen(true)
+  await nextTick()
+  const target = section.value?.$el.querySelector<HTMLElement>(`[id="${id}"]`)
+  if (target?.getClientRects().length) target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+}
+watch([() => route.hash, () => adapterViews.value.length], () => {
+  void revealTargetAdapter()
+})
+/** After in-app navigation the adapters are already loaded, so the section must exist before the first reveal. */
+onMounted(() => {
+  void revealTargetAdapter()
+})
 
 const { copyToClipboard } = useClipboardCopy()
 
@@ -167,7 +191,9 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
 
 <template>
   <VaultOverviewAccordionSection
+    ref="section"
     title="Oracles"
+    icon="section-oracles"
     :default-open="props.defaultOpen ?? true"
     content-class="flex flex-col gap-24"
   >
@@ -279,6 +305,7 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
     >
       <div
         v-for="adapter in adapterViews"
+        :id="oracleAdapterAnchor(adapter.oracle)"
         :key="getOracleRouteStepKey(adapter)"
         class="w-full rounded-xl bg-surface p-16 flex flex-col gap-12 border border-line-subtle"
       >
@@ -436,7 +463,7 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
                 'text-warning-500': check.outcome !== OracleAdapterCheckOutcome.Fail || check.severity !== OracleAdapterCheckSeverity.High,
               }"
             />
-            <div>
+            <div class="min-w-0 break-words">
               <span class="text-content-primary font-medium">{{ formatOracleCheckTitle(check.id) }}: </span>
               <span class="text-content-secondary">{{ check.message }}</span>
             </div>

@@ -48,6 +48,7 @@ cp .env.example .env
 | Variable     | Default                       | Description                           |
 | ------------ | ----------------------------- | ------------------------------------- |
 | `V3_API_URL` | `https://v3.euler.finance`    | Euler V3 upstream used by the server `/api/internal/v3` proxy |
+| `DISABLE_V3` | `false` | Explicitly disables V3 adapters, proxying, image discovery and V3 utility reads. Requires static labels. Alias: `EULER_SDK_DISABLE_V3`. See [Fork setup](docs/fork-setup.md). |
 | `EULER_SDK_V3_API_KEY` | —                  | Optional server-side V3 API key forwarded by `/api/internal/v3` as `X-API-Key` |
 | `SWAP_API_URL` or `NUXT_PUBLIC_SWAP_API_URL` | —           | Euler swap API                        |
 | `PYTH_API_KEY` | — | Server-side API key sent to `https://hermes.pyth.network` as Bearer authentication by `/api/internal/pyth/updates` |
@@ -63,8 +64,8 @@ Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for 
 | `SERVER_VAULT_CACHE_SOURCE` | `fallback` | Server snapshot builder adapter chain: `fallback`, `onchain`, or `v3`. |
 | `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` | `fallback` | Browser "fast" SDK adapter chain: `fallback`, `onchain`, or `v3`. The plan-time SDK is always on-chain. |
 | `DISABLE_SERVER_VAULT_CACHE` | `false` | Set to `true` to disable `/api/internal/vaults` snapshots and let the browser fall through to the normal RPC pipeline. |
-| `DEPRECATED_CHAINS` | — | Comma-separated chain IDs shown collapsed in the chain selector and skipped by startup warm-cache cycles. A chain with status `deprecated` in `EulerChains.json` is treated the same way. |
-| `ONCHAIN_SDK_CHAINS` | — | Comma-separated chain IDs pinned to the onchain SDK adapter config for chain-aware browser reads and the server vault snapshot, bypassing V3. Independent of `DEPRECATED_CHAINS`; list a chain in both to deprecate it and route it onchain. |
+| `DEPRECATED_CHAINS` | — | Optional comma-separated deprecated-chain override. Enabled chains marked `deprecated` here or in `EulerChains.json` appear collapsed in the chain selector, skip warm-cache cycles, and use V3 metadata with on-chain labels verification. They must also be in `ONCHAIN_SDK_CHAINS`. |
+| `ONCHAIN_SDK_CHAINS` | — | Comma-separated chain IDs pinned to the onchain SDK adapter config for chain-aware browser reads and the server vault snapshot, bypassing V3. Independent of deprecated status; include every enabled chain using metadata-only labels verification. |
 | `EVAULT_FETCH_CHUNK_CHAINS` | — | Comma-separated chain IDs whose EVault list reads are split into small sequential SDK calls. Use for RPC/lens endpoints that fail under larger concurrent onchain EVault fetches. |
 | `EULER_SDK_EULER_INTERFACES_BRANCH` | `master` | Euler interfaces branch used for runtime ABIs and `EulerChains.json`. Explicit `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` and `NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL` overrides take precedence over the branch for their respective manifests. |
 
@@ -83,6 +84,11 @@ Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for 
 | `TENDERLY_ACCESS_KEY`, `TENDERLY_ACCOUNT_SLUG`, `TENDERLY_PROJECT_SLUG` | Optional Tenderly simulation configuration. |
 | `FUUL_API_URL` or `NUXT_PUBLIC_FUUL_API_URL` | Optional Fuul API upstream override. |
 | `INCENTRA_API_URL` or `NUXT_PUBLIC_INCENTRA_API_URL` | Optional Incentra/Brevis API upstream override. |
+| `LABELS_SOURCE` | `v3` (default) or `static`; selects the shared label snapshot producer. |
+| `LABELS_VAULT_TAG` | Optional exact, case-sensitive tag for discovery and new-target suggestions, e.g. `base` or `governance limited`. Blank disables tag filtering. |
+| `STATIC_LABELS_BASE_URL` | Required directory URL for static authoring files; unused by hosted V3 mode. |
+| `LABELS_IMAGE_ORIGINS` | Optional comma-separated HTTP(S) origins for hosted label images in the UI and public metadata, in addition to the configured custom V3 origin and Euler's image hosts. |
+| `LIQUIDATION_BOT_API_URL` | Optional default liquidation bot API with a `{chainId}` placeholder, e.g. `https://{chainId}-liquidations.euler.finance`. When set, the server reads each enabled chain's `/vault-filter` and borrowable vaults the bot does not cover get a "Not covered by default liquidation bot" badge in lists and portfolio rows and a notice on the vault overview. A chain whose bot has not answered since the server started, or whose last answer is more than 30 minutes old, counts as having no bot, so all its borrowable vaults get the badge. Unset disables the feature. HTTPS only (localhost HTTP allowed for dev). Server-only. |
 | `TURTLE_EARN_API_KEY` | **Required when `NUXT_PUBLIC_CONFIG_ENABLE_TURTLE` is on.** Server-only Turtle Earn API key sent as `X-API-Key` by `/api/internal/proxy/turtle` and by the server-side SDK's rewards adapters (`server/utils/sdk-server.ts`), which call Turtle directly for stream discovery. Turtle rejects unauthenticated requests with 401; without this variable the proxy answers 503 and never calls upstream, and the server SDK disables direct Turtle discovery (`rewardsEnableTurtle: false`) instead of issuing unauthenticated calls, so reward proofs and claims are unavailable. Turtle campaigns sourced from euler-data-v3 may still appear in snapshots and APYs, because the flag only gates the SDK's direct adapter. Configure the secret before rolling out. Never exposed to the browser. |
 
 #### Branding & Feature Flags
@@ -95,9 +101,6 @@ These settings use `NUXT_PUBLIC_CONFIG_*` env vars. Branding and announcement va
 | `NUXT_PUBLIC_CONFIG_APP_DESCRIPTION`        | `Lightweight interface for Euler Finance.` | App description                                       |
 | `NUXT_PUBLIC_CONFIG_LOGO_URL`               | —                                          | Custom logo URL (falls back to built-in Euler logo)   |
 | `NUXT_PUBLIC_CONFIG_SOCIAL_IMAGE_URL`       | —                                          | Absolute URL to social share image (og:image / twitter:image), 1200×630+ |
-| `NUXT_PUBLIC_CONFIG_LABELS_REPO`            | `euler-xyz/euler-labels`                   | GitHub labels repo                                    |
-| `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH`     | `master`                                   | Branch to fetch labels from                           |
-| `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL`        | —                                          | S3/CDN base URL for labels (overrides repo/branch)    |
 | `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL`       | —                                          | Explicit URL for EulerChains.json; takes precedence over the Euler interfaces branch |
 | `NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL` | — | Base URL serving `{contract}.json` for runtime ABIs; takes precedence over the Euler interfaces branch. |
 | `NUXT_PUBLIC_CONFIG_DOCS_URL`               | —                                          | Documentation link                                    |
@@ -225,27 +228,11 @@ The resolution order in `getAssetLogoUrl(address, symbol)`:
 2. `logoURI` from the unified token list (Euler SDK token list > DefiLlama > Uniswap > Merkl)
 3. Empty string (component shows initials fallback)
 
-#### EulerEarn Vaults
+#### Public Labels
 
-If using a custom labels repository, create chain-specific `earn-vaults.json` files to curate which EulerEarn vaults appear:
+Vault inventory, products, entities, hosted logos, tags, campaigns, and deprecation metadata come from the versioned Public Labels API at `V3_API_URL`. Lite resolves `version=latest` to one immutable publication before fetching a chain bundle and follows every paginated list through `meta.total`.
 
-```
-your-labels-repo/
-├── 1/earn-vaults.json          # Ethereum
-├── 42161/earn-vaults.json      # Arbitrum
-└── 8453/earn-vaults.json       # Base
-```
-
-Each file is a JSON array of vault addresses:
-
-```json
-[
-  "0x1234567890123456789012345678901234567890",
-  "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"
-]
-```
-
-When using the default `euler-xyz/euler-labels` repository, all verified EulerEarn vaults are shown automatically.
+Hosted labels, visibility and geo policies come exclusively from V3. Fork deployments can set `LABELS_SOURCE=static` and provide their own authoring files through `STATIC_LABELS_BASE_URL`. Start with [Fork setup](docs/fork-setup.md) for complete examples using your own V3, static labels, or static labels without V3. See [Static labels](docs/static-labels.md) for the authoring format and failure semantics.
 
 ### 4. Development
 

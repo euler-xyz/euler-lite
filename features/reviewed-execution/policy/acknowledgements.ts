@@ -8,6 +8,7 @@ export interface UnverifiedVaultAcknowledgementContext {
 }
 
 const acknowledgedContexts = new Set<string>()
+const acknowledgedDeprecatedDeposits = new Set<string>()
 
 const normalizeVaults = (vaults: readonly string[]) =>
   [...new Set(vaults.map(vault => getAddress(vault).toLowerCase()))].sort()
@@ -30,3 +31,16 @@ export const hasUnverifiedVaultAcknowledgement = (context: UnverifiedVaultAcknow
   acknowledgedContexts.has(unverifiedVaultAcknowledgementKey(context))
 
 export const clearUnverifiedVaultAcknowledgements = () => acknowledgedContexts.clear()
+
+export const deprecatedDepositAcknowledgementKey = (context: UnverifiedVaultAcknowledgementContext) =>
+  `deprecated-deposit:${unverifiedVaultAcknowledgementKey(context)}`
+
+/** Separate consent: an earlier unverified-vault acknowledgement never accepts deprecation. */
+export const recordDeprecatedDepositAcknowledgement = (context: UnverifiedVaultAcknowledgementContext) => {
+  acknowledgedDeprecatedDeposits.add(deprecatedDepositAcknowledgementKey(context))
+}
+
+export const hasDeprecatedDepositAcknowledgement = (context: UnverifiedVaultAcknowledgementContext) =>
+  acknowledgedDeprecatedDeposits.has(deprecatedDepositAcknowledgementKey(context))
+
+export const clearDeprecatedDepositAcknowledgements = () => acknowledgedDeprecatedDeposits.clear()

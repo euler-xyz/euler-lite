@@ -150,7 +150,17 @@ export const getDeprecatedVaultCount = (market: MarketGroup): number => {
 export const getUnknownCollateralCount = (market: MarketGroup): number =>
   market.unknownCollateral.length
 
-export const getMarketEntities = (market: MarketGroup): { name: string, logos: string[] } => {
+export const getMarketEntities = (market: MarketGroup): { name: string, logos: string[], labels: string[] } => {
+  if (market.source === 'product' && market.brandEntities?.length) {
+    return {
+      // Co-brands contribute visual identity only; the visible manager name
+      // and manager-profile ownership remain attached to the product curator.
+      name: market.curator?.name ?? market.brandEntities[0].name,
+      logos: market.brandEntities.map(entity => getEulerLabelEntityLogo(entity.logo)),
+      labels: market.brandEntities.map(entity => entity.name),
+    }
+  }
+
   const seen = new Set<string>()
   const all: EulerLabelEntity[] = []
   for (const v of market.vaults) {
@@ -160,13 +170,17 @@ export const getMarketEntities = (market: MarketGroup): { name: string, logos: s
       all.push(entity)
     }
   }
-  if (all.length === 0) return { name: '', logos: [] }
+  if (all.length === 0) return { name: '', logos: [], labels: [] }
   const name = all.length === 1
     ? all[0].name
     : all.length === 2
       ? `${all[0].name} & ${all[1].name}`
       : `${all[0].name} & others`
-  return { name, logos: all.map(e => getEulerLabelEntityLogo(e.logo)) }
+  return {
+    name,
+    logos: all.map(e => getEulerLabelEntityLogo(e.logo)),
+    labels: all.map(entity => entity.name),
+  }
 }
 
 const hasBorrowableLTV = (vault: EVault): boolean =>

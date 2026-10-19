@@ -82,6 +82,15 @@ export function readV3ApiUrl(env: NodeJS.ProcessEnv = process.env): string {
   return firstEnv(env, V3_API_ENV_KEYS)
 }
 
+/** Explicit opt-out; an empty V3 URL alone retains the hosted utility defaults. */
+export function readDisableV3(env: NodeJS.ProcessEnv = process.env): boolean {
+  return isTruthyEnv(firstEnv(env, ['DISABLE_V3', 'EULER_SDK_DISABLE_V3']))
+}
+
+export function isV3BackendEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return !readDisableV3(env) && !!readV3ApiUrl(env)
+}
+
 export function readV3ApiKey(env: NodeJS.ProcessEnv = process.env): string {
   return firstEnv(env, V3_API_KEY_ENV_KEYS)
 }
@@ -145,6 +154,7 @@ export function readDisableServerVaultCache(env: NodeJS.ProcessEnv = process.env
 export function warnIfVaultSourceNeedsV3(
   env: NodeJS.ProcessEnv = process.env,
 ): void {
+  if (readDisableV3(env)) return
   if (readV3ApiUrl(env)) return
   const serverSource = readServerVaultCacheSource(env)
   const browserSource = readBrowserVaultSource(env)

@@ -102,13 +102,13 @@ Copy lives in `OperationReviewModal` (direct) and `BatchReviewModal` (per cart r
 | `tests/composables/useREULLocks.test.ts` | Chain-time `allowRemainderLoss`; fail closed when block time is missing; required refresh clears stale rows |
 | `tests/components/reulUnlockWarning.test.ts` | Raw `amountToBeBurned > 0n` drives `hasBurn`, including a 1-wei burn that formats as zero days |
 | `tests/components/BatchReviewModal.test.ts` | Batch warning uses the captured burn condition, not a formatted amount |
-| `tests/components/reulUnlockReview.test.ts` | Fresh / changed / missing / unavailable quote refresh |
+| `tests/components/reulUnlockReview.test.ts` | Plan-build failure skips simulation; failed simulation prevents review |
 
 ## Pitfalls
 
 | Symptom | Likely cause |
 | ------- | ------------ |
-| Unlock stays disabled after the 180-day maturity date | Open-lock is the **UTC day of the lock timestamp**, not maturity. Today's deliveries share that lock. |
+| Unlock stays disabled after the 180-day maturity date | Spy mode or an active batch disables Unlock. The UTC-day gate has already closed for a mature lock. |
 | Review burn warning missing on a tiny remainder | Warning was keyed off formatted days or a rounded display amount instead of `amountToBeBurned > 0n` |
 | Executed burn larger than the reviewed remainder | `allowRemainderLoss` true while the UTC-day lock was still open, or quote refresh skipped |
 | Spy review shows the connected wallet's locks | `useEffectiveAddress` fell back to the wallet while `isSpyResolving` |

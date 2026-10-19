@@ -1,6 +1,6 @@
 # Server-Side Caching
 
-Lite ships a layered cache between the browser and every external data source — third-party reward APIs, the Goldsky subgraph, the labels repo, the Euler V3 backend, and the chain RPC. The layer accomplishes four things:
+Lite ships a layered cache between the browser and every external data source — third-party reward APIs, the Goldsky subgraph, Public Labels V3, the optional static authoring source, and the chain RPC. The layer accomplishes four things:
 
 1. **Cross-tab sharing.** Every browser session against the same origin hits the same in-process cache.
 2. **Authentication / credentials stay server-side.** Browsers don't need V3 API keys, subgraph project IDs, or any provider tokens.
@@ -19,14 +19,16 @@ This document covers the per-host proxies, the vault snapshot pipeline, the warm
 | `server/api/internal/proxy/{merkl,fuul,incentra,turtle}/[...path].ts` | One `createProviderProxy` config each — upstream, allowlist, credential headers, rate limit, cache policy |
 | `server/utils/merkl-proxy.ts`, `server/utils/turtle-proxy.ts` | Credential header builders (optional `MERKL_API_KEY`; required `TURTLE_EARN_API_KEY`) plus the fixed Turtle upstream constant shared with the server SDK builder |
 | `server/api/internal/proxy/subgraph/[chainId].post.ts` | Proxies the per-chain Goldsky subgraph (hand-rolled: router param, per-chain URL, not built with the factory) |
-| `server/api/internal/labels/[file].get.ts` | Query-shape labels endpoint (`?chainId=X`) — used internally |
-| `server/api/internal/labels/[chainId]/[file].get.ts` | Path-shape labels endpoint — matches the SDK's default URL template |
+| `server/api/internal/public-labels.get.ts` | Chain/version-scoped aggregate Public Labels endpoint |
+| `server/utils/public-labels-source.ts` | Public Labels V3 pagination, 5-minute cache, in-flight dedup, and bounded stale fallback |
+| `server/api/internal/liquidation-coverage.get.ts` | Chain-scoped default liquidation bot coverage |
+| `server/utils/liquidation-coverage-source.ts` | Reads each bot's `/vault-filter`, 5-minute cache, 30-minute last-good window, one-minute retry floor |
+| `server/utils/static-labels-source.ts` | Atomic static authoring snapshots, used only in static mode |
 | `server/api/internal/v3/[...path].ts` | Rate-limited V3 backend proxy for SDK browser endpoints (`/api/internal/v3/...` → `v3.euler.finance/v3/...`) |
 | `server/api/internal/proxy/intrinsic-apy-overrides.get.ts` | Lite intrinsic-APY overlay for HyperEVM / Monad; chain-keyed 5-min cache |
 | `server/api/internal/vaults.get.ts` | Per-chain consolidated vault snapshot endpoint |
 | `server/utils/vaults-cache.ts` | `refreshChainVaults` + `vaultsCache` |
-| `server/utils/sdk-server.ts` | Lazy per-chain server-side SDK builder |
-| `server/utils/server-provider-service.ts` | Chain-specific server `IProviderService` overrides (Sonic Multicall throttle); all other chains stay on the SDK provider |
+| `server/utils/sdk-server.ts` | Lazy per-chain server-side SDK builder, including Sonic transport tuning |
 | `server/plugins/warm-cache.ts` | Boot + interval warm cycles for labels, token-list, vault snapshot |
 | `utils/snapshot-codec.ts` | Bigint-safe JSON wire format |
 | `utils/snapshot-types.ts` | Wire-shape types shared client + server |
@@ -90,18 +92,17 @@ Turtle is the only provider whose credential is required: Turtle rejects unauthe
 
 `GET|HEAD /api/internal/proxy/intrinsic-apy-overrides?chainId=` is a Lite-owned aggregator, not `external-proxy.ts`. Origin results are cached 5 minutes **by `chainId` only** — extra query parameters must not create extra origin fetches. Concurrent callers coalesce per chain. Unsupported chains return `[]` without fetching. HyperEVM all-source failure caches an empty array until TTL expiry; a Monad origin throw is not cached. Browser `Cache-Control: public, max-age=300`; Nitro route rules add CDN `s-maxage=300, stale-while-revalidate=600`. Rate limiter: 300 / 60 s. End-to-end behavior, V3 overlay rules, and the unwrapped server snapshot are in [Intrinsic APY](./intrinsic-apy.md#lite-override-proxy).
 
-### Labels
+### Public Labels
 
-Two endpoints, same `refreshLabelFile` engine:
+`/api/internal/public-labels?chainId=N` is the browser's single label read. `server/utils/public-labels-source.ts` reads the admitted `EulerChains.json` manifest, then paginates vaults, products, entities, entity governance addresses, and geo policies directly from V3. Enabled deprecated chains use metadata with on-chain verification; other enabled chains use V3 visibility verdicts. Results are cached for five minutes by chain, version, and verification mode; concurrent misses share one in-flight operation. Bundle and geo-policy stale fallback is bounded to 24 hours. Geo separately retains a validated, fetchedAt-stamped disk checkpoint; cold starts without valid geo policies cannot publish a bundle. Mount `GEO_POLICY_CACHE_DIR` for cross-container persistence.
 
-- **`/api/internal/labels/{file}?chainId=N`** (`[file].get.ts`) — query-shape, used by internal callers (`labels-helpers.ts`).
-- **`/api/internal/labels/{chainId}/{file}`** (`[chainId]/[file].get.ts`) — path-shape, matches the SDK's default `eulerLabelsBaseUrl` template (`${base}/{chainId}/{file}.json`). The SDK is pointed at `/api/internal/labels`, default templates land here.
+`LABELS_SOURCE=v3` performs no label-file reads. `LABELS_SOURCE=static` reads the operator-owned authoring files on the same warm/refresh cycle and uses one atomic disk checkpoint for the entire collection. See [Static labels](./static-labels.md).
 
-Both endpoints write to and fall back on the same in-memory TTL cache, but only the query-shape handler reads through it. It checks `cache.get()` first (and uses the `getOrRefresh` helper for the `assets.json` union), so a fresh entry short-circuits without touching upstream. The path-shape handler calls `refreshLabelFile` directly, and that function is the force-refresh primitive — it skips the fresh-entry check and only deduplicates while a fetch is in flight. Every path-shape request therefore reaches upstream unless it coincides with an in-flight fetch for the same key, so the warm-cache entry acts as a stale fallback on that route rather than as a read-through cache. Since the SDK's default template targets the path shape, that is the route most label traffic takes. Warm callers (`warm-cache.ts`, `vaults-cache.ts`) use `refreshLabelFile` intentionally — see [Warm-Cache Plugin](#warm-cache-plugin) for why. The path handler's file header documents the shared TTL cache / upstream-fetch pipeline and that this route force-refreshes rather than reading through.
+### Liquidation bot coverage
 
-Missing label files (HTTP 403/404) return a cached empty payload. Transient failures serve stale labels when available or return HTTP 503; they never turn an unavailable verification list into a successful empty result.
+`/api/internal/liquidation-coverage?chainId=N` answers which vaults the default liquidation bot (`LIQUIDATION_BOT_API_URL`) leaves out on that chain. `server/utils/liquidation-coverage-source.ts` fetches `{base}/vault-filter` with one 5 s deadline covering the headers and the body, follows no redirects, keeps the mode and the listed addresses and drops the bot's reasons. An answer is fresh for 5 minutes; after that it is still served at once while a background refresh runs, until 30 minutes after it was fetched. Past that, or when the bot has not answered since the server started, the chain is `no-bot` and the browser badges every borrowable vault on it. A failing chain is retried at most once a minute. The browser asks again after a minute for a `no-bot` answer and before an answer reaches 30 minutes. With the variable unset the route answers `{ enabled: false }` and nothing is fetched.
 
-Upstream is resolved by `NUXT_PUBLIC_CONFIG_LABELS_BASE_URL` if set, else `NUXT_PUBLIC_CONFIG_LABELS_REPO` + `NUXT_PUBLIC_CONFIG_LABELS_REPO_BRANCH` → GitHub raw.
+The browser removes expired answers when checking for a refresh, including the visible-tab poll and focus/visibility handlers, and when a request settles. If the Lite endpoint cannot be reached, expired coverage becomes unknown and renders no badge. The browser uses `no-bot` only when the server returns that state.
 
 ### V3 proxy
 
@@ -140,7 +141,6 @@ Allowed `GET` paths:
 | `/v3/evk/vaults` | EVK vault catalogue. |
 | `/v3/evk/vaults/{chainId}/{vault}/totals` | EVK vault totals history. |
 | `/v3/evk/vaults/bad-debt` | Bad debt rows. |
-| `/v3/evk/vaults/open-interest` | Open interest by vault/collateral query. |
 | `/v3/evk/vaults/open-interest/by-collateral` | Open interest grouped by collateral. |
 
 Activity surfaces are documented end-to-end in [Activity Feed](./activity-feed.md).
@@ -208,7 +208,7 @@ Pipeline:
 
 ```text
 1. getServerSdk(chainId)          // lazy per-chain server SDK; reused across requests
-2. getLabels(chainId)             // verified addresses, earn vaults (read via refreshLabelFile)
+2. getPublicEulerLabelsData(chainId) // shared normalized Public Labels bundle
 3. sdk.eVaultService.fetchVerifiedVaultAddresses(chainId, [ESCROW])   // escrow set
 4. sdk.vaultMetaService.fetchVaultTypes(chainId, candidates)          // partition EVK vs Securitize vs Earn
 5. Promise.all([
@@ -249,23 +249,21 @@ A boot-time warning fires if `SERVER_VAULT_CACHE_SOURCE` (or `NUXT_PUBLIC_BROWSE
 
 `labels-view.ts` shares the same `getServerSdk` instance per chain.
 
+The server SDK's labels service reads `getPublicLabelsBundle` directly. The token-list route's SDK uses the same service; both follow `LABELS_SOURCE=v3` or `LABELS_SOURCE=static` and reject an expired hosted snapshot. Neither SDK uses the default file-based labels adapter.
+
 **Turtle rewards.** The direct Turtle rewards adapter inside the server SDK calls Turtle Earn upstream (not through `/api/internal/proxy/turtle`), and every Turtle endpoint requires `X-API-Key`. In fallback mode, the V3 rewards adapter sources campaigns from `euler-data-v3`. `resolveServerTurtleRewardsConfig()` therefore hands the SDK the same server-only `TURTLE_EARN_API_KEY` as `rewardsTurtleApiKey`, pinned to the same fixed upstream the proxy uses. When the key is unset or blank after trimming, the builder emits `rewardsEnableTurtle: false` so the direct adapter skips Turtle discovery rather than issuing guaranteed-401 requests. That flag gates only the direct adapter: in the default fallback mode the V3 adapter still returns Turtle campaigns it sourced from euler-data-v3, so those campaigns can remain in snapshots while the proof proxy answers 503. Missing Turtle campaigns are therefore not a reliable missing-key symptom, and visible campaigns do not prove the key is set. The SDK never follows redirects on credentialed Turtle requests. Because the SDK is cached per chain at first use, changing the key requires a restart.
 
 Every server-side SDK build resolves the deployments manifest through the euler-chains cache chain rather than fetching euler-interfaces directly: `server/plugins/sdk-deployments.ts` installs `DeploymentService.setQueryDeployments(loadEulerChains)` at boot, so all server SDK builds share one cached copy with its 7-day stale window instead of issuing their own GitHub fetches.
 
+Deployment admission is per chain: valid rows refresh independently, present invalid rows retain their last-good entry only within its original 7-day stale window, and omitted rows leave the admitted set. Empty, malformed, or entirely invalid responses keep the bounded stale fallback. An RPC-configured chain without an admitted deployment is excluded from the injected browser chain lists; without any cached manifest, the env-derived config applies. The browser also intersects its initial RPC list with the fetched deployment IDs before constructing providers, so a slow registry boot read cannot enable an incomplete chain. Address loading keeps only that intersection and selects an admitted chain if the initial selection is unavailable.
+
 ### Server provider overrides
 
-`getServerSdk` does **not** use the browser JSON-RPC proxy (`/api/internal/rpc/{chainId}`). It talks to `RPC_URL_<chainId>` through an `IProviderService` installed as `servicesOverrides.providerService`.
+`getServerSdk` talks directly to `RPC_URL_<chainId>` through the SDK's provider. The SDK resolves chain metadata using the registry's `viemName` before applying Lite's `chains` transport options.
 
-`createServerProviderService(rpcUrls, delegate)` in `server/utils/server-provider-service.ts` wraps the SDK `ProviderService`:
+Sonic (`146`) is the only transport override. Other chains keep the SDK defaults (Ethereum in tests: Multicall `batchSize: 2048`, `wait: 10`). Each server SDK is built with only that chain's RPC URL, so asking its provider for another chain throws.
 
-- Chains **without** an override keep the SDK client (Ethereum in tests: Multicall `batchSize: 2048`, `wait: 10`).
-- Chains **with** an override get a Lite-constructed viem `PublicClient` that reuses the SDK provider's `chain` metadata — including its Multicall3 address — because the SDK ships its own viem and Lite cannot assign that `Chain` type directly.
-- `getSupportedChainIds()` still comes from the delegate. Each `getServerSdk(chainId)` instance is built with only that chain's `rpcUrls`, so asking it for another chain throws.
-
-Overrides are a code map, not an env flag. Add a row to `providerOverrides` and cover it in `tests/server/sdk-server.test.ts`. Because the server SDK is cached per chain at first use, a changed override needs a process restart.
-
-**Sonic (`146`) is the only override today.** Sonic's public RPC / lens path rejects the SDK's default Multicall aggregates, so the replacement client uses:
+Transport overrides are a code map in `server/utils/sdk-server.ts`, covered by `tests/server/sdk-server.test.ts`. Because the server SDK is cached per chain at first use, a changed override needs a process restart. Sonic's public RPC / lens path uses:
 
 | Layer | Value | Effect |
 |---|---|---|
@@ -278,7 +276,7 @@ This is a different throttle from `EVAULT_FETCH_CHUNK_CHAINS`, which splits Lite
 
 | Symptom | First check |
 |---|---|
-| Sonic snapshot / server label reads fail with oversized Multicall or RPC batch errors | Confirm `createServerProviderService` still wraps chain `146` and the process was restarted after a change |
+| Sonic snapshot / server label reads fail with oversized Multicall or RPC batch errors | Confirm `getServerSdk` sets transport tuning for chain `146` and the process was restarted after a change |
 | Other chains suddenly issue tiny Multicall aggregates | An override was added too broadly — only list the chain that needs it |
 | `EVAULT_FETCH_CHUNK_CHAINS=146` does not stop Sonic Multicall failures | Expected: that env only chunks `fetchVaults`, it does not change viem Multicall size |
 
@@ -371,12 +369,13 @@ The pipeline always succeeds eventually — the snapshot is the *fast path*, not
 ```text
 Global cycle (5 min)                   Vaults cycle (1 min if V3, else 5 min)
 ─────────────────────                  ──────────────────────────────────────
-- /api/internal/euler-chains                    - refreshChainVaults(chain) for each
-- /api/internal/abis/{contract} (×3)     enabled non-deprecated chain,
-- labels/all/assets.json                 sequential (lets cross-chain V3
-- per-chain:                             upstreams dedupe via in-flight)
-    labels/{file}.json (×5)
-    /api/internal/token-list
+- Euler Chains and runtime ABIs                         - refreshChainVaults(chain) for each
+- static source includes cross-chain assets     enabled non-deprecated chain
+- per-chain Public Labels bundle
+- per-chain labels snapshot
+- per-chain token list
+- per-chain liquidation bot coverage
+  (when LIQUIDATION_BOT_API_URL is set)
 ```
 
 Vault snapshot has its own faster timer because V3-backed refreshes are cheap — one batched POST per chain hitting V3's own cache. Pulling a fresh snapshot every minute keeps it tight without hammering upstream. Without V3, the snapshot is built from heavier onchain lens multicalls, so it falls back to the global 5-min cadence.
@@ -385,9 +384,7 @@ When the two intervals are equal (V3 off), the timers naturally double-warm at e
 
 ### Why warm directly (not via HTTP)
 
-Every warm task is a **direct function call** (`refreshChainVaults(chainId)`, `refreshLabelFile(...)`, etc.) that bypasses the handler's fresh-cache short-circuit and writes straight to the cache. If we warm via HTTP, the handler short-circuits on the still-fresh previous entry (age ≈ TTL − 2 s) and the entry then expires without refresh until the next cycle — leaving a stale window per cycle. Direct calls ensure the entry is always rewritten *before* it expires.
-
-User requests arriving during a refresh continue to read the still-fresh previous entry via the handler's own `cache.get()` short-circuit, so there's no blocking on the in-flight refresh. This holds for handlers that actually short-circuit — the vault snapshot endpoint and the query-shape labels endpoint. The path-shape labels endpoint calls `refreshLabelFile` instead of reading through, so a concurrent request there joins the in-flight refresh rather than being served the previous entry (see [Labels](#labels)).
+Every warm task is a **direct function call** (`refreshChainVaults(chainId)`, `refreshPublicLabelsBundle(...)`, `refreshLabelFile(...)`, etc.) that replaces the cache before expiry. The Public Labels and policy refreshers deduplicate concurrent work, while normal reads use the previous fresh value and failures can fall back only within the configured stale ceiling.
 
 ### Boot behaviour
 
@@ -425,7 +422,7 @@ The snapshot remains active in all modes (unless `DISABLE_SERVER_VAULT_CACHE=tru
 |---|---|---|---|---|
 | `SERVER_VAULT_CACHE_SOURCE` | server | `fallback` \| `onchain` \| `v3` | `fallback` | Adapter chain in `server/utils/sdk-server.ts`; `ONCHAIN_SDK_CHAINS` chains use `onchain`. |
 | `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` | browser (exposed) | `fallback` \| `onchain` \| `v3` | `fallback` | Adapter chain in `composables/useEulerSdk.ts:getEulerSdk()`. `getEulerSdkForChain(chainId)` uses `onchain` for `ONCHAIN_SDK_CHAINS` chains. The "fresh" / plan-time SDK is always `onchain` regardless. |
-| `DEPRECATED_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Chains shown collapsed in the chain selector and skipped by per-chain warm-cache work. Status `deprecated` in `EulerChains.json` has the same effect. |
+| `DEPRECATED_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Optional override for deprecated status. Enabled chains marked here or `deprecated` in `EulerChains.json` appear collapsed, skip per-chain warm-cache work, and use metadata-only labels with on-chain verification. |
 | `ONCHAIN_SDK_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Chains pinned to onchain adapters in chain-aware browser SDK reads and server snapshot builds. |
 | `TURTLE_EARN_API_KEY` | server | Turtle Earn server key | unset | Passed to the server SDK as `rewardsTurtleApiKey` (and sent by the Turtle proxy). Unset or blank, the proxy answers 503 and the server SDK is built with `rewardsEnableTurtle: false`, which disables direct Turtle discovery only; V3-sourced Turtle campaigns may still be listed. |
 | `EVAULT_FETCH_CHUNK_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Chains whose EVault list reads are split into small sequential SDK calls in Lite. |

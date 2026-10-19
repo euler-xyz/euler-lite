@@ -41,7 +41,7 @@ const isActive = (item: MenuItem) => {
         <span class="leading-tight">{{ link.label }}</span>
         <span
           v-if="link.sublabel"
-          class="leading-tight text-[9px] text-content-tertiary"
+          class="leading-tight"
         >{{ link.sublabel }}</span>
       </NuxtLink>
 

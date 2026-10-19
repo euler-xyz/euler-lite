@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
-import { useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
-import { getProductByVault, getProductKeyByVault, isVaultGovernanceLimited } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, getProductKeyByVault, isVaultGovernanceLimited, getEntitiesByVault } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { autoLink } from '~/utils/autoLink'
@@ -10,9 +9,10 @@ import { formatNumber, compactNumber, formatUsdValue, formatCompactUsdValue } fr
 import { nanoToValue } from '~/utils/crypto-utils'
 import { formatMarketAvailability } from '~/utils/vault-display'
 import { VaultApyModal } from '#components'
-import { getAddress, maxUint256 } from 'viem'
+import { getAddress, maxUint256, zeroAddress } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
+import { FLAGGED_VAULT_LABEL } from '~/utils/vault-assessment/flagged'
 
 const { vault } = defineProps<{ vault: SecuritizeCollateralVault, desktopOverview?: boolean }>()
 const emit = defineEmits<{
@@ -21,25 +21,22 @@ const emit = defineEmits<{
 const route = useRoute()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
 
-const { borrowList: _borrowList, isVaultGovernorVerified } = useVaults()
+const { borrowList: _borrowList, isSecuritizeGovernorVerified } = useVaults()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getSupplyRewardCampaigns, hasSupplyRewards } = useRewardsApy()
 const vaultAddress = computed(() => getAddress(vault.address))
+const isFlagged = useFlaggedVault(() => vault.address)
 const product = useEulerProductOfVault(vaultAddress)
 const description = computed(() => {
   return product.vaultOverrides?.[vaultAddress.value]?.description ?? product.description
 })
-const entities = useEulerEntitiesOfVault(vault as unknown as EVault)
-const isGovernorVerified = computed(() => isVaultGovernorVerified(vault as unknown as EVault))
+const entities = computed(() => getEntitiesByVault(vault as unknown as EVault))
+const isGovernorVerified = computed(() => isSecuritizeGovernorVerified(vault))
+const isUngoverned = computed(() => vault.governor?.toLowerCase() === zeroAddress)
 const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
 const marketProductKey = computed(() => getProductKeyByVault(vault.address))
 const marketProductName = computed(() => getProductByVault(vault.address).name)
-
-const isDeprecated = computed(() => {
-  return product.deprecatedVaults?.includes(vaultAddress.value) ?? false
-})
-const deprecationReason = computed(() => isDeprecated.value ? product.deprecationReason || '' : '')
 const isRestricted = computed(() => isVaultBlockedByCountry(vault.address))
 
 // Count markets where this can be borrowed (securitize vaults cannot be borrow destinations)
@@ -125,32 +122,22 @@ const supplyCapPercentageDisplay = computed(() => {
     <!-- Overview -->
     <VaultOverviewAccordionSection
       title="Overview"
+      icon="section-overview"
       :default-open="true"
       content-class="flex flex-col items-start gap-24"
     >
-      <VaultDeprecationBanner
-        v-if="isDeprecated"
-        :reason="deprecationReason"
-      />
-      <div
+      <VaultDeprecationBanner :addresses="[vault.address]" />
+      <VaultPublicNotice :addresses="[vault.address]" />
+      <GeoBlockAlert
         v-if="isRestricted"
-        class="w-full rounded-12 p-16 bg-warning-100 text-warning-500"
-      >
-        <div class="flex items-center gap-8">
-          <SvgIcon
-            name="warning"
-            class="!w-20 !h-20 flex-shrink-0"
-          />
-          <p class="text-p3 text-warning-500">
-            This vault is not available in your region.
-          </p>
-        </div>
-      </div>
+        :vault-addresses="[vault.address]"
+        description="This vault is not available in your region."
+      />
       <div
         v-if="description"
         class="w-full rounded-12 p-16 bg-surface-tertiary"
       >
-        <!-- eslint-disable vue/no-v-html -- trusted label content -->
+        <!-- eslint-disable vue/no-v-html -- autoLink escapes label text before adding links -->
         <p
           class="text-p3 text-content-secondary auto-link"
           v-html="autoLink(description)"
@@ -178,8 +165,14 @@ const supplyCapPercentageDisplay = computed(() => {
         v-if="enableEntityBrandingDisplay"
         label="Curator"
       >
+        <VaultTypeChip
+          v-if="isUngoverned"
+          :vault="vault"
+          type="ungoverned"
+          nudge
+        />
         <div
-          v-if="entities.length && isGovernorVerified"
+          v-else-if="entities.length && isGovernorVerified"
           class="flex flex-col gap-16"
         >
           <div
@@ -202,13 +195,13 @@ const supplyCapPercentageDisplay = computed(() => {
           </div>
         </div>
         <VaultTypeChip
-          v-else-if="!isGovernorVerified"
+          v-else-if="!isGovernorVerified && !isFlagged"
           :vault="vault"
           type="unknown"
           nudge
         />
         <div v-else>
-          -
+          {{ isFlagged ? FLAGGED_VAULT_LABEL : '-' }}
         </div>
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue
@@ -216,9 +209,14 @@ const supplyCapPercentageDisplay = computed(() => {
         label="Vault type"
       >
         <VaultTypeBadges
+          v-if="!isFlagged || isUngoverned"
           :vault="vault"
           nudge
         />
+        <span
+          v-else
+          class="text-p2 text-content-tertiary"
+        >-</span>
       </VaultOverviewLabelValue>
       <VaultOverviewLabelValue label="Can be borrowed">
         <div class="flex items-center gap-8">
@@ -235,6 +233,7 @@ const supplyCapPercentageDisplay = computed(() => {
     <!-- Statistics -->
     <VaultOverviewAccordionSection
       title="Statistics"
+      icon="section-statistics"
       :default-open="true"
       content-class="flex flex-col items-start gap-24"
     >
@@ -275,6 +274,7 @@ const supplyCapPercentageDisplay = computed(() => {
     <!-- Risk Parameters -->
     <VaultOverviewAccordionSection
       title="Risk parameters"
+      icon="section-risk-parameters"
       :default-open="false"
       content-class="flex flex-col items-start gap-24"
     >
@@ -312,6 +312,7 @@ const supplyCapPercentageDisplay = computed(() => {
     <!-- Addresses -->
     <VaultOverviewAccordionSection
       title="Addresses"
+      icon="section-addresses"
       :default-open="false"
       content-class="flex flex-col items-start gap-24"
     >
@@ -338,5 +339,9 @@ const supplyCapPercentageDisplay = computed(() => {
         />
       </VaultOverviewLabelValue>
     </VaultOverviewAccordionSection>
+    <VaultEntityDisclosures
+      v-if="isGovernorVerified"
+      :entities="entities"
+    />
   </div>
 </template>

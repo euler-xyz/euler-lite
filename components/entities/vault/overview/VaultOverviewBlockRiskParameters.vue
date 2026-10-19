@@ -94,6 +94,7 @@ const hooksModalData = computed(() => ({
 <template>
   <VaultOverviewAccordionSection
     title="Risk parameters"
+    icon="section-risk-parameters"
     :default-open="defaultOpen"
     content-class="flex flex-col items-start gap-24"
   >

@@ -270,8 +270,8 @@ This is a `staticCall` - no transaction is sent, no gas is spent, and the state 
 3. Replace vault data with simulation result.
 
 **Borrow position loading** (`composables/useEulerAccount.ts`):
-1. Call `sdk.portfolioService.fetchPortfolio(..., { populateAll: true })`.
-2. Read portfolio positions from SDK `Portfolio` and keep SDK diagnostics beside the portfolio for UI warnings.
+1. Fetch the account with the required portfolio hydration options, excluding SDK label population; Lite gets labels from its shared V3 or static snapshot.
+2. Build the SDK `Portfolio` from that account and keep SDK diagnostics beside it for UI warnings.
 3. Transaction paths use SDK `TransactionPlan` processing for Pyth updates before execution.
 
 **Transaction building** (`useEulerTx.ts` + SDK Pyth plugins):

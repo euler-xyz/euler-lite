@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { parseAbi } from 'viem'
 
 const A = '0x00000000000000000000000000000000000000a1'
 const B = '0x00000000000000000000000000000000000000b2'
@@ -36,8 +37,9 @@ vi.mock('~/server/utils/log', () => ({
   reportStatus: vi.fn(),
 }))
 
-vi.mock('@eulerxyz/euler-v2-sdk', () => ({
-  buildEulerSDK: async () => {
+vi.mock('@eulerxyz/euler-v2-sdk', async importOriginal => ({
+  ...await importOriginal<typeof import('@eulerxyz/euler-v2-sdk')>(),
+  buildEulerSDK: vi.fn(async () => {
     let queryTokenList: (url: string) => Promise<Record<string, unknown>[]> = async () => []
     return {
       tokenlistService: {
@@ -55,7 +57,7 @@ vi.mock('@eulerxyz/euler-v2-sdk', () => ({
           })),
       },
     }
-  },
+  }),
 }))
 
 const respond = (body: unknown) => Response.json(body)
@@ -79,6 +81,40 @@ const importRoute = async () => {
 }
 
 describe('/api/internal/token-list logos', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('wires the shared custom-source ABI service into the token-list SDK', async () => {
+    vi.stubEnv('NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL', 'https://abis.example/token-list/')
+    routeUpstreams([])
+    const { refreshTokenList } = await importRoute()
+    await refreshTokenList(1)
+    const { buildEulerSDK } = await import('@eulerxyz/euler-v2-sdk')
+    const options = vi.mocked(buildEulerSDK).mock.calls[0]?.[0]
+    const abi = parseAbi(['function computeAPYs(uint256, uint256, uint256, uint256) pure returns (bytes)'])
+    mocks.fetchWithTimeout.mockClear()
+    mocks.fetchWithTimeout.mockResolvedValueOnce(respond(abi))
+
+    await expect(options.servicesOverrides?.abiService?.fetchABI(1, 'UtilsLens')).resolves.toEqual(abi)
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledExactlyOnceWith('https://abis.example/token-list/UtilsLens.json')
+    expect(options.servicesOverrides?.eulerLabelsService).toBeDefined()
+  })
+
+  it('retains other token sources without contacting V3 when disabled', async () => {
+    vi.stubEnv('DISABLE_V3', 'true')
+    mocks.fetchWithTimeout.mockClear()
+    routeUpstreams([v3Token(B)])
+    const { refreshTokenList } = await importRoute()
+    const tokens = await refreshTokenList(1)
+    expect(tokens.some(token => token.address.toLowerCase() === A)).toBe(true)
+    expect(tokens.some(token => token.address.toLowerCase() === B)).toBe(false)
+    expect(mocks.fetchWithTimeout.mock.calls.some(([url]) => String(url).includes('v3.example'))).toBe(false)
+  })
   it('replaces a V3 logo only when V3 says it has no image, and never returns the flag', async () => {
     routeUpstreams([
       v3Token(A, { hasLogo: false }),

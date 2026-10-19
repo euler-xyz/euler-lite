@@ -1,3 +1,4 @@
+import type { PublicEulerLabelsData } from '~/utils/public-labels'
 import { getAddress, zeroAddress, type Address } from 'viem'
 import { isEVault, type EulerEarn, type EVault, type OracleDetailedInfo } from '@eulerxyz/euler-v2-sdk'
 import { getEulerRouterGovernor } from '~/entities/oracle'
@@ -57,6 +58,13 @@ export interface VerificationLabels {
   getDeclaredEntityKeys: (vaultAddress: string) => string[] | undefined
   /** Returns true if `address` (checksummed) is one of `entityKey`'s declared addresses. */
   hasEntityAddress: (entityKey: string, address: Address) => boolean
+}
+
+/** Hosted labels must explicitly declare a manager; absence cannot use static Earn trust. */
+export const getHostedEntityKeys = (labels: Pick<PublicEulerLabelsData, 'source' | 'managingEntityByVault'>, address: string): string[] | undefined => {
+  if (labels.source !== 'v3' && labels.source !== 'v3-metadata') return undefined
+  const entity = labels.managingEntityByVault?.[address.toLowerCase()]
+  return entity ? [entity] : []
 }
 
 const findDeclaredEntityFor = (
@@ -120,9 +128,9 @@ export const isEarnVaultOwnerVerified = (
   if (!earnVault.verified) return false
 
   const declaredKeys = labels.getDeclaredEntityKeys(earnVault.address)
-  // Earn vaults outside any product are trusted on the strength of being in
-  // earn-vaults.json alone — earn curation lives in that file, not in
-  // products.json. Differs from EVK behaviour.
+  // A published Earn vault can be trusted without a product assignment.
+  // This differs from EVK governance verification, which requires a product
+  // with a declared managing entity.
   if (declaredKeys === undefined) return true
   // But if the earn vault IS in a product whose entity is empty/undefined,
   // the product has no on-chain authority to claim it — treat as unverified.

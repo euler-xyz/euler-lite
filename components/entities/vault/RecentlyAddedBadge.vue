@@ -6,6 +6,7 @@ const props = withDefaults(defineProps<{
 })
 
 const tooltipText = computed(() => `This ${props.entity} was added recently.`)
+const isIconActive = ref(false)
 </script>
 
 <template>
@@ -16,9 +17,11 @@ const tooltipText = computed(() => `This ${props.entity} was added recently.`)
   >
     <span
       class="recently-added-badge relative inline-flex items-center gap-4 rounded-8 px-8 py-2 text-p5 mobile:gap-0 mobile:rounded-full mobile:w-26 mobile:h-26 mobile:p-0 mobile:justify-center"
+      @mouseenter="isIconActive = true"
+      @mouseleave="isIconActive = false"
     >
       <SvgIcon
-        name="star"
+        :name="isIconActive ? 'badge-recently-added-filled' : 'badge-recently-added'"
         class="!w-14 !h-14"
       />
       <span class="mobile:hidden">Recently added</span>

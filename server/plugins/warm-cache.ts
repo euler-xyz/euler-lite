@@ -1,6 +1,6 @@
 /**
  * Pre-populates the in-memory TTL caches for every proxy that serves
- * static/low-churn data (labels, token-list, euler-chains) and for the
+ * static/low-churn data (Public Labels, token-list, Euler Chains) and for the
  * per-chain vault snapshot served at /api/internal/vaults.
  *
  * Nitro's node-server preset calls `server.listen()` synchronously right
@@ -14,9 +14,10 @@
  *
  * Two timers, each with its own cadence:
  *
- *   • Global cycle (5 min): /api/internal/euler-chains once, runtime ABIs
- *     once, cross-chain `all/assets.json` once, then per-chain labels +
- *     token-list, serialized across chains.
+ *   • Global cycle (5 min): Euler Chains and runtime ABIs once, then each
+ *     chain's labels bundle, token list and (when LIQUIDATION_BOT_API_URL is
+ *     set) liquidation bot coverage, serialized across chains. Hosted
+ *     bundles share the live geo-policy cache.
  *   • Vaults cycle (1 min when V3 is configured, otherwise 5 min):
  *     /api/internal/vaults per chain, serialized.
  *
@@ -36,15 +37,16 @@
  * Merkl's /tokens/reward payload is fetched transitively by /api/internal/token-list
  * (one of its sources).
  */
-import { LABEL_FILES, refreshLabelFile } from '../api/internal/labels/[file].get'
 import { peekEulerChains, refreshEulerChains } from '../api/internal/euler-chains.get'
 import { ABI_CONTRACTS, refreshAbi } from '../api/internal/abis/[contract].get'
 import { refreshTokenList } from '../api/internal/token-list.get'
 import { refreshChainVaults } from '../utils/vaults-cache'
 import { UPSTREAM_FETCH_TIMEOUT_MS } from '../utils/fetchWithTimeout'
+import { refreshPublicLabelsBundle } from '../utils/public-labels-source'
+import { isLiquidationCoverageEnabled, refreshLiquidationCoverage } from '../utils/liquidation-coverage-source'
 import {
   readDisableServerVaultCache,
-  readV3ApiUrl,
+  isV3BackendEnabled,
   warnIfVaultSourceNeedsV3,
 } from '~/utils/api-url-env'
 import { getEnabledChainIds } from '~/utils/chain-env'
@@ -65,7 +67,7 @@ const delay = (ms: number) => new Promise<void>((resolve) => {
 // own cache), so a 1-min rewarm keeps the snapshot tight without
 // hammering upstream. Without V3 the snapshot is built from heavier
 // onchain lens multicalls, so it rides the global 5-min interval.
-const VAULTS_REWARM_INTERVAL_MS = readV3ApiUrl() ? 60_000 : REWARM_INTERVAL_MS
+const VAULTS_REWARM_INTERVAL_MS = isV3BackendEnabled() ? 60_000 : REWARM_INTERVAL_MS
 
 // Nitro dev mode re-imports server plugins across its double-init (Vite
 // client build + Nitro server build), which would fire two warm cycles
@@ -115,22 +117,14 @@ const warmAbis = (): Promise<unknown>[] =>
     reportWarm(`abis/${contract}`, refreshAbi(contract)),
   )
 
-// Cross-chain pattern rules for asset geo-blocking live at `all/assets.json`
-// upstream. The /api/internal/labels/assets.json handler unions this with the
-// per-chain file; warm it once so the first chain-scoped request doesn't
-// pay the cold-upstream cost.
-const warmGlobalAssets = () =>
-  reportWarm('labels/assets.json scope=all', refreshLabelFile('all', 'assets.json'))
-
-// --- Per-chain warms (parallel across chains and within a chain) ---
-
-const warmLabels = (chainId: number): Promise<unknown>[] =>
-  LABEL_FILES.map(file =>
-    reportWarm(`labels/${file} chain=${chainId}`, refreshLabelFile(chainId, file)),
-  )
+const warmPublicLabels = (chainId: number) =>
+  reportWarm(`public-labels chain=${chainId}`, refreshPublicLabelsBundle(chainId))
 
 const warmTokenList = (chainId: number) =>
   reportWarm(`token-list chain=${chainId}`, refreshTokenList(chainId))
+
+const warmLiquidationCoverage = (chainId: number) =>
+  reportWarm(`liquidation-coverage chain=${chainId}`, refreshLiquidationCoverage(chainId))
 
 // Per-chain consolidated vault snapshot served at /api/internal/vaults?chainId=N.
 // Warmed so the first user navigation to /lend hydrates instantly from
@@ -138,11 +132,12 @@ const warmTokenList = (chainId: number) =>
 const warmVaults = (chainId: number) =>
   reportWarm(`vaults chain=${chainId}`, refreshChainVaults(chainId))
 
-// Labels + token-list — refresh at the global 5-min interval. Vaults run
-// on their own faster timer (see `warmVaultsForChains` below).
+// Labels and token-list refresh at the global
+// 5-min interval. Vaults run on their own faster timer.
 const warmChainTasks = (chainId: number): Promise<unknown>[] => [
-  ...warmLabels(chainId),
+  warmPublicLabels(chainId),
   warmTokenList(chainId),
+  ...(isLiquidationCoverageEnabled() ? [warmLiquidationCoverage(chainId)] : []),
 ]
 
 // --- Orchestration ---
@@ -191,7 +186,6 @@ export default defineNitroPlugin(() => {
       await Promise.allSettled([
         warmEulerChains(),
         ...warmAbis(),
-        warmGlobalAssets(),
         warmChainsSequentially(),
       ])
     }

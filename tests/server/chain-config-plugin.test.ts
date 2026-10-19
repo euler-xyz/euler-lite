@@ -113,6 +113,19 @@ describe('chain-config plugin registry status', () => {
     expect(config.explorerUrls).toEqual({})
   })
 
+  it('excludes missing deployment rows and admits them on a later render when they become valid', async () => {
+    vi.stubEnv('ONCHAIN_SDK_CHAINS', '1,8453')
+    mocks.peekEulerChains.mockReturnValue([REGISTRY[0]])
+    const { render } = await bootPlugin()
+
+    const config = await render()
+    expect(config.enabledChainIds).toEqual([1])
+    expect(config.onchainSdkChainIds).toEqual([1])
+
+    mocks.peekEulerChains.mockReturnValue([REGISTRY[0], { ...REGISTRY[3], status: 'production' }])
+    expect((await render()).enabledChainIds).toEqual([1, 8453])
+  })
+
   it('reads the current registry on every render', async () => {
     vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
     const { render } = await bootPlugin()

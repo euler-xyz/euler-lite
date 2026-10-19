@@ -14,7 +14,8 @@ let isAnnouncementOpen = false
 const { loadEulerConfig, chainId } = useEulerAddresses()
 const { loadVaults, isReady: isVaultsReady, resetVaultsState, refreshVaults, setShowAllLabelEntries } = useVaults()
 const { loadTokenList, isLoaded: isTokenListLoaded } = useTokenList()
-const { loadLabels, retryLabels, isReady: isLabelsReady, isLoading: isLabelsLoading, loadError: labelsLoadError } = useEulerLabels()
+const { loadLabels, refreshLabelsIfStale, retryLabels, isReady: isLabelsReady, isLoading: isLabelsLoading, loadError: labelsLoadError } = useEulerLabels()
+const { refreshLiquidationCoverageIfStale } = useLiquidationCoverage()
 const { loadCountry } = useGeoBlock()
 const { updateBalances, resetBalances } = useWallets()
 const { isConnected, address } = useWagmi()
@@ -161,6 +162,25 @@ watch([chainId, showAllLabelEntries], () => {
     void loadVaults()
   })
 }, { immediate: true })
+
+// Refresh live label verdicts and liquidation bot coverage for an open tab and
+// after returning from a suspended/background tab. Each store owns its freshness.
+let labelsRefreshInterval: ReturnType<typeof setInterval> | undefined
+const refreshVisibleData = () => {
+  if (document.visibilityState !== 'visible') return
+  void refreshLabelsIfStale()
+  refreshLiquidationCoverageIfStale()
+}
+onMounted(() => {
+  labelsRefreshInterval = setInterval(refreshVisibleData, POLL_INTERVAL_60S_MS)
+  window.addEventListener('focus', refreshVisibleData)
+  document.addEventListener('visibilitychange', refreshVisibleData)
+})
+onUnmounted(() => {
+  clearInterval(labelsRefreshInterval)
+  window.removeEventListener('focus', refreshVisibleData)
+  document.removeEventListener('visibilitychange', refreshVisibleData)
+})
 
 // Refresh balances when token list finishes loading (includes new DefiLlama tokens)
 watch(isTokenListLoaded, (loaded) => {

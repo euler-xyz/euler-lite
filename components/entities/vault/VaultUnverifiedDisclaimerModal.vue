@@ -1,9 +1,13 @@
 <script setup lang="ts">
+import { getUnverifiedActionCopy } from '~/utils/vault-assessment/presentation'
+
 const emits = defineEmits(['close'])
-const { cancelAction, acceptAction } = defineProps<{
+const { cancelAction, acceptAction, flaggedNotice } = defineProps<{
   cancelAction?: () => void
   acceptAction?: () => void
+  flaggedNotice?: string | null
 }>()
+const actionCopy = computed(() => getUnverifiedActionCopy(flaggedNotice))
 
 const handleAccept = () => {
   acceptAction?.()
@@ -18,19 +22,19 @@ const handleCancel = () => {
 
 <template>
   <BaseModalWrapper
-    title="Important!"
+    :title="flaggedNotice ? actionCopy.title : 'Important!'"
     warning
     @close="handleCancel"
   >
     <div class="flex flex-col gap-12 text-content-primary mb-24">
-      <h4 class="text-white text-h4">
-        Are you sure you want to interact with the unverified vault?
+      <h4
+        v-if="!flaggedNotice"
+        class="text-white text-h4"
+      >
+        {{ actionCopy.title }}
       </h4>
       <p class="pb-8">
-        Proceeding with this unknown and unverified vault may pose security risks. Such vaults could potentially be used for phishing attempts.
-      </p>
-      <p>
-        Please ensure you trust the source before continuing.
+        {{ actionCopy.description }}
       </p>
     </div>
     <div class="flex gap-8">
@@ -40,7 +44,7 @@ const handleCancel = () => {
         variant="primary-stroke"
         @click="handleAccept"
       >
-        Yes
+        {{ flaggedNotice ? 'Confirm' : 'Yes' }}
       </UiButton>
       <UiButton
         size="large"

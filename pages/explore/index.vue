@@ -111,7 +111,7 @@ const marketOptions = computed(() => {
       seenInGroup.add(market.name)
       const entityName = Array.isArray(market?.entity) ? market?.entity[0] : market?.entity
       const entityObj = entityName ? entities[entityName] : null
-      entries.push({ key: market.name, label: market.name, tvl: group.metrics.totalTVL, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined })
+      entries.push({ key: market.name, label: market.name, tvl: group.metrics.totalTVL, icon: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined })
     }
   }
   return buildTvlSortedOptions(entries)
@@ -141,7 +141,7 @@ const curatorOptions = computed(() => {
   for (const group of marketGroups.value) {
     if (group.source !== 'product') continue
     for (const entity of getUniqueEntitiesByVaults(group.vaults)) {
-      entries.push({ key: entity.name, label: entity.name, tvl: group.metrics.totalTVL, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined })
+      entries.push({ key: entity.name, label: entity.name, tvl: group.metrics.totalTVL, icon: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined })
     }
   }
   return buildTvlSortedOptions(entries)
@@ -321,7 +321,7 @@ const clearExploreFilters = () => {
       title="Explore"
       description="Discover lending markets across Euler. Filter by asset, curator, or market type."
       class="mb-16"
-      icon="nodes"
+      icon="nav-explore"
     />
 
     <div class="mb-16 -mx-16">
@@ -339,10 +339,10 @@ const clearExploreFilters = () => {
           v-model:dir="sortDir"
           :options="[
             { label: 'Active', icon: 'sparks' },
-            { label: 'Max ROE', icon: 'percent' },
-            { label: 'Total Supply', icon: 'lend-outline' },
-            { label: 'Total Borrowed', icon: 'borrow-outline' },
-            { label: 'Available Liquidity', icon: 'wallet' },
+            { label: 'Max ROE', icon: 'sort-roe' },
+            { label: 'Total Supply', icon: 'sort-total-supply' },
+            { label: 'Total Borrowed', icon: 'sort-total-borrowed' },
+            { label: 'Available Liquidity', icon: 'sort-liquidity' },
           ]"
           :disable-dir="sortBy === 'Active'"
           title="Sorting type"
@@ -355,7 +355,8 @@ const clearExploreFilters = () => {
           placeholder="Curator"
           title="Curator"
           modal-input-placeholder="Search curator"
-          icon="shield"
+          icon="filter-curator"
+          active-icon="filter-curator-filled"
         />
         <UiSelect
           v-if="enableEntityBranding"
@@ -365,7 +366,8 @@ const clearExploreFilters = () => {
           placeholder="Market"
           title="Market"
           modal-input-placeholder="Search market"
-          icon="bank"
+          icon="market"
+          active-icon="market-filled"
         />
         <UiSelect
           :key="`assets-${chainId}`"
@@ -374,7 +376,8 @@ const clearExploreFilters = () => {
           placeholder="Asset"
           title="Asset"
           modal-input-placeholder="Search asset"
-          icon="wallet"
+          icon="filter-asset"
+          active-icon="filter-asset-filled"
         />
         <UiCustomFilterChips
           :filters="customFilters"
@@ -404,7 +407,7 @@ const clearExploreFilters = () => {
       <UiEmptyState
         v-else
         class="flex-1"
-        icon="nodes"
+        icon="nav-explore"
         :title="emptyStateTitle"
         :description="emptyStateDescription"
       >

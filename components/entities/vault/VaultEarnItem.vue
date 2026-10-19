@@ -239,11 +239,22 @@ const supplyApyModalData = computed(() => ({
           <VaultDisplayName
             :name="displayName"
             :is-unverified="isUnverified"
+            :addresses="[vault.address]"
           />
           <RecentlyAddedBadge
             v-if="isRecentlyAdded"
           />
-          <RestrictedBadge v-if="isGeoBlocked" />
+          <RestrictedBadge
+            v-if="isGeoBlocked"
+            :vault-addresses="[vault.address]"
+            :chain-id="vault.chainId"
+          />
+          <VaultDeprecatedBadge :addresses="[vault.address]" />
+          <VaultAssessmentWarning
+            :address="vault.address"
+            family="earn"
+            hide-deprecated
+          />
         </div>
         <div
           class="text-h5 text-content-primary"
@@ -329,18 +340,22 @@ const supplyApyModalData = computed(() => ({
           v-else-if="entityName"
           class="flex items-center gap-6"
         >
-          <BaseAvatar
-            class="icon--20"
-            :label="entityName"
-            :src="entityLogos"
-          />
-          <span
-            class="text-p2 text-content-primary truncate"
-            data-id="data-point"
-            :data-key="vault.address.toLowerCase()"
-            data-field="curator"
-            :data-value="entityName"
-          >{{ entityName }}</span>
+          <VaultEntityDisclosureTooltip :entities="entities">
+            <span class="inline-flex min-w-0 items-center gap-6">
+              <BaseAvatar
+                class="icon--20"
+                :label="entityName"
+                :src="entityLogos"
+              />
+              <span
+                class="text-p2 text-content-primary truncate"
+                data-id="data-point"
+                :data-key="vault.address.toLowerCase()"
+                data-field="curator"
+                :data-value="entityName"
+              >{{ entityName }}</span>
+            </span>
+          </VaultEntityDisclosureTooltip>
         </div>
         <div
           v-else

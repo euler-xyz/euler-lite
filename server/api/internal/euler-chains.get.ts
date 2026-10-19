@@ -7,7 +7,6 @@ import {
   MANIFEST_MAX_STALE_MS,
   eulerInterfacesRawUrl,
 } from '~/server/utils/euler-interfaces'
-import { getEnabledChainIds } from '~/utils/chain-env'
 import { logger } from '~/server/utils/logger'
 
 const CACHE_TTL_MS = 300_000
@@ -18,10 +17,12 @@ const rateLimiter = createRateLimiter({
   label: 'euler-chains',
 })
 
-const cache = createTtlCache<unknown[]>({
+const cache = createTtlCache<unknown>({
   ttlMs: CACHE_TTL_MS,
   maxStaleMs: MANIFEST_MAX_STALE_MS,
 })
+let cachedChainIds = new Set<number>()
+let refreshedAt: number | undefined
 const CACHE_KEY = 'euler-chains'
 const inFlight = createInFlightDedup<string, unknown[]>()
 
@@ -35,24 +36,11 @@ function getUpstreamUrl(): string {
   return eulerInterfacesRawUrl('EulerChains.json')
 }
 
-// Admission check guarding the long stale window: only a manifest the SDK
-// and useEulerAddresses can actually consume may overwrite the last-known-
-// good entry. An array-shaped but unusable 200 (`[]`, `[{ chainId, addresses:
-// {} }]`, non-address values) must throw so loadEulerChains() keeps serving
-// the previous stale value instead of preserving poison for up to
-// MANIFEST_MAX_STALE_MS.
-//
-// Admission is per entry: an invalid entry for a chain this deployment does
-// not enable is dropped with a warning (a routine euler-interfaces commit
-// adding a sparse new chain must not freeze the manifest and time-bomb a
-// total 502 when the stale window expires), while every enabled chain must
-// be present and valid — an unusable payload for a chain users are actually
-// on is exactly the poison the stale window exists to outlive.
-//
-// Required keys are the ones whose absence breaks SDK builds or the core
-// lend/borrow surfaces on every chain (all current manifest entries carry
-// the full key set; peripheral keys are deliberately not required so a
-// sparse entry degrades a feature, not the chain).
+// Admission is per chain. Valid rows refresh independently; invalid rows may
+// retain their last-good entry within its original stale window. Missing rows
+// leave the admitted set. A wholly unusable response cannot replace that set.
+// Only core/lens keys needed by SDK builds and lend/borrow are required, so
+// missing peripheral keys degrade a feature rather than excluding the chain.
 const REQUIRED_CORE_ADDRS = ['eVaultFactory', 'evc', 'permit2'] as const
 const REQUIRED_LENS_ADDRS = ['accountLens', 'oracleLens', 'utilsLens', 'vaultLens'] as const
 
@@ -94,13 +82,6 @@ function admitDeploymentManifest(data: unknown): unknown[] {
     else dropped.push(readChainId(entry) ?? 'unknown')
   }
 
-  const validChainIds = new Set(valid.map(entry => readChainId(entry)))
-  const unusableEnabledChains = getEnabledChainIds().filter(id => !validChainIds.has(id))
-  if (unusableEnabledChains.length > 0) {
-    throw new Error(
-      `Upstream manifest is missing or invalid for enabled chains: ${unusableEnabledChains.join(', ')}`,
-    )
-  }
   if (valid.length === 0) {
     throw new Error('Upstream returned an invalid deployment manifest')
   }
@@ -108,7 +89,7 @@ function admitDeploymentManifest(data: unknown): unknown[] {
   if (dropped.length > 0) {
     logger.warn(
       { ctx: 'euler-chains', dropped },
-      'dropped invalid manifest entries for non-enabled chains',
+      'ignoring invalid manifest entries; cached entries retain their original stale deadline',
     )
   }
   return valid
@@ -129,14 +110,33 @@ export function refreshEulerChains(): Promise<unknown[]> {
 
     const data: unknown = await resp.json()
     const admitted = admitDeploymentManifest(data)
-    cache.set(CACHE_KEY, admitted)
-    return admitted
+    const previousChainIds = cachedChainIds
+    cachedChainIds = new Set<number>()
+    for (const entry of admitted) {
+      const chainId = readChainId(entry)!
+      cache.set(String(chainId), entry)
+      cachedChainIds.add(chainId)
+    }
+    // Keep bounded fallback only for rows still present in this response.
+    // An omitted chain is removed, including from the browser enabled set.
+    for (const entry of data as unknown[]) {
+      const chainId = readChainId(entry)
+      if (chainId !== undefined && previousChainIds.has(chainId)) cachedChainIds.add(chainId)
+    }
+    refreshedAt = Date.now()
+    return peekEulerChains()!
   })
 }
 
 /** The cached manifest, fresh or within the stale window, without fetching. */
 export function peekEulerChains(): unknown[] | undefined {
-  return cache.getStale(CACHE_KEY)
+  const entries: unknown[] = []
+  for (const chainId of cachedChainIds) {
+    const entry = cache.getStale(String(chainId))
+    if (entry) entries.push(entry)
+    else cachedChainIds.delete(chainId)
+  }
+  return entries.length ? entries : undefined
 }
 
 /**
@@ -148,8 +148,8 @@ export function peekEulerChains(): unknown[] | undefined {
  * server/plugins/sdk-deployments.ts).
  */
 export async function loadEulerChains(): Promise<unknown[]> {
-  const cached = cache.get(CACHE_KEY)
-  if (cached) return cached
+  const cached = peekEulerChains()
+  if (cached && refreshedAt !== undefined && Date.now() - refreshedAt < CACHE_TTL_MS) return cached
 
   try {
     return await refreshEulerChains()
@@ -157,7 +157,7 @@ export async function loadEulerChains(): Promise<unknown[]> {
   catch (err) {
     logger.warn({ ctx: 'euler-chains', err }, 'upstream fetch failed')
 
-    const stale = cache.getStale(CACHE_KEY)
+    const stale = peekEulerChains()
     if (stale) return stale
 
     logger.error(

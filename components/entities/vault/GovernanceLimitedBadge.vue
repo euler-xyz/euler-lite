@@ -11,7 +11,8 @@ const { size = 'small', block = false, as = 'span', nudge = false } = defineProp
 
 <template>
   <VaultMetadataBadge
-    icon="pulse"
+    icon="badge-governance-limited"
+    active-icon="badge-governance-limited-filled"
     label="Limited"
     title="This vault has limited risk management"
     :modal="GovernanceLimitedInfoModal"

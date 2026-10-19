@@ -47,7 +47,7 @@ All four sources run concurrently via `Promise.allSettled`. Each fetcher has its
 
 `applyOnchainDecimals` races that fan-out against a **5-second deadline** (`DECIMALS_READ_DEADLINE_MS`). viem can retry a hanging RPC for ~40 s; the deadline keeps `/api/internal/token-list` from blocking the merged cache that long. Reads that miss the deadline still complete in the background and fill the memo for the next build (`token-list` status `decimals:<chainId>` → `unread`). Until then the merged entry keeps the list-source decimals.
 
-A confirmed missing contract (`RawContractError` or `ContractFunctionZeroDataError`, including via `error.cause`) stores `null` and **drops** the token from the response. RPC failures are not treated as missing: those tokens stay in the list with source decimals and retry on the next build. Native `address(0)` is never read on-chain.
+When a `decimals()` read reports `RawContractError` or `ContractFunctionZeroDataError` (including via `error.cause`), the handler memoises `null` and **drops** the token for the life of the process. This covers absent contracts and missing or reverting `decimals()` implementations; it does not prove that the address has no code. RPC failures keep the token in the list with source decimals and retry on the next build. Native `address(0)` is never read on-chain.
 
 **Missing V3 logos**: V3 sets `logoURI` on every token and marks tokens without a managed image with `hasLogo: false`. For those tokens the merged entry takes the DefiLlama logo, else the Uniswap logo, else the V3 `logoURI`, which still serves a fallback image. If an image fails to load, the app shows initials. An older V3 response without `hasLogo` keeps the V3 logo. The flag itself is not passed on to the browser.
 

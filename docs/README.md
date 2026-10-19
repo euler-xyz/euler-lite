@@ -11,6 +11,12 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Development environment setup
 - Quick start guide
 
+### [Fork Setup](./fork-setup.md)
+
+- Operator-owned V3 and static labels, with complete environment examples
+- Explicit V3 opt-out, custom image hosts, SDK/Lite settings and remaining external services
+- Configuration diagnostics and verification steps
+
 ### 🏗️ [Architecture Overview](./architecture.md)
 
 - High-level system architecture
@@ -164,7 +170,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 
 - Four-source token list (Euler SDK, DefiLlama, Uniswap, Merkl reward tokens)
 - Parallel fetch via `Promise.allSettled` with per-source stale fallback
-- On-chain decimals with a 5 s read deadline; missing contracts are dropped, unread tokens retry
+- On-chain decimals with a 5 s read deadline; tokens with missing or reverting `decimals()` are dropped, unread tokens retry
 - Pre-populated at server startup by `warm-cache.ts`
 - CSP considerations for logo URLs
 

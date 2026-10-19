@@ -91,6 +91,15 @@ describe('app-config plugin images base', () => {
 
     expect(await render()).not.toContain(PRIVATE_V3)
   })
+  it('publishes the V3 opt-out and skips image discovery even with an upstream configured', async () => {
+    vi.stubEnv('DISABLE_V3', 'true')
+    const { render } = await bootPlugin()
+    const html = await render()
+    expect(html).toContain('"disableV3":true')
+    expect(html).toContain('"enableV3Backend":false')
+    expect(mocks.start).not.toHaveBeenCalled()
+    expect(html).not.toContain(PRIVATE_V3)
+  })
 
   it('stops refreshing when Nitro closes', async () => {
     const { hooks } = await bootPlugin()

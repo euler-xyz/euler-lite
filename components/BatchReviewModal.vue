@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { getAddress } from 'viem'
-import { flattenBatchEntries, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import type { TransactionPlan } from '@eulerxyz/euler-v2-sdk'
+import { collectUnverifiedPlanVaults } from '~/utils/plan-vault-targets'
 import { buildModifiedPositionKeySets, buildRemovedPositionKeySets, filterPositionKeysByOwner, useTxBatch } from '~/composables/useTxBatch'
 import { useTokenSymbolResolver } from '~/composables/useTokenSymbolResolver'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
@@ -20,6 +21,9 @@ import { BatchPreviewNotReadyError, ReviewedPlanDivergenceError } from '~/featur
 import { finalizeSuccessfulSubmission } from '~/features/reviewed-execution/review/submission-completion'
 import { useToast } from '~/components/ui/composables/useToast'
 import { getPositionTag, getSourcePositionTag } from '~/utils/positionTag'
+import { getUnverifiedActionCopy } from '~/utils/vault-assessment/presentation'
+import { getFlaggedActionNotice } from '~/utils/vault-assessment/flagged'
+import { useEulerLabels } from '~/composables/useEulerLabels'
 
 // Whole-batch review: required approvals, then the operations as rows that roll
 // down to their details, the net wallet changes, a Tenderly simulation link,
@@ -55,6 +59,7 @@ const {
   dismissExecutionError,
 } = useTxBatch()
 const executionService = useReviewedExecution()
+const approvalReadIssueCount = computed(() => executionService.approvalReadIssues?.value.length ?? 0)
 const toast = useToast()
 const isExecuting = ref(false)
 const preparedExecution = shallowRef<PreparedExecutionReview | null>(null)
@@ -218,32 +223,17 @@ const restorationSummaryGroups = computed(() => {
   ]
 })
 
-// Unverified vaults the batch touches — surfaced as a warning. A vault is the
-// target of an op's core action; we read targets off each op's contextual plan
-// and check the registry's verification flag (same source the forms use).
-const unverifiedVaultNames = computed<string[]>(() => {
-  const names = new Set<string>()
-  for (const entry of entries.value) {
-    const plan = entryPlans.value[entry.id]
-    if (!plan) continue
-    for (const item of plan) {
-      if (item.type !== 'evcBatch') continue
-      for (const bi of flattenBatchEntries(item.items)) {
-        try {
-          const addr = getAddress(bi.targetContract)
-          const vault = getVault(addr) as { shares?: { name?: string }, asset?: { symbol?: string } } | undefined
-          if (vault && !isVerifiedVault(addr)) {
-            const name = vault.shares?.name || vault.asset?.symbol || ''
-            if (name) names.add(name)
-          }
-        }
-        catch { /* skip malformed address */ }
-      }
-    }
-  }
-  return [...names]
-})
-const hasUnverified = computed(() => unverifiedVaultNames.value.length > 0)
+const unverifiedVaults = computed(() => collectUnverifiedPlanVaults(
+  entries.value.map(entry => entryPlans.value[entry.id]).filter((plan): plan is TransactionPlan => !!plan),
+  { getVault, isVerifiedVault },
+))
+const unverifiedVaultNames = computed(() => [...new Set(unverifiedVaults.value.map(vault => vault.name))])
+const { isReady: labelsReady, source: labelsSource, visibility: vaultVisibility } = useEulerLabels()
+const hasUnverified = computed(() => (labelsReady.value || labelsSource.value !== 'v3') && unverifiedVaultNames.value.length > 0)
+const flaggedNotice = computed(() => labelsReady.value
+  ? getFlaggedActionNotice(unverifiedVaults.value.map(vault => vault.address), labelsSource.value, vaultVisibility.value)
+  : null)
+const unverifiedActionCopy = computed(() => getUnverifiedActionCopy(flaggedNotice.value, unverifiedVaultNames.value))
 
 interface REULUnlockInfo {
   hasBurn: boolean
@@ -355,7 +345,7 @@ const hasStaleQuoteEntries = computed(() => entries.value.some(isEntryQuoteStale
 
 // Approvals the user will be asked to sign, decoded from the prepared plan.
 interface ResolvedApproval { type: string, token: string }
-const approvals = ref<Array<{ kind: 'approve' | 'permit', symbol: string }>>([])
+const approvals = ref<Array<{ kind: 'approve' | 'permit', symbol: string, forPermit2: boolean }>>([])
 const isPreparing = ref(false)
 const prepareError = ref('')
 // The prepared plan (with approvals resolved) backs "Copy calldata".
@@ -383,12 +373,17 @@ onMounted(async () => {
     preparedExecution.value = prepared
     preparedPlanRef.value = prepared.previewPlan
     const known = buildKnownSymbols()
-    const out: Array<{ kind: 'approve' | 'permit', symbol: string }> = []
+    const out: Array<{ kind: 'approve' | 'permit', symbol: string, forPermit2: boolean }> = []
     for (const item of prepared.previewPlan) {
       if ((item as { type?: string }).type !== 'requiredApproval') continue
       const resolved = (item as { resolved?: ResolvedApproval[] }).resolved ?? []
+      const permit2Tokens = new Set(resolved.filter(r => r.type === 'permit2').map(r => r.token.toLowerCase()))
       for (const r of resolved) {
-        out.push({ kind: r.type === 'approve' ? 'approve' : 'permit', symbol: resolveSymbol(r.token, known) })
+        out.push({
+          kind: r.type === 'approve' ? 'approve' : 'permit',
+          symbol: resolveSymbol(r.token, known),
+          forPermit2: r.type === 'approve' && permit2Tokens.has(r.token.toLowerCase()),
+        })
       }
     }
     approvals.value = out
@@ -583,7 +578,7 @@ const onCloseRequested = () => {
                 class="!w-16 !h-16"
                 :class="a.kind === 'permit' ? 'text-accent-500' : 'text-content-tertiary'"
               />
-              {{ a.kind === 'permit' ? `Sign permit2 — ${a.symbol}` : `Approve ${a.symbol}` }}
+              {{ a.kind === 'permit' ? `Sign permit2 — ${a.symbol}` : `Approve ${a.symbol}${a.forPermit2 ? ' for Permit2' : ''}` }}
             </span>
             <span class="text-p3 text-content-tertiary">{{ a.kind === 'permit' ? '1 signature' : bundlesApprovals ? 'bundled in batch' : '1 transaction' }}</span>
           </div>
@@ -596,6 +591,13 @@ const onCloseRequested = () => {
         size="compact"
         title="Infinite approval"
         description="You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract that lets you approve once, then sign per-action permissions without new onchain approvals."
+      />
+      <UiAlert
+        v-if="approvalReadIssueCount"
+        variant="warning"
+        size="compact"
+        title="Allowances could not be read"
+        description="The current token allowances could not be read from the network, so an approval is included to be safe. If you approved this token before, this approval may be redundant."
       />
 
       <UiAlert
@@ -797,8 +799,8 @@ const onCloseRequested = () => {
         v-if="hasUnverified"
         variant="warning"
         size="compact"
-        title="Interacting with an unverified vault"
-        :description="`This batch interacts with an unverified vault (${unverifiedVaultNames.join(', ')}). Proceeding with an unknown and unverified vault may pose security risks — such vaults could potentially be used for phishing attempts.`"
+        :title="unverifiedActionCopy.title"
+        :description="unverifiedActionCopy.description"
       />
 
       <!-- Top-level batch error (revert / status-check / wallet shortfall) -->

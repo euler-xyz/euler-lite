@@ -10,7 +10,8 @@
  */
 import {
   readBrowserVaultSource,
-  readV3ApiUrl,
+  readDisableV3,
+  isV3BackendEnabled,
   V3_API_PROXY_URL,
 } from '~/utils/api-url-env'
 import { buildAnnouncementConfig } from '~/utils/announcement-config'
@@ -60,7 +61,8 @@ function readAppConfig() {
     v3ApiUrl: V3_API_PROXY_URL,
     // The client uses this to decide whether the SDK's "fast" instance routes
     // reads via /api/internal/v3 (v3 adapters) or falls back to direct on-chain reads.
-    enableV3Backend: !!readV3ApiUrl(),
+    enableV3Backend: isV3BackendEnabled(),
+    disableV3: readDisableV3(),
     // Adapter chain pinned for the browser's "fast" SDK instance. See
     // utils/api-url-env.ts:readBrowserVaultSource.
     browserVaultSource: readBrowserVaultSource(),
@@ -137,7 +139,7 @@ export default defineNitroPlugin((nitroApp) => {
   const appConfig = readAppConfig()
   const v3ImagesBase = createV3ImagesBaseSource()
   // Prerendered pages are static, so they must not bake in a value read at build time.
-  const bootRead = import.meta.prerender
+  const bootRead = import.meta.prerender || appConfig.disableV3
     ? Promise.resolve()
     : Promise.race([v3ImagesBase.start(), delay(BOOT_READ_WAIT_MS)])
   nitroApp.hooks.hook('close', () => v3ImagesBase.stop())

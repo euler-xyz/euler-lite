@@ -7,6 +7,11 @@ import { BatchPreviewNotReadyError, ReviewedPlanDivergenceError } from '~/featur
 const mocks = vi.hoisted(() => ({
   prepare: vi.fn(),
   entries: [] as Array<{ id: string, review: Record<string, unknown> }>,
+  entryPlans: {} as Record<string, unknown>,
+  vaults: {} as Record<string, { shares: { name: string } }>,
+  verified: new Set<string>(),
+  labelsSource: 'static',
+  visibility: {} as Record<string, { status: string, decidedBy?: string, reason?: string | null }>,
 }))
 
 // Run the modal's mounted preparation before asserting its server-rendered output.
@@ -17,7 +22,7 @@ vi.mock('vue', async (importOriginal) => {
 
 vi.mock('~/composables/useTxBatch', () => ({
   useTxBatch: () => ({
-    entries: ref(mocks.entries), layers: ref([]), walletChanges: ref([]), entryPlans: ref({}), marketByEntryId: ref({}),
+    entries: ref(mocks.entries), layers: ref([]), walletChanges: ref([]), entryPlans: ref(mocks.entryPlans), marketByEntryId: ref({}),
     simError: ref(), execError: ref(), insufficientBalanceMessage: ref(),
     isSimulating: ref(false), canExecuteBatch: ref(true), hasFailedOps: ref(false), hasInsufficientBalance: ref(false),
     tenderlyEnabled: ref(false), isTenderlySimulating: ref(false), tenderlyUrl: ref(), tenderlyError: ref(),
@@ -31,9 +36,15 @@ vi.mock('~/composables/useTokenSymbolResolver', () => ({
   useTokenSymbolResolver: () => ({ buildKnownSymbols: () => ({}), resolveSymbol: () => '' }),
 }))
 vi.mock('~/composables/useVaultRegistry', () => ({
-  useVaultRegistry: () => ({ getVault: vi.fn(), isVerifiedVault: () => true }),
+  useVaultRegistry: () => ({
+    getVault: (address: string) => mocks.vaults[address.toLowerCase()],
+    isVerifiedVault: (address: string) => mocks.verified.has(address.toLowerCase()),
+  }),
 }))
 vi.mock('~/composables/useTokenList', () => ({ getAssetLogoUrl: () => '' }))
+vi.mock('~/composables/useEulerLabels', () => ({
+  useEulerLabels: () => ({ isReady: ref(true), source: ref(mocks.labelsSource), visibility: ref(mocks.visibility) }),
+}))
 vi.mock('~/components/ui/composables/useToast', () => ({ useToast: () => ({}) }))
 vi.mock('~/utils/errorHandling', () => ({ logWarn: vi.fn() }))
 
@@ -60,6 +71,11 @@ beforeEach(() => {
   vi.useFakeTimers()
   mocks.prepare.mockReset()
   mocks.entries.length = 0
+  mocks.entryPlans = {}
+  mocks.vaults = {}
+  mocks.visibility = {}
+  mocks.verified = new Set()
+  mocks.labelsSource = 'static'
   vi.stubGlobal('useReviewedExecution', () => ({}))
   vi.stubGlobal('useEffectiveAddress', () => ({ isSpyMode: ref(false), effectiveAddress: ref('0x1000000000000000000000000000000000000000') }))
   vi.stubGlobal('useEulerAddresses', () => ({ eulerCoreAddresses: ref({}) }))
@@ -111,5 +127,53 @@ describe('batch review preparation failures', () => {
     for (const action of ['batch-copy-calldata', 'batch-review-execute']) {
       expect(html).toMatch(new RegExp(`<button(?=[^>]*data-testid="${action}")(?=[^>]*disabled)[^>]*>`))
     }
+  })
+})
+
+describe('batch review vault confirmation', () => {
+  const LISTED = '0x00000000000000000000000000000000000000b1'
+  const FLAGGED = '0x00000000000000000000000000000000000000b2'
+  const UNKNOWN = '0x00000000000000000000000000000000000000b3'
+  const ACCOUNT = '0x1000000000000000000000000000000000000000'
+  const batchTargeting = (...targets: string[]) => {
+    mocks.entries.push({ id: 'swap', review: { type: 'swap' } })
+    mocks.entryPlans.swap = [{
+      type: 'evcBatch',
+      items: targets.map(targetContract => ({ targetContract, onBehalfOfAccount: ACCOUNT, value: 0n, data: '0x' })),
+    }]
+  }
+
+  beforeEach(() => {
+    mocks.labelsSource = 'v3'
+    mocks.verified.add(LISTED)
+    mocks.vaults[LISTED] = { shares: { name: 'Listed vault' } }
+    mocks.vaults[FLAGGED] = { shares: { name: 'Flagged vault' } }
+    mocks.vaults[UNKNOWN] = { shares: { name: 'Unknown vault' } }
+    mocks.visibility[LISTED] = { status: 'visible', decidedBy: 'verified' }
+    mocks.visibility[FLAGGED] = { status: 'hidden', decidedBy: 'config-failed', reason: 'The oracle failed' }
+    mocks.visibility[UNKNOWN] = { status: 'pending_review', decidedBy: 'awaiting-verification' }
+    mocks.prepare.mockRejectedValue(new BatchPreviewNotReadyError())
+  })
+
+  it('uses the flagged copy when the calldata of an operation from a listed vault targets a flagged vault', async () => {
+    batchTargeting(LISTED, FLAGGED)
+    const html = await renderModal()
+    expect(html).toContain('data-alert-title="Vault flagged"')
+    expect(html).toContain('This transaction uses a flagged vault: The oracle failed.')
+    expect(html).not.toContain('not listed')
+  })
+
+  it('keeps the strict copy when the batch also targets a pending-review vault', async () => {
+    batchTargeting(FLAGGED, UNKNOWN)
+    const html = await renderModal()
+    expect(html).toContain('data-alert-title="Unverified vault"')
+    expect(html).toContain('phishing attempts')
+  })
+
+  it('shows no vault alert for listed vaults only', async () => {
+    batchTargeting(LISTED)
+    const html = await renderModal()
+    expect(html).not.toContain('data-alert-title="Vault flagged"')
+    expect(html).not.toContain('data-alert-title="Unverified vault"')
   })
 })

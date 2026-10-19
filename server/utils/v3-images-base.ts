@@ -1,4 +1,4 @@
-import { readResolvedV3ApiUrl } from '~/utils/api-url-env'
+import { readDisableV3, readResolvedV3ApiUrl } from '~/utils/api-url-env'
 import { parsePublicImagesBaseUrl } from '~/utils/v3-images'
 import { fetchWithTimeout } from './fetchWithTimeout'
 import { logger } from './logger'
@@ -11,8 +11,10 @@ export type V3ImagesBaseRead
   = | { status: 'ok', baseUrl: string }
     | { status: 'invalid' }
     | { status: 'unreachable' }
+    | { status: 'disabled' }
 
 export async function readV3ImagesBaseUrl(env: NodeJS.ProcessEnv = process.env): Promise<V3ImagesBaseRead> {
+  if (readDisableV3(env)) return { status: 'disabled' }
   let response: Response
   try {
     response = await fetchWithTimeout(`${readResolvedV3ApiUrl(env)}/v3/images`, undefined, {
@@ -67,6 +69,11 @@ export function createV3ImagesBaseSource(options: {
 
   const refresh = async () => {
     const result = await read().catch((): V3ImagesBaseRead => ({ status: 'unreachable' }))
+    if (result.status === 'disabled') {
+      baseUrl = ''
+      clearTimeout(timer)
+      return
+    }
     if (result.status === 'ok') baseUrl = result.baseUrl
     if (result.status === 'invalid') baseUrl = ''
     if (result.status !== lastStatus && result.status !== 'ok') {

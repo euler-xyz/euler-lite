@@ -203,12 +203,12 @@ onClickOutside(wrapperRef, () => {
 
     <!-- Navigation -->
     <div class="hidden laptop:block min-w-0 tablet:absolute tablet:left-1/2 tablet:-translate-x-1/2">
-      <div class="flex gap-4 tablet:gap-0">
+      <div class="flex gap-4">
         <NuxtLink
           v-for="item in menuItems"
           :key="item.name"
           :to="'/' + item.name"
-          class="flex gap-8 text-[13px] font-medium no-underline py-6 px-12 tablet:px-16 rounded-8 text-content-secondary items-center justify-center hover:text-content-primary hover:bg-surface-secondary transition-all"
+          class="flex gap-8 text-[13px] font-medium no-underline py-6 px-6 tablet:px-10 rounded-8 text-content-secondary items-center justify-center hover:text-content-primary hover:bg-surface-secondary transition-all"
           :class="[
             getIsMenuItemActive(item)
               ? 'bg-surface-secondary text-content-primary'
@@ -222,16 +222,11 @@ onClickOutside(wrapperRef, () => {
                 ? 'text-accent-600'
                 : 'text-content-muted',
             ]"
-            :name="item.icon"
+            :name="getIsMenuItemActive(item) ? item.activeIcon : item.icon"
           />
-          <span
-            v-if="item.sublabel"
-            class="flex flex-col items-start leading-[1.15]"
-          >
-            <span>{{ item.label }}</span>
-            <span class="text-[10px] font-normal text-content-tertiary">{{ item.sublabel }}</span>
+          <span class="whitespace-nowrap">
+            {{ item.sublabel ? `${item.label} / ${item.sublabel}` : item.label }}
           </span>
-          <span v-else>{{ item.label }}</span>
         </NuxtLink>
       </div>
     </div>
