@@ -8,8 +8,9 @@ import { getBorrowPositionEffectiveLiquidationLTV, getBorrowPositionTimeToLiquid
 import { maxUint256 } from 'viem'
 import { formatTtl, ltvToPercent, nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { formatNumber, formatHealthScore, formatUsdValue, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
-import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
-import { getVaultNotice } from '~/utils/eulerLabelsUtils'
+import { getVaultGeoUnavailableReason, isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
+import { getVaultDeprecation, getVaultNotice } from '~/utils/eulerLabelsUtils'
+import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
 import { getPositionCollateralEdge, getPositionRampStatus, getPositionRampTargetTimestamp } from '~/entities/account'
 import { DateTime } from 'luxon'
 import { VaultOverviewModal, VaultApyModal, VaultNetApyModal, PortfolioRoeModal, VaultRampDownModal } from '#components'
@@ -80,6 +81,37 @@ const borrowVault = computed<EVault | undefined>(() => position.value ? position
 const collateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() => position.value ? position.value.collateralVault as EVault | SecuritizeCollateralVault | undefined : undefined)
 const positionCollateralAddresses = computed(() => position.value ? position.value.collateralVaults : [])
 const primaryCollateralAddress = computed(() => collateralVault.value ? getAddress(collateralVault.value.address) : '')
+const deprecatedPosition = computed(() => {
+  getEulerLabelsVersion()
+  const borrow = borrowVault.value ? getVaultDeprecation(borrowVault.value.address) : null
+  const collaterals = positionCollateralAddresses.value
+    .map(address => ({ address, ...getVaultDeprecation(address) }))
+    .filter(item => item.deprecated)
+  const reasons = [...new Set([
+    ...(borrow?.deprecated ? [borrow.reason] : []),
+    ...collaterals.map(item => item.reason),
+  ].filter(Boolean))]
+  return { borrow: borrow?.deprecated ?? false, collaterals, reasons }
+})
+const deprecatedPositionAction = computed(() => {
+  const network = _route.query.network
+  const query: Record<string, string> = {}
+  if (typeof network === 'string') query.network = network
+  if (deprecatedPosition.value.borrow && !hasNoBorrow.value) {
+    return { text: 'Repay debt', to: { path: `/position/${positionIndex}/repay`, query } }
+  }
+  const collateral = deprecatedPosition.value.collaterals[0]
+  if (!collateral) return null
+  if (isEligibleForLiquidation.value || hasQueryFailure.value || isPositionGeoBlocked.value || isPairFullyRestricted.value) {
+    return !hasNoBorrow.value
+      ? { text: 'Repay debt', to: { path: `/position/${positionIndex}/repay`, query } }
+      : null
+  }
+  return {
+    text: 'Withdraw collateral',
+    to: { path: `/position/${positionIndex}/withdraw`, query: { ...query, collateral: collateral.address } },
+  }
+})
 const buildMigrationRoute = computed(() => {
   const query: Record<string, string> = {}
   const network = _route.query.network
@@ -186,7 +218,7 @@ const isPairFullyRestricted = computed(() => {
 const migrationDisabledReason = computed(() => {
   if (!enableExternalMigrations.value) return 'Enable advanced mode in settings'
   if (hasNoBorrow.value) return 'This position has no debt to migrate out'
-  if (isPositionGeoBlocked.value || isPairFullyRestricted.value) return 'This position is not available in your region'
+  if (isPositionGeoBlocked.value || isPairFullyRestricted.value) return getVaultGeoUnavailableReason(borrowVault.value?.address, ...positionCollateralAddresses.value) || 'This position is not available in your region'
   if (hasQueryFailure.value) return 'Position data is incomplete'
   if (!collateralVault.value || isSecuritizeCollateralVault(collateralVault.value)) return 'Migration requires standard Euler collateral'
   // buildMigrationRoute only carries the primary collateral, so a multi-collateral
@@ -897,6 +929,16 @@ watch([isConnected, isSpyMode, address, activeLayerData, () => _route.params.num
       </VaultLabelsAndAssets>
 
       <UiAlert
+        v-if="deprecatedPosition.borrow || deprecatedPosition.collaterals.length"
+        title="Deprecated position"
+        :description="`${deprecatedPosition.reasons.join(' ')} Review whether to withdraw or migrate your collateral and repay or refinance any debt.`"
+        :action-text="deprecatedPositionAction?.text"
+        variant="warning"
+        size="compact"
+        @action="deprecatedPositionAction && router.push(deprecatedPositionAction.to)"
+      />
+
+      <UiAlert
         v-if="hasQueryFailure"
         title="Oracle unavailable"
         description="Oracle pricing is currently unavailable. Some position details cannot be displayed. You can still repay debt and supply collateral."
@@ -1244,21 +1286,18 @@ watch([isConnected, isSpyMode, address, activeLayerData, () => _route.params.num
               variant="warning"
               size="compact"
             />
-            <UiAlert
+            <GeoBlockAlert
               v-if="isPositionGeoBlocked || isPairFullyRestricted"
+              :vault-addresses="[borrowVault?.address, ...positionCollateralAddresses]"
               class="my-12"
-              title="Region restricted"
               description="This pair is not available in your region. You can still repay existing debt."
-              variant="warning"
-              size="compact"
             />
-            <UiAlert
+            <GeoBlockAlert
               v-if="!isPositionGeoBlocked && !isPairFullyRestricted && (isBorrowRestricted || isMultiplyRestricted)"
+              :vault-addresses="[borrowVault?.address, ...positionCollateralAddresses]"
               class="my-12"
               title="Asset restricted"
               description="Some operations on this pair are restricted in your region. Supply, withdraw, and repay remain available."
-              variant="warning"
-              size="compact"
             />
             <div
               class="flex justify-between gap-8 mt-4"

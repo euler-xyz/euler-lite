@@ -31,7 +31,7 @@ const { onSelect, currentAssetAddress, mode = 'input', allowNativeCurrency = fal
   pairedAsset?: { address: string }
 }>()
 
-const { getByType } = useVaultRegistry()
+const { getAll } = useVaultRegistry()
 const { getBalance } = useWallets()
 const { getAllTokens, toVaultAsset } = useTokenList()
 const { chainId } = useEulerAddresses()
@@ -74,7 +74,7 @@ const tokenOptions = computed((): TokenOption[] => {
   const options: TokenOption[] = []
 
   // Vault assets first — they take precedence
-  const allVaults = [...getByType('evk'), ...getByType('earn'), ...getByType('securitize')]
+  const allVaults = getAll().filter(entry => !entry.portfolioOnly).map(entry => entry.vault)
   for (const vault of allVaults) {
     if (!vault.asset?.address) continue
     let normalized: string
@@ -253,6 +253,9 @@ const handleSelectCustomToken = () => {
           icon="search"
           clearable
         />
+        <p class="mt-8 text-p5 text-content-tertiary">
+          Token names and symbols can be misleading. Check the contract address before selecting.
+        </p>
       </div>
       <div
         class="flex-1 min-h-0 overflow-auto styled-scrollbar"

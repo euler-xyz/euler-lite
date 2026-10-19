@@ -7,9 +7,7 @@
     },
     "localStorage": {
       "is-onboarding-completed": "true",
-      "permit2-enabled": "false",
-      "swap-slippage": "5",
-      "swap-slippage-set-at": "9999999999999"
+      "signatures-enabled": "false"
     },
     "waitFor": [
       "[data-id]"
@@ -41,12 +39,14 @@
     "reul-unlock",
     "cleanup",
     "earn-supply",
-    "earn-withdraw"
+    "earn-withdraw",
+    "swap-collateral"
   ],
   "unsupportedTransactionTypes": [
     "swap-from-wallet",
     "same-asset-debt-migration",
-    "multiply-same-asset"
+    "multiply-same-asset",
+    "transfer"
   ],
   "scenarios": [
     {
@@ -248,6 +248,13 @@
           "label": "Enter swapped supply amount",
           "assetLabel": "Supply amount",
           "value": "2",
+          "settleMs": 6000,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "setSlippage",
+          "label": "Set fork quote slippage through the form",
+          "value": 5,
           "settleMs": 6000,
           "captureTagsAfter": true
         },
@@ -915,6 +922,13 @@
           "captureTagsAfter": true
         },
         {
+          "type": "setSlippage",
+          "label": "Set fork quote slippage through the form",
+          "value": 5,
+          "settleMs": 6000,
+          "captureTagsAfter": true
+        },
+        {
           "type": "click",
           "label": "Select best multiply swap route",
           "selector": "[data-id=\"swap-route-list-item\"]",
@@ -1055,6 +1069,16 @@
       "covers": [
         "withdraw-and-swap"
       ],
+      "requiredCalls": [
+        {
+          "target": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9",
+          "signature": "withdraw(uint256,address,address)"
+        },
+        {
+          "target": "0xB1C777BE7965dCdE810645497CC1e6e5997BD6C5",
+          "signature": "verifyAmountMinAndTransfer(address,address,uint256,uint256)"
+        }
+      ],
       "path": "/lend/0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9/0/withdraw?network=1",
       "waitFor": [
         "[data-id=\"asset-input\"][data-label=\"Withdraw amount\"]",
@@ -1074,6 +1098,13 @@
           "label": "Enter withdraw swap amount",
           "assetLabel": "Withdraw amount",
           "value": "0.25",
+          "settleMs": 6000,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "setSlippage",
+          "label": "Set fork quote slippage through the form",
+          "value": 5,
           "settleMs": 6000,
           "captureTagsAfter": true
         },
@@ -1193,6 +1224,13 @@
           "captureTagsAfter": true
         },
         {
+          "type": "setSlippage",
+          "label": "Set fork quote slippage through the form",
+          "value": 5,
+          "settleMs": 6000,
+          "captureTagsAfter": true
+        },
+        {
           "type": "click",
           "label": "Select best wallet repay swap route",
           "selector": "[data-id=\"swap-route-list-item\"]",
@@ -1302,6 +1340,13 @@
           "label": "Enter collateral repay source amount",
           "assetLabel": "Collateral to swap",
           "value": "1",
+          "settleMs": 6000,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "setSlippage",
+          "label": "Set fork quote slippage through the form",
+          "value": 5,
           "settleMs": 6000,
           "captureTagsAfter": true
         },
@@ -1465,6 +1510,16 @@
       "covers": [
         "redeem-and-swap"
       ],
+      "requiredCalls": [
+        {
+          "target": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9",
+          "signature": "redeem(uint256,address,address)"
+        },
+        {
+          "target": "0xB1C777BE7965dCdE810645497CC1e6e5997BD6C5",
+          "signature": "verifyAmountMinAndTransfer(address,address,uint256,uint256)"
+        }
+      ],
       "path": "/portfolio/saving?network=1",
       "waitFor": [
         "[data-id=\"portfolio-list-item\"][data-list=\"lend\"][data-vault-address=\"0x797dd80692c3b2dadabce8e30c07fde5307d48a9\"]"
@@ -1490,10 +1545,16 @@
           "captureTagsAfter": true
         },
         {
-          "type": "fillAsset",
-          "label": "Enter redeem swap amount",
+          "type": "clickAssetMax",
+          "label": "Redeem the full savings share balance through swap",
           "assetLabel": "Withdraw amount",
-          "value": "0.5",
+          "settleMs": 6000,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "setSlippage",
+          "label": "Set fork quote slippage through the form",
+          "value": 5,
           "settleMs": 6000,
           "captureTagsAfter": true
         },
@@ -1655,10 +1716,6 @@
         "swap-debt"
       ],
       "path": "/portfolio?network=1&showAll=1",
-      "localStorage": {
-        "swap-slippage": "20",
-        "swap-slippage-set-at": "9999999999999"
-      },
       "waitFor": [
         "[data-id=\"portfolio-list-item\"][data-list=\"borrow\"]"
       ],
@@ -1689,10 +1746,14 @@
           "label": "Select USDT debt target",
           "assetLabel": "Debt vault",
           "vaultAddress": "0x313603FA690301b0CaeEf8069c065862f9162162",
-          "waitFor": [
-            "[data-id=\"swap-route-list-item\"]"
-          ],
           "settleMs": 3000,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "setSlippage",
+          "label": "Set fork quote slippage through the form",
+          "value": 20,
+          "settleMs": 6000,
           "captureTagsAfter": true
         },
         {
@@ -1756,7 +1817,13 @@
             }
           ]
         }
-      }
+      },
+      "requiredCalls": [
+        {
+          "target": "0xB1C777BE7965dCdE810645497CC1e6e5997BD6C5",
+          "signature": "verifyDebtMax(address,address,uint256,uint256)"
+        }
+      ]
     },
     {
       "id": "position-repay-wallet-max-cleanup-execute",
@@ -1765,8 +1832,7 @@
         "borrow-open-position-execute"
       ],
       "covers": [
-        "cleanup",
-        "transfer"
+        "cleanup"
       ],
       "path": "/portfolio?network=1&showAll=1",
       "waitFor": [
@@ -1924,6 +1990,13 @@
           "captureTagsAfter": true
         },
         {
+          "type": "setSlippage",
+          "label": "Set fork quote slippage through the form",
+          "value": 5,
+          "settleMs": 6000,
+          "captureTagsAfter": true
+        },
+        {
           "type": "click",
           "label": "Select best borrow swap route",
           "selector": "[data-id=\"swap-route-list-item\"]",
@@ -1963,122 +2036,6 @@
       "postCaptures": [
         {
           "id": "portfolio-borrow-after-swap-borrow",
-          "path": "/portfolio?network=1&showAll=1",
-          "waitFor": [
-            "[data-id]"
-          ],
-          "settleMs": 5000
-        }
-      ],
-      "discoveryMocks": {
-        "subgraph": {
-          "accounts": [
-            {
-              "chainId": 1,
-              "subAccountIndex": 1,
-              "deposits": [
-                {
-                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
-                }
-              ],
-              "borrows": [
-                {
-                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
-                }
-              ]
-            }
-          ]
-        },
-        "activation": "afterFirstTransaction"
-      }
-    },
-    {
-      "id": "borrow-multiply-same-asset-execute",
-      "label": "Same-asset multiply opens a fork position",
-      "covers": [
-        "multiply-same-asset"
-      ],
-      "path": "/borrow/0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9/0x313603FA690301b0CaeEf8069c065862f9162162?network=1",
-      "waitFor": [
-        "[data-id=\"tab\"][data-value=\"Multiply\"]",
-        "button:has-text(\"Review Borrow\"), button:has-text(\"Review Multiply\"), button:has-text(\"Accept Terms Of Use\")"
-      ],
-      "actions": [
-        {
-          "type": "click",
-          "label": "Open Terms of Use modal (if shown)",
-          "selector": "button:has-text(\"Accept Terms Of Use\")",
-          "optional": true,
-          "probeMs": 3000,
-          "waitFor": [
-            "text=Acknowledge terms",
-            "button:has-text(\"Accept\")"
-          ],
-          "settleMs": 750,
-          "captureTagsAfter": true
-        },
-        {
-          "type": "click",
-          "label": "Accept Terms of Use (if modal open)",
-          "selector": "button:has-text(\"Accept\"):not(:has-text(\"Terms\"))",
-          "optional": true,
-          "probeMs": 2000,
-          "waitFor": [
-            "button:has-text(\"Review Borrow\"), button:has-text(\"Review Multiply\")"
-          ],
-          "settleMs": 1500,
-          "captureTagsAfter": true
-        },
-        {
-          "type": "clickTab",
-          "label": "Select multiply mode",
-          "tab": "Multiply",
-          "waitFor": [
-            "[data-id=\"asset-input\"][data-label=\"Supply USDC\"]",
-            "[data-id=\"ui-range\"][data-label=\"Multiplier\"]",
-            "button:has-text(\"Review Multiply\")"
-          ],
-          "settleMs": 1500,
-          "captureTagsAfter": true
-        },
-        {
-          "type": "fillAsset",
-          "label": "Enter same-asset multiply supply amount",
-          "assetLabel": "Supply USDC",
-          "value": "1",
-          "settleMs": 3000,
-          "captureTagsAfter": true
-        },
-        {
-          "type": "clickRangeStep",
-          "label": "Select same-asset multiplier",
-          "rangeLabel": "Multiplier",
-          "index": 2,
-          "settleMs": 3000,
-          "captureTagsAfter": true
-        },
-        {
-          "type": "click",
-          "label": "Open same-asset multiply review",
-          "selector": "button:has-text(\"Review Multiply\")",
-          "waitFor": [
-            "text=Transaction review",
-            "[data-id=\"operation-review-confirm\"]"
-          ],
-          "settleMs": 1500,
-          "captureTagsAfter": true
-        },
-        {
-          "type": "click",
-          "label": "Confirm same-asset multiply",
-          "selector": "[data-id=\"operation-review-confirm\"]",
-          "settleMs": 10000,
-          "captureTagsAfter": true
-        }
-      ],
-      "postCaptures": [
-        {
-          "id": "portfolio-borrow-after-same-asset-multiply",
           "path": "/portfolio?network=1&showAll=1",
           "waitFor": [
             "[data-id]"
@@ -2165,7 +2122,7 @@
         {
           "type": "click",
           "label": "Open early-unlock review for the partially-vested lock",
-          "selector": "[data-id=\"reward-unlock-list-item\"][data-timestamp=\"1772150400\"] button:has-text(\"Unlock\")",
+          "selector": "[data-id=\"reward-unlock-list-item\"][data-timestamp=\"1787529600\"] button:has-text(\"Unlock\")",
           "waitFor": [
             "text=Transaction review",
             "[data-id=\"operation-review-confirm\"]",
@@ -2365,6 +2322,374 @@
             }
           ]
         }
+      }
+    },
+    {
+      "id": "collateral-withdraw-and-swap-execute",
+      "label": "Withdraw collateral into a wallet token while retaining the borrow position",
+      "dependsOn": [
+        "borrow-open-position-execute"
+      ],
+      "covers": [
+        "withdraw-and-swap"
+      ],
+      "requiredCalls": [
+        {
+          "target": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9",
+          "signature": "withdraw(uint256,address,address)"
+        },
+        {
+          "target": "0xB1C777BE7965dCdE810645497CC1e6e5997BD6C5",
+          "signature": "verifyAmountMinAndTransfer(address,address,uint256,uint256)"
+        }
+      ],
+      "path": "/position/1/withdraw?network=1&showAll=1",
+      "waitFor": [
+        "[data-id=\"asset-input\"][data-label=\"Withdraw amount\"]",
+        "button:has-text(\"Review Withdraw\")"
+      ],
+      "actions": [
+        {
+          "type": "selectSwapToken",
+          "label": "Select WETH as receive-as token",
+          "triggerLabel": "Receive as",
+          "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+          "settleMs": 1500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "fillAsset",
+          "label": "Enter withdraw swap amount",
+          "assetLabel": "Withdraw amount",
+          "value": "0.25",
+          "settleMs": 6000,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "setSlippage",
+          "label": "Set fork quote slippage through the form",
+          "value": 5,
+          "settleMs": 6000,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Select best withdraw swap route",
+          "selector": "[data-id=\"swap-route-list-item\"]",
+          "waitFor": [
+            "[data-id=\"swap-route-list-item\"][data-selected=\"true\"]"
+          ],
+          "settleMs": 1500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Open withdraw swap review",
+          "selector": "button:has-text(\"Review Withdraw\")",
+          "waitFor": [
+            "text=Transaction review",
+            "[data-id=\"operation-review-confirm\"]"
+          ],
+          "settleMs": 1500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Confirm withdraw swap",
+          "selector": "[data-id=\"operation-review-confirm\"]",
+          "settleMs": 10000,
+          "captureTagsAfter": true
+        }
+      ],
+      "postCaptures": [
+        {
+          "id": "portfolio-after-collateral-withdraw-swap",
+          "path": "/portfolio?network=1&showAll=1",
+          "waitFor": [
+            "[data-id=\"portfolio-list-item\"][data-list=\"borrow\"]"
+          ],
+          "settleMs": 5000
+        }
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "subAccountIndex": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                }
+              ],
+              "borrows": [
+                {
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "lend-collateral-swap-execute",
+      "label": "Swap supplied USDC into the USDT vault with skimMin verification",
+      "dependsOn": [
+        "lend-supply-execute"
+      ],
+      "covers": [
+        "swap-collateral"
+      ],
+      "path": "/lend/0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9/0/swap?to=0x313603FA690301b0CaeEf8069c065862f9162162&network=1",
+      "waitFor": [
+        "[data-id=\"asset-input\"][data-label=\"From\"]",
+        "[data-id=\"asset-input\"][data-label=\"To\"]"
+      ],
+      "actions": [
+        {
+          "type": "fillAsset",
+          "label": "Enter collateral swap amount",
+          "assetLabel": "From",
+          "value": "0.25",
+          "settleMs": 3000,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "setSlippage",
+          "label": "Set fork quote slippage through the form",
+          "value": 5,
+          "settleMs": 6000,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Select collateral swap route",
+          "selector": "[data-id=\"swap-route-list-item\"]",
+          "waitFor": [
+            "[data-id=\"swap-route-list-item\"][data-selected=\"true\"]"
+          ],
+          "settleMs": 1500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Open collateral swap review",
+          "selector": "button:has-text(\"Review Swap\")",
+          "waitFor": [
+            "text=Transaction review",
+            "[data-id=\"operation-review-confirm\"]"
+          ],
+          "settleMs": 1500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Confirm collateral swap",
+          "selector": "[data-id=\"operation-review-confirm\"]",
+          "settleMs": 10000,
+          "captureTagsAfter": true
+        }
+      ],
+      "postCaptures": [
+        {
+          "id": "portfolio-saving-after-collateral-swap",
+          "path": "/portfolio/saving?network=1",
+          "waitFor": [
+            "[data-id]"
+          ],
+          "settleMs": 5000
+        }
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                },
+                {
+                  "vault": "0x313603FA690301b0CaeEf8069c065862f9162162"
+                }
+              ],
+              "borrows": []
+            }
+          ]
+        }
+      },
+      "requiredCalls": [
+        {
+          "target": "0xB1C777BE7965dCdE810645497CC1e6e5997BD6C5",
+          "signature": "verifyAmountMinAndSkim(address,address,uint256,uint256)"
+        }
+      ]
+    },
+    {
+      "id": "lend-withdraw-and-swap-batch-execute",
+      "label": "Two transferMin withdrawals execute in one reviewed batch",
+      "dependsOn": [
+        "lend-supply-execute"
+      ],
+      "covers": [
+        "withdraw-and-swap"
+      ],
+      "requiredCalls": [
+        {
+          "target": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9",
+          "signature": "withdraw(uint256,address,address)",
+          "count": 2
+        },
+        {
+          "target": "0xB1C777BE7965dCdE810645497CC1e6e5997BD6C5",
+          "signature": "verifyAmountMinAndTransfer(address,address,uint256,uint256)",
+          "count": 2
+        }
+      ],
+      "path": "/lend/0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9/0/withdraw?network=1",
+      "waitFor": [
+        "[data-id=\"asset-input\"][data-label=\"Withdraw amount\"]",
+        "button:has-text(\"Review Withdraw\")"
+      ],
+      "actions": [
+        {
+          "type": "selectSwapToken",
+          "label": "Select WETH as receive-as token",
+          "triggerLabel": "Receive as",
+          "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+          "settleMs": 1500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "fillAsset",
+          "label": "Enter withdraw swap amount",
+          "assetLabel": "Withdraw amount",
+          "value": "0.25",
+          "settleMs": 6000,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "setSlippage",
+          "label": "Set fork quote slippage through the form",
+          "value": 5,
+          "settleMs": 6000,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Select best withdraw swap route",
+          "selector": "[data-id=\"swap-route-list-item\"]",
+          "waitFor": [
+            "[data-id=\"swap-route-list-item\"][data-selected=\"true\"]"
+          ],
+          "settleMs": 1500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Add first transferMin withdrawal to batch",
+          "selector": "[data-testid=\"add-to-batch\"]",
+          "waitFor": [
+            "[data-testid=\"batch-entry\"]"
+          ],
+          "settleMs": 3000,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Reopen withdrawal form after adding the first batch item",
+          "selector": "[data-id=\"portfolio-list-item\"][data-list=\"lend\"][data-vault-address=\"0x797dd80692c3b2dadabce8e30c07fde5307d48a9\"] a:has-text(\"Withdraw\")",
+          "waitFor": [
+            "[data-id=\"asset-input\"][data-label=\"Withdraw amount\"]",
+            "[data-testid=\"add-to-batch\"]"
+          ],
+          "settleMs": 1500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "selectSwapToken",
+          "label": "Select WETH as savings receive token",
+          "triggerLabel": "Receive as",
+          "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+          "settleMs": 1500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "fillAsset",
+          "label": "Enter second withdrawal amount",
+          "assetLabel": "Withdraw amount",
+          "value": "0.1",
+          "settleMs": 6000,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "setSlippage",
+          "label": "Set fork quote slippage through the form",
+          "value": 5,
+          "settleMs": 6000,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Select second withdrawal route",
+          "selector": "[data-id=\"swap-route-list-item\"]",
+          "settleMs": 1500,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Add second transferMin withdrawal to batch",
+          "selector": "[data-testid=\"add-to-batch\"]",
+          "settleMs": 3000,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Open combined batch review",
+          "selector": "[data-testid=\"batch-review\"]",
+          "waitFor": [
+            "[data-testid=\"batch-review-execute\"]"
+          ],
+          "settleMs": 3000,
+          "captureTagsAfter": true
+        },
+        {
+          "type": "click",
+          "label": "Execute both withdrawals atomically",
+          "selector": "[data-testid=\"batch-review-execute\"]",
+          "settleMs": 10000,
+          "captureTagsAfter": true
+        }
+      ],
+      "postCaptures": [
+        {
+          "id": "portfolio-saving-after-withdraw-swap",
+          "path": "/portfolio/saving?network=1",
+          "waitFor": [
+            "[data-id]"
+          ],
+          "settleMs": 5000
+        }
+      ],
+      "discoveryMocks": {
+        "subgraph": {
+          "accounts": [
+            {
+              "chainId": 1,
+              "deposits": [
+                {
+                  "vault": "0x797DD80692c3b2dAdabCe8e30C07fDE5307D48a9"
+                }
+              ],
+              "borrows": []
+            }
+          ]
+        }
+      },
+      "requireAtomicExecution": true,
+      "localStorage": {
+        "user-settings": "{\"enableAdvancedMode\":true}"
       }
     }
   ]

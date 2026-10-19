@@ -13,6 +13,6 @@ describe('getVaultFetchBatchSize', () => {
 
   it('keeps the default VaultLens batch size on other chains', () => {
     expect(getVaultFetchBatchSize(1)).toBe(BATCH_SIZE_VAULT_FETCH)
-    expect(getVaultFetchBatchSize(8453)).toBe(BATCH_SIZE_VAULT_FETCH)
+    expect(getVaultFetchBatchSize(424242)).toBe(BATCH_SIZE_VAULT_FETCH)
   })
 })

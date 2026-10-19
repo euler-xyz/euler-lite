@@ -19,6 +19,9 @@ Server (server/api/internal/token-list.get.ts)
   v
 Merge with deduplicateTokens()
 Priority: Euler SDK > DefiLlama > Uniswap > Merkl reward-tokens
+  |
+  v
+Keep the requested chain, read decimals() once per token per server process
 ```
 
 ## Server Endpoint
@@ -38,7 +41,15 @@ All four sources run concurrently via `Promise.allSettled`. Each fetcher has its
 
 **Startup warming**: `server/plugins/warm-cache.ts` calls `refreshTokenList(chainId)` directly every 5 minutes for each enabled chain. The direct refresh bypasses the handler's fresh-cache short-circuit and always fetches all four sources + rebuilds the merged cache, so the entry is rewritten while the previous one is still serving live traffic. User requests arriving during a refresh continue to read the still-fresh previous entry from `mergedCache`. Warming runs fire-and-forget (Nitro's node-server preset doesn't await plugin promises), so caches are typically hot within ~5 s of boot; users arriving before that pay the usual cold-upstream latency.
 
-**Deduplication**: tokens are merged with the Euler SDK token list taking priority. If the same `chainId:address` appears in multiple sources, the higher-priority entry wins. This ensures Euler metadata (name, symbol, decimals, logo URL) takes precedence over supplemental sources.
+**Deduplication**: tokens are merged with the Euler SDK token list taking priority. If the same `chainId:address` appears in multiple sources, the higher-priority entry wins. This ensures Euler metadata (name, symbol, logo URL) takes precedence over supplemental sources.
+
+**Decimals**: the response holds only the requested chain's tokens. Each token's decimals come from its contract through the server SDK (`tokenlistService.resolveTokenDecimals`), memoised once per `chainId:address` for the life of the process.
+
+`applyOnchainDecimals` races that fan-out against a **5-second deadline** (`DECIMALS_READ_DEADLINE_MS`). viem can retry a hanging RPC for ~40 s; the deadline keeps `/api/internal/token-list` from blocking the merged cache that long. Reads that miss the deadline still complete in the background and fill the memo for the next build (`token-list` status `decimals:<chainId>` → `unread`). Until then the merged entry keeps the list-source decimals.
+
+When a `decimals()` read reports `RawContractError` or `ContractFunctionZeroDataError` (including via `error.cause`), the handler memoises `null` and **drops** the token for the life of the process. This covers absent contracts and missing or reverting `decimals()` implementations; it does not prove that the address has no code. RPC failures keep the token in the list with source decimals and retry on the next build. Native `address(0)` is never read on-chain.
+
+**Missing V3 logos**: V3 sets `logoURI` on every token and marks tokens without a managed image with `hasLogo: false`. For those tokens the merged entry takes the DefiLlama logo, else the Uniswap logo, else the V3 `logoURI`, which still serves a fallback image. If an image fails to load, the app shows initials. An older V3 response without `hasLogo` keeps the V3 logo. The flag itself is not passed on to the browser.
 
 **Error contract**:
 

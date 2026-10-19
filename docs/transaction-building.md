@@ -71,7 +71,7 @@ The wrapper supplies the current SDK `Account`, wallet/sub-account owner, and ch
 
 1. Forms eagerly preprocess accounts, quotes, slot hints, plugin data, and simulation results. Preview data is cached only as canonical serializable values keyed by the full intent/content identity; it never recovers authority from an SDK plan object or Vue reference. Add-to-batch stores only `{ intentId, revision, intent }`; plans and builders stay outside the draft DTO.
 2. `useReviewedExecution.prepare()` captures the exact account, chain, connector session, wallet kind, approval mode, and required sub-accounts, then compiles the current intent revisions against a generation-bound planning snapshot.
-3. The service processes plugins, resolves approvals, pins Permit2 nonce/deadline/expiration inputs, and asks the SDK to deterministically materialize the plan. Lite records every prerequisite, main, and cleanup call, and rejects any SDK request-byte or insertion-coordinate disagreement before evaluating policy, simulating, and sealing one immutable reviewed execution. The reviewed execution commits to the raw and processed plugin plans by digest; their full values stay in a runtime preparation sidecar and are re-hashed before preview or Pyth-refresh use. Context-complete preview cache is reused only when the intent set, raw and prepared plan digests, wallet binding, approval mode, account set, and freshness all match.
+3. The service processes plugins, resolves approvals, pins Permit2 nonce/deadline/expiration inputs, and asks the SDK to deterministically materialize the plan. Lite records every prerequisite, main, and cleanup call, and rejects any SDK request-byte or insertion-coordinate disagreement before evaluating policy, simulating, and sealing one immutable reviewed execution. The reviewed execution commits to the raw and processed plugin plans by digest; their full values stay in a runtime preparation sidecar and are re-hashed before preview or Pyth-refresh use. Capture those raw bytes **before** plugin processing and approval resolution: the SDK resolver mutates approval items in place, and plugins retain those object references, so digesting after `resolveApprovals` would make raw and preview collide. Context-complete preview cache is reused only when the intent set, raw and prepared plan digests, wallet binding, approval mode, account set, and freshness all match.
 4. The existing review modal renders the prepared preview and receives only an opaque `{ reviewId, reviewDigest }` binding. It cannot prepare, replan, sign, or submit.
 5. Acceptance checks the binding and current cart generation. Before any wallet interaction, the coordinator synchronously guards that reviewed execution against duplicate confirmation in the current process.
 6. The coordinator revalidates the exact wallet/session and policy, collects declared signatures, and verifies the finalized artifact against the reviewed request set. If static EOA prerequisites precede the single Pyth-bearing request, SDK `executeMaterialized` receipts that static prefix before Lite refreshes Pyth and hands the finalized suffix back to the SDK. Otherwise bounded Pyth refresh occurs immediately before the one transport handoff. Wallet and policy are checked again after refresh, and the refreshed publish times are synchronously checked after the final awaited pre-dispatch guard.
@@ -181,6 +181,26 @@ Pyth updates are completely invisible in review. Preview fees, maximum fees, fee
 
 The rendered-output fixtures in `tests/reviewed-execution/inventory.test.ts` protect this contract. Changes to the visible review are separate product work and require explicit approval.
 
+### Planning requirement collection (`transferMin`)
+
+`collectPlanningRequirements` in `features/reviewed-execution/planning/requirements.ts` walks planner args for vault, asset, and account addresses the snapshot loader and policy must fetch.
+
+SDK swap quotes set `verify.type` to `skimMin`, `debtMax`, or `transferMin`. For `skimMin` / `debtMax`, `verify.vault` is an Euler vault that needs snapshot and policy checks. For `transferMin`, `verify.vault` is the **transfer recipient** (the owner, another wallet, or the swap verifier) — not a vault to load through the Euler registry.
+
+The collector therefore rewrites that one field to `receiver` so mixed carts (partial savings/collateral withdrawals, wallet swaps, Aave → EulerEarn migrations) do not fail looking up a wallet or MetaMorpho vault as an EVK. Zero-address `accountIn` / `vaultIn` sentinels on wallet-side swap legs are skipped for the same reason.
+
+Do not "simplify" the walk by treating every `verify.vault` as a vault. Coverage: `tests/reviewed-execution/planning-requirements.test.ts`, `tests/reviewed-execution/app-policy-vault-context.test.ts`, and the fork `execution:transfer-min` script documented in `tests/execution/README.md`.
+
+### Reward claim identity
+
+`rewardClaimId` in `features/reviewed-execution/domain/rewards.ts` is `chainId:provider:claimAddress:campaignId:streamId:token:unclaimed`, plus `epoch` **only** when `provider === 'brevis'`. Incentra/Brevis can have several claimable epochs for the same campaign, token, and amount; without the epoch those rows collide and sealing one claim can bind another.
+
+Merkl, Fuul, and Turtle keep identity independent of any `epoch` field that happens to be present. `hasRewardDrifted` still compares decimals separately because an unresolved token keeps the same claim id. Snapshot and drift rules: [SDK Integration → Reward token decimals](./sdk-integration.md#reward-token-decimals).
+
+### rEUL unlocks
+
+Early unlock is a reviewed-execution `reul-unlock` with an explicit `remainder-loss` bound. The UTC-day open-lock gate, chain-time `allowRemainderLoss`, and raw-burn warning (`amountToBeBurned > 0n`) are in [rEUL Unlocks](./reul-unlocks.md).
+
 ## Simulation Performance Tuning
 
 For fan-out flows (per-quote estimate sweeps, leverage explorers) and heavy single-shot flows, Lite threads two SDK helpers through `useEulerTx` and `useTransactionPlanSimulation` so the per-call RPC + plugin cost collapses to roughly "local plan assembly":
@@ -258,7 +278,7 @@ After selection, a healthy sim must yield exactly `entries + 1` layers (`getCurr
 
 Each cart row captures an immutable digest of its executable preview, bound to its intent ID and revision. Migration rows capture the executable plan separately from their simulation-only plan. Preview compilation uses the simulated account state left by earlier rows; whole-cart preparation uses one fresh account snapshot. Those inputs can make an SDK planner produce different calls, such as omitting a collateral enablement that the row preview included.
 
-Batch preparation requires `expectedIntentPlans` for every row and compares the recompiled plans in order, including the number of rows, intent IDs, revisions, and plan digests. This check runs before plugins and cached-review adoption. The expectations also form part of the cart preparation cache identity. A mismatch throws `ReviewedPlanDivergenceError`; the modal asks the user to remove and re-add the affected operations. Missing previews block preparation with `BatchPreviewNotReadyError` and a message to wait for preparation to finish. Background warm-up skips while any row is still compiling.
+Batch preparation requires `expectedIntentPlans` for every row and compares the recompiled plans in order, including the number of rows, intent IDs, revisions, and plan digests. Each row captures that digest from the executable compiler preview **before** simulation or approval resolution can mutate the plan (`captureIntentPlanExpectation`). This check runs before plugins and cached-review adoption. The expectations also form part of the cart preparation cache identity. A mismatch throws `ReviewedPlanDivergenceError`; missing previews throw `BatchPreviewNotReadyError`. `BatchReviewModal` shows those two error messages verbatim under "Preparation failed" and disables calldata copy plus Execute. Any other prepare throw is collapsed to `Unable to prepare this batch. Resolve the preparation error before copying calldata or executing.` so SDK/internal diagnostics stay out of the UI. Background warm-up skips while any row is still compiling.
 
 Every cart entry stores a serializable intent and revision. `lastSimulatedPlan` and the layered simulated accounts remain non-authoritative projections for responsive forms. Review preparation recompiles or deeply validates the current generation, seals one complete request vector, and binds the existing batch display to it. Tenderly and calldata-copy actions derive from that sealed vector. Closing `BatchReviewModal` calls `discardBatchExecutionReview(reviewId)` only when a prepared execution exists and execution is inactive: when the cached preparation's `reviewId` matches, the module-scope `batchExecutionPreparation` is cleared and `executionService.discard` runs. After that discard, reopening an unchanged cart must prepare a new execution. Closing during an active Safe execution detaches the UI without discarding the execution. Discarding an older `reviewId` must not clear a newer in-flight preparation. Submission captures exact revisions and external-migration refresh requirements before wallet handoff. Confirmed completion applies those captured effects regardless of Safe detachment; modal closing, navigation, and visible success toasts remain context-scoped. A Safe submits the vector atomically; an EOA follows its explicit request phases. Details and CoW/signature gates: [Safe Wallet Compatibility](./safe-wallets.md).
 
@@ -294,6 +314,9 @@ Lite still uses `utils/pyth.ts` for read-path lens simulations and visible vault
 | `composables/useExecutionReview.ts` | Single-operation review launcher; spy mode opens a read-only `OperationReviewModal` |
 | `composables/useCrossPositionRepayCollateralOptions.ts` | Advanced-mode exact-vault collateral from other sub-accounts; see [Cross-Position Repay](./cross-position-repay.md) |
 | `features/reviewed-execution/` | Intents, compiler, immutable reviewed execution, policy, simulation, coordinator, finalization, and transport adapters |
+| `features/reviewed-execution/planning/requirements.ts` | Address collection for snapshots/policy; `transferMin` `verify.vault` is a recipient |
+| `features/reviewed-execution/domain/rewards.ts` | `rewardClaimId` / snapshot / drift, including Brevis epochs |
+| `composables/useREULLocks.ts` | rEUL lock list and unlock planner; see [rEUL Unlocks](./reul-unlocks.md) |
 | `composables/useTransactionPlanSimulation.ts` | Simulation state and error formatting for forms |
 | `composables/useStateOverrideOptions.ts` | `SimulationStateOverrideOptions` builder + per-token slot-hint priming |
 | `composables/batchPrefetchState.ts` | Form → batch handoff for pre-overlay accounts and chain-scoped slot hints |

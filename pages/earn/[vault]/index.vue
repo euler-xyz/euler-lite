@@ -3,21 +3,19 @@ import type { VaultAsset } from '~/types/asset'
 import { computeSupplyApyBreakdown, type TransactionPlan, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
-import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
+import { getVaultGeoUnavailableReason, isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBlock.vue'
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
 import { formatNumber } from '~/utils/string-utils'
 import { isNativeCurrencyAddress } from '~/utils/native-currency'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import type { Address } from 'viem'
-import { VaultUnverifiedDisclaimerModal, VaultApyModal } from '#components'
+import { VaultApyModal } from '#components'
 
 const router = useRouter()
 const route = useRoute()
-const modal = useModal()
 const { error } = useToast()
 const { planDeposit } = useEulerTx()
 const { create: createIntent } = useOperationIntentFactory()
@@ -26,7 +24,7 @@ const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
 const { getEarnVault, updateEarnVault } = useVaults()
-const { isConnected, address, chainId: walletChainId } = useWagmi()
+const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { chainId } = useEulerAddresses()
 const { primeSlotHintsFor } = useStateOverrideOptions()
@@ -40,7 +38,8 @@ const shareLinkQuery = computed(() => {
 const { getBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const vaultAddress = route.params.vault as string
-const { unverifiedVaultGuard } = useOperationGuard([vaultAddress])
+const { warning: assessmentWarning } = useVaultAssessmentWarning(vaultAddress, 'earn')
+useOperationGuard([vaultAddress], { depositedVaultAddresses: [vaultAddress] })
 const { name } = useEulerProductOfVault(vaultAddress)
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -54,6 +53,7 @@ const isEstimatesLoading = ref(false)
 const amount = ref('')
 const plan = ref<TransactionPlan | null>(null)
 const vault: Ref<EulerEarn | undefined> = ref(undefined)
+useVaultOpeningNotice(() => vault.value ? [vaultAddress] : [])
 const asset: Ref<VaultAsset | undefined> = ref(undefined)
 const estimateSupplyAPY = ref(0)
 const earnVaultMarketLabel = computed(() => unref(name) || vault.value?.shares.name || '')
@@ -106,32 +106,6 @@ const refreshEarnVault = async (address: string, silent = false) => {
     logWarn('[earn] failed to load vault', e)
   }
 })()
-let warningModalId: number | undefined
-watch(
-  () => !!vault.value && isConnected.value && walletChainId.value === chainId.value
-    && unverifiedVaultGuard.isAcknowledgmentRequired,
-  (required) => {
-    if (required && warningModalId === undefined) {
-      warningModalId = modal.open(VaultUnverifiedDisclaimerModal, {
-        isNotClosable: true,
-        onClose: () => { warningModalId = undefined },
-        props: {
-          // The form collects risk acknowledgment separately from this browsing notice.
-          cancelAction: () => router.replace('/'),
-        },
-      })
-    }
-    else if (!required && warningModalId !== undefined) {
-      modal.close(warningModalId)
-      warningModalId = undefined
-    }
-  },
-  { immediate: true },
-)
-onUnmounted(() => {
-  if (warningModalId !== undefined) modal.close(warningModalId)
-})
-
 const errorText = computed(() => {
   if (balance.value < valueToNano(amount.value, asset.value?.decimals)) {
     return 'Not enough balance'
@@ -147,7 +121,7 @@ const isSubmitDisabled = computed(() => {
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vaultAddress))
 const reviewSupplyDisabled = computed(() => isGeoBlocked.value || isSubmitDisabled.value)
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: getVaultGeoUnavailableReason(vaultAddress) || 'This operation is not available in your region', variant: 'warning' }
   if (errorText.value) return { message: errorText.value, variant: 'error' }
   return undefined
 })
@@ -370,12 +344,10 @@ watch(amount, () => {
               maxable
             />
 
-            <UiAlert
+            <GeoBlockAlert
               v-if="isGeoBlocked"
-              title="Region restricted"
+              :vault-addresses="[vaultAddress]"
               description="This operation is not available in your region. You can still withdraw existing deposits."
-              variant="warning"
-              size="compact"
             />
             <UiAlert
               v-show="errorText"
@@ -391,6 +363,8 @@ watch(amount, () => {
               :description="simulationError"
               size="compact"
             />
+
+            <VaultWarningBanner :warnings="[assessmentWarning]" />
 
             <VaultFormInfoBlock
               v-if="vault && asset"

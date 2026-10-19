@@ -8,6 +8,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   fetchWithTimeout: vi.fn(),
   warn: vi.fn(),
+  loadEulerChains: vi.fn(),
+  peekEulerChains: vi.fn(),
+}))
+
+vi.mock('~/server/api/internal/euler-chains.get', () => ({
+  loadEulerChains: mocks.loadEulerChains,
+  peekEulerChains: mocks.peekEulerChains,
 }))
 
 vi.mock('~/server/utils/fetchWithTimeout', async (importOriginal) => {
@@ -36,6 +43,11 @@ const versionsResponse = () => new Response(JSON.stringify({
     status: 'published',
     aliases: ['latest'],
     isLatest: true,
+  }, {
+    versionKey: 'v20260911011146353',
+    status: 'published',
+    aliases: [],
+    isLatest: false,
   }],
   meta: { timestamp: '2026-08-04T15:13:05.236Z' },
 }), {
@@ -57,6 +69,9 @@ describe('public labels server source', () => {
     vi.stubEnv('LABELS_V3_VERSION', '')
     vi.stubEnv('LABELS_VAULT_TAG', '')
     vi.stubEnv('V3_API_URL', 'https://v3.example.test')
+    const manifest = [{ chainId: 1, status: 'production' }, { chainId: 146, status: 'production' }]
+    mocks.loadEulerChains.mockReset().mockResolvedValue(manifest)
+    mocks.peekEulerChains.mockReset().mockReturnValue(manifest)
     mocks.fetchWithTimeout.mockReset().mockImplementation(async (url: string) =>
       new URL(url).pathname.endsWith('/versions')
         ? versionsResponse()
@@ -71,22 +86,40 @@ describe('public labels server source', () => {
     vi.unstubAllEnvs()
   })
 
-  it('selects metadata-only for deprecated chains, isolates its cache and never falls back after assessment failure', async () => {
+  it('uses registry deprecation for metadata-only labels and changes cache modes with the registry', async () => {
     vi.stubEnv('RPC_URL_146', 'https://rpc.example.test')
     vi.stubEnv('ONCHAIN_SDK_CHAINS', '146')
-    vi.stubEnv('DEPRECATED_CHAINS', '146')
+    const deprecated = [{ chainId: 146, status: 'deprecated' }]
+    mocks.loadEulerChains.mockResolvedValue(deprecated)
+    mocks.peekEulerChains.mockReturnValue(deprecated)
     mocks.fetchWithTimeout.mockImplementation(async (input: string) => {
-      const path = new URL(input).pathname
-      if (path.startsWith('/v3/evk/') || path.startsWith('/v3/earn/')) return new Response('CHAIN_NOT_SUPPORTED', { status: 404 })
-      return path.endsWith('/versions') ? versionsResponse() : emptyListResponse()
+      const url = new URL(input)
+      if (url.pathname.startsWith('/v3/evk/') || url.pathname.startsWith('/v3/earn/') || url.searchParams.get('include') === 'visibility') {
+        return new Response('CHAIN_NOT_SUPPORTED', { status: 404 })
+      }
+      return url.pathname.endsWith('/versions') ? versionsResponse() : emptyListResponse()
     })
-    const { getPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
+    const { getCachedPublicLabelsBundle, getPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
     const bundle = await getPublicLabelsBundle(146)
     expect(bundle.source).toBe('v3-metadata')
     expect(bundle).not.toHaveProperty('publicLabels.visibility')
-    expect(mocks.fetchWithTimeout.mock.calls.some(([url]) => /\/(evk|earn)\//.test(new URL(url).pathname))).toBe(false)
-    vi.stubEnv('DEPRECATED_CHAINS', '')
+    expect(getCachedPublicLabelsBundle(146)).toEqual(bundle)
+    expect(mocks.fetchWithTimeout.mock.calls.some(([url]) => /\/(evk|earn)\//.test(new URL(url).pathname) || new URL(url).searchParams.has('include'))).toBe(false)
+    const active = [{ chainId: 146, status: 'production' }]
+    mocks.loadEulerChains.mockResolvedValue(active)
+    mocks.peekEulerChains.mockReturnValue(active)
+    expect(getCachedPublicLabelsBundle(146)).toBeUndefined()
     await expect(getPublicLabelsBundle(146)).rejects.toThrow('404')
+  })
+
+  it('does not choose the assessed adapter before the chain registry is available', async () => {
+    vi.stubEnv('RPC_URL_146', 'https://rpc.example.test')
+    mocks.loadEulerChains.mockRejectedValue(new Error('registry unavailable'))
+    mocks.peekEulerChains.mockReturnValue(undefined)
+    const { getCachedPublicLabelsBundle, getPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
+    expect(getCachedPublicLabelsBundle(146)).toBeUndefined()
+    await expect(getPublicLabelsBundle(146)).rejects.toThrow('registry unavailable')
+    expect(mocks.fetchWithTimeout).not.toHaveBeenCalled()
   })
 
   it('deduplicates concurrent loads and serves the aggregate from cache', async () => {
@@ -101,16 +134,15 @@ describe('public labels server source', () => {
     expect(concurrent).toBe(first)
     expect(cached).toBe(first)
     expect(first.version).toBe('v20260804151305236')
-    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(7)
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(5)
     expect(mocks.fetchWithTimeout.mock.calls.map(([url]) => new URL(url).pathname)).toEqual([
       '/v3/geo-policies',
       '/v3/labels/sets/public/versions',
       '/v3/labels/vaults',
       '/v3/labels/products',
       '/v3/labels/entities',
-      '/v3/evk/vaults',
-      '/v3/earn/vaults',
     ])
+    expect(mocks.fetchWithTimeout.mock.calls.some(([url]) => new URL(url).pathname === '/v3/labels/vaults' && new URL(url).searchParams.get('include') === 'visibility')).toBe(true)
     expect(mocks.fetchWithTimeout.mock.calls.slice(2, 5).every(([url]) =>
       new URL(url).searchParams.get('version') === 'v20260804151305236',
     )).toBe(true)
@@ -122,18 +154,57 @@ describe('public labels server source', () => {
     vi.stubEnv('LABELS_VAULT_TAG', ' governance limited ')
     expect(await getPublicLabelsBundle(1)).toMatchObject({ ...unfiltered, vaultTag: 'governance limited' })
     expect((await getPublicEulerLabelsData(1)).vaultTagAddresses?.size).toBe(0)
-    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(7)
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(5)
     expect(await refreshPublicLabelsBundle(1)).toHaveProperty('vaultTag', 'governance limited')
     expect(mocks.fetchWithTimeout.mock.calls.every(([url]) => !new URL(url).searchParams.has('tags'))).toBe(true)
     vi.stubEnv('LABELS_VAULT_TAG', '')
     expect(await getPublicLabelsBundle(1)).not.toHaveProperty('vaultTag')
   })
 
+  it('shares only approved image origins used by the snapshot, keeping private backend configuration out of responses', async () => {
+    vi.stubEnv('RPC_URL_1', 'https://rpc.example.test')
+    vi.stubEnv('DEPRECATED_CHAINS', '1')
+    vi.stubEnv('ONCHAIN_SDK_CHAINS', '1')
+    vi.stubEnv('V3_API_URL', 'https://private-v3.example.test')
+    vi.stubEnv('LABELS_IMAGE_ORIGINS', 'https://images.fork.test,https://points.fork.test,https://products.fork.test,https://unused.fork.test')
+    const labels = structuredClone(publicLabelsFixture)
+    labels.entities[0].logo = 'https://images.fork.test/curator.svg'
+    labels.entities[1].logo = 'https://unapproved.test/curator.svg'
+    labels.products[0].logo = 'https://products.fork.test/product.svg'
+    labels.vaults[0].campaigns![0].logo = 'https://points.fork.test/points.svg'
+    const json = (data: unknown[]) => Response.json({ data, meta: { total: data.length, timestamp: new Date().toISOString() } })
+    mocks.fetchWithTimeout.mockImplementation(async (input: string) => {
+      const path = new URL(input).pathname
+      if (path.endsWith('/versions')) return versionsResponse()
+      if (path === '/v3/labels/vaults') return json(labels.vaults)
+      if (path === '/v3/labels/products') return json(labels.products)
+      if (path === '/v3/labels/entities') return json(labels.entities)
+      if (path.endsWith('/addresses')) return json(labels.entityAddresses.filter(row => row.entityId === path.split('/')[4]))
+      if (path.startsWith('/v3/labels/entities/')) return Response.json({
+        data: labels.entities.find(row => row.id === path.split('/')[4]),
+        meta: { timestamp: new Date().toISOString() },
+      })
+      return emptyListResponse()
+    })
+    const { getPublicLabelsBundle, getCachedPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
+    const bundle = await getPublicLabelsBundle(1)
+    expect(bundle).toMatchObject({ logoOrigins: ['https://images.fork.test', 'https://points.fork.test', 'https://products.fork.test'] })
+    expect(JSON.stringify(bundle)).not.toContain('private-v3.example.test')
+    expect(JSON.stringify(bundle)).not.toContain('unused.fork.test')
+    const fetchCount = mocks.fetchWithTimeout.mock.calls.length
+    vi.stubEnv('LABELS_IMAGE_ORIGINS', 'https://images.fork.test')
+    expect(getCachedPublicLabelsBundle(1)).toMatchObject({ logoOrigins: ['https://images.fork.test'] })
+    expect(await getPublicLabelsBundle(1)).toMatchObject({ logoOrigins: ['https://images.fork.test'] })
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(fetchCount)
+  })
+
   it('includes the deployment selection with static snapshots', async () => {
     vi.stubEnv('LABELS_SOURCE', 'static')
     vi.stubEnv('STATIC_LABELS_BASE_URL', 'https://fork.test')
     vi.stubEnv('LABELS_VAULT_TAG', 'base')
-    mocks.fetchWithTimeout.mockImplementation(async () => new Response('', { status: 404 }))
+    mocks.fetchWithTimeout.mockImplementation(async (url: string) => /\/(products|entities)\.json$/.test(url)
+      ? new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
+      : new Response('', { status: 404 }))
     const { getPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
     const bundle = await getPublicLabelsBundle(1)
     expect(bundle).toMatchObject({ source: 'static', vaultTag: 'base' })
@@ -177,22 +248,22 @@ describe('public labels server source', () => {
     expect(data.managingEntityByVault?.[address]).toBe('kpk')
     expect(data.visibility?.[address]).toMatchObject({ status: 'visible', explorableLend: false, explorableBorrow: true })
     failVisibility = true
-    await expect(refreshPublicLabelsBundle(1)).resolves.toBe(first)
+    await expect(refreshPublicLabelsBundle(1)).resolves.toEqual(first)
     vi.resetModules()
     const cold = await import('~/server/utils/public-labels-source')
     await expect(cold.getPublicLabelsBundle(1)).rejects.toThrow('503')
   })
 
-  it('uses deterministic fixture versions directly without resolving latest', async () => {
+  it('confirms a deterministic fixture version against the published versions instead of resolving latest', async () => {
     const { getPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
 
     const bundle = await getPublicLabelsBundle(1, 'v20260804151305236')
 
     expect(bundle.version).toBe('v20260804151305236')
-    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(6)
-    expect(mocks.fetchWithTimeout.mock.calls.every(([url]) =>
-      !new URL(url).pathname.endsWith('/labels/sets/public/versions'),
-    )).toBe(true)
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(5)
+    expect(mocks.fetchWithTimeout.mock.calls.filter(([url]) =>
+      new URL(url).pathname.endsWith('/labels/sets/public/versions'),
+    )).toHaveLength(1)
   })
 
   it('uses configured set and version for server reads without resolving latest', async () => {
@@ -202,8 +273,8 @@ describe('public labels server source', () => {
     const bundle = await getPublicLabelsBundle(1)
     expect(bundle).toMatchObject({ labelSet: 'test-instance', version: 'v20260804151305236' })
     const urls = mocks.fetchWithTimeout.mock.calls.map(([url]) => new URL(url))
-    expect(urls.some(url => url.pathname.endsWith('/versions'))).toBe(false)
-    expect(urls.filter(url => url.pathname.startsWith('/v3/labels/')).every(url =>
+    expect(urls.filter(url => url.pathname.endsWith('/versions')).map(url => url.pathname)).toEqual(['/v3/labels/sets/test-instance/versions'])
+    expect(urls.filter(url => url.pathname.startsWith('/v3/labels/') && !url.pathname.endsWith('/versions')).every(url =>
       url.searchParams.get('labelSet') === 'test-instance' && url.searchParams.get('version') === 'v20260804151305236',
     )).toBe(true)
     expect(urls.filter(url => !url.pathname.startsWith('/v3/labels/')).every(url => !url.searchParams.has('labelSet'))).toBe(true)
@@ -235,22 +306,97 @@ describe('public labels server source', () => {
   ])('rejects invalid %s before making requests', async (key, value) => {
     vi.stubEnv(key, value)
     const { getPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
-    expect(() => getPublicLabelsBundle(1)).toThrow(key)
+    await expect(getPublicLabelsBundle(1)).rejects.toThrow(key)
     expect(mocks.fetchWithTimeout).not.toHaveBeenCalled()
   })
 
   it('serves a bounded stale bundle when a refresh fails', async () => {
     const { getPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
     const first = await getPublicLabelsBundle(1)
+    expect(first).toHaveProperty('sourceFetchedAt', Date.now())
 
     vi.advanceTimersByTime(300_001)
     mocks.fetchWithTimeout.mockRejectedValue(new Error('V3 unavailable'))
 
-    await expect(getPublicLabelsBundle(1)).resolves.toBe(first)
+    await expect(getPublicLabelsBundle(1)).resolves.toEqual(first)
     expect(mocks.warn).toHaveBeenCalledWith(
       expect.objectContaining({ ctx: 'public-labels-source', chainId: 1 }),
       'refresh failed',
     )
+  })
+
+  it('keeps newly fetched geo restrictions when the labels refresh fails', async () => {
+    const { getPublicLabelsBundle, refreshPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
+    const first = await getPublicLabelsBundle(1)
+    if (first.source === 'static') throw new Error('Expected V3 labels')
+    const restriction = {
+      id: 'new-restriction', chainId: 1, productId: null, vaultAddress: null,
+      assetAddress: null, countries: ['US'], countriesResolved: ['US'],
+      policyType: 'block', reason: 'Restricted', createdAt: '2026-08-05T10:00:00Z',
+    }
+
+    vi.advanceTimersByTime(300_001)
+    mocks.fetchWithTimeout.mockImplementation(async (input: string) => {
+      if (new URL(input).pathname.endsWith('/geo-policies')) {
+        return new Response(JSON.stringify({ data: [restriction], meta: { total: 1 } }), { status: 200 })
+      }
+      throw new Error('labels unavailable')
+    })
+
+    const fallback = await refreshPublicLabelsBundle(1)
+    if (fallback.source === 'static') throw new Error('Expected V3 labels')
+    expect(fallback.publicLabels.geoPolicies).toEqual([restriction])
+    expect(fallback.geoFetchedAt).toBe(Date.now())
+    expect(fallback.sourceFetchedAt).toBe(first.sourceFetchedAt)
+  })
+
+  it('serves a newer geo overlay on the next cache read without extending labels freshness', async () => {
+    const { getPublicLabelsBundle, getCachedPublicLabelsBundle, refreshPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
+    await getPublicLabelsBundle(1)
+    vi.advanceTimersByTime(4 * 60_000)
+    const first = await getPublicLabelsBundle(10)
+    if (first.source === 'static') throw new Error('Expected V3 labels')
+
+    vi.advanceTimersByTime(60_001)
+    const restriction = {
+      id: 'new-restriction', chainId: 10, productId: null, vaultAddress: null,
+      assetAddress: null, countries: ['US'], countriesResolved: ['US'],
+      policyType: 'block', reason: 'Restricted', createdAt: '2026-08-05T10:00:00Z',
+    }
+    mocks.fetchWithTimeout.mockImplementation(async (input: string) => {
+      if (new URL(input).pathname.endsWith('/geo-policies')) {
+        return new Response(JSON.stringify({ data: [restriction], meta: { total: 1 } }), { status: 200 })
+      }
+      throw new Error('labels unavailable')
+    })
+
+    const fallback = await refreshPublicLabelsBundle(10)
+    const cached = await getPublicLabelsBundle(10)
+    if (fallback.source === 'static' || cached.source === 'static') throw new Error('Expected V3 labels')
+    expect(cached.publicLabels.geoPolicies).toEqual([restriction])
+    expect(cached.sourceFetchedAt).toBe(first.sourceFetchedAt)
+    expect(cached.geoFetchedAt).toBe(fallback.geoFetchedAt)
+
+    vi.advanceTimersByTime(4 * 60_000)
+    expect(getCachedPublicLabelsBundle(10)).toBeUndefined()
+  })
+
+  it('never serves an aggregate bundle after its geo rules expire', async () => {
+    const { getPublicLabelsBundle, refreshPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
+    const first = await getPublicLabelsBundle(1)
+    if (first.source === 'static') throw new Error('Expected V3 labels')
+    vi.advanceTimersByTime(23 * 60 * 60_000)
+    mocks.fetchWithTimeout.mockImplementation(async (input: string) => {
+      if (new URL(input).pathname.endsWith('/geo-policies')) throw new Error('geo unavailable')
+      return new URL(input).pathname.endsWith('/versions') ? versionsResponse() : emptyListResponse()
+    })
+    const refreshed = await refreshPublicLabelsBundle(1)
+    if (refreshed.source === 'static') throw new Error('Expected V3 labels')
+    expect(refreshed.geoFetchedAt).toBe(first.geoFetchedAt)
+    expect(refreshed.sourceFetchedAt).toBe(Date.now())
+
+    vi.advanceTimersByTime(2 * 60 * 60_000)
+    await expect(getPublicLabelsBundle(1)).rejects.toThrow('geo unavailable')
   })
 
   it('does not publish a snapshot when geo is unavailable on a cold start', async () => {

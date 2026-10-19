@@ -33,12 +33,12 @@ import { createTtlCache } from './cache'
 import { createInFlightDedup } from '~/utils/in-flight'
 import { logger } from './logger'
 import { reportStatus } from './log'
-import { summarizeSdkIssue } from './observability'
+import { buildVaultAssetLookup, summarizeSdkIssue } from './observability'
 import { getServerSdk } from './sdk-server'
 import { isSdkErrorDiagnostic } from './sdk-diagnostics'
 import { getPublicEulerLabelsData } from './public-labels-source'
 import { encodeBigints } from '~/utils/snapshot-codec'
-import { readV3ApiUrl } from '~/utils/api-url-env'
+import { isV3BackendEnabled } from '~/utils/api-url-env'
 import {
   EVAULT_FETCH_CHUNK_DELAY_MS,
   EVAULT_FETCH_CHUNK_SIZE,
@@ -57,7 +57,7 @@ import { governableGovernorAbi } from '~/abis/oracle'
 // cadence (see `server/plugins/warm-cache.ts:VAULTS_REWARM_INTERVAL_MS`).
 // Without V3, the snapshot is built from onchain lens multicalls which
 // are heavier; the 5-min TTL keeps the cost bounded.
-const CACHE_TTL_MS = readV3ApiUrl() ? 2 * 60_000 : 5 * 60_000
+const CACHE_TTL_MS = isV3BackendEnabled() ? 2 * 60_000 : 5 * 60_000
 
 export const SNAPSHOT_CACHE_TTL_MS = CACHE_TTL_MS
 
@@ -226,6 +226,7 @@ export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot>
         : empty,
     ])
 
+    const assetForVault = buildVaultAssetLookup([...evk.result, ...earn.result, ...securitize.result, ...escrow.result])
     for (const { errors, ctx } of [
       { errors: evk.errors, ctx: 'evk' },
       { errors: earn.errors, ctx: 'earn' },
@@ -234,7 +235,7 @@ export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot>
     ] as const) {
       for (const issue of errors as unknown[]) {
         if (isSdkErrorDiagnostic(issue)) {
-          logger.error({ ctx: 'vaults-cache', chainId, kind: ctx, issue: summarizeSdkIssue(issue) }, 'sdk fetch issue')
+          logger.error({ ctx: 'vaults-cache', chainId, kind: ctx, issue: summarizeSdkIssue(issue, assetForVault) }, 'sdk fetch issue')
         }
       }
     }

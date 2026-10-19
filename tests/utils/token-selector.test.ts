@@ -42,6 +42,16 @@ describe('filterSelectableTokens', () => {
   it('treats a whitespace-only query as no search', () => {
     expect(filterSelectableTokens(all, 'output', '   ')).toEqual(all)
   })
+
+  it('puts an exact symbol or address ahead of weaker matches without changing tied order', () => {
+    const heldSubstring = tok({ balance: 1n, asset: { symbol: 'USDC.e', name: 'Bridged USD Coin', address: '0x1' } })
+    const nameMatch = tok({ asset: { symbol: 'OTHER', name: 'USDC copy', address: '0x2' } })
+    const exact = tok({ asset: { symbol: 'USDC', name: 'USD Coin', address: '0x3' } })
+    const samePrefix = tok({ asset: { symbol: 'USDCT', name: 'Other', address: '0x4' } })
+    expect(filterSelectableTokens([heldSubstring, nameMatch, samePrefix, exact], 'input', 'usdc'))
+      .toEqual([exact, heldSubstring, samePrefix, nameMatch])
+    expect(filterSelectableTokens([heldSubstring, exact], 'output', '0x3')).toEqual([exact])
+  })
 })
 
 describe('sortSelectableTokens', () => {

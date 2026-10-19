@@ -128,6 +128,8 @@ export default defineNuxtConfig({
     public: {
       // CONFIG_ vars (Doppler: NUXT_PUBLIC_CONFIG_*)
       configDocsUrl: '',
+      configToolboxUrl: '',
+      configRiskAnalyticsUrl: '',
       configStargateUrl: '',
       configTosUrl: '',
       configTosMdUrl: '',
@@ -172,6 +174,7 @@ export default defineNuxtConfig({
       pythHermesUrl: '',
       v3ApiUrl: '',
       enableV3Backend: '',
+      disableV3: '',
       // Adapter chain for the browser "fast" SDK. fallback (default) | onchain | v3.
       // Maps to NUXT_PUBLIC_BROWSER_VAULT_SOURCE.
       browserVaultSource: '',

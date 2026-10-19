@@ -27,6 +27,7 @@ import {
   validateV3ProxyUrl,
 } from '~/server/utils/v3-proxy'
 import { isAbortError } from '~/utils/errorHandling'
+import { readDisableV3 } from '~/utils/api-url-env'
 
 const ALLOWED_METHODS = new Set(['GET', 'POST'])
 
@@ -37,6 +38,10 @@ const rateLimiter = createRateLimiter({
 })
 
 export default defineEventHandler(async (event) => {
+  if (readDisableV3()) {
+    setResponseHeader(event, 'Cache-Control', 'no-store')
+    throw createError({ statusCode: 503, statusMessage: 'V3 is disabled for this deployment' })
+  }
   const method = getMethod(event).toUpperCase()
   if (!ALLOWED_METHODS.has(method)) {
     logger.warn({ ctx: 'v3-proxy', method, reason: 'invalid-method' }, 'request rejected')

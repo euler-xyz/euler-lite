@@ -6,7 +6,7 @@ The inventory uses two consent-bearing lifecycle records: `OperationIntent` and 
 
 ## Operation coverage
 
-The in-scope operation families are supply, withdraw/redeem, borrow, repay, collateral and debt swaps, multiply, refinance, cross-protocol migration, transfer/cleanup, SDK reward claims, and rEUL unlocks. Direct and batch variants share one reviewed execution service and one submission coordinator.
+The in-scope operation families are supply, withdraw/redeem, borrow, repay, collateral and debt swaps, multiply, refinance, cross-protocol migration, transfer/cleanup, SDK reward claims, and rEUL unlocks. Direct and batch variants share one reviewed execution service and one submission coordinator. rEUL remainder-loss and the UTC-day open-lock gate: [rEUL Unlocks](./reul-unlocks.md). Reward-claim identity (including Brevis epochs) and `transferMin` recipient collection: [Transaction Building](./transaction-building.md).
 
 CoW solver-order flows remain outside this reviewed execution. Their wallet-write owner is frozen as an excluded boundary so a new excluded caller cannot appear accidentally.
 

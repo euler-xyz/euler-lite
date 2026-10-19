@@ -1,14 +1,21 @@
 import { createError, getQuery, setResponseHeader } from 'h3'
+import { isAddress, zeroAddress, type Address } from 'viem'
 import { createRateLimiter } from '~/server/utils/rate-limit'
+import { getServerSdk } from '~/server/utils/sdk-server'
+import { serverAbiService } from '~/server/utils/sdk-abi-service'
 import { createTtlCache } from '~/server/utils/cache'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { createInFlightDedup } from '~/server/utils/in-flight'
 import { reportStatus } from '~/server/utils/log'
 import { MERKL_API_BASE_URL } from '~/entities/constants'
 import { buildEulerSDK, type EulerSDK, type TokenListItem } from '@eulerxyz/euler-v2-sdk'
-import { readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-url-env'
+import { readDisableV3, readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-url-env'
+import { LiteEulerLabelsService } from '~/utils/sdk-labels'
+import { getPublicLabelsBundle } from '~/server/utils/public-labels-source'
+import { preferFallbackLogos, replaceV3LogoFlags } from '~/server/utils/token-list-logos'
 
 const CACHE_TTL_MS = 300_000
+const DECIMALS_READ_DEADLINE_MS = 5_000
 const DEFILLAMA_DEFAULT_URL = 'https://d3g10bzo9rdluh.cloudfront.net'
 
 interface TokenEntry {
@@ -18,6 +25,7 @@ interface TokenEntry {
   symbol: string
   decimals: number
   logoURI?: string
+  hasLogo?: boolean
   tags?: string[]
 }
 
@@ -53,6 +61,7 @@ const mergedCache = createTtlCache<TokenEntry[]>({ ttlMs: CACHE_TTL_MS, maxEntri
 const mergedInFlight = createInFlightDedup<string, TokenEntry[]>()
 
 let sdkPromise: Promise<EulerSDK> | undefined
+let v3LogoFlags: ReadonlyMap<string, boolean> = new Map()
 
 type TokenListPage = TokenListItem[] | {
   data?: TokenListItem[]
@@ -105,19 +114,29 @@ const getSdk = () => {
   sdkPromise ??= buildEulerSDK({
     config: {
       v3ApiUrl,
+      disableV3: readDisableV3(),
       tokenlistApiBaseUrl: v3ApiUrl,
       ...(v3ApiKey ? { v3ApiKey } : {}),
     },
+    servicesOverrides: {
+      abiService: serverAbiService,
+      eulerLabelsService: new LiteEulerLabelsService(getPublicLabelsBundle),
+    },
   }).then((sdk) => {
     const tokenlistService = sdk.tokenlistService as ConfigurableTokenlistService
-    tokenlistService.setQueryTokenList?.((url: string) => queryEulerSdkTokenList(url, v3ApiKey))
+    tokenlistService.setQueryTokenList?.(async (url: string) => {
+      const items = await queryEulerSdkTokenList(url, v3ApiKey)
+      v3LogoFlags = replaceV3LogoFlags(v3LogoFlags, items)
+      return items
+    })
     return sdk
   })
   return sdkPromise
 }
 
-const toTokenEntry = (token: TokenListItem): TokenEntry => {
+const toTokenEntry = (token: TokenListItem, logoFlags: ReadonlyMap<string, boolean>): TokenEntry => {
   const tags = (token as TokenListItemWithTags).tags
+  const hasLogo = logoFlags.get(`${token.chainId}:${token.address.toLowerCase()}`)
   return {
     chainId: token.chainId,
     address: token.address,
@@ -125,6 +144,7 @@ const toTokenEntry = (token: TokenListItem): TokenEntry => {
     symbol: token.symbol,
     decimals: token.decimals,
     logoURI: token.logoURI || undefined,
+    ...(hasLogo !== undefined ? { hasLogo } : {}),
     ...(tags?.length ? { tags } : {}),
   }
 }
@@ -139,11 +159,12 @@ const stripUntrustedTokenTags = (token: TokenEntry): TokenEntry => ({
 })
 
 function refreshEulerSdkTokenList(chainId: number): Promise<TokenEntry[]> {
+  if (readDisableV3()) return Promise.resolve([])
   const key = String(chainId)
 
   return eulerInFlight.run(key, () => getSdk()
     .then(async (sdk) => {
-      const tokens = (await sdk.tokenlistService.loadTokenlist(chainId)).map(toTokenEntry)
+      const tokens = (await sdk.tokenlistService.loadTokenlist(chainId)).map(token => toTokenEntry(token, v3LogoFlags))
       eulerSdkCache.set(key, tokens)
       reportStatus('token-list', `euler-sdk:${chainId}`, 'ok')
       return tokens
@@ -157,6 +178,7 @@ function refreshEulerSdkTokenList(chainId: number): Promise<TokenEntry[]> {
 }
 
 function fetchEulerSdkTokenList(chainId: number): Promise<TokenEntry[]> {
+  if (readDisableV3()) return Promise.resolve([])
   const cached = eulerSdkCache.get(String(chainId))
   if (cached) return Promise.resolve(cached)
   return refreshEulerSdkTokenList(chainId)
@@ -318,23 +340,74 @@ const mergeSources = (
   // without overriding authoritative metadata for tokens (like EUL) that
   // are in multiple lists.
   return deduplicateTokens(
-    euler,
+    preferFallbackLogos(euler, [defillama, uniswap]),
     deduplicateTokens(defillama, deduplicateTokens(uniswap, merkl)),
   )
 }
 
+// Read once per token per server process. null: no contract or no decimals(), so the token is dropped.
+const onchainDecimals = new Map<string, number | null>()
+
+const decimalsKey = (chainId: number, address: string) => `${chainId}:${address.toLowerCase()}`
+
+// Matched by name because the SDK bundles its own viem. RawContractError only marks a call that failed inside a
+// successful Multicall3 batch; RPC failures (often -32603, which viem also reports as a revert) never carry it.
+const isMissingDecimals = (err: unknown): boolean => {
+  for (let e: unknown = err; e instanceof Error; e = e.cause) {
+    if (e.name === 'RawContractError' || e.name === 'ContractFunctionZeroDataError') return true
+  }
+  return false
+}
+
+async function readMissingDecimals(chainId: number, tokens: TokenEntry[]): Promise<void> {
+  const missing = tokens.filter(t => t.address !== zeroAddress && !onchainDecimals.has(decimalsKey(chainId, t.address)))
+  if (!missing.length) return
+  try {
+    const { tokenlistService } = await getServerSdk(chainId)
+    const resolveDecimals = tokenlistService.resolveTokenDecimals?.bind(tokenlistService)
+    if (!resolveDecimals) throw new Error('SDK token decimals resolver unavailable')
+    await Promise.all(missing.map(async (token) => {
+      const key = decimalsKey(chainId, token.address)
+      try {
+        onchainDecimals.set(key, await resolveDecimals(chainId, token.address as Address))
+      }
+      catch (err: unknown) {
+        if (isMissingDecimals(err)) onchainDecimals.set(key, null)
+      }
+    }))
+    const unread = missing.filter(t => !onchainDecimals.has(decimalsKey(chainId, t.address))).length
+    reportStatus('token-list', `decimals:${chainId}`, unread ? 'unread' : 'ok',
+      unread ? `${unread} token decimals unread for chain ${chainId}, retrying on the next build` : undefined)
+  }
+  catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    reportStatus('token-list', `decimals:${chainId}`, `failed:${msg}`,
+      `Token decimals read failed for chain ${chainId}: ${msg}`)
+  }
+}
+
+async function applyOnchainDecimals(chainId: number, tokens: TokenEntry[]): Promise<TokenEntry[]> {
+  const chainTokens = tokens.filter(t => t.chainId === chainId && isAddress(t.address))
+  // viem retries a hanging RPC for ~40 s; reads that miss the deadline still fill the memo for the next build.
+  await Promise.race([
+    readMissingDecimals(chainId, chainTokens),
+    new Promise(resolve => setTimeout(resolve, DECIMALS_READ_DEADLINE_MS)),
+  ])
+  return chainTokens.flatMap((token) => {
+    const decimals = onchainDecimals.get(decimalsKey(chainId, token.address))
+    if (decimals === null) return []
+    return decimals === undefined ? [token] : [{ ...token, decimals }]
+  })
+}
+
 const buildMergedTokens = async (chainId: number): Promise<TokenEntry[]> => {
-  // Fetch all four sources concurrently. Each fetcher has its own cache,
-  // in-flight dedup, and stale-fallback (via allSettled so one failure
-  // doesn't kill the merge). Bounded by the slowest cold-fetch (10s
-  // timeout); warm-cache path is a Map lookup.
   const [eulerResult, uniswapResult, defillamaResult, merklResult] = await Promise.allSettled([
     fetchEulerSdkTokenList(chainId),
     fetchUniswap(),
     fetchDefillama(chainId),
     fetchMerkl(chainId),
   ])
-  return mergeSources(eulerResult, uniswapResult, defillamaResult, merklResult)
+  return applyOnchainDecimals(chainId, mergeSources(eulerResult, uniswapResult, defillamaResult, merklResult))
 }
 
 /**
@@ -356,7 +429,7 @@ export function refreshTokenList(chainId: number): Promise<TokenEntry[]> {
       refreshDefillama(chainId),
       refreshMerkl(chainId),
     ])
-    const merged = mergeSources(results[0], results[1], results[2], results[3])
+    const merged = await applyOnchainDecimals(chainId, mergeSources(results[0], results[1], results[2], results[3]))
     if (merged.length > 0) mergedCache.set(key, merged)
     return merged
   })

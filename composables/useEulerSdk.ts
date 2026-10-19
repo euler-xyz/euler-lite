@@ -1,10 +1,12 @@
-import { buildEulerSDK, createKeyringPlugin, createPythPlugin, IntrinsicApyService, IntrinsicApyV3Adapter } from '@eulerxyz/euler-v2-sdk'
+import { buildEulerSDK, DeploymentService, createKeyringPlugin, createPythPlugin, IntrinsicApyService, IntrinsicApyV3Adapter } from '@eulerxyz/euler-v2-sdk'
 import type { BuildQueryFn, EulerSDK, EulerSDKConfig } from '@eulerxyz/euler-v2-sdk'
 import { INTERNAL_API_BASE } from '~/utils/api-url-env'
 import { logWarn } from '~/utils/errorHandling'
 import { sdkBuildQuery, sdkFreshBuildQuery } from '~/utils/sdk-query-cache'
 import { createLiteTosPlugin } from '~/utils/sdk-tos'
 import { createYuzuIntrinsicApyService } from '~/utils/yuzu-intrinsic-apy'
+import { LiteEulerLabelsService } from '~/utils/sdk-labels'
+import { createNoV3IntrinsicApyService, disableSdkV3Utilities } from '~/utils/sdk-no-v3'
 import { PYTH_MAX_UPDATE_FEE } from '~/features/reviewed-execution/planning/plugin-config'
 
 // sdk-keyring is loaded dynamically below to avoid a static import cycle:
@@ -51,7 +53,8 @@ const pythProxyFetch: typeof fetch = (input, init) => {
  *     by `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` (default `fallback`):
  *       • `fallback` — V3 HTTP primary, on-chain secondary; auto-degrades to
  *         onchain via `disableV3: true` when no V3 endpoint is configured.
- *       • `onchain`  — direct on-chain reads only; never touches V3.
+ *       • `onchain`  — account/vault/Earn reads use RPC; optional V3 utilities
+ *         remain available unless the deployment sets DISABLE_V3.
  *       • `v3`       — V3 only; SDK build throws without a V3 endpoint.
  *     Uses the default `sdkBuildQuery` cache policy (sub-minute stale times
  *     for hot reads, longer for catalogue data). Consumed by UI surfaces:
@@ -179,7 +182,7 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
   const swapApiUrl = cleanUrl(rc.swapApiUrl)
   const v3ApiUrl = buildV3ProxyApiPath()
   const subgraphUrls = buildSubgraphUrlMap()
-  const { enableV3Backend, browserVaultSource, eulerInterfacesBranch } = useEnvConfig()
+  const { enableV3Backend, disableV3, browserVaultSource, eulerInterfacesBranch } = useEnvConfig()
   // 'fast' resolves to whatever NUXT_PUBLIC_BROWSER_VAULT_SOURCE pins.
   // 'onchain' covers both ONCHAIN_SDK_CHAINS fast reads and the plan-time
   // instance, which exists specifically so the planner sees fresh chain
@@ -225,7 +228,7 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
     // when no upstream V3 is configured. Other sources have their adapters
     // pinned explicitly; v3-pinned without V3 will fail the SDK build (the
     // boot-time warning in api-url-env.ts flags this earlier).
-    ...(fastSource === 'fallback' && !enableV3Backend ? { disableV3: true } : {}),
+    disableV3: Boolean(disableV3) || (fastSource === 'fallback' && !enableV3Backend),
   }
 
   return {
@@ -291,18 +294,33 @@ interface InstanceBuildArgs {
 const buildInstance = async ({ backend, buildQuery }: InstanceBuildArgs): Promise<SdkInstance> => {
   const rpcUrls = buildRpcUrls()
   const { config: staticConfig } = buildSdkStaticConfig(backend)
-  const config: EulerSDKConfig = { ...staticConfig, rpcUrls }
+  // HTML may reach the browser before the server's bounded registry boot read.
+  // Resolve deployments before providers so a premature RPC setting is isolated.
+  const deploymentService = await DeploymentService.build(
+    { deploymentsUrl: staticConfig.deploymentsUrl! },
+    buildQuery,
+  )
+  const deploymentChainIds = new Set(deploymentService.getDeploymentChainIds())
+  const admittedRpcUrls = Object.fromEntries(Object.entries(rpcUrls)
+    .filter(([chainId]) => deploymentChainIds.has(Number(chainId))))
+  if (!Object.keys(admittedRpcUrls).length) {
+    throw new Error('No enabled chains have usable deployment metadata')
+  }
+  const config: EulerSDKConfig = { ...staticConfig, rpcUrls: admittedRpcUrls }
   const { buildSdkKeyringHookTargets, getSdkKeyringCredential } = await loadSdkKeyringModule()
   const keyringHookTargets = buildSdkKeyringHookTargets()
-  const intrinsicApyService = createYuzuIntrinsicApyService(
-    new IntrinsicApyService(
-      new IntrinsicApyV3Adapter(
-        { endpoint: config.intrinsicApyV3ApiUrl ?? config.v3ApiUrl ?? buildV3ProxyApiPath() },
-        buildQuery,
-      ),
-    ),
-    buildAppApiPath('/api/internal/proxy/intrinsic-apy-overrides'),
-  )
+  const disableV3 = useEnvConfig().disableV3
+  const intrinsicApyService = disableV3
+    ? createNoV3IntrinsicApyService()
+    : createYuzuIntrinsicApyService(
+        new IntrinsicApyService(
+          new IntrinsicApyV3Adapter(
+            { endpoint: config.intrinsicApyV3ApiUrl ?? config.v3ApiUrl ?? buildV3ProxyApiPath() },
+            buildQuery,
+          ),
+        ),
+        buildAppApiPath('/api/internal/proxy/intrinsic-apy-overrides'),
+      )
 
   const sdk = await buildEulerSDK({
     config,
@@ -311,7 +329,11 @@ const buildInstance = async ({ backend, buildQuery }: InstanceBuildArgs): Promis
       morpho: { morphoGraphqlUrl: buildMorphoProxyApiPath() },
       aave: { graphqlEndpoint: buildAaveProxyApiPath() },
     },
-    servicesOverrides: { intrinsicApyService },
+    servicesOverrides: {
+      intrinsicApyService,
+      deploymentService,
+      eulerLabelsService: new LiteEulerLabelsService(),
+    },
     plugins: [
       createPythPlugin({ buildQuery, fetchFn: pythProxyFetch, maxUpdateFee: PYTH_MAX_UPDATE_FEE }),
       createKeyringPlugin({
@@ -322,6 +344,7 @@ const buildInstance = async ({ backend, buildQuery }: InstanceBuildArgs): Promis
       createLiteTosPlugin(),
     ],
   })
+  if (disableV3) disableSdkV3Utilities(sdk)
   configureAppProxies(sdk, buildQuery)
   return { sdk }
 }

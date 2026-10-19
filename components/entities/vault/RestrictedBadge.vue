@@ -1,15 +1,23 @@
 <script setup lang="ts">
+import { getVaultTags } from '~/composables/useGeoBlock'
 import { useModal } from '~/components/ui/composables/useModal'
 import { RestrictedInfoModal } from '#components'
 
 type Variant = 'blocked' | 'restricted'
 
-const { variant = 'blocked', size = 'small' } = defineProps<{
+const { variant = 'blocked', size = 'small', vaultAddresses, chainId } = defineProps<{
+  vaultAddresses: (string | undefined)[]
+  chainId?: number
   variant?: Variant
   size?: 'small' | 'large'
 }>()
 
 const modal = useModal()
+const { chainId: activeChainId } = useEulerAddresses()
+const show = computed(() => {
+  if (chainId !== undefined && chainId !== activeChainId.value) return false
+  return vaultAddresses.some(address => address && getVaultTags(address, variant === 'restricted' ? 'swap-target' : 'browse').tags.includes('Restricted'))
+})
 
 const title = computed(() =>
   variant === 'restricted'
@@ -26,6 +34,7 @@ const openInfoModal = (event: MouseEvent) => {
 
 <template>
   <UiHoverPreviewTooltip
+    v-if="show"
     :title="variant === 'restricted' ? 'Asset restricted' : 'Region restricted'"
     :text="title"
     placement="top-start"

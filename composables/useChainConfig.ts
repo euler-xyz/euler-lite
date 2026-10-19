@@ -20,6 +20,7 @@ interface ChainConfig {
   eVaultFetchChunkChainIds: number[]
   unsupportedChainIds?: number[]
   chainEnvIssues?: ChainEnvIssues
+  explorerUrls?: Record<number, string>
 }
 
 let cached: ChainConfig | null = null

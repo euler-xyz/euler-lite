@@ -48,6 +48,7 @@ cp .env.example .env
 | Variable     | Default                       | Description                           |
 | ------------ | ----------------------------- | ------------------------------------- |
 | `V3_API_URL` | `https://v3.euler.finance`    | Euler V3 upstream used by the server `/api/internal/v3` proxy |
+| `DISABLE_V3` | `false` | Explicitly disables V3 adapters, proxying, image discovery and V3 utility reads. Requires static labels. Alias: `EULER_SDK_DISABLE_V3`. See [Fork setup](docs/fork-setup.md). |
 | `EULER_SDK_V3_API_KEY` | —                  | Optional server-side V3 API key forwarded by `/api/internal/v3` as `X-API-Key` |
 | `SWAP_API_URL` or `NUXT_PUBLIC_SWAP_API_URL` | —           | Euler swap API                        |
 | `PYTH_API_KEY` | — | Server-side API key sent to `https://hermes.pyth.network` as Bearer authentication by `/api/internal/pyth/updates` |
@@ -63,8 +64,8 @@ Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for 
 | `SERVER_VAULT_CACHE_SOURCE` | `fallback` | Server snapshot builder adapter chain: `fallback`, `onchain`, or `v3`. |
 | `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` | `fallback` | Browser "fast" SDK adapter chain: `fallback`, `onchain`, or `v3`. The plan-time SDK is always on-chain. |
 | `DISABLE_SERVER_VAULT_CACHE` | `false` | Set to `true` to disable `/api/internal/vaults` snapshots and let the browser fall through to the normal RPC pipeline. |
-| `DEPRECATED_CHAINS` | — | Comma-separated chain IDs shown collapsed in the chain selector and skipped by startup warm-cache cycles. |
-| `ONCHAIN_SDK_CHAINS` | — | Comma-separated chain IDs pinned to the onchain SDK adapter config for chain-aware browser reads and the server vault snapshot, bypassing V3. Independent of `DEPRECATED_CHAINS`; list a chain in both to deprecate it and route it onchain. |
+| `DEPRECATED_CHAINS` | — | Optional comma-separated deprecated-chain override. Enabled chains marked `deprecated` here or in `EulerChains.json` appear collapsed in the chain selector, skip warm-cache cycles, and use V3 metadata with on-chain labels verification. They must also be in `ONCHAIN_SDK_CHAINS`. |
+| `ONCHAIN_SDK_CHAINS` | — | Comma-separated chain IDs pinned to the onchain SDK adapter config for chain-aware browser reads and the server vault snapshot, bypassing V3. Independent of deprecated status; include every enabled chain using metadata-only labels verification. |
 | `EVAULT_FETCH_CHUNK_CHAINS` | — | Comma-separated chain IDs whose EVault list reads are split into small sequential SDK calls. Use for RPC/lens endpoints that fail under larger concurrent onchain EVault fetches. |
 | `EULER_SDK_EULER_INTERFACES_BRANCH` | `master` | Euler interfaces branch used for runtime ABIs and `EulerChains.json`. Explicit `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` and `NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL` overrides take precedence over the branch for their respective manifests. |
 
@@ -86,6 +87,8 @@ Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for 
 | `LABELS_SOURCE` | `v3` (default) or `static`; selects the shared label snapshot producer. |
 | `LABELS_VAULT_TAG` | Optional exact, case-sensitive tag for discovery and new-target suggestions, e.g. `base` or `governance limited`. Blank disables tag filtering. |
 | `STATIC_LABELS_BASE_URL` | Required directory URL for static authoring files; unused by hosted V3 mode. |
+| `LABELS_IMAGE_ORIGINS` | Optional comma-separated HTTP(S) origins for hosted label images in the UI and public metadata, in addition to the configured custom V3 origin and Euler's image hosts. |
+| `LIQUIDATION_BOT_API_URL` | Optional default liquidation bot API with a `{chainId}` placeholder, e.g. `https://{chainId}-liquidations.euler.finance`. When set, the server reads each enabled chain's `/vault-filter` and borrowable vaults the bot does not cover get a "Not covered by default liquidation bot" badge in lists and portfolio rows and a notice on the vault overview. A chain whose bot has not answered since the server started, or whose last answer is more than 30 minutes old, counts as having no bot, so all its borrowable vaults get the badge. Unset disables the feature. HTTPS only (localhost HTTP allowed for dev). Server-only. |
 | `TURTLE_EARN_API_KEY` | **Required when `NUXT_PUBLIC_CONFIG_ENABLE_TURTLE` is on.** Server-only Turtle Earn API key sent as `X-API-Key` by `/api/internal/proxy/turtle` and by the server-side SDK's rewards adapters (`server/utils/sdk-server.ts`), which call Turtle directly for stream discovery. Turtle rejects unauthenticated requests with 401; without this variable the proxy answers 503 and never calls upstream, and the server SDK disables direct Turtle discovery (`rewardsEnableTurtle: false`) instead of issuing unauthenticated calls, so reward proofs and claims are unavailable. Turtle campaigns sourced from euler-data-v3 may still appear in snapshots and APYs, because the flag only gates the SDK's direct adapter. Configure the secret before rolling out. Never exposed to the browser. |
 
 #### Branding & Feature Flags
@@ -101,6 +104,8 @@ These settings use `NUXT_PUBLIC_CONFIG_*` env vars. Branding and announcement va
 | `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL`       | —                                          | Explicit URL for EulerChains.json; takes precedence over the Euler interfaces branch |
 | `NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL` | — | Base URL serving `{contract}.json` for runtime ABIs; takes precedence over the Euler interfaces branch. |
 | `NUXT_PUBLIC_CONFIG_DOCS_URL`               | —                                          | Documentation link                                    |
+| `NUXT_PUBLIC_CONFIG_TOOLBOX_URL`            | —                                          | Toolbox link                                          |
+| `NUXT_PUBLIC_CONFIG_RISK_ANALYTICS_URL`     | —                                          | Risk & Analytics link                                 |
 | `NUXT_PUBLIC_CONFIG_STARGATE_URL`           | —                                          | Stargate link                                         |
 | `NUXT_PUBLIC_CONFIG_TOS_URL`                | —                                          | Terms of Service link                                 |
 | `NUXT_PUBLIC_CONFIG_TOS_MD_URL`             | —                                          | TOS markdown URL (enables TOS signing when set)       |
@@ -145,7 +150,11 @@ RPC_URL_42161=https://your-arbitrum-rpc.com
 SUBGRAPH_URL_42161=https://api.goldsky.com/.../euler-simple-arbitrum/latest/gn
 ```
 
-The app scans for `RPC_URL_<chainId>` env vars at server startup and automatically enables those chains. The SDK subgraph adapters call the same-origin `/api/internal/proxy/subgraph/<chainId>` route, which resolves `SUBGRAPH_URL_<chainId>` first and `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` second. No code changes needed to add or remove chains.
+The app scans for `RPC_URL_<chainId>` env vars at server startup and automatically enables those chains. The SDK subgraph adapters call the same-origin `/api/internal/proxy/subgraph/<chainId>` route, which resolves `SUBGRAPH_URL_<chainId>` first and `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` second.
+
+A chain also needs an entry in euler-interfaces `EulerChains.json`, and both the pinned `@eulerxyz/euler-v2-sdk` and `@reown/appkit/networks` must support it. When they already do, adding a chain needs no code change; otherwise it needs a dependency bump and a release. See [Adding a Chain](./docs/adding-a-chain.md) for the full checklist.
+
+The chain's `status` in `EulerChains.json` decides whether an enabled chain is shown: `production` chains are shown, `staging` chains only where `DOPPLER_ENVIRONMENT` is not `prd`, `deprecated` chains in the chain selector's deprecated section (like `DEPRECATED_CHAINS`), and `unlisted` chains not at all.
 
 #### Base App In-App Browser
 
@@ -223,7 +232,7 @@ The resolution order in `getAssetLogoUrl(address, symbol)`:
 
 Vault inventory, products, entities, hosted logos, tags, campaigns, and deprecation metadata come from the versioned Public Labels API at `V3_API_URL`. Lite resolves `version=latest` to one immutable publication before fetching a chain bundle and follows every paginated list through `meta.total`.
 
-Hosted labels, visibility and geo policies come exclusively from V3. Fork deployments can set `LABELS_SOURCE=static` and provide their own authoring files through `STATIC_LABELS_BASE_URL`. See [Static labels](docs/static-labels.md) for the format, failure semantics and on-chain data options.
+Hosted labels, visibility and geo policies come exclusively from V3. Fork deployments can set `LABELS_SOURCE=static` and provide their own authoring files through `STATIC_LABELS_BASE_URL`. Start with [Fork setup](docs/fork-setup.md) for complete examples using your own V3, static labels, or static labels without V3. See [Static labels](docs/static-labels.md) for the authoring format and failure semantics.
 
 ### 4. Development
 
@@ -410,6 +419,7 @@ Before deploying:
 
 - Ensure at least one `RPC_URL_<chainId>` env var is set
 - Each chain needs a matching `SUBGRAPH_URL_<chainId>` or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`
+- Check the chain's `status` in `EulerChains.json`: `unlisted` chains are always hidden, and `staging` chains are hidden when `DOPPLER_ENVIRONMENT=prd`
 
 ## Additional Resources
 

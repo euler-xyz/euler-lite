@@ -20,6 +20,7 @@ const hasPageLabelsErrorState = computed(() =>
   || route.path.startsWith('/portfolio')
   || route.path.startsWith('/curators/'),
 )
+const { refreshLiquidationCoverageIfStale } = useLiquidationCoverage()
 const { loadCountry } = useGeoBlock()
 const { updateBalances, resetBalances } = useWallets()
 const { isConnected, address } = useWagmi()
@@ -167,21 +168,23 @@ watch([chainId, showAllLabelEntries], () => {
   })
 }, { immediate: true })
 
-// Refresh live label verdicts for an open tab and after returning from a
-// suspended/background tab. The labels store owns freshness and deduplication.
+// Refresh live label verdicts and liquidation bot coverage for an open tab and
+// after returning from a suspended/background tab. Each store owns its freshness.
 let labelsRefreshInterval: ReturnType<typeof setInterval> | undefined
-const refreshVisibleLabels = () => {
-  if (document.visibilityState === 'visible') void refreshLabelsIfStale()
+const refreshVisibleData = () => {
+  if (document.visibilityState !== 'visible') return
+  void refreshLabelsIfStale()
+  refreshLiquidationCoverageIfStale()
 }
 onMounted(() => {
-  labelsRefreshInterval = setInterval(refreshVisibleLabels, POLL_INTERVAL_60S_MS)
-  window.addEventListener('focus', refreshVisibleLabels)
-  document.addEventListener('visibilitychange', refreshVisibleLabels)
+  labelsRefreshInterval = setInterval(refreshVisibleData, POLL_INTERVAL_60S_MS)
+  window.addEventListener('focus', refreshVisibleData)
+  document.addEventListener('visibilitychange', refreshVisibleData)
 })
 onUnmounted(() => {
   clearInterval(labelsRefreshInterval)
-  window.removeEventListener('focus', refreshVisibleLabels)
-  document.removeEventListener('visibilitychange', refreshVisibleLabels)
+  window.removeEventListener('focus', refreshVisibleData)
+  document.removeEventListener('visibilitychange', refreshVisibleData)
 })
 
 // Refresh balances when token list finishes loading (includes new DefiLlama tokens)

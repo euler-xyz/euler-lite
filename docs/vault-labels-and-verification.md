@@ -4,11 +4,13 @@ This document explains how euler-lite discovers, categorizes, verifies, and disp
 
 ## Overview
 
-Not all vaults on-chain are equal. Public Labels maps chain-scoped vault addresses to published products, managing entities, display-only co-brands, campaigns, descriptions, tags, and deprecation metadata. Lite combines that published content with on-chain governor checks and its effective visibility data when deciding how a vault is presented.
+Not all vaults on-chain are equal. Public Labels maps chain-scoped vault addresses to published products, managing entities, display-only co-brands, campaigns, descriptions, tags, and deprecation metadata. On V3-assessed chains, Lite uses the effective visibility verdict for verification. Metadata-only and static sources use local governor or owner checks.
 
 ## Label Data Sources
 
 `useEulerLabels` reads one chain-scoped bundle from `/api/internal/public-labels`. The server resolves `version=latest` once through the published-versions endpoint, pins resolved metadata pages and entity profiles to that publication. Geo policies, global entity addresses, platform tags and visibility remain live even for a concrete version. Tests use captured fixtures for those live overlays. List reads follow `meta.total` with `limit=100` and increasing `offset`, because V3 caps each page at 100 records.
+
+SDK label population in Lite uses the same public-labels bundle. Browser SDK instances read `/api/internal/public-labels`; server SDK instances read the bundle source directly. The server selects hosted V3 or the configured static fork source. Portfolio reads request their required account fields explicitly and use the already loaded Lite labels snapshot for presentation, so they do not populate labels a second time.
 
 | Public data | V3 path |
 |---|---|
@@ -19,19 +21,19 @@ Not all vaults on-chain are equal. Public Labels maps chain-scoped vault address
 | Entity governance addresses | `GET /labels/entities/{entityId}/addresses` |
 | Geo policy records | `GET /geo-policies` |
 
-The adapter also reads `/evk/vaults` and `/earn/vaults` with explicit `visibility=visible,warning,hidden,pending_review`. Trusted label membership requires a visible or warning verdict and a managing entity. Hidden and pending metadata remain available without granting trusted membership. Per-side V3 explorability flags control hosted listing. On-chain governor checks still determine the stronger verification badge.
+The adapter also reads `/evk/vaults` and `/earn/vaults` with explicit `visibility=visible,warning,hidden,pending_review`. Trusted label membership requires a visible or warning verdict and a managing entity. Hidden and pending metadata remain available without granting trusted membership. Per-side V3 explorability flags control hosted listing. The V3 verdict determines the verification badge on assessed chains.
 
 Entity profiles supply hosted logo URLs. A product's `entityId` is its managing entity; `coBrandEntityIds` supplies additional display branding only. Co-brands do not participate in curator ownership, governor verification, or curator-profile market assignment. Neutral escrow inventory rows are not assigned to a product/entity and are not added to the labels-derived verified set.
 
 Curator pages load one V3 entity profile by ID through `/api/internal/curator-profiles/{entityId}`, independently of the selected chain. The network cards select chain-scoped markets and Earn vaults, which still come from `useEulerLabels`. The profile request has a five-minute server cache with bounded stale fallback. If it fails while a chain labels bundle is available, the page shows entity details from that bundle; if no profile data is available, it offers a retry. With `LABELS_SOURCE=static`, the page uses the selected chain's authored entity profile.
 
-Lite evaluates live V3 geo policies using `countriesResolved` and cumulative global/chain/product/vault/asset rules. The server embeds a validated geo collection with each snapshot and retains a disk checkpoint for stale-on-error recovery. Mount `GEO_POLICY_CACHE_DIR` on persistent storage for redeploy durability. Hosted snapshots have no GitHub-label dependency. `LABELS_SOURCE=static` supplies the same snapshot from operator-owned files; see [Static labels](./static-labels.md). Production bake/canary remain rollout work. See [Geo-Blocking](./geo-blocking.md).
+Lite evaluates live V3 geo policies using `countriesResolved` and cumulative global/chain/product/vault/asset rules. Geo rules retain their own fetch time and disk checkpoint. A failed labels refresh can reuse label content with newer geo rules; a cached bundle never serves geo rules past their one-day limit. Mount `GEO_POLICY_CACHE_DIR` on persistent storage for redeploy durability. Hosted snapshots have no GitHub-label dependency. `LABELS_SOURCE=static` supplies the same snapshot from operator-owned files; see [Static labels](./static-labels.md). Production bake/canary remain rollout work. See [Geo-Blocking](./geo-blocking.md).
 
 Oracle adapter identity and health assessments come from Data V3 through the SDK and Lite's same-origin V3 proxy. Detail views load an assessment per adapter; discovery loads the paginated chain catalogue. The UI uses V3's explicit `recognized` identity verdict and server-computed `checksStatus`, preserving `unknown` and `not_applicable` finding outcomes.
 
-**Caching and fallback**: The server bundle has a 5-minute chain/version cache, concurrent cold loads share one in-flight fetch, and failures can return a bounded stale bundle. The browser deduplicates chain-scoped loads and rejects superseded responses. Visible tabs check freshness every minute and on focus/visibility changes, requesting a fresh server bundle after five minutes. Same-chain refreshes retain display data; verification becomes unavailable after fifteen minutes without a successful response. Requests time out after 35 seconds. Current hosted membership overrides cached positive registry flags, so refreshed revocations also update verification guards and verified EVault lists. Escrow perspective trust remains independent. An initial failure leaves labels unavailable with a retry action. Retry requests a fresh bundle and reloads vault discovery after labels recover.
+**Caching and fallback**: The server bundle has a 5-minute chain/version cache, concurrent cold loads share one in-flight fetch, and failures can return a bounded stale bundle while its geo rules remain usable. Hosted bundles carry the time of the V3 read, including when served from stale cache. The browser deduplicates chain-scoped loads and rejects superseded responses. Visible tabs check freshness every minute and on focus/visibility changes, requesting a fresh server bundle after five minutes. Same-chain refreshes retain display data and every action stays available while the bundle is younger than a day; V3 verification becomes unavailable one day after the last successful source read, even if the server returns that bundle again, and then every vault reads as unverified behind the app's backend-unavailable notice. The server keeps the last good bundle, verified set and metadata map for that day and refreshes them every five minutes. Public metadata can retain display text past source expiry, but it drops verified manager attribution at that deadline. The public verified-set cache uses the same source timestamp and caps its response-cache lifetime at that deadline. Requests time out after 35 seconds. Current hosted membership overrides cached positive registry flags, so refreshed revocations also update verification guards and verified EVault lists. Escrow perspective trust remains independent. An initial failure leaves labels unavailable with a retry action. Retry requests a fresh bundle and reloads vault discovery after labels recover.
 
-**Inventory gaps**: The SDK reads direct V3 visibility for labelled vaults absent from the EVK/Earn inventories, with at most eight requests in flight. This covers Securitize labels without inventing a verdict. Effective lend/borrow listing decisions are preserved, so a visible collateral wrapper may remain hidden from lend discovery. Direct-verdict failures fail the aggregate refresh and use the same bounded stale-snapshot behavior described above. Hosted governor/owner verification still applies separately.
+**Inventory gaps**: The SDK reads direct V3 visibility for labelled vaults absent from the EVK/Earn inventories, with at most eight requests in flight. This covers Securitize labels without inventing a verdict. Effective lend/borrow listing decisions are preserved, so a visible collateral wrapper may remain hidden from lend discovery. Direct-verdict failures fail the aggregate refresh and use the same bounded stale-snapshot behavior described above.
 
 **Address normalization**: All addresses from labels are checksummed via `getAddress()` before storage, ensuring consistent lookups regardless of input casing.
 
@@ -41,7 +43,9 @@ Oracle adapter identity and health assessments come from Data V3 through the SDK
 
 Products provide `entityId`, optional `coBrandEntityIds`, display name, description, URL, portfolio notice, and direct product deprecation metadata. Vault inventory rows provide vault type, product/entity assignment, display metadata, tags, campaigns, and resolved vault deprecation metadata. V3 resolves the display cascade; Lite preserves empty resolved overrides instead of re-inheriting product notices.
 
-Entity rows provide profile text, hosted logos, website/social links, and optional organization details. Lite separately fetches each relevant entity's global governance addresses and checksums them before comparison with on-chain governor addresses.
+Entity rows provide profile text, hosted logos, website/social links, and optional organization details. Lite also fetches each relevant entity's global governance addresses for metadata-only and static verification.
+
+Verified EVK, Earn, Securitize and borrow-pair overviews show the managing entity's published profile in "Curator details": description, legal name, risk methodology, security information, terms, licenses, disclaimers and links when supplied. Explore market cards expose the curator description on hover and summarize V3 warning verdicts with their reasons. Missing profile fields are omitted.
 
 Vault campaigns have a `name`, hosted `logo`, and `type` of `deposit` or `borrow`. Deposit campaigns render beside supply APY and borrow campaigns render beside borrow APY. Campaign badges are informational and do not change reward APR calculations.
 
@@ -81,7 +85,7 @@ Router recognition comes from `/v3/oracles/routers`, which lists exactly the rou
 
 Explore and vault oracle rows resolve logos through `getOracleProviderLogo` (`entities/oracle-providers.ts`), not local SVG assets.
 
-The URL is always `https://v3.euler.finance/v3/images/oracle-providers/{key}`. That host is `DEFAULT_V3_API_URL`; it does **not** follow `V3_API_URL` / `EULER_SDK_V3_API_URL`. Custom V3 deployments still load logos from production V3. `img-src` already allows `https:` (see [Token List](./token-list.md#csp)).
+The URL is `{base}/oracle-providers/{key}`, where `base` is the public images base the server reads from its own V3 (`GET /v3/images`) and passes to the browser as `window.__APP_CONFIG__.v3ImagesUrl`. `V3_API_URL` and the API key stay server-side. When the base is unknown (V3 unreachable at boot, or an invalid answer), oracle-provider logos are not shown. `img-src` already allows `https:` (see [Token List](./token-list.md#csp)).
 
 Lookup rules:
 
@@ -97,15 +101,36 @@ Lookup rules:
 
 ### Building the Verified Set
 
-The `useEulerLabels` composable builds a set of verified vault addresses from the labels data: a vault address is added if it appears in any product's `vaults` or `deprecatedVaults` array. This drives the `vault.verified` flag — a precondition for governor verification, but not the full verdict.
+For V3-assessed chains, `useEulerLabels` builds verified membership from visible or warning vaults with a managing entity. The client and `/api/public/is-known` use that membership as the verification verdict. Hidden and pending-review vaults can retain display metadata without becoming verified. Independent on-chain escrow-perspective membership also counts as verified.
 
-The full "is this vault verified?" verdict (used by the UI to render markets, and by the `/api/public/is-known` endpoint) additionally requires the on-chain governor to match a declared entity address. See `utils/vault/governor-verification.ts` for the shared rule, and the "Programmatic verification lookup" section below for the public endpoint.
+Vault configuration checks and listing are separate V3 results. A vault can have passed checks and still be unlisted because it has no published vault label. The Vault checks UI says "Checks passed" for that assessment.
+
+### Unknown and flagged vaults
+
+The UI sorts every vault that is not verified into one of two groups.
+
+- **Flagged**: the V3 verdict is `hidden`. V3 hides a vault when a required check failed, when a check layer was suspended or revoked, or when the vault was marked as not to be listed. The vault keeps its real name and shows an amber "Flagged" chip; on a borrow pair the chip reads "Collateral flagged" or "Borrow flagged". The chip's tooltip is titled "Vault flagged" and shows V3's reason, or "Euler's checks flagged this vault." when there is none. The line under the name and the cause line under the checks read "Euler's checks flagged this vault: <reason>." The Curator value in the overview reads "Flagged".
+- **Unknown**: every other vault that is not verified. This covers a vault with no V3 verdict, a `pending_review` verdict, and a vault that fails the verification rules (for example, no managing entity). The name and the Curator show the red "Unknown" chip. No line is shown under the name. The cause line under the checks reads "This vault has not been checked yet." (no verdict, or pending review), "This vault is not in the published vault labels." (unclaimed), or "This vault is in the published vault labels but could not be verified." (no managing entity).
+
+`visible` and `warning` vaults with a managing entity are verified and get neither treatment. The "Deprecated", "Warning" and "Restricted" chips are unchanged. The "Warning" chip (and "Collateral warning" / "Borrow warning" on a pair) is still left out when its only failed checks were accepted exceptions. No vault state is described as "not listed". Flagged status needs ready V3 labels. Static and metadata-only sources never flag a vault.
+
+The Lend, Borrow and Earn vault pages open a pop-up once per page, after the vault and the labels have loaded. No wallet is needed. On Borrow, the pop-up opens when either side of the pair is unknown or flagged. If any vault is unknown, the pop-up is the strict one: "Important!", a phishing warning, Yes / Cancel, and Cancel goes to `/`. If every vault that is not verified is flagged, the pop-up is titled "Vault flagged", gives V3's reason, and offers Continue / Go back. Go back returns to the previous page, or to `/` when there is none. Neither pop-up closes from the backdrop. `composables/useVaultOpeningNotice.ts` holds this logic.
+
+Metadata-only and static sources have no V3 visibility verdict. Their verification path matches the on-chain governor, router governor, or Earn owner to the declared managing entity. See `utils/vault/governor-verification.ts` and the "Programmatic verification lookup" section below.
 
 ### Operation warnings and consent
 
-Operation guards verify vaults against the app's selected chain and the shared governor/owner rules. Wallet connection and chain switching remain available before other form gates. While labels or vault metadata are unresolved, operations remain blocked with a loading state or a retry action.
+Operation guards use the selected chain's verification source. Wallet connection and chain switching remain available before other form gates. New exposure waits for verification data or presents a retry action when that data is unavailable. A V3 `pending_review` verdict keeps the vault out of discovery and requires explicit unverified-vault acknowledgment before deposits and borrows. Existing-position exits remain available during a labels outage.
 
-The Earn deposit page opens its automatic disclaimer only for a resolved unverified vault when the wallet is connected to the selected chain. Clicking Yes dismisses the browsing notice. The form's explicit risk button records the account, chain, operation, and vault-set acknowledgment required by final execution policy. The popup closes when acknowledgment is no longer required or the page unmounts. Final execution policy also requires available verification labels for operations involving vaults.
+Vault pages show status in the page. Forms request explicit, account- and operation-scoped acknowledgment for unverified vault risk and a separate acknowledgment for deposits into deprecated vaults. The final execution policy checks the same requirements.
+
+The acknowledgment covers every vault the operation targets, not only the vault of the page. Each form passes the vaults of its operation to `useOperationGuard`, for example the target collateral of a swap and the long vault of a multiply. Repay and position withdraw build that list with `collectPlannerVaultAddresses`, the rule the final policy uses. The final policy checks the acknowledgment against the vaults named in the planner arguments, so a vault a form leaves out blocks the transaction. If every unverified vault in the operation is flagged, the form's button reads "Review flagged vault". The confirmation then reads "This transaction uses a flagged vault: <reason>." with Confirm / Cancel. If any vault is unknown, the strict "Unverified vault" confirmation applies. The batch review reads its vaults from each entry's calldata (EVC batch targets, direct-call targets and approval spenders). It uses the same two texts.
+
+Known gaps:
+
+- The disable-collateral action on the position page has no form guard. For a collateral that is not verified, the final execution policy refuses that transaction, and no confirmation is shown first.
+- The position borrow page lists the collateral beside the borrow vault, and the position swap page lists both sides of the position. Their planner arguments can name fewer vaults. When both a listed-only vault and a planned vault are unverified, the recorded acknowledgment does not match, and the final policy refuses the transaction.
+- The batch review does not decode vaults that appear only as arguments of EVC calls, such as `enableCollateral`, and skips vaults that are not in the registry. The form guard and the final policy still cover those vaults.
 
 ### Governance hydration guard (SDK 2.0)
 
@@ -121,9 +146,13 @@ Only a **defined** `governorAdmin` means governance actually resolved. Until the
 
 ### Ungoverned vaults
 
-Vaults with `governorAdmin = address(0)` use the `ungoverned` entity whose governance-address set contains the zero address. A product managed by that entity follows the same governor matching rule as any other product. The UI shows the "Ungoverned" governance type chip independently from entity matching, based directly on `governorAdmin === zeroAddress`.
+The UI shows "Ungoverned" from the on-chain zero governor (`governorAdmin` for EVK, `governor` for Securitize), independently of the verification verdict. Metadata-only and static sources still apply their entity-address check for verification.
 
-This keeps the bridge endpoint verification aligned with the UI: label/entity matching proves the vault is governed by the declared entity, while the "Ungoverned" presentation signal comes directly from the on-chain `governorAdmin` value.
+### Governance facts
+
+The EVK curator and address rows use `evidence.multisig` for Safe owner thresholds and `evidence.governance` for the router governor. Missing evidence falls back to the Safe and router RPC probes. These facts are informational and do not change verification or action gates.
+
+The Earn Governance block shows on-chain owner, curator, guardian, timelock, pending timelock and guardian changes, pending strategy caps, and supply and withdraw queues from the SDK. It reads pending ownership from the Earn contract. V3 assessment evidence supplies allocator addresses and Safe thresholds; when that evidence is unavailable, allocator rows are omitted and visible governance addresses use the Safe RPC probe. The V3 timelock finding adds its reviewed judgment beside the on-chain duration.
 
 ### How `vault.verified` Is Set
 
@@ -135,7 +164,7 @@ This keeps the bridge endpoint verification aligned with the UI: label/entity ma
 | **Securitize vaults** | Address appears in `verifiedVaultAddresses` from labels |
 | **Unknown vaults** | Resolved via subgraph; verified only if in labels |
 
-Registry presence is not Earn verification. `updateEarnVaults` / `refreshVaults` builds `verified` as `curatedAddresses.has(vault.address)` from `useEulerLabels().earnVaults`. On-demand unlisted Earn vaults stay unverified after a refresh that still fetches them. Removing an address from `earn-vaults.json` clears stale verification on the next Earn update — do not copy the prior `verified: true`. Server snapshot hydration can mark snapshot Earn rows verified because that snapshot only includes labeled earn addresses.
+Registry presence is not Earn verification. `updateEarnVaults` / `refreshVaults` builds `verified` as `curatedAddresses.has(vault.address)` from `useEulerLabels().earnVaults`. On-demand unlisted Earn vaults stay unverified after a refresh that still fetches them. When an address is absent from the selected labels snapshot, the next Earn update clears its prior verification rather than copying `verified: true`. Server snapshot hydration can mark snapshot Earn rows verified because that snapshot only includes labeled earn addresses.
 
 ### On-Chain Perspectives
 
@@ -187,6 +216,40 @@ For per-address lookups during direct navigation to a not-yet-cached vault, `fet
 
 **Important: labels remain authoritative for which vaults are _shown_.** SDK categorization says "what category each vault is"; normalized Public Labels products and earn-vault entries say "which vaults to include in lists". The two are composed in `useVaults.loadVaults`: labels select the set, categorization picks the right lens per address.
 
+## Cyclical IRM overview
+
+The cyclical Interest Rate Model block is **label-gated**, not IRM-type-gated.
+
+`isVaultCyclicalNote(address)` in `utils/eulerLabelsUtils.ts` is true when the product `tags` or that vault's `vaultOverrides.tags` include `cyclical note`. That helper is what `VaultOverview.vue` uses to swap `VaultOverviewBlockCyclicalIRM` in for the generic IRM block. The same tag participates in these UI gates:
+
+| Surface | Gate |
+|---|---|
+| Overview IRM block | `isVaultCyclicalNote(vault.address)` |
+| `cyclicalNote` type badge | verified **and** the tag |
+| Lend list "cyclical note" badge | the tag and verified vault governance |
+| Borrow list "cyclical note" badge | the borrow vault's tag and verified governance for both vaults in the pair |
+| Discovery graph "cyclical note" badge | the tag, subject to the graph's badge priority |
+| Target-utilisation info warning (`useVaultWarnings`) | the tag, at least 95% utilisation, and a context other than `repay`; repay keeps its standard high/critical warning |
+
+`isCyclicalNoteVault` in `utils/vault/classification.ts` is a different helper: it only inspects `vault.interestRateModel.type` (`FIXED_CYCLICAL_BINARY` = 4 or `FIXED_CYCLICAL_BINARY_MONTHLY` = 5). A vault can have a cyclical IRM on-chain and still render the generic IRM block if the label tag is absent. Do not treat the type number as permission to show cyclical-note UI.
+
+Inside `VaultOverviewBlockCyclicalIRM.vue` the block still hides itself unless the vault has collateral exposure (`hasCollateralExposure`) and a non-zero IRM address. Both IRM variants are then normalised into one `{ primaryRate, secondaryRate, startSec, primaryDurationSec, secondaryDurationSec }` cycle:
+
+| `interestRateModel.type` | Cycle bounds | Date display |
+|---|---|---|
+| `FIXED_CYCLICAL_BINARY` | `startTimestamp` plus `primaryDuration` / `secondaryDuration` | Local timezone |
+| `FIXED_CYCLICAL_BINARY_MONTHLY` | UTC calendar month; `cycleStartDay` must be `1n…31n` or the cycle is `null` | UTC |
+
+The monthly variant clamps a start day past a short month to that month's last day (`Math.min(startDay, daysInMonth)`) so `Date.UTC` cannot roll 31 February into March. That matches the contract.
+
+The live "Now" marker and elapsed-cycle math use:
+
+```ts
+const now = useNow({ scheduler: cb => useIntervalFn(cb, 1_000) })
+```
+
+The custom scheduler updates the clock once per second; VueUse 15's bare `useNow()` is valid and defaults to animation-frame updates. Borrow APYs on the block convert the IRM's 27-decimal per-second rate (`SPY`) with `(1 + spy)^(secondsInYear) - 1`.
+
 ## Discovery Page Filtering
 
 `LABELS_VAULT_TAG` optionally selects vaults whose tags contain that exact, case-sensitive string. Leading/trailing env whitespace is trimmed; an unset or blank value applies no tag filter. Any tag is supported, including `base` and `governance limited`. A configured tag with no matches produces empty discovery. Set the env before server startup and restart after changing it.
@@ -194,6 +257,8 @@ For per-address lookups during direct navigation to a not-yet-cached vault, `fet
 Both Main and Base can use `LABELS_V3_SET=public`; Base additionally sets `LABELS_VAULT_TAG=base`. Populate the desired tags in V3 before enabling the filter. Hosted mode matches each vault row independently, including Earn, Securitize and escrow rows; metadata-only chains use the same tags without requiring V3 indexing. Static mode matches product tags, vault-override tags and Earn-entry tags using its authored inheritance rules.
 
 The filter applies to Explore group members and metrics, Lend/Borrow/Earn lists, both sides of borrow pairs, and new-target suggestions in swap/migration forms. The `showAll` query does not bypass it. Existing visibility, verification, listing and geo rules still apply. Label refreshes update the selection while preserving loaded vaults used by open forms.
+
+On Lend, Borrow and Earn, `?showAll` includes verified vaults that the labels mark as not explorable for that page. It does not include hidden or pending-review vaults, override the deployment tag, or change geo restrictions. On Portfolio, the same query opens the existing "Show all positions" view for the user's positions; it does not change vault verification. Explore has no `showAll` mode. The "Recently added" badge and sort order follow the published `recently added` tag, so publication controls that designation rather than a client-side age cutoff.
 
 Full labels and vault snapshots remain available for positions, direct URLs, collateral relationships and Earn strategy details. Tag selection does not change verification, geo policies, `/api/public/is-known` or `/api/public/metadata`; it is a discovery setting, not an access restriction.
 
@@ -276,21 +341,21 @@ These labels appear in address fields across all vault overview types (EVK, Earn
 
 ## Programmatic verification lookup
 
-External consumers that only need a yes/no answer for a vault address can call the public [`GET /api/public/is-known`](./public-api.md#get-apipublicis-known) endpoint instead of loading the full label set. This server endpoint uses the same normalized Public Labels bundle as the UI plus the on-chain `escrowedCollateralPerspective`, applies governor / router-governor / owner verification, and answers batches of up to 100 addresses per request. The same governor check applies to deprecated and active vaults. Escrow vaults from the on-chain perspective and standalone Earn entries are trusted unconditionally.
+External consumers that only need a yes/no answer for a vault address can call the public [`GET /api/public/is-known`](./public-api.md#get-apipublicis-known) endpoint instead of loading the full label set. It uses V3 verified membership on assessed chains, the governor / router-governor / owner check on metadata-only and static sources, and independent on-chain `escrowedCollateralPerspective` membership. It answers batches of up to 100 addresses per request. Deprecation does not change the verification verdict.
 
 Consumers that need display metadata (resolved name, description, governing entity, asset) on top of the verification verdict can call [`GET /api/public/metadata`](./public-api.md#get-apipublicmetadata), which applies the same labels / override / verification rules the client UI uses and returns a uniform shape across EVK, Securitize, and Earn vaults.
 
 
-Hosted full verification resolves the managing entity from the V3 vault row, including standalone Earn vaults. Missing curator data yields an empty authority set, so a visible/warning inventory entry alone cannot grant an owner-verification badge. Both client and public APIs apply this rule. Static Earn labels preserve their authored membership semantics. Hosted on-chain governor/owner checks remain in place until the verification bake justifies delegation to V3.
+On assessed chains, V3 supplies the managing entity and effective visibility verdict, including for standalone Earn vaults. A visible or warning row without a curator does not grant verified membership. Both client and public APIs apply this rule. Static Earn labels preserve their authored membership semantics.
 
 ## Archived chains: V3 metadata with on-chain verification
 
-Enabled `DEPRECATED_CHAINS` select the SDK's `PublicLabelsV3MetadataAdapter`. Each must also be in `ONCHAIN_SDK_CHAINS`; a missing entry is a configuration error. Chains without a configured RPC are ignored, and other enabled chains keep V3 assessments even if they use on-chain SDK reads. No separate labels chain variable is required. The archived-chain configuration is `DEPRECATED_CHAINS=146,239,60808,80094`; restart after configuration changes. Swellchain is not selected unless enabled and added to the deprecated/on-chain lists.
+Enabled chains marked `deprecated` in `EulerChains.json` select the SDK's `PublicLabelsV3MetadataAdapter`. `DEPRECATED_CHAINS` is an optional override with the same effect. Each selected chain must also be in `ONCHAIN_SDK_CHAINS`; a missing entry is a configuration error. Chains without a configured RPC are ignored, and other enabled chains keep V3 assessments even if they use on-chain SDK reads. The shared server labels loader reads the admitted Euler interfaces manifest before selecting or serving a cached adapter result. If no manifest is available, hosted labels remain unavailable until it loads. No separate labels chain variable is required.
 
 The SDK shares metadata fetching and display mapping between its adapters. Metadata-only bundles carry `source: 'v3-metadata'` and contain no visibility verdicts. They use the same label set/publication selection, live entity addresses and live geo policies as the assessed path. Candidate addresses are separate from verified membership.
 
 Lite selects the adapter once in its shared server labels loader. The browser, vault snapshots and public APIs use that selection. The metadata-only path applies the existing governor/router/owner checks against the vault's explicit managing entity; an absent curator cannot inherit static Earn trust. Registry verification uses current candidates and entity addresses rather than a cached positive flag. Independent escrow-perspective verification remains applicable.
 
-Metadata-only discovery follows published product `notExplorable` and per-vault `notExplorableLend` / `notExplorableBorrow` flags and normal market filters. Explore product cards are label/market driven; governance checks separately control verified vault lists and verification badges. Deprecation alone does not hide a vault; Earn uses its lend-side flag and product hiding. Published deprecation and display information remains available to direct pages and existing positions. V3 assessment-based platform listing controls are not synthesized for these chains. Errors on normally assessed chains never switch them to metadata-only handling. Static fork mode remains independent.
+Metadata-only discovery follows published product `notExplorable` and per-vault `notExplorableLend` / `notExplorableBorrow` flags and normal market filters. An explicit vault-side `false` overrides a hidden product for that side; a missing flag inherits the product setting. Explore product cards are label/market driven; governance checks separately control verified vault lists and verification badges. Deprecation alone does not hide a vault; Earn uses its lend-side flag before the product setting. Published deprecation, notices and tags remain available for unnamed EVKs without creating a blank display product. V3 assessment-based platform listing controls are not synthesized for these chains. Errors on normally assessed chains never switch them to metadata-only handling. Static fork mode remains independent.
 
 Live labels refreshes reload vault data when membership or discovery eligibility changes; text-only updates use the reactive labels store. This brings newly eligible vaults into the registry without requiring a page reload. Same-chain label refreshes retain already loaded vaults, including unlisted vaults used by open forms; current hosted membership still controls verification. Ordinary loads and chain changes clear the registry. Batch-review account reads request quantitative data explicitly and do not invoke the SDK's default file-based labels service through `populateAll`.

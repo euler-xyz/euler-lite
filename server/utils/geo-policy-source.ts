@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { fetchPublicGeoPolicies, validatePublicGeoPolicies, type PublicGeoPolicy, type PublicLabelsRequest } from '@eulerxyz/euler-v2-sdk/public-labels'
 import { logger } from './logger'
 import { withWallClock } from './fetchWithTimeout'
+import { isLabelsSnapshotUsable } from '~/utils/labels-freshness'
 
 interface GeoSnapshot { fetchedAt: number, policies: PublicGeoPolicy[] }
 
@@ -43,7 +44,7 @@ export const createGeoPolicySource = (source: string, directory: string) => {
       return snapshot
     }
     catch (err) {
-      if (!lastGood) throw err
+      if (!lastGood || !isLabelsSnapshotUsable(lastGood.fetchedAt)) throw err
       logger.warn({ ctx: 'geo-policy-source', ageMs: Date.now() - lastGood.fetchedAt, fetchedAt: lastGood.fetchedAt, err }, 'using last-known-good geo policies')
       return lastGood
     }

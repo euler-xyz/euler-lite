@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import type { EulerLabelsFileData } from '@eulerxyz/euler-v2-sdk/public-labels'
 import { fetchWithTimeout, withWallClock } from './fetchWithTimeout'
 import { resolveLabelsBaseUrl } from './labels-base-url'
+import { LabelsConfigurationError } from './labels-configuration-error'
 import { validateNode, validateStaticGeo } from './static-labels-validation'
 import { logger } from './logger'
 import { normalizeLabelsBundle, type StaticLabelsBundle } from '~/utils/public-labels'
@@ -53,10 +54,14 @@ export const getStaticLabelsBundle = (chainId: number, force = false): Promise<S
     }
     try {
       const bundle = await withWallClock(async () => {
+        const missing = new Set<string>()
         const read = async (scope: number | 'all', name: string) => {
           const response = await fetchWithTimeout(`${base}/${scope}/${name}.json`)
           // Match the labels file contract, including S3/CDN missing-key 403 responses.
-          if (response.status === 404 || response.status === 403) return name === 'products' || name === 'entities' ? {} : []
+          if (response.status === 404 || response.status === 403) {
+            missing.add(`${scope}/${name}`)
+            return name === 'products' || name === 'entities' ? {} : []
+          }
           if (!response.ok) throw new Error(`Static labels ${scope}/${name}: HTTP ${response.status}`)
           return response.json()
         }
@@ -64,6 +69,9 @@ export const getStaticLabelsBundle = (chainId: number, force = false): Promise<S
           read(chainId, 'products'), read(chainId, 'entities'), read(chainId, 'points'),
           read(chainId, 'earn-vaults'), read(chainId, 'assets'), read('all', 'assets'),
         ])
+        if (missing.has(`${chainId}/products`) && missing.has(`${chainId}/entities`)) {
+          throw new LabelsConfigurationError(`Static labels: products and entities are both missing for chain ${chainId}. Check STATIC_LABELS_BASE_URL and publish ${chainId}/products.json or ${chainId}/entities.json.`)
+        }
         if (!Array.isArray(chainAssets) || !Array.isArray(globalAssets)) throw new Error('Static asset rules must be arrays')
         const files = { products, entities, points, earnVaults, assets: [...chainAssets, ...globalAssets] } as EulerLabelsFileData
         const version = createHash('sha256').update(JSON.stringify(files)).digest('hex')

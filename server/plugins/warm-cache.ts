@@ -15,7 +15,8 @@
  * Two timers, each with its own cadence:
  *
  *   • Global cycle (5 min): Euler Chains and runtime ABIs once, then each
- *     chain's labels bundle and token list, serialized across chains. Hosted
+ *     chain's labels bundle, token list and (when LIQUIDATION_BOT_API_URL is
+ *     set) liquidation bot coverage, serialized across chains. Hosted
  *     bundles share the live geo-policy cache.
  *   • Vaults cycle (1 min when V3 is configured, otherwise 5 min):
  *     /api/internal/vaults per chain, serialized.
@@ -28,36 +29,45 @@
  * rather than refetching — sequential mode is therefore much cheaper
  * than N× the first chain's wall time.
  *
- * Per-chain warms skip chains listed in `DEPRECATED_CHAINS`. Their data
- * is still served — the first visitor to a deprecated chain pays a
+ * Per-chain warms skip deprecated chains (`DEPRECATED_CHAINS`, or status
+ * `deprecated` in the cached deployment manifest, re-read every cycle). Their
+ * data is still served — the first visitor to a deprecated chain pays a
  * cold-upstream fetch, cached from then on under normal TTL behavior.
  *
  * Merkl's /tokens/reward payload is fetched transitively by /api/internal/token-list
  * (one of its sources).
  */
-import { refreshEulerChains } from '../api/internal/euler-chains.get'
+import { peekEulerChains, refreshEulerChains } from '../api/internal/euler-chains.get'
 import { ABI_CONTRACTS, refreshAbi } from '../api/internal/abis/[contract].get'
 import { refreshTokenList } from '../api/internal/token-list.get'
 import { refreshChainVaults } from '../utils/vaults-cache'
+import { UPSTREAM_FETCH_TIMEOUT_MS } from '../utils/fetchWithTimeout'
 import { refreshPublicLabelsBundle } from '../utils/public-labels-source'
+import { isLiquidationCoverageEnabled, refreshLiquidationCoverage } from '../utils/liquidation-coverage-source'
 import {
   readDisableServerVaultCache,
-  readV3ApiUrl,
+  isV3BackendEnabled,
   warnIfVaultSourceNeedsV3,
 } from '~/utils/api-url-env'
 import { getEnabledChainIds } from '~/utils/chain-env'
 import { parseChainIds } from '~/utils/parseChainIds'
+import { getRegistryDeprecatedChainIds, readChainRegistry } from '~/utils/chain-status'
 import { reportStatus } from '../utils/log'
 import { logger } from '~/server/utils/logger'
 
 const REWARM_INTERVAL_MS = 5 * 60_000
+
+const delay = (ms: number) => new Promise<void>((resolve) => {
+  const timer = setTimeout(resolve, ms)
+  timer.unref?.()
+})
 
 // Vaults snapshot gets a separate, faster timer when V3 is configured —
 // V3-backed refreshes are cheap (one batched POST per chain hitting V3's
 // own cache), so a 1-min rewarm keeps the snapshot tight without
 // hammering upstream. Without V3 the snapshot is built from heavier
 // onchain lens multicalls, so it rides the global 5-min interval.
-const VAULTS_REWARM_INTERVAL_MS = readV3ApiUrl() ? 60_000 : REWARM_INTERVAL_MS
+const VAULTS_REWARM_INTERVAL_MS = isV3BackendEnabled() ? 60_000 : REWARM_INTERVAL_MS
 
 // Nitro dev mode re-imports server plugins across its double-init (Vite
 // client build + Nitro server build), which would fire two warm cycles
@@ -113,6 +123,9 @@ const warmPublicLabels = (chainId: number) =>
 const warmTokenList = (chainId: number) =>
   reportWarm(`token-list chain=${chainId}`, refreshTokenList(chainId))
 
+const warmLiquidationCoverage = (chainId: number) =>
+  reportWarm(`liquidation-coverage chain=${chainId}`, refreshLiquidationCoverage(chainId))
+
 // Per-chain consolidated vault snapshot served at /api/internal/vaults?chainId=N.
 // Warmed so the first user navigation to /lend hydrates instantly from
 // cache instead of paying the full lens-multicall + intrinsic-APY fan-out.
@@ -124,6 +137,7 @@ const warmVaults = (chainId: number) =>
 const warmChainTasks = (chainId: number): Promise<unknown>[] => [
   warmPublicLabels(chainId),
   warmTokenList(chainId),
+  ...(isLiquidationCoverageEnabled() ? [warmLiquidationCoverage(chainId)] : []),
 ]
 
 // --- Orchestration ---
@@ -146,10 +160,23 @@ export default defineNitroPlugin(() => {
   const chainIds = enabledChainIds.filter(id => !deprecatedChainIds.has(id))
   if (chainIds.length === 0) return
 
+  const currentChainIds = () => {
+    const registryDeprecated = new Set(getRegistryDeprecatedChainIds(readChainRegistry(peekEulerChains())))
+    return chainIds.filter(id => !registryDeprecated.has(id))
+  }
+
+  // Chain selection reads deprecated statuses from the manifest, so the first
+  // per-chain warms wait for its first read; a failed or slow read leaves the env list.
+  const firstManifestRead = Promise.race([
+    refreshEulerChains().then(() => undefined, () => undefined),
+    delay(UPSTREAM_FETCH_TIMEOUT_MS),
+  ])
+
   const serverVaultCacheDisabled = readDisableServerVaultCache()
 
   const warmChainsSequentially = async () => {
-    for (const chainId of chainIds) {
+    await firstManifestRead
+    for (const chainId of currentChainIds()) {
       await Promise.allSettled(warmChainTasks(chainId))
     }
   }
@@ -172,7 +199,8 @@ export default defineNitroPlugin(() => {
       // Sequential across chains: cross-chain upstreams (V3 prices,
       // intrinsic APY) dedupe via their in-flight maps, so chains 2..N
       // hit warm upstream caches rather than refetching.
-      for (const chainId of chainIds) {
+      await firstManifestRead
+      for (const chainId of currentChainIds()) {
         await warmVaults(chainId)
       }
     }

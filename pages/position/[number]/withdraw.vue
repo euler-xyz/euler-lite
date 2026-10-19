@@ -1,11 +1,12 @@
 <script setup lang="ts">
+import { getVaultGeoUnavailableReason } from '~/composables/useGeoBlock'
 import { captureSwapReview } from '~/utils/swapReview'
 import type { VaultAsset } from '~/types/asset'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatio } from '~/utils/sdk-prices'
 import type { SwapQuote, EVault } from '@eulerxyz/euler-v2-sdk'
-import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useCollateralForm } from '~/composables/position/useCollateralForm'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
@@ -14,6 +15,7 @@ import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/uti
 import { getAddress, type Address, zeroAddress, maxUint256 } from 'viem'
 import { FixedPoint } from '~/utils/fixed-point'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
+import { collectPlannerVaultAddresses } from '~/features/reviewed-execution/planning/requirements'
 
 import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
 
@@ -181,7 +183,10 @@ const form = useCollateralForm({
   },
   usePreparedPipeline: true,
 })
-useOperationGuard(computed(() => [form.collateralVault.value?.address, form.borrowVault.value?.address].filter(Boolean)), { acquiresExposure: false })
+useOperationGuard(computed(() => collectPlannerVaultAddresses({
+  vaultAddress: form.collateralVault.value?.address,
+  swapQuote: needsSwap.value ? form.swapSelectedQuote.value : undefined,
+})), { acquiresExposure: false })
 const withdrawableCollateralAssets = computed(() => cashLimitedCollateralAssets())
 
 // True when the requested amount covers the entire collateral balance. The Max
@@ -275,7 +280,7 @@ const addToBatch = async () => {
 }
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (form.isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (form.isGeoBlocked.value) return { message: getVaultGeoUnavailableReason(form.borrowVault.value?.address, form.collateralVault.value?.address) || 'This operation is not available in your region', variant: 'warning' }
   if (form.isOutputAssetBlocked.value || form.isOutputAssetRestricted.value) return { message: 'Receiving this asset is not available in your region', variant: 'warning' }
   if (form.isSwapRestricted.value) return { message: 'Swapping from this vault is not available in your region', variant: 'warning' }
   if (form.estimatesError.value) return { message: form.estimatesError.value, variant: 'error' }
@@ -288,10 +293,12 @@ const pairAssetsLabel = usePositionPairLabel(form.position)
 
 // Withdraw-specific computeds
 const withdrawWarnings = computed(() => {
-  if (!form.borrowVault.value) return []
+  const collateralVault = form.collateralVault.value
   return [
     form.hookWarning.value,
-    getUtilisationWarning(form.borrowVault.value, 'borrow'),
+    collateralVault && isEVault(collateralVault)
+      ? getUtilisationWarning(collateralVault, 'lend')
+      : null,
   ]
 })
 
@@ -426,6 +433,7 @@ watch(selectedOutputAsset, () => {
             />
 
             <FormAlertStack
+              :vault-addresses="[form.borrowVault.value?.address, form.collateralVault.value?.address]"
               :is-geo-blocked="form.isGeoBlocked.value"
               :asset-restricted="!form.isGeoBlocked.value && (form.isOutputAssetBlocked.value || form.isOutputAssetRestricted.value)"
               asset-restricted-description="Receiving this asset is not available in your region. Pick a different token."

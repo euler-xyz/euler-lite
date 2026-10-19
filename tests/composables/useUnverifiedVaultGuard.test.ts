@@ -4,6 +4,7 @@ import { operationBlockerEntries, unregisterOperationBlocker } from '~/utils/ope
 import { useUnverifiedVaultGuard, type UnverifiedVaultGuardState } from '~/composables/guards/useUnverifiedVaultGuard'
 
 const VAULT = '0x00000000000000000000000000000000000000a1'
+const LISTED_VAULT = '0x00000000000000000000000000000000000000a2'
 const ACCOUNT = '0x00000000000000000000000000000000000000b1'
 
 const registryVersion = ref(0)
@@ -11,13 +12,20 @@ const entries = new Map<string, { type: 'evk', vault: { chainId: number, address
 const verifyEVault = vi.fn()
 const labelsReady = ref(true)
 const labelsError = ref<string | undefined>()
+const labelsSource = ref<'v3' | 'static'>('static')
+const visibility = ref<Record<string, { status: string, reason?: string, decidedBy?: string }>>({})
 const retryLabels = vi.fn()
+const deprecated = ref(false)
+
+vi.mock('~/utils/eulerLabelsUtils', () => ({
+  getVaultDeprecation: () => ({ deprecated: deprecated.value, reason: deprecated.value ? 'Vault is deprecated.' : '' }),
+}))
 
 vi.mock('~/composables/useEulerLabels', () => ({
   getEulerLabelsVersion: () => 1,
 }))
 
-const mountGuard = (options?: { allowUnavailableLabels?: boolean, chainId?: Ref<number | undefined>, account?: Ref<string | undefined>, operation?: Ref<string> }) => {
+const mountGuard = (options?: { vaults?: string[], allowUnavailableLabels?: boolean, depositedVaultAddresses?: Ref<string[]>, chainId?: Ref<number | undefined>, account?: Ref<string | undefined>, operation?: Ref<string> }) => {
   let state: UnverifiedVaultGuardState | undefined
   const chainId = options?.chainId ?? ref<number | undefined>(1)
   const account = options?.account ?? ref<string | undefined>(ACCOUNT)
@@ -37,9 +45,10 @@ const mountGuard = (options?: { allowUnavailableLabels?: boolean, chainId?: Ref<
   })
   const app = renderer.createApp({
     setup() {
-      useUnverifiedVaultGuard(computed(() => [VAULT]), {
+      useUnverifiedVaultGuard(computed(() => options?.vaults ?? [VAULT]), {
         chainId,
         allowUnavailableLabels: options?.allowUnavailableLabels,
+        depositedVaultAddresses: computed(() => options?.depositedVaultAddresses?.value ?? []),
         account,
         operation: computed(() => operation.value),
       })
@@ -61,8 +70,11 @@ describe('useUnverifiedVaultGuard canonical context', () => {
     entries.clear()
     labelsReady.value = true
     labelsError.value = undefined
+    labelsSource.value = 'static'
+    visibility.value = {}
+    deprecated.value = false
     retryLabels.mockReset()
-    vi.stubGlobal('useEulerLabels', () => ({ isReady: labelsReady, loadError: labelsError, retryLabels }))
+    vi.stubGlobal('useEulerLabels', () => ({ isReady: labelsReady, loadError: labelsError, retryLabels, source: labelsSource, visibility }))
     registryVersion.value = 0
     verifyEVault.mockReset()
     vi.stubGlobal('useVaultRegistry', () => ({
@@ -98,6 +110,93 @@ describe('useUnverifiedVaultGuard canonical context', () => {
     mounted.operation.value = 'position-number-supply'
     await nextTick()
     expect(mounted.state.isAcknowledgmentRequired).toBe(true)
+    mounted.app.unmount()
+  })
+
+  it('keeps the acknowledgement but uses the flagged-vault confirmation for a hidden vault', async () => {
+    entries.set(VAULT.toLowerCase(), { type: 'evk', vault: { chainId: 1, address: VAULT } })
+    verifyEVault.mockReturnValue(false)
+    labelsSource.value = 'v3'
+    visibility.value = { [VAULT.toLowerCase()]: { status: 'hidden', reason: 'A required check failed' } }
+    const mounted = mountGuard()
+    await nextTick()
+
+    expect(mounted.state.isAcknowledgmentRequired).toBe(true)
+    expect(mounted.state.flaggedNotice).toBe('This transaction uses a flagged vault: A required check failed.')
+    mounted.state.acknowledgeRisk()
+    expect(mounted.state.isAcknowledgmentRequired).toBe(false)
+    mounted.app.unmount()
+  })
+
+  it.each(['unclaimed', 'awaiting-verification'])('keeps the strict confirmation for a pending-review vault decided by %s', async (decidedBy) => {
+    entries.set(VAULT.toLowerCase(), { type: 'evk', vault: { chainId: 1, address: VAULT } })
+    verifyEVault.mockReturnValue(false)
+    labelsSource.value = 'v3'
+    visibility.value = { [VAULT.toLowerCase()]: { status: 'pending_review', decidedBy } }
+    const mounted = mountGuard()
+    await nextTick()
+    expect(mounted.state.flaggedNotice).toBeNull()
+    expect(mounted.state.isAcknowledgmentRequired).toBe(true)
+    expect(operationBlockerEntries.value.some(([, reason]) => reason === 'Unverified vault risk acknowledgment required')).toBe(true)
+    mounted.state.acknowledgeRisk()
+    await nextTick()
+    expect(mounted.state.isAcknowledgmentRequired).toBe(false)
+    expect(operationBlockerEntries.value.some(([, reason]) => reason === 'Unverified vault risk acknowledgment required')).toBe(false)
+    mounted.app.unmount()
+  })
+
+  it('asks for a flagged vault the operation targets beside the listed vault of the page', async () => {
+    entries.set(LISTED_VAULT.toLowerCase(), { type: 'evk', vault: { chainId: 1, address: LISTED_VAULT } })
+    entries.set(VAULT.toLowerCase(), { type: 'evk', vault: { chainId: 1, address: VAULT } })
+    verifyEVault.mockImplementation((vault: { address: string }) => vault.address === LISTED_VAULT)
+    labelsSource.value = 'v3'
+    visibility.value = {
+      [LISTED_VAULT.toLowerCase()]: { status: 'visible', decidedBy: 'verified' },
+      [VAULT.toLowerCase()]: { status: 'hidden', decidedBy: 'config-failed', reason: 'The oracle failed' },
+    }
+    const mounted = mountGuard({ vaults: [LISTED_VAULT, VAULT] })
+    await nextTick()
+    expect(mounted.state.isAcknowledgmentRequired).toBe(true)
+    expect(mounted.state.flaggedNotice).toBe('This transaction uses a flagged vault: The oracle failed.')
+    mounted.app.unmount()
+  })
+
+  it('keeps the strict confirmation when the operation also targets an unknown vault', async () => {
+    entries.set(LISTED_VAULT.toLowerCase(), { type: 'evk', vault: { chainId: 1, address: LISTED_VAULT } })
+    entries.set(VAULT.toLowerCase(), { type: 'evk', vault: { chainId: 1, address: VAULT } })
+    verifyEVault.mockReturnValue(false)
+    labelsSource.value = 'v3'
+    visibility.value = { [VAULT.toLowerCase()]: { status: 'hidden', decidedBy: 'config-failed', reason: 'The oracle failed' } }
+    const mounted = mountGuard({ vaults: [LISTED_VAULT, VAULT] })
+    await nextTick()
+    expect(mounted.state.isAcknowledgmentRequired).toBe(true)
+    expect(mounted.state.flaggedNotice).toBeNull()
+    mounted.app.unmount()
+  })
+
+  it('asks nothing for a listed vault', async () => {
+    entries.set(LISTED_VAULT.toLowerCase(), { type: 'evk', vault: { chainId: 1, address: LISTED_VAULT } })
+    verifyEVault.mockReturnValue(true)
+    labelsSource.value = 'v3'
+    visibility.value = { [LISTED_VAULT.toLowerCase()]: { status: 'visible', decidedBy: 'verified' } }
+    const mounted = mountGuard({ vaults: [LISTED_VAULT] })
+    await nextTick()
+    expect(mounted.state.isAcknowledgmentRequired).toBe(false)
+    expect(mounted.state.flaggedNotice).toBeNull()
+    mounted.app.unmount()
+  })
+
+  it('requires separate acknowledgement for a deprecated deposit', async () => {
+    entries.set(VAULT.toLowerCase(), { type: 'evk', vault: { chainId: 1, address: VAULT } })
+    verifyEVault.mockReturnValue(true)
+    deprecated.value = true
+    const mounted = mountGuard({ depositedVaultAddresses: ref([VAULT]) })
+    await nextTick()
+    expect(mounted.state.isDeprecatedDepositAcknowledgmentRequired).toBe(true)
+    expect(mounted.state.deprecatedDepositNotice).toBe('Vault is deprecated.')
+    mounted.state.acknowledgeDeprecatedDeposit()
+    await nextTick()
+    expect(mounted.state.isDeprecatedDepositAcknowledgmentRequired).toBe(false)
     mounted.app.unmount()
   })
 

@@ -2,9 +2,11 @@ import { createGeoPolicySource } from './geo-policy-source'
 import { createTtlCache } from './cache'
 import { fetchWithTimeout, withWallClock } from './fetchWithTimeout'
 import { createInFlightDedup } from './in-flight'
-import { readLabelsSource, readV3LabelsSelection, readLabelsOnchainVerificationChains, readLabelsVaultTag } from './labels-base-url'
+import { readLabelsSource, readV3LabelsSelection, isLabelsOnchainVerificationChain, readLabelsVaultTag, readHostedLabelImageOrigins } from './labels-base-url'
 import { getStaticLabelsBundle } from './static-labels-source'
 import { logger } from './logger'
+import { loadEulerChains, peekEulerChains } from '~/server/api/internal/euler-chains.get'
+import { readChainRegistry } from '~/utils/chain-status'
 import { PublicLabelsV3Adapter, PublicLabelsV3MetadataAdapter } from '@eulerxyz/euler-v2-sdk/public-labels'
 import {
   normalizeLabelsBundle,
@@ -14,13 +16,16 @@ import {
   type PublicLabelsQuery,
   type PublicLabelsRequest,
   type PublicLabelsResponse,
+  type PublicGeoPolicy,
 } from '~/utils/public-labels'
 import { readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-url-env'
+import { isLabelsSnapshotUsable, LABELS_MAX_STALE_MS } from '~/utils/labels-freshness'
+import { resolveLabelLogo } from '~/utils/label-logo'
 
 const CACHE_TTL_MS = 300_000
 const REFRESH_BUDGET_MS = 30_000
 
-const cache = createTtlCache<HostedLabelsBundle>({ ttlMs: CACHE_TTL_MS, maxEntries: 64 })
+const cache = createTtlCache<HostedLabelsBundle>({ ttlMs: CACHE_TTL_MS, maxStaleMs: LABELS_MAX_STALE_MS, maxEntries: 64 })
 const inFlight = createInFlightDedup<string, HostedLabelsBundle>()
 
 const geoSources = new Map<string, ReturnType<typeof createGeoPolicySource>>()
@@ -34,8 +39,11 @@ const getGeoSource = () => {
   return loader
 }
 
-const cacheKey = (chainId: number, labelSet: string, version: string): string =>
-  JSON.stringify([readResolvedV3ApiUrl(), labelSet, chainId, version, readLabelsOnchainVerificationChains().includes(chainId)])
+const cacheKey = (chainId: number, labelSet: string, version: string, metadataOnly: boolean): string =>
+  JSON.stringify([readResolvedV3ApiUrl(), labelSet, chainId, version, metadataOnly])
+
+const isMetadataOnlyChain = (chainId: number, manifest: readonly unknown[]): boolean =>
+  isLabelsOnchainVerificationChain(chainId, readChainRegistry(manifest))
 
 export const createPublicLabelsRequest = (): PublicLabelsRequest => async <T>(
   path: string,
@@ -65,39 +73,73 @@ export class PublicLabelsRequestError extends Error {
   }
 }
 
-// Cached source data is complete; deployment selection is attached on every read.
-const withVaultTag = (bundle: PublicLabelsBundle): PublicLabelsBundle => {
+// Cached source data is complete; deployment policy is attached on every read.
+const withDeploymentConfig = (bundle: PublicLabelsBundle): PublicLabelsBundle => {
+  let configuredBundle = bundle
+  if (bundle.source !== 'static') {
+    const allowedOrigins = readHostedLabelImageOrigins()
+    const labels = bundle.publicLabels
+    const logos = [
+      ...labels.entities.map(entity => entity.logo),
+      ...labels.products.map(product => product.logo),
+      ...labels.vaults.flatMap(vault => (vault.campaigns ?? []).map(campaign => campaign.logo)),
+    ]
+    const usedOrigins = new Set(logos.flatMap((logo) => {
+      const resolved = resolveLabelLogo(logo ?? undefined, undefined, allowedOrigins)
+      return resolved ? [new URL(resolved).origin] : []
+    }))
+    // Do not publish a private V3 origin merely because it is configured.
+    // The browser only receives origins already present in approved logo URLs.
+    const logoOrigins = allowedOrigins.filter(origin => usedOrigins.has(origin))
+    if (logoOrigins.length) configuredBundle = { ...bundle, logoOrigins }
+  }
   const vaultTag = readLabelsVaultTag()
-  return vaultTag ? { ...bundle, vaultTag } : bundle
+  return vaultTag ? { ...configuredBundle, vaultTag } : configuredBundle
 }
 
-export function refreshPublicLabelsBundle(
+const hasUsableGeo = (bundle: HostedLabelsBundle): boolean =>
+  typeof bundle.geoFetchedAt === 'number' && isLabelsSnapshotUsable(bundle.geoFetchedAt)
+
+const withCurrentGeo = (
+  bundle: HostedLabelsBundle,
+  geo: { fetchedAt: number, policies: PublicGeoPolicy[] },
+): HostedLabelsBundle => {
+  if (bundle.source === 'v3-metadata') {
+    return { ...bundle, publicLabels: { ...bundle.publicLabels, geoPolicies: geo.policies }, geoFetchedAt: geo.fetchedAt }
+  }
+  return { ...bundle, publicLabels: { ...bundle.publicLabels, geoPolicies: geo.policies }, geoFetchedAt: geo.fetchedAt }
+}
+
+function refreshV3PublicLabelsBundle(
   chainId: number,
-  version?: string,
+  labelSet: string,
+  selectedVersion: string,
+  metadataOnly: boolean,
 ): Promise<PublicLabelsBundle> {
-  if (readLabelsSource() === 'static') return getStaticLabelsBundle(chainId, true).then(withVaultTag)
-  const selection = readV3LabelsSelection()
-  const selectedVersion = version ?? selection.version
-  const key = cacheKey(chainId, selection.labelSet, selectedVersion)
+  const key = cacheKey(chainId, labelSet, selectedVersion, metadataOnly)
   return inFlight.run(key, async () => {
+    let currentGeo: { fetchedAt: number, policies: PublicGeoPolicy[] } | undefined
     try {
       const bundle = await withWallClock(
         async () => {
           const request = createPublicLabelsRequest()
-          const Adapter = readLabelsOnchainVerificationChains().includes(chainId) ? PublicLabelsV3MetadataAdapter : PublicLabelsV3Adapter
+          const Adapter = metadataOnly ? PublicLabelsV3MetadataAdapter : PublicLabelsV3Adapter
           const adapter = new Adapter({
             endpoint: readResolvedV3ApiUrl(),
-            labelSet: selection.labelSet,
+            labelSet,
             version: selectedVersion,
             request,
           })
-          const geo = await getGeoSource()(request)
-          const snapshot = await adapter.fetchPublicLabelsSnapshot(chainId, selectedVersion, geo.policies)
-          normalizeLabelsBundle(chainId, snapshot)
-          return {
+          currentGeo = await getGeoSource()(request)
+          const snapshot = await adapter.fetchPublicLabelsSnapshot(chainId, selectedVersion, currentGeo.policies)
+          const bundle = {
             ...snapshot,
-            geoFetchedAt: geo.fetchedAt,
+            // Keep the age of the actual V3 read when this bundle is served stale.
+            sourceFetchedAt: Date.now(),
+            geoFetchedAt: currentGeo.fetchedAt,
           }
+          normalizeLabelsBundle(chainId, bundle)
+          return bundle
         },
         REFRESH_BUDGET_MS,
         `public-labels chain=${chainId}`,
@@ -106,23 +148,62 @@ export function refreshPublicLabelsBundle(
       return bundle
     }
     catch (err) {
-      logger.warn({ ctx: 'public-labels-source', chainId, version, err }, 'refresh failed')
+      logger.warn({ ctx: 'public-labels-source', chainId, version: selectedVersion, err }, 'refresh failed')
       const stale = cache.getStale(key)
-      if (stale) return stale
+      if (stale) {
+        // A newer geo read must never be rolled back with an older labels bundle.
+        // Keep the labels source timestamp and cache lifetime unchanged.
+        if (currentGeo) {
+          if (currentGeo.fetchedAt < (stale.geoFetchedAt ?? 0) && hasUsableGeo(stale)) return stale
+          const updated = withCurrentGeo(stale, currentGeo)
+          cache.replace(key, updated)
+          return updated
+        }
+        if (hasUsableGeo(stale)) return stale
+      }
       throw err
     }
-  }).then(withVaultTag)
+  }).then(withDeploymentConfig)
 }
 
-export function getPublicLabelsBundle(
+export function refreshPublicLabelsBundle(
   chainId: number,
   version?: string,
 ): Promise<PublicLabelsBundle> {
-  if (readLabelsSource() === 'static') return getStaticLabelsBundle(chainId).then(withVaultTag)
+  if (readLabelsSource() === 'static') return getStaticLabelsBundle(chainId, true).then(withDeploymentConfig)
   const selection = readV3LabelsSelection()
   const selectedVersion = version ?? selection.version
-  const hit = cache.get(cacheKey(chainId, selection.labelSet, selectedVersion))
-  return hit ? Promise.resolve(withVaultTag(hit)) : refreshPublicLabelsBundle(chainId, selectedVersion)
+  return loadEulerChains().then(manifest => refreshV3PublicLabelsBundle(
+    chainId,
+    selection.labelSet,
+    selectedVersion,
+    isMetadataOnlyChain(chainId, manifest),
+  ))
+}
+
+export function getCachedPublicLabelsBundle(chainId: number, version?: string): PublicLabelsBundle | undefined {
+  if (readLabelsSource() === 'static') return undefined
+  // Without a registry snapshot, the cached adapter's verification mode is unknown.
+  const manifest = peekEulerChains()
+  if (!manifest) return undefined
+  const selection = readV3LabelsSelection()
+  const hit = cache.get(cacheKey(chainId, selection.labelSet, version ?? selection.version, isMetadataOnlyChain(chainId, manifest)))
+  return hit && hasUsableGeo(hit) ? withDeploymentConfig(hit) : undefined
+}
+
+export async function getPublicLabelsBundle(
+  chainId: number,
+  version?: string,
+): Promise<PublicLabelsBundle> {
+  if (readLabelsSource() === 'static') return getStaticLabelsBundle(chainId).then(withDeploymentConfig)
+  const selection = readV3LabelsSelection()
+  const selectedVersion = version ?? selection.version
+  const manifest = await loadEulerChains()
+  const metadataOnly = isMetadataOnlyChain(chainId, manifest)
+  const hit = cache.get(cacheKey(chainId, selection.labelSet, selectedVersion, metadataOnly))
+  return hit && hasUsableGeo(hit)
+    ? withDeploymentConfig(hit)
+    : refreshV3PublicLabelsBundle(chainId, selection.labelSet, selectedVersion, metadataOnly)
 }
 
 export async function getPublicEulerLabelsData(

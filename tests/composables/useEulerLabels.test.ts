@@ -6,11 +6,13 @@ import {
   __setEulerLabelsDataForTest,
   getCurrentEulerLabelsData,
   getEulerLabelsVersion,
+  getEulerGeoContext,
   getEulerLabelWrapPairs,
   useEulerLabels,
 } from '~/composables/useEulerLabels'
 import type { PublicLabelsBundle } from '~/utils/public-labels'
-import { isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
+import { getVaultDeprecation, isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
+import { useGeoBlock } from '~/composables/useGeoBlock'
 
 type Deferred<T> = {
   promise: Promise<T>
@@ -48,7 +50,7 @@ vi.mock('~/composables/useEulerSdk', () => ({
 
 vi.mock('~/utils/public-labels', async importOriginal => ({
   ...await importOriginal<typeof import('~/utils/public-labels')>(),
-  normalizeLabelsBundle: (_chainId: number, bundle: { publicLabels: unknown }) => mocks.normalizePublicLabelsData(_chainId, bundle.publicLabels),
+  normalizeLabelsBundle: (_chainId: number, bundle: { publicLabels: unknown }) => mocks.normalizePublicLabelsData(_chainId, bundle.publicLabels, bundle),
 }))
 
 vi.mock('~/composables/useEulerOracleAdapters', () => ({
@@ -61,7 +63,7 @@ vi.mock('~/composables/useEulerOracleAdapters', () => ({
 }))
 
 vi.mock('~/composables/useVaults', () => ({
-  useVaults: () => ({ isReady: { value: true } }),
+  useVaults: () => ({ isReady: { value: true }, loadVaults: mocks.loadVaults }),
 }))
 
 vi.mock('~/composables/useVaultRegistry', () => ({
@@ -96,6 +98,7 @@ const labelsFor = (marker: string) => ({
 const bundleFor = (labels: EulerLabelsData): PublicLabelsBundle => ({
   version: 'v20260804151305236',
   publicLabels: labels,
+  sourceFetchedAt: Date.now(),
   effectivePolicy: { products: {}, earnVaults: [], assets: [] },
 }) as unknown as PublicLabelsBundle
 
@@ -123,6 +126,32 @@ describe('useEulerLabels chain-scoped loading', () => {
 
   afterAll(() => {
     vi.unstubAllGlobals()
+  })
+
+  it('resolves EVK and Earn deprecation with their bundle reasons', () => {
+    const evk = '0x0000000000000000000000000000000000000001'
+    const earn = '0x0000000000000000000000000000000000000002'
+    const productReasonVault = '0x0000000000000000000000000000000000000003'
+    __setEulerLabelsDataForTest({
+      products: {
+        activeProduct: {
+          vaults: [evk],
+          deprecatedVaults: [],
+          deprecationReason: 'Another product reason.',
+        },
+        product: {
+          vaults: [evk, productReasonVault],
+          deprecatedVaults: [evk, productReasonVault],
+          deprecationReason: 'The EVK is deprecated.',
+          vaultOverrides: { [evk]: { deprecationReason: 'This EVK was deprecated for a specific reason.' } },
+        },
+      } as unknown as EulerLabelsData['products'],
+      deprecatedEarnVaults: { [earn.toLowerCase()]: 'The Earn vault is deprecated.' },
+    })
+    expect(getVaultDeprecation(evk)).toEqual({ deprecated: true, reason: 'This EVK was deprecated for a specific reason.' })
+    expect(getVaultDeprecation(productReasonVault)).toEqual({ deprecated: true, reason: 'The EVK is deprecated.' })
+    expect(getVaultDeprecation(earn)).toEqual({ deprecated: true, reason: 'The Earn vault is deprecated.' })
+    expect(getVaultDeprecation('0x0000000000000000000000000000000000000004')).toEqual({ deprecated: false, reason: '' })
   })
 
   it('updates tag selection on a live labels refresh without reloading unchanged vault data', async () => {
@@ -181,6 +210,16 @@ describe('useEulerLabels chain-scoped loading', () => {
     expect(labels.loadError.value).toBeUndefined()
     expect(currentProductKeys()).toEqual(['recovered'])
   })
+  it('distinguishes an operator configuration error without displaying server details', async () => {
+    mocks.fetchPublicLabelsBundle.mockRejectedValueOnce({ data: { data: {
+      code: 'LABELS_CONFIGURATION_ERROR', message: 'STATIC_LABELS_BASE_URL is required',
+    } } })
+    const labels = useEulerLabels()
+    await labels.loadLabels()
+    expect(labels.isReady.value).toBe(false)
+    expect(labels.loadError.value).toContain('Contact the app operator')
+    expect(labels.loadError.value).not.toContain('STATIC_LABELS_BASE_URL')
+  })
 
   it('retains a successful same-chain snapshot when a refresh fails', async () => {
     mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('cached')))
@@ -190,6 +229,196 @@ describe('useEulerLabels chain-scoped loading', () => {
     await labels.loadLabels(true)
     expect(labels.isReady.value).toBe(true)
     expect(currentProductKeys()).toEqual(['cached'])
+  })
+
+  it('retains fresh labels but expires geo after a later refresh fails', async () => {
+    vi.useFakeTimers()
+    try {
+      const t0 = 1_000_000
+      vi.setSystemTime(t0)
+      mocks.normalizePublicLabelsData.mockImplementation((_chainId, labels, bundle) => ({
+        ...labels,
+        source: 'v3',
+        sourceFetchedAt: bundle.sourceFetchedAt,
+        geoFetchedAt: bundle.geoFetchedAt,
+        geoContext: { chainId: 1, policies: [], productByVault: {} },
+      }))
+      const labels = useEulerLabels()
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce({ ...bundleFor(labelsFor('initial')), geoFetchedAt: t0 })
+      await labels.loadLabels()
+      expect(useGeoBlock().isPolicyAvailable.value).toBe(true)
+
+      await vi.advanceTimersByTimeAsync(23 * 60 * 60_000)
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce({ ...bundleFor(labelsFor('refreshed')), geoFetchedAt: t0 })
+      await labels.loadLabels(true)
+      expect(currentProductKeys()).toEqual(['refreshed'])
+      expect(getEulerGeoContext()?.policies).toEqual([])
+
+      await vi.advanceTimersByTimeAsync(2 * 60 * 60_000)
+      mocks.fetchPublicLabelsBundle.mockRejectedValueOnce(new Error('geo unavailable'))
+      await labels.loadLabels(true)
+      expect(labels.isReady.value).toBe(true)
+      expect(currentProductKeys()).toEqual(['refreshed'])
+      expect(getEulerGeoContext()?.policies).toBeUndefined()
+      expect(useGeoBlock().isPolicyAvailable.value).toBe(false)
+    }
+    finally {
+      __setEulerLabelsDataForTest()
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps checks unavailable during a retry after a failed refresh', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
+    try {
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('cached')))
+      const labels = useEulerLabels()
+      await labels.loadLabels()
+
+      clock.mockReturnValue(1_000_000 + 5 * 60_000)
+      mocks.fetchPublicLabelsBundle.mockRejectedValueOnce(new Error('temporary outage'))
+      await labels.loadLabels(true)
+      expect(labels.isReady.value).toBe(true)
+      expect(labels.loadError.value).toContain('Unable to load vault verification')
+
+      const refreshed = deferred<PublicLabelsBundle>()
+      mocks.fetchPublicLabelsBundle.mockReturnValueOnce(refreshed.promise)
+      const pending = labels.loadLabels(true)
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(labels.isLoading.value).toBe(true)
+      expect(labels.loadError.value).toContain('Unable to load vault verification')
+
+      refreshed.resolve(bundleFor(labelsFor('recovered')))
+      await pending
+      expect(labels.isReady.value).toBe(true)
+      expect(labels.loadError.value).toBeUndefined()
+    }
+    finally { clock.mockRestore() }
+  })
+
+  it('expires a server-cached verdict a day after the actual V3 read', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
+    try {
+      const original = bundleFor(labelsFor('cached'))
+      mocks.fetchPublicLabelsBundle.mockResolvedValue(original)
+      const labels = useEulerLabels()
+      await labels.loadLabels()
+
+      clock.mockReturnValue(1_000_000 + 5 * 60_000)
+      await labels.refreshLabelsIfStale()
+      expect(labels.isReady.value).toBe(true)
+      expect(currentProductKeys()).toEqual(['cached'])
+
+      clock.mockReturnValue(1_000_000 + 24 * 60 * 60_000)
+      await labels.refreshLabelsIfStale()
+      expect(labels.isReady.value).toBe(false)
+      expect(labels.loadError.value).toContain('Unable to load vault verification')
+      expect(currentProductKeys()).toEqual(['cached'])
+    }
+    finally { clock.mockRestore() }
+  })
+
+  it('expires verification at the deadline even before the next refresh poll', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000_000)
+    try {
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('cached')))
+      const labels = useEulerLabels()
+      await labels.loadLabels()
+      vi.advanceTimersByTime(24 * 60 * 60_000 - 1)
+      expect(labels.isReady.value).toBe(true)
+      vi.advanceTimersByTime(1)
+      expect(labels.isReady.value).toBe(false)
+      expect(labels.loadError.value).toContain('Unable to load vault verification')
+    }
+    finally { vi.useRealTimers() }
+  })
+
+  it('hides stale verification during an in-flight refresh and restores it on recovery', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000_000)
+    try {
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('cached')))
+      const labels = useEulerLabels()
+      await labels.loadLabels()
+
+      vi.advanceTimersByTime(24 * 60 * 60_000 - 1_000)
+      const refreshed = deferred<PublicLabelsBundle>()
+      mocks.fetchPublicLabelsBundle.mockReturnValueOnce(refreshed.promise)
+      const pending = labels.loadLabels(true)
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(labels.isLoading.value).toBe(true)
+
+      vi.advanceTimersByTime(1_000)
+      expect(labels.isReady.value).toBe(false)
+      expect(labels.loadError.value).toContain('Unable to load vault verification')
+      expect(currentProductKeys()).toEqual(['cached'])
+
+      refreshed.resolve(bundleFor(labelsFor('recovered')))
+      await pending
+      expect(labels.isReady.value).toBe(true)
+      expect(labels.loadError.value).toBeUndefined()
+      expect(currentProductKeys()).toEqual(['recovered'])
+    }
+    finally { vi.useRealTimers() }
+  })
+
+  it('keeps expired verification unavailable when a new refresh starts', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000_000)
+    try {
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('cached')))
+      const labels = useEulerLabels()
+      await labels.loadLabels()
+
+      vi.advanceTimersByTime(24 * 60 * 60_000)
+      const refreshed = deferred<PublicLabelsBundle>()
+      mocks.fetchPublicLabelsBundle.mockReturnValueOnce(refreshed.promise)
+      const pending = labels.loadLabels(true)
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(labels.isLoading.value).toBe(true)
+      expect(labels.isReady.value).toBe(false)
+      expect(labels.loadError.value).toContain('Unable to load vault verification')
+      expect(currentProductKeys()).toEqual(['cached'])
+
+      refreshed.resolve(bundleFor(labelsFor('recovered')))
+      await pending
+      expect(labels.isReady.value).toBe(true)
+      expect(labels.loadError.value).toBeUndefined()
+    }
+    finally { vi.useRealTimers() }
+  })
+
+  it('marks expired verification unavailable when a suspended tab resumes before its timer runs', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000_000)
+    try {
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('cached')))
+      const labels = useEulerLabels()
+      await labels.loadLabels()
+
+      vi.setSystemTime(1_000_000 + 24 * 60 * 60_000)
+      const refreshed = deferred<PublicLabelsBundle>()
+      mocks.fetchPublicLabelsBundle.mockReturnValueOnce(refreshed.promise)
+      const pending = labels.refreshLabelsIfStale()
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(labels.isLoading.value).toBe(true)
+      expect(labels.isReady.value).toBe(false)
+      expect(labels.loadError.value).toContain('Unable to load vault verification')
+      expect(currentProductKeys()).toEqual(['cached'])
+
+      refreshed.resolve(bundleFor(labelsFor('recovered')))
+      await pending
+      expect(labels.isReady.value).toBe(true)
+      expect(labels.loadError.value).toBeUndefined()
+    }
+    finally { vi.useRealTimers() }
   })
 
   it('refreshes an aged successful snapshot and joins overlapping poll events', async () => {
@@ -210,7 +439,7 @@ describe('useEulerLabels chain-scoped loading', () => {
       expect(labels.isReady.value).toBe(true)
       await labels.refreshLabelsIfStale()
       expect(mocks.fetchPublicLabelsBundle).toHaveBeenCalledTimes(2)
-      expect(mocks.fetchPublicLabelsBundle).toHaveBeenLastCalledWith('/api/internal/public-labels', expect.objectContaining({ headers: { 'cache-control': 'no-cache' } }))
+      expect(mocks.fetchPublicLabelsBundle).toHaveBeenLastCalledWith('/api/internal/public-labels', expect.not.objectContaining({ headers: expect.anything() }))
       refreshed.resolve(bundleFor(labelsFor('revoked')))
       await pending
       expect(currentProductKeys()).toEqual(['revoked'])
@@ -228,7 +457,7 @@ describe('useEulerLabels chain-scoped loading', () => {
       clock.mockReturnValue(1_000_000 + 300_000)
       await labels.refreshLabelsIfStale()
       expect(labels.isReady.value).toBe(true)
-      clock.mockReturnValue(1_000_000 + 900_000)
+      clock.mockReturnValue(1_000_000 + 86_400_000)
       await labels.refreshLabelsIfStale()
       expect(labels.isReady.value).toBe(false)
       expect(labels.loadError.value).toContain('Unable to load')

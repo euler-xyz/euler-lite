@@ -189,6 +189,9 @@ const netAssetValueDisplay = computed(() => {
   if (total === 0 && hasMissingPrices) return '—'
   return formatCompactUsdValue(total)
 })
+const netAssetValuePricingText = computed(() => totalBorrowedValueInfo.value.hasMissingPrices
+  ? 'Some positions have no USD price, so this value leaves them out. Debt left out can make this value look higher than it is.'
+  : 'Some positions have no USD price, so this value leaves them out.')
 
 const updatePositions = async (
   options: { portfolioSource?: 'fast' | 'fresh', preemptPortfolio?: boolean } = {},
@@ -323,8 +326,8 @@ watch(showAllLabelEntries, (showAll) => {
             Total supplied
             <UiHoverPreviewTooltip
               v-if="totalSuppliedValueInfo.hasMissingPrices"
-              title="Incomplete pricing"
-              text="Some supplied assets don't have price data available. The displayed value may be higher than shown."
+              title="Partial pricing"
+              text="Some supplied assets have no USD price, so this total leaves them out."
               placement="bottom-end"
               icon-class="text-warning-500"
             />
@@ -335,7 +338,7 @@ watch(showAllLabelEntries, (showAll) => {
               data-id="data-point"
               :data-key="spyAddress || address"
               data-field="portfolio-total-supplied"
-              :data-value="totalSuppliedValueInfo.hasMissingPrices ? totalSuppliedDisplay : totalSuppliedValueInfo.total"
+              :data-value="totalSuppliedDisplay === '—' ? totalSuppliedDisplay : totalSuppliedValueInfo.total"
             >
               {{ totalSuppliedDisplay }}
             </div>
@@ -346,8 +349,8 @@ watch(showAllLabelEntries, (showAll) => {
             Total borrowed
             <UiHoverPreviewTooltip
               v-if="totalBorrowedValueInfo.hasMissingPrices"
-              title="Incomplete pricing"
-              text="Some borrowed assets don't have price data available. The displayed value may be higher than shown."
+              title="Partial pricing"
+              text="Some borrowed assets have no USD price, so this total leaves them out."
               placement="bottom-end"
               icon-class="text-warning-500"
             />
@@ -358,7 +361,7 @@ watch(showAllLabelEntries, (showAll) => {
               data-id="data-point"
               :data-key="spyAddress || address"
               data-field="portfolio-total-borrowed"
-              :data-value="totalBorrowedValueInfo.hasMissingPrices ? totalBorrowedDisplay : totalBorrowedValueInfo.total"
+              :data-value="totalBorrowedDisplay === '—' ? totalBorrowedDisplay : totalBorrowedValueInfo.total"
             >
               {{ totalBorrowedDisplay }}
             </div>
@@ -368,9 +371,9 @@ watch(showAllLabelEntries, (showAll) => {
           <div class="flex items-center gap-4 text-p2 text-content-secondary">
             Net asset value
             <UiHoverPreviewTooltip
-              v-if="totalSuppliedValueInfo.hasMissingPrices || totalBorrowedValueInfo.hasMissingPrices"
-              title="Incomplete pricing"
-              text="Some assets in your portfolio don't have price data available. The displayed value may be higher than shown."
+              v-if="netAssetValueInfo.hasMissingPrices"
+              title="Partial pricing"
+              :text="netAssetValuePricingText"
               placement="bottom-end"
               icon-class="text-warning-500"
             />
@@ -381,7 +384,7 @@ watch(showAllLabelEntries, (showAll) => {
               data-id="data-point"
               :data-key="spyAddress || address"
               data-field="portfolio-net-asset-value"
-              :data-value="netAssetValueInfo.hasMissingPrices ? netAssetValueDisplay : netAssetValueInfo.total"
+              :data-value="netAssetValueDisplay === '—' ? netAssetValueDisplay : netAssetValueInfo.total"
             >
               {{ netAssetValueDisplay }}
             </div>

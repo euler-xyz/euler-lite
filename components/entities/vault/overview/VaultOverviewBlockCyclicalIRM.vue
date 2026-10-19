@@ -42,7 +42,7 @@ const monthlyInfo = computed((): FixedCyclicalBinaryMonthlyIRMInfo | null => {
   return vault.interestRateModel.data as FixedCyclicalBinaryMonthlyIRMInfo | null
 })
 
-const now = useNow({ interval: 1_000 })
+const now = useNow({ scheduler: cb => useIntervalFn(cb, 1_000) })
 
 type CurrentCycle = {
   primaryRate: bigint
@@ -285,6 +285,7 @@ const formatDuration = (seconds: bigint): string => {
   <VaultOverviewAccordionSection
     v-if="hasValidIRM && currentCycle"
     title="Interest rate model"
+    icon="section-interest-rate-model"
     :default-open="defaultOpen"
     content-class="flex flex-col gap-24"
   >

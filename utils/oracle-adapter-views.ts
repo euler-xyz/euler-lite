@@ -100,6 +100,7 @@ const assessmentPairMatchesRoute = (
 export const buildOracleAdapterView = (
   step: OracleRouteStep,
   oracleAdapters: Record<string, OracleAdapterMeta>,
+  imagesBaseUrl?: string,
 ): OracleAdapterView => {
   const isAdapter = isOracleAdapterRouteStep(step)
   const meta = isAdapter ? oracleAdapters[step.oracle.toLowerCase()] : undefined
@@ -128,7 +129,7 @@ export const buildOracleAdapterView = (
     provider,
     isCustomAdapter,
     methodology: trustedMeta?.methodology || (step.kind === 'vault' ? 'Exchange Rate' : undefined),
-    logo: getOracleProviderLogo(provider, name),
+    logo: getOracleProviderLogo(provider, name, imagesBaseUrl),
     label: parseAdapterLabel(assessmentApplies ? trustedMeta?.label : undefined),
     invertPrice: shouldInvertOraclePrice({
       metaBase: trustedMeta?.base,
@@ -142,8 +143,8 @@ export const buildOracleAdapterView = (
     reason: assessmentState === 'unrecognized' && meta?.reason
       ? formatOracleAssessmentReason(meta.reason)
       : undefined,
-    passedChecks: healthChecks.filter(c => c.outcome === OracleAdapterCheckOutcome.Pass).length,
-    failedChecks: healthChecks.filter(c => c.outcome === OracleAdapterCheckOutcome.Fail),
+    passedChecks: healthChecks.filter(c => c.outcome === OracleAdapterCheckOutcome.Pass || (c.outcome === OracleAdapterCheckOutcome.Fail && c.exempted)).length,
+    failedChecks: healthChecks.filter(c => c.outcome === OracleAdapterCheckOutcome.Fail && !c.exempted),
     unknownChecks: healthChecks.filter(c => c.outcome === OracleAdapterCheckOutcome.Unknown),
     assessmentPairMatchesRoute: pairMatches,
     lastCheckedAt: checks?.length ? meta?.lastCheckedAt : undefined,
@@ -153,4 +154,5 @@ export const buildOracleAdapterView = (
 export const buildOracleAdapterViews = (
   steps: OracleRouteStep[],
   oracleAdapters: Record<string, OracleAdapterMeta>,
-): OracleAdapterView[] => steps.map(step => buildOracleAdapterView(step, oracleAdapters))
+  imagesBaseUrl: string,
+): OracleAdapterView[] => steps.map(step => buildOracleAdapterView(step, oracleAdapters, imagesBaseUrl))

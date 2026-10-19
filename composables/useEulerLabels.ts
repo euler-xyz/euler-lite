@@ -15,10 +15,13 @@ import { logWarn } from '~/utils/errorHandling'
 import type { EulerLabelEntity, EulerLabelProduct, EulerLabelPointReward } from '~/entities/euler/labels'
 import { eulerLabelProductEmpty } from '~/entities/euler/labels'
 import { getEulerSdk } from '~/composables/useEulerSdk'
+import { useVaults } from '~/composables/useVaults'
 import { useEulerOracleAdapters } from '~/composables/useEulerOracleAdapters'
+import { useEulerVaultAssessments } from '~/composables/useEulerVaultAssessments'
 import { erc4626AssetAbi } from '~/abis/erc4626'
 import { buildBatchItem, evcBatchCall } from '~/utils/multicall'
 import { normalizeAddress } from '~/utils/normalizeAddress'
+import { isLabelsSnapshotUsable, LABELS_MAX_STALE_MS, LABELS_REFRESH_INTERVAL_MS } from '~/utils/labels-freshness'
 import {
   normalizeLabelsBundle,
   getLabelVaultCandidates,
@@ -50,14 +53,16 @@ const createEmptyEulerLabelsData = (): PublicEulerLabelsData => ({
 const labelsData = shallowRef<PublicEulerLabelsData>(createEmptyEulerLabelsData())
 const labelsChainId = ref<number | null>(null)
 const labelsVersion = ref(0)
+const geoExpiryVersion = ref(0)
 const isLoading = ref(false)
 const isReady = ref(false)
 const loadError = ref<string | undefined>()
-const LABELS_REFRESH_INTERVAL_MS = 5 * 60_000
-const LABELS_MAX_AGE_MS = 15 * 60_000
 let lastSuccessfulLoadAt = 0
 let hasSuccessfulSnapshot = false
-const pendingLabelsFetches = new Map<number, Promise<PublicEulerLabelsData>>()
+let labelsExpiryTimer: ReturnType<typeof setTimeout> | undefined
+let geoExpiryTimer: ReturnType<typeof setTimeout> | undefined
+type LabelsFetch = { data: PublicEulerLabelsData, sourceFetchedAt: number }
+const pendingLabelsFetches = new Map<number, Promise<LabelsFetch>>()
 let labelsLoadGeneration = 0
 let wrapPairProbeGeneration = 0
 const wrapPairs = shallowReactive<Record<string, string>>({})
@@ -66,13 +71,45 @@ const setLabelsData = (data: PublicEulerLabelsData, chainId: number | null) => {
   labelsData.value = data
   labelsChainId.value = chainId
   labelsVersion.value += 1
+  clearTimeout(geoExpiryTimer)
+  geoExpiryTimer = undefined
+  if ((data.source === 'v3' || data.source === 'v3-metadata') && isLabelsSnapshotUsable(data.geoFetchedAt)) {
+    geoExpiryTimer = setTimeout(() => {
+      geoExpiryVersion.value += 1
+      geoExpiryTimer = undefined
+    }, data.geoFetchedAt! + LABELS_MAX_STALE_MS - Date.now())
+  }
+}
+
+const scheduleLabelsExpiry = () => {
+  clearTimeout(labelsExpiryTimer)
+  const remainingMs = LABELS_MAX_STALE_MS - (Date.now() - lastSuccessfulLoadAt)
+  if (remainingMs <= 0) {
+    isReady.value = false
+    loadError.value = 'Unable to load vault verification. Please retry.'
+    return
+  }
+  labelsExpiryTimer = setTimeout(() => {
+    isReady.value = false
+    loadError.value = 'Unable to load vault verification. Please retry.'
+  }, remainingMs)
 }
 
 export const getCurrentEulerLabelsData = (): EulerLabelsData => labelsData.value
 
 export const getEulerLabelsSourceData = () => labelsData.value
 
-export const getEulerGeoContext = () => labelsData.value.geoContext
+export const getEulerGeoContext = () => {
+  void geoExpiryVersion.value
+  const data = labelsData.value
+  if (data.source !== 'v3' && data.source !== 'v3-metadata') return data.geoContext
+  if (data.geoContext && isLabelsSnapshotUsable(data.geoFetchedAt)) return data.geoContext
+  return {
+    chainId: data.geoContext?.chainId ?? null,
+    policies: undefined,
+    productByVault: data.geoContext?.productByVault ?? {},
+  }
+}
 
 export const getEulerLabelsVersion = (): number => labelsVersion.value
 
@@ -82,6 +119,8 @@ export const __setEulerLabelsDataForTest = (data: Partial<PublicEulerLabelsData>
   labelsLoadGeneration += 1
   wrapPairProbeGeneration += 1
   pendingLabelsFetches.clear()
+  clearTimeout(labelsExpiryTimer)
+  labelsExpiryTimer = undefined
   lastSuccessfulLoadAt = 0
   Object.keys(wrapPairs).forEach(key => Reflect.deleteProperty(wrapPairs, key))
   setLabelsData({
@@ -135,7 +174,13 @@ const getLabelsFetch = (chainId: number, forceRefresh: boolean) => {
         timeout: 35_000,
         ...(forceRefresh && { headers: { 'cache-control': 'no-cache' } }),
       })
-      return normalizeLabelsBundle(chainId, bundle)
+      const now = Date.now()
+      const sourceFetchedAt = bundle.source === 'static' ? now : bundle.sourceFetchedAt
+      if (!Number.isSafeInteger(sourceFetchedAt) || sourceFetchedAt <= 0 || sourceFetchedAt > now
+        || now - sourceFetchedAt >= LABELS_MAX_STALE_MS) {
+        throw new Error('Vault verification snapshot is too old')
+      }
+      return { data: normalizeLabelsBundle(chainId, bundle), sourceFetchedAt }
     }
     catch (error) {
       logWarn('labels/public-v3', error)
@@ -160,34 +205,45 @@ const loadLabels = async (forceRefresh = false): Promise<void> => {
   const isCurrentLoad = () => isCurrentLabelsLoad(chainId, generation)
   if (!isCurrentLoad()) return
 
-  isReady.value = hasCurrentSnapshot && Date.now() - lastSuccessfulLoadAt < LABELS_MAX_AGE_MS
+  const hasUsableSnapshot = hasCurrentSnapshot && Date.now() - lastSuccessfulLoadAt < LABELS_MAX_STALE_MS
+  isReady.value = hasUsableSnapshot
   isLoading.value = true
-  loadError.value = undefined
+  if (!hasCurrentSnapshot) loadError.value = undefined
+  else if (!hasUsableSnapshot) loadError.value = 'Unable to load vault verification. Please retry.'
   const probeGeneration = ++wrapPairProbeGeneration
   Object.keys(wrapPairs).forEach(key => Reflect.deleteProperty(wrapPairs, key))
 
   if (labelsChainId.value !== chainId && isCurrentLoad()) {
     hasSuccessfulSnapshot = false
+    clearTimeout(labelsExpiryTimer)
+    labelsExpiryTimer = undefined
     setLabelsData(createEmptyEulerLabelsData(), chainId)
   }
 
-  // A scheduled refresh requests current server data; concurrent ordinary
-  // callers still join the existing fetch instead of restarting it.
-  const fetchPromise = getLabelsFetch(chainId, forceRefresh || (hasCurrentSnapshot && !pendingLabelsFetches.has(chainId)))
+  // Only an explicit retry bypasses the server cache; the scheduled poll reads the
+  // warmed bundle so N open tabs cost one upstream read per refresh window.
+  const fetchPromise = getLabelsFetch(chainId, forceRefresh)
 
   try {
-    const data = await fetchPromise
+    const { data, sourceFetchedAt } = await fetchPromise
     if (isCurrentLoad()) {
       setLabelsData(data, chainId)
       hasSuccessfulSnapshot = true
-      lastSuccessfulLoadAt = Date.now()
+      lastSuccessfulLoadAt = sourceFetchedAt
+      loadError.value = undefined
+      scheduleLabelsExpiry()
     }
     if (isCurrentLoad()) {
       void probeWrapPairs(chainId, generation, probeGeneration)
     }
   }
   catch (e) {
-    if (isCurrentLoad()) loadError.value = 'Unable to load vault verification. Please retry.'
+    if (isCurrentLoad()) {
+      const code = (e as { data?: { data?: { code?: unknown } } })?.data?.data?.code
+      loadError.value = code === 'LABELS_CONFIGURATION_ERROR'
+        ? 'Vault verification is unavailable because this app\'s labels configuration needs attention. Contact the app operator.'
+        : 'Unable to load vault verification. Please retry.'
+    }
     logWarn('labels/load', e)
   }
   finally {
@@ -196,14 +252,15 @@ const loadLabels = async (forceRefresh = false): Promise<void> => {
     }
     if (isCurrentLoad()) {
       isLoading.value = false
-      isReady.value = hasSuccessfulSnapshot && Date.now() - lastSuccessfulLoadAt < LABELS_MAX_AGE_MS
+      isReady.value = hasSuccessfulSnapshot && Date.now() - lastSuccessfulLoadAt < LABELS_MAX_STALE_MS
     }
   }
 }
 
 const refreshLabelsIfStale = async () => {
-  if (hasSuccessfulSnapshot && Date.now() - lastSuccessfulLoadAt >= LABELS_MAX_AGE_MS) {
+  if (hasSuccessfulSnapshot && Date.now() - lastSuccessfulLoadAt >= LABELS_MAX_STALE_MS) {
     isReady.value = false
+    loadError.value = 'Unable to load vault verification. Please retry.'
   }
   if (isLoading.value) return
   const previous = labelsData.value
@@ -301,6 +358,7 @@ const probeWrapPairs = async (startChainId: number, loadGeneration: number, prob
 
 export const useEulerLabels = () => {
   const oracleAdapters = useEulerOracleAdapters()
+  const vaultAssessments = useEulerVaultAssessments()
 
   return {
     isLoading,
@@ -315,9 +373,16 @@ export const useEulerLabels = () => {
     oracleAdapters: oracleAdapters.oracleAdapters,
     oracleAssessmentsStatus: oracleAdapters.oracleAssessmentsStatus,
     oracleAssessmentsAvailable: oracleAdapters.oracleAssessmentsAvailable,
+    vaultAssessments: vaultAssessments.entries,
+    vaultAssessmentsChainId: vaultAssessments.activeChainId,
+    loadVaultAssessment: vaultAssessments.loadVaultAssessment,
+    getVaultAssessmentEntry: vaultAssessments.getEntry,
+    isVaultAssessmentAvailableForChain: vaultAssessments.isAvailableForChain,
+    refreshVaultAssessmentAfterOwnTransaction: vaultAssessments.refreshAfterOwnTransaction,
     earnVaults,
     geoPolicies,
     visibility,
+    source: computed(() => labelsData.value.source),
     loadLabels,
     refreshLabelsIfStale,
     retryLabels,

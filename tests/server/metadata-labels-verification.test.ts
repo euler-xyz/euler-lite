@@ -18,7 +18,7 @@ describe('public API metadata-only governance verification', () => {
     vi.stubGlobal('$fetch', vi.fn(async () => ({ tokens: [] })))
     mocks.types.mockResolvedValue({})
     mocks.labels.mockResolvedValue(normalizeLabelsBundle(1, {
-      source: 'v3-metadata', labelSet: 'public', version: 'pinned', publicLabels: publicLabelsFixture,
+      source: 'v3-metadata', labelSet: 'public', version: 'pinned', publicLabels: publicLabelsFixture, sourceFetchedAt: Date.now(),
     }))
   })
   it('fetches candidates with empty verified membership, then rejects mismatches and refreshed claim removal', async () => {

@@ -34,6 +34,7 @@ import {
 } from '@eulerxyz/euler-v2-sdk'
 import {
   readResolvedV3ApiUrl,
+  readDisableV3,
   readServerVaultCacheSource,
   readTurtleEarnApiKey,
   readV3ApiKey,
@@ -41,6 +42,10 @@ import {
   type VaultDataSource,
 } from '~/utils/api-url-env'
 import { parseChainIds } from '~/utils/parseChainIds'
+import { LiteEulerLabelsService } from '~/utils/sdk-labels'
+import { getPublicLabelsBundle } from './public-labels-source'
+import { serverAbiService } from './sdk-abi-service'
+import { createNoV3IntrinsicApyService, disableSdkV3Utilities } from '~/utils/sdk-no-v3'
 import { resolveRpcUrl } from './rpc'
 import { TURTLE_EARN_API_URL } from './turtle-proxy'
 
@@ -92,7 +97,7 @@ export const resolveServerTurtleRewardsConfig = (
 const isOnchainSdkChain = (chainId: number): boolean =>
   parseChainIds(process.env.ONCHAIN_SDK_CHAINS, new Set([chainId])).includes(chainId)
 
-const buildServerSdkConfig = (chainId: number): EulerSDKConfig => {
+const buildServerSdkConfig = (chainId: number): EulerSDKConfig & { rpcUrls: Record<number, string> } => {
   const rpcUrl = resolveRpcUrl(chainId)
   if (!rpcUrl) throw new Error(`No RPC URL configured for chain ${chainId}`)
 
@@ -110,14 +115,35 @@ const buildServerSdkConfig = (chainId: number): EulerSDKConfig => {
     ...adapterConfigForSource(source),
     // Fallback short-circuits to onchain when no V3 is configured —
     // otherwise the SDK keeps trying V3 and every refresh logs failures.
-    ...(source === 'fallback' && !hasV3 ? { disableV3: true } : {}),
+    disableV3: readDisableV3() || (source === 'fallback' && !hasV3),
   }
 }
 
 export const getServerSdk = (chainId: number): Promise<EulerSDK> => {
   const existing = sdkByChain.get(chainId)
   if (existing) return existing
-  const promise = buildEulerSDK({ config: buildServerSdkConfig(chainId) }).catch((err) => {
+  const config = buildServerSdkConfig(chainId)
+  const disableV3 = readDisableV3()
+  const promise = buildEulerSDK({
+    config,
+    // Let the SDK resolve registry viemNames before applying server-only tuning.
+    chains: {
+      146: {
+        transport: {
+          multicall: { batchSize: 128, wait: 10 },
+          http: { batch: { batchSize: 100, wait: 10 } },
+        },
+      },
+    },
+    servicesOverrides: {
+      abiService: serverAbiService,
+      eulerLabelsService: new LiteEulerLabelsService(getPublicLabelsBundle),
+      ...(disableV3 ? { intrinsicApyService: createNoV3IntrinsicApyService() } : {}),
+    },
+  }).then((sdk) => {
+    if (disableV3) disableSdkV3Utilities(sdk)
+    return sdk
+  }).catch((err) => {
     if (sdkByChain.get(chainId) === promise) sdkByChain.delete(chainId)
     throw err
   })

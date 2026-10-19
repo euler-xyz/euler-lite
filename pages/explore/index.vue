@@ -13,6 +13,7 @@ import { getVaultAddress, getVaultAssetSymbol, getVaultAssetAddress } from '~/ut
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import type { FilterOptionEntry } from '~/utils/buildTvlSortedOptions'
 import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
+import { marketUsdMetricValue } from '~/utils/market-usd-metric'
 
 defineOptions({
   name: 'ExplorePage',
@@ -78,8 +79,7 @@ const {
       const best = getBestMaxROE(group.id)
       return best.metric === 'max-roe' ? best.value : Number.NaN
     }
-    const val = group.metrics[metric as keyof typeof group.metrics]
-    return typeof val === 'number' ? val : 0
+    return marketUsdMetricValue(group.metrics, metric)
   },
 )
 
@@ -322,7 +322,7 @@ const clearExploreFilters = () => {
       title="Explore"
       description="Discover lending markets across Euler. Filter by asset, curator, or market type."
       class="mb-16"
-      icon="nodes"
+      icon="nav-explore"
     />
 
     <div
@@ -343,10 +343,10 @@ const clearExploreFilters = () => {
           v-model:dir="sortDir"
           :options="[
             { label: 'Active', icon: 'sparks' },
-            { label: 'Max ROE', icon: 'percent' },
-            { label: 'Total Supply', icon: 'lend-outline' },
-            { label: 'Total Borrowed', icon: 'borrow-outline' },
-            { label: 'Available Liquidity', icon: 'wallet' },
+            { label: 'Max ROE', icon: 'sort-roe' },
+            { label: 'Total Supply', icon: 'sort-total-supply' },
+            { label: 'Total Borrowed', icon: 'sort-total-borrowed' },
+            { label: 'Available Liquidity', icon: 'sort-liquidity' },
           ]"
           :disable-dir="sortBy === 'Active'"
           title="Sorting type"
@@ -359,7 +359,8 @@ const clearExploreFilters = () => {
           placeholder="Curator"
           title="Curator"
           modal-input-placeholder="Search curator"
-          icon="shield"
+          icon="filter-curator"
+          active-icon="filter-curator-filled"
         />
         <UiSelect
           v-if="enableEntityBranding"
@@ -369,7 +370,8 @@ const clearExploreFilters = () => {
           placeholder="Market"
           title="Market"
           modal-input-placeholder="Search market"
-          icon="bank"
+          icon="market"
+          active-icon="market-filled"
         />
         <UiSelect
           :key="`assets-${chainId}`"
@@ -378,7 +380,8 @@ const clearExploreFilters = () => {
           placeholder="Asset"
           title="Asset"
           modal-input-placeholder="Search asset"
-          icon="wallet"
+          icon="filter-asset"
+          active-icon="filter-asset-filled"
         />
         <UiCustomFilterChips
           :filters="customFilters"
@@ -414,7 +417,7 @@ const clearExploreFilters = () => {
       <UiEmptyState
         v-else
         class="flex-1"
-        icon="nodes"
+        icon="nav-explore"
         :title="emptyStateTitle"
         :description="emptyStateDescription"
       >

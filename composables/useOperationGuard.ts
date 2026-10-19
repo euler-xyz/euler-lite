@@ -7,13 +7,17 @@ import { useUnverifiedVaultGuard } from '~/composables/guards/useUnverifiedVault
 import { clearOperationMeta, registerOperationBlocker, setOperationMeta, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
 import { clearSdkKeyringCredential, setSdkKeyringCredential } from '~/utils/sdk-keyring'
 import { useGeoBlock } from '~/composables/useGeoBlock'
+import { useSafeWallet } from '~/composables/useSafeWallet'
 import { isVaultKeyring } from '~/utils/eulerLabelsUtils'
 
 let geoGuardSequence = 0
 
 export const useOperationGuard = (
   vaultAddresses: Ref<(string | undefined)[]> | (string | undefined)[],
-  options: { acquiresExposure?: boolean } = {},
+  options: {
+    acquiresExposure?: boolean
+    depositedVaultAddresses?: Ref<(string | undefined)[]> | (string | undefined)[]
+  } = {},
 ) => {
   const { isPolicyAvailable } = useGeoBlock()
   const geoBlockerKey = `geo-policy:${++geoGuardSequence}`
@@ -22,6 +26,16 @@ export const useOperationGuard = (
     else unregisterOperationBlocker(geoBlockerKey)
   }, { immediate: true })
   onUnmounted(() => unregisterOperationBlocker(geoBlockerKey))
+
+  // The approval mode is sealed from the wallet kind at review time; a review
+  // prepared before a slow Safe detection lands would be rejected at signing.
+  const { isSafeWalletResolved } = useSafeWallet()
+  const walletKindBlockerKey = `wallet-kind:${geoBlockerKey}`
+  watch(isSafeWalletResolved, (resolved) => {
+    if (!resolved && options.acquiresExposure !== false) registerOperationBlocker(walletKindBlockerKey, 'Detecting the wallet type…')
+    else unregisterOperationBlocker(walletKindBlockerKey)
+  }, { immediate: true })
+  onUnmounted(() => unregisterOperationBlocker(walletKindBlockerKey))
   const { address: userAddress } = useWagmi()
   const chainId = useChainId()
   const { chainId: appChainId } = useEulerAddresses()
@@ -30,6 +44,10 @@ export const useOperationGuard = (
 
   const addresses = computed((): string[] => {
     const raw = isRef(vaultAddresses) ? vaultAddresses.value : vaultAddresses
+    return raw.filter((addr): addr is string => Boolean(addr))
+  })
+  const depositedAddresses = computed((): string[] => {
+    const raw = isRef(options.depositedVaultAddresses) ? options.depositedVaultAddresses.value : options.depositedVaultAddresses ?? []
     return raw.filter((addr): addr is string => Boolean(addr))
   })
 
@@ -42,6 +60,7 @@ export const useOperationGuard = (
     chainId: appChainId,
     operation,
     allowUnavailableLabels: options.acquiresExposure === false,
+    depositedVaultAddresses: depositedAddresses,
   })
 
   // --- Keyring guard ---

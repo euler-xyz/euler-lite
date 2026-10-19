@@ -1,7 +1,7 @@
 import { getAddress } from 'viem'
 import { describe, expect, it } from 'vitest'
 import { getEulerLabelProductBrandEntityKeys } from '@eulerxyz/euler-v2-sdk/public-labels'
-import { normalizeLabelsBundle, getLabelVaultCandidates, getLabelsVaultLoadKey, normalizePublicLabelsData } from '~/utils/public-labels'
+import { normalizeLabelsBundle, getLabelVaultCandidates, getPublishedVaultCandidates, getLabelsVaultLoadKey, normalizePublicLabelsData } from '~/utils/public-labels'
 import { ASSESSMENT_ONLY_EARN, ASSESSMENT_ONLY_EVK, KPK_VAULT, NEUTRAL_ESCROW, VERIFICATION_ONLY_EVK, VERIFICATION_ONLY_EARN, publicLabelsFixture } from '~/tests/fixtures/public-labels-v20260804151305236'
 
 describe('V3-only label normalization', () => {
@@ -23,6 +23,9 @@ describe('V3-only label normalization', () => {
     const data = normalizePublicLabelsData(1, { ...publicLabelsFixture, visibility })
     expect(data.verifiedVaultAddresses).toEqual([])
     expect(data.earnVaults).toEqual([])
+    expect(getLabelVaultCandidates(data).vaults).toEqual([])
+    expect(getPublishedVaultCandidates(data).vaults).toContain(getAddress(KPK_VAULT))
+    expect(getPublishedVaultCandidates(data).earn).toContain(getAddress(VERIFICATION_ONLY_EARN))
     expect(data.products['kpk-securitize'].vaultOverrides?.[getAddress(KPK_VAULT)]?.notExplorableLend).toBe(true)
     expect(data.notExplorableEarnVaults.has(VERIFICATION_ONLY_EARN.toLowerCase())).toBe(true)
   })
@@ -34,14 +37,15 @@ describe('V3-only label normalization', () => {
 })
 
 it('maps metadata-only labels for display without granting verification, preserving label listing flags', () => {
-  const data = normalizeLabelsBundle(1, { source: 'v3-metadata', labelSet: 'public', version: 'pinned', publicLabels: publicLabelsFixture })
+  const data = normalizeLabelsBundle(1, { source: 'v3-metadata', labelSet: 'public', version: 'pinned', publicLabels: publicLabelsFixture, sourceFetchedAt: Date.now() })
   expect(data.source).toBe('v3-metadata')
   expect(data.visibility).toBeUndefined()
   expect(data.verifiedVaultAddresses).toEqual([])
   expect(data.earnVaults).toEqual([])
   expect(getLabelVaultCandidates(data).vaults).toContain(getAddress(KPK_VAULT))
   expect(data.products['kpk-securitize'].notExplorable).toBe(false)
-  expect(data.products['kpk-securitize'].vaultOverrides?.[getAddress(KPK_VAULT)]).toMatchObject({ notExplorableLend: false, notExplorableBorrow: false })
+  expect(data.products['kpk-securitize'].vaultOverrides?.[getAddress(KPK_VAULT)]?.notExplorableLend).toBeUndefined()
+  expect(data.products['kpk-securitize'].vaultOverrides?.[getAddress(KPK_VAULT)]?.notExplorableBorrow).toBeUndefined()
   expect(data.geoContext?.policies).toEqual(publicLabelsFixture.geoPolicies)
 })
 
@@ -61,13 +65,16 @@ it('honours product and per-side hiding on deprecated metadata-only vaults', () 
   source.vaults[0].deprecated = true
   source.vaults[0].notExplorableLend = true
   source.vaults[0].notExplorableBorrow = false
-  const normalize = () => normalizeLabelsBundle(1, { source: 'v3-metadata', labelSet: 'public', version: 'pinned', publicLabels: source })
+  const normalize = () => normalizeLabelsBundle(1, { source: 'v3-metadata', labelSet: 'public', version: 'pinned', publicLabels: source, sourceFetchedAt: Date.now() })
   const listed = normalize()
   expect(listed.products['kpk-securitize'].notExplorable).toBe(false)
   expect(listed.products['kpk-securitize'].vaultOverrides?.[getAddress(KPK_VAULT)]).toMatchObject({ notExplorableLend: true, notExplorableBorrow: false })
   source.products[0].notExplorable = true
   const hidden = normalize()
   expect(hidden.products['kpk-securitize'].notExplorable).toBe(true)
-  expect(getLabelsVaultLoadKey(hidden)).not.toBe(getLabelsVaultLoadKey(listed))
+  expect(getLabelsVaultLoadKey(hidden)).toBe(getLabelsVaultLoadKey(listed))
+  source.vaults[0].notExplorableLend = null
+  source.vaults[0].notExplorableBorrow = null
+  expect(getLabelsVaultLoadKey(normalize())).not.toBe(getLabelsVaultLoadKey(listed))
   expect(hidden.verifiedVaultAddresses).toEqual([])
 })

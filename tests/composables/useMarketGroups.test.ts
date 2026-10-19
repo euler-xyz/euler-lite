@@ -7,6 +7,7 @@ import type { EulerLabelProduct } from '~/entities/euler/labels'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 
 vi.mock('~/utils/sdk-prices', () => ({
+  getAssetUsdValueForEstimate: async (amount: bigint) => Number(amount),
   getAssetUsdValueOrZero: async (amount: bigint) => Number(amount),
 }))
 
@@ -18,6 +19,8 @@ g.getVaultBorrowApy = () => 0
 
 const LEND_VAULT = normalizeAddress('0x0000000000000000000000000000000000003001')
 const WRAPPER = normalizeAddress('0x0000000000000000000000000000000000003002')
+const ESCROW_VAULT = normalizeAddress('0x0000000000000000000000000000000000003003')
+const UNTRUSTED_ESCROW = normalizeAddress('0x0000000000000000000000000000000000003004')
 
 const makeEVault = (address: string): EVault =>
   ({
@@ -104,7 +107,7 @@ describe('deployment tag market groups', () => {
       vaultTagAddresses: new Set([address.toLowerCase()]),
     })
     select(LEND_VAULT)
-    vi.stubGlobal('useVaultRegistry', () => ({ getAll: () => fullRegistry.map(vault => ({ vault })) }))
+    vi.stubGlobal('useVaultRegistry', () => ({ getAll: () => fullRegistry.map(vault => ({ vault })), isKnownEscrowAddress: () => false }))
     vi.stubGlobal('useEulerLabels', () => ({ products: groupedProducts, entities: {}, isReady: ref(true) }))
     vi.stubGlobal('useVaults', () => ({
       isVaultGovernorVerified: () => true,
@@ -127,6 +130,69 @@ describe('deployment tag market groups', () => {
       expect(direct?.vaults).toHaveLength(2)
       expect(direct?.metrics.totalTVL).toBe(300)
       expect(fullRegistry).toHaveLength(2)
+    }
+    finally { scope.stop() }
+  })
+})
+
+describe('hosted publication refresh', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('removes a delisted orphan card while retaining independently verified escrow discovery', () => {
+    const retained = makeEVault(LEND_VAULT)
+    const escrow = makeEVault(ESCROW_VAULT)
+    escrow.isEscrow = true
+    const untrustedEscrow = makeEVault(UNTRUSTED_ESCROW)
+    untrustedEscrow.isEscrow = true
+    __setEulerLabelsDataForTest({ source: 'v3', candidateVaultAddresses: [LEND_VAULT] })
+    vi.stubGlobal('useVaultRegistry', () => ({
+      getAll: () => [{ vault: retained }, { vault: escrow }, { vault: untrustedEscrow }],
+      isKnownEscrowAddress: (address: string) => address.toLowerCase() === ESCROW_VAULT.toLowerCase(),
+    }))
+    vi.stubGlobal('useEulerLabels', () => ({ products: {}, entities: {}, isReady: ref(true) }))
+    vi.stubGlobal('useVaults', () => ({
+      isVaultGovernorVerified: () => false,
+      isCollateralResolved: ref(true),
+      isMarketDataResolved: ref(true),
+      isReady: ref(true),
+    }))
+    vi.stubGlobal('useShowAllLabelEntries', () => ref(true))
+    const scope = effectScope()
+    try {
+      const groups = scope.run(useMarketGroups)!
+      expect(groups.allVaults.value).toEqual([retained, escrow])
+      expect(groups.marketGroupsSync.value).toHaveLength(2)
+
+      __setEulerLabelsDataForTest({ source: 'v3', candidateVaultAddresses: [] })
+      expect(groups.allVaults.value).toEqual([escrow])
+      expect(groups.marketGroupsSync.value).toHaveLength(1)
+      expect(retained.address).toBe(LEND_VAULT)
+    }
+    finally { scope.stop() }
+  })
+})
+
+describe('held portfolio metadata isolation', () => {
+  afterEach(() => vi.unstubAllGlobals())
+  it('keeps static held-only entries out of groups while retaining collateral lookups', () => {
+    const listed = makeEVault(LEND_VAULT)
+    const held = makeEVault(WRAPPER)
+    __setEulerLabelsDataForTest({ source: 'static' })
+    vi.stubGlobal('useVaultRegistry', () => ({
+      getAll: () => [{ vault: listed }, { vault: held, verified: false, portfolioOnly: true }],
+      isKnownEscrowAddress: () => false,
+    }))
+    vi.stubGlobal('useEulerLabels', () => ({ products: {}, entities: {}, isReady: ref(true) }))
+    vi.stubGlobal('useVaults', () => ({
+      isVaultGovernorVerified: () => false, isCollateralResolved: ref(true),
+      isMarketDataResolved: ref(true), isReady: ref(true),
+    }))
+    vi.stubGlobal('useShowAllLabelEntries', () => ref(true))
+    const scope = effectScope()
+    try {
+      const groups = scope.run(useMarketGroups)!
+      expect(groups.allVaults.value).toEqual([listed])
+      expect(groups.marketGroupsSync.value.flatMap(group => group.vaults)).toEqual([listed])
     }
     finally { scope.stop() }
   })

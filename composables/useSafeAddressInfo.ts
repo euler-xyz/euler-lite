@@ -70,6 +70,7 @@ const probeSafeAccount = async (
  */
 export const useSafeAddressInfo = (
   address: MaybeRefOrGetter<string | null | undefined>,
+  enabled: MaybeRefOrGetter<boolean> = true,
 ) => {
   const { chainId } = useEulerAddresses()
   const { client } = useRpcClient()
@@ -88,13 +89,13 @@ export const useSafeAddressInfo = (
   })
 
   watch(
-    [cacheKey, client],
-    ([key, rpcClient]) => {
+    [cacheKey, client, () => toValue(enabled)],
+    ([key, rpcClient, shouldProbe]) => {
       // Probe client-side only — SSR output renders without badges and
       // hydrates identically (the client cache starts empty too).
       if (import.meta.server) return
       const target = probeAddress.value
-      if (!key || !rpcClient || !target) return
+      if (!shouldProbe || !key || !rpcClient || !target) return
       safeInfoCache.load(key, () => probeSafeAccount(rpcClient, target)).catch(() => {})
     },
     { immediate: true },

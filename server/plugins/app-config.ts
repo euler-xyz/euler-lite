@@ -10,14 +10,23 @@
  */
 import {
   readBrowserVaultSource,
-  readV3ApiUrl,
+  readDisableV3,
+  isV3BackendEnabled,
   V3_API_PROXY_URL,
 } from '~/utils/api-url-env'
 import { buildAnnouncementConfig } from '~/utils/announcement-config'
 import { edgeProvidesVpnEvidence, parseEdgeProvider } from '~/utils/edge-presets'
 import { escapeScriptJson } from '~/server/utils/escape-script-json'
+import { createV3ImagesBaseSource } from '~/server/utils/v3-images-base'
 
 export { escapeScriptJson }
+
+const BOOT_READ_WAIT_MS = 1_000
+
+const delay = (ms: number) => new Promise<void>((resolve) => {
+  const timer = setTimeout(resolve, ms)
+  timer.unref?.()
+})
 
 const DEFAULTS = {
   appTitle: 'Euler Lite',
@@ -52,7 +61,8 @@ function readAppConfig() {
     v3ApiUrl: V3_API_PROXY_URL,
     // The client uses this to decide whether the SDK's "fast" instance routes
     // reads via /api/internal/v3 (v3 adapters) or falls back to direct on-chain reads.
-    enableV3Backend: !!readV3ApiUrl(),
+    enableV3Backend: isV3BackendEnabled(),
+    disableV3: readDisableV3(),
     // Adapter chain pinned for the browser's "fast" SDK instance. See
     // utils/api-url-env.ts:readBrowserVaultSource.
     browserVaultSource: readBrowserVaultSource(),
@@ -127,10 +137,17 @@ function injectSocialImage(html: { head: string[] }, socialImageUrl: string) {
 
 export default defineNitroPlugin((nitroApp) => {
   const appConfig = readAppConfig()
-  const scriptTag = `<script>window.__APP_CONFIG__=${escapeScriptJson(JSON.stringify(appConfig))}</script>`
+  const v3ImagesBase = createV3ImagesBaseSource()
+  // Prerendered pages are static, so they must not bake in a value read at build time.
+  const bootRead = import.meta.prerender || appConfig.disableV3
+    ? Promise.resolve()
+    : Promise.race([v3ImagesBase.start(), delay(BOOT_READ_WAIT_MS)])
+  nitroApp.hooks.hook('close', () => v3ImagesBase.stop())
 
-  nitroApp.hooks.hook('render:html', (html) => {
-    html.head.push(scriptTag)
+  nitroApp.hooks.hook('render:html', async (html) => {
+    await bootRead
+    const config = { ...appConfig, v3ImagesUrl: v3ImagesBase.get() }
+    html.head.push(`<script>window.__APP_CONFIG__=${escapeScriptJson(JSON.stringify(config))}</script>`)
     patchMeta(html, appConfig)
     injectSocialImage(html, appConfig.socialImageUrl)
   })
