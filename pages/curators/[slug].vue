@@ -5,6 +5,7 @@ import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { getChainById } from '~/entities/chainRegistry'
 import { getChainLogoUrl } from '~/utils/chain-logo'
 import {
+  getCuratorProfileCompleteness,
   getCuratorProfileSocialLinks,
 } from '~/utils/curator-profile'
 
@@ -100,18 +101,16 @@ const networkRows = computed(() =>
 const selectedNetwork = computed(() => networkRows.value.find(network => network.chainId === chainId.value))
 
 const socialLinks = computed(() => profileEntity.value ? getCuratorProfileSocialLinks(profileEntity.value) : [])
-const profileDetails = computed(() => {
-  const current = profileEntity.value
-  if (!current) return []
-  return [
-    { label: 'Legal entity', value: current.legalEntityName },
-    { label: 'Risk methodology', value: current.riskMethodology },
-    { label: 'Security', value: current.security },
-    { label: 'Terms of service', value: current.termsOfService },
-    { label: 'Licenses', value: current.licenses },
-    { label: 'Disclaimers', value: current.disclaimers },
-  ].filter((entry): entry is { label: string, value: string } => Boolean(entry.value?.trim()))
-})
+const profileInformation = computed(() => profileEntity.value ? getCuratorProfileCompleteness(profileEntity.value) : null)
+const profileCompleteness = computed(() => profileData.value?.source === 'v3'
+  && profileStatus.value === 'success' && !profileError.value
+  ? profileInformation.value
+  : null)
+const profileDescription = computed(() => profileInformation.value?.fields.find(field => field.key === 'description'))
+const profileWebsite = computed(() => profileInformation.value?.fields.find(field => field.key === 'url'))
+const profileDetails = computed(() => (profileInformation.value?.fields ?? [])
+  .filter(field => field.key !== 'description' && field.key !== 'url')
+  .filter(field => profileCompleteness.value || field.value))
 </script>
 
 <template>
@@ -198,16 +197,16 @@ const profileDetails = computed(() => {
             </p>
             <!-- eslint-disable vue/no-v-html -- autoLink escapes label text before adding links -->
             <p
-              v-if="profileEntity.description"
+              v-if="profileDescription?.value"
               class="mt-8 max-w-[760px] text-p2 text-content-secondary auto-link"
-              v-html="autoLink(profileEntity.description)"
+              v-html="autoLink(profileDescription.value)"
             />
             <!-- eslint-enable vue/no-v-html -->
             <p
               v-else
               class="mt-8 max-w-[760px] text-p2 text-content-tertiary"
             >
-              No profile description is available yet.
+              {{ profileCompleteness ? profileDescription?.missingText : 'No profile description is available.' }}
             </p>
             <div
               v-if="socialLinks.length"
@@ -228,11 +227,93 @@ const profileDetails = computed(() => {
                 />
               </a>
             </div>
+            <p
+              v-if="profileCompleteness && !profileWebsite?.value"
+              class="mt-12 text-p3 text-content-tertiary"
+            >
+              {{ profileWebsite?.missingText }}
+            </p>
           </div>
         </div>
       </section>
 
       <div class="flex flex-col gap-24">
+        <section
+          v-if="profileCompleteness || profileDetails.length"
+          aria-labelledby="profile-details-title"
+          class="flex flex-col gap-12"
+        >
+          <div class="flex flex-wrap items-center justify-between gap-12">
+            <h2
+              id="profile-details-title"
+              class="flex items-center gap-8 text-h3 text-content-primary"
+            >
+              Profile details
+              <UiHoverPreviewTooltip
+                v-if="profileCompleteness"
+                title="Profile completeness"
+                text="Eight fields count equally: description, website, legal entity, risk methodology, security, terms of service, licenses and disclaimers. This measures information provided without assessing its content. An explicit statement that something does not apply counts as provided."
+              />
+            </h2>
+            <div
+              v-if="profileCompleteness"
+              class="flex flex-wrap items-baseline gap-x-12 gap-y-4"
+            >
+              <span class="text-h3 text-content-primary">{{ profileCompleteness.percentage }}% complete</span>
+              <span class="text-p3 text-content-tertiary">{{ profileCompleteness.provided }} of {{ profileCompleteness.total }} details provided</span>
+            </div>
+          </div>
+          <UiProgress
+            v-if="profileCompleteness"
+            :model-value="profileCompleteness.percentage"
+            :max="100"
+            size="small"
+            rounded
+            role="progressbar"
+            aria-label="Profile completeness"
+            :aria-valuenow="profileCompleteness.percentage"
+            :aria-valuemin="0"
+            :aria-valuemax="100"
+            :aria-valuetext="`${profileCompleteness.provided} of ${profileCompleteness.total} details provided`"
+          />
+          <p
+            v-if="profileCompleteness && profileCompleteness.provided < profileCompleteness.total"
+            class="text-p3 text-content-secondary"
+          >
+            {{ profileEntity.name }} has not provided {{ profileCompleteness.total - profileCompleteness.provided }} profile {{ profileCompleteness.total - profileCompleteness.provided === 1 ? 'detail' : 'details' }}.
+          </p>
+          <div class="grid grid-cols-2 gap-12 mobile:grid-cols-1">
+            <div
+              v-for="detail in profileDetails"
+              :key="detail.key"
+              class="rounded-12 border border-line-subtle bg-surface-elevated p-16"
+            >
+              <div class="flex flex-wrap items-center justify-between gap-8">
+                <h3 class="text-p2 text-content-primary">
+                  {{ detail.label }}
+                </h3>
+                <span
+                  v-if="!detail.value"
+                  class="inline-flex shrink-0 items-center whitespace-nowrap rounded-8 bg-warning-100 px-8 py-2 text-p5 text-warning-500"
+                >Not provided</span>
+              </div>
+              <!-- eslint-disable vue/no-v-html -- autoLink escapes label text before adding links -->
+              <p
+                v-if="detail.value"
+                class="mt-8 text-p2 text-content-primary auto-link"
+                v-html="autoLink(detail.value)"
+              />
+              <!-- eslint-enable vue/no-v-html -->
+              <p
+                v-else
+                class="mt-8 text-p3 text-content-tertiary"
+              >
+                {{ detail.missingText }}
+              </p>
+            </div>
+          </div>
+        </section>
+
         <section
           v-if="networkRows.length || networksStatus === 'pending' || networksError"
           class="flex flex-col gap-12"
@@ -300,27 +381,6 @@ const profileDetails = computed(() => {
           >
             Could not load networks. Try again
           </button>
-        </section>
-
-        <section
-          v-if="profileDetails.length"
-          class="grid grid-cols-2 gap-16 mobile:grid-cols-1"
-        >
-          <div
-            v-for="detail in profileDetails"
-            :key="detail.label"
-            class="rounded-12 border border-line-subtle bg-surface-elevated p-16"
-          >
-            <h2 class="text-p3 text-content-tertiary">
-              {{ detail.label }}
-            </h2>
-            <!-- eslint-disable vue/no-v-html -- autoLink escapes label text before adding links -->
-            <p
-              class="mt-8 text-p2 text-content-primary auto-link"
-              v-html="autoLink(detail.value)"
-            />
-            <!-- eslint-enable vue/no-v-html -->
-          </div>
         </section>
       </div>
 

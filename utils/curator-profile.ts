@@ -39,6 +39,31 @@ const asHttpsUrl = (value: string): string => {
 const asAbsoluteHttpsUrl = (value: string | null): string =>
   value?.startsWith('https://') ? asHttpsUrl(value) : ''
 
+const PROFILE_FIELDS = [
+  { key: 'description', label: 'Description', missingText: 'The curator has not provided a description.' },
+  { key: 'url', label: 'Website', missingText: 'The curator has not provided a website.' },
+  { key: 'legalEntityName', label: 'Legal entity', missingText: 'The curator has not identified its legal entity.' },
+  { key: 'riskMethodology', label: 'Risk methodology', missingText: 'The curator has not shared how it assesses and manages risk.' },
+  { key: 'security', label: 'Security', missingText: 'The curator has not shared its security practices.' },
+  { key: 'termsOfService', label: 'Terms of service', missingText: 'The curator has not provided terms of service.' },
+  { key: 'licenses', label: 'Licenses', missingText: 'The curator has not provided licensing information or stated that none applies.' },
+  { key: 'disclaimers', label: 'Disclaimers', missingText: 'The curator has not provided disclaimers or stated that none apply.' },
+] as const
+
+export const getCuratorProfileCompleteness = (entity: EulerLabelEntity) => {
+  const fields = PROFILE_FIELDS.map(field => ({
+    ...field,
+    value: field.key === 'url' ? asHttpsUrl(entity.url ?? '') : entity[field.key]?.trim() ?? '',
+  }))
+  const provided = fields.filter(field => field.value).length
+  return {
+    fields,
+    provided,
+    total: fields.length,
+    percentage: Math.round(provided / fields.length * 100),
+  }
+}
+
 export const toCuratorProfileEntity = (profile: PublicEntityLabel): EulerLabelEntity => ({
   id: profile.id,
   name: profile.name,

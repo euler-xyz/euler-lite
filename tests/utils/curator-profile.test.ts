@@ -5,6 +5,7 @@ import {
   getEulerLabelEntityDisplayName,
   getEulerLabelEntityKeys,
   getEulerLabelEntityId,
+  getCuratorProfileCompleteness,
   getCuratorProfileExternalUrl,
   getCuratorProfilePath,
   getCuratorProfileSocialLinks,
@@ -29,6 +30,47 @@ const entity = (name: string, logo = `${name}.svg`): EulerLabelEntity => ({
 })
 
 describe('curator profile helpers', () => {
+  it('counts the description, website and six disclosures equally', () => {
+    const completion = getCuratorProfileCompleteness({
+      ...entity('K3'),
+      description: 'Curator description',
+    })
+
+    expect(completion).toMatchObject({ provided: 2, total: 8, percentage: 25 })
+    expect(completion.fields.filter(field => !field.value).map(field => field.label)).toEqual([
+      'Legal entity', 'Risk methodology', 'Security', 'Terms of service', 'Licenses', 'Disclaimers',
+    ])
+  })
+
+  it('does not give credit for whitespace, unsafe websites, branding or social links', () => {
+    const completion = getCuratorProfileCompleteness({
+      ...entity('K3'),
+      description: ' \n ',
+      url: 'javascript:alert(1)',
+      legalEntityName: '  ',
+      social: { ...entity('K3').social, twitter: 'https://x.com/k3_capital' },
+    })
+
+    expect(completion).toMatchObject({ provided: 0, total: 8, percentage: 0 })
+    expect(completion.fields.every(field => !field.value)).toBe(true)
+  })
+
+  it('counts explicit non-applicability statements as provided information', () => {
+    const completion = getCuratorProfileCompleteness({
+      ...entity('K3'),
+      description: ' Curator description ',
+      legalEntityName: 'K3 Capital',
+      riskMethodology: 'Published methodology',
+      security: 'Security practices',
+      termsOfService: 'https://k3.capital/terms',
+      licenses: 'No licenses apply.',
+      disclaimers: 'No additional disclaimers.',
+    })
+
+    expect(completion).toMatchObject({ provided: 8, total: 8, percentage: 100 })
+    expect(completion.fields.find(field => field.key === 'description')?.value).toBe('Curator description')
+  })
+
   it('converts one V3 entity record into profile details without a chain', () => {
     const profile = toCuratorProfileEntity({
       id: 'k3-capital',
