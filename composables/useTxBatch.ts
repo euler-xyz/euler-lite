@@ -1719,7 +1719,7 @@ export const useTxBatch = () => {
     }
   })
 
-  const resimulate = async () => {
+  const resimulate = async ({ preparedOnly = false }: { preparedOnly?: boolean } = {}) => {
     const token = ++resimToken
     const o = owner.value
     const cid = chainId.value
@@ -1742,13 +1742,11 @@ export const useTxBatch = () => {
       return
     }
 
-    // A draft row is visible immediately. It has no execution authority until
-    // its preview plan build finishes and a whole-cart simulation is published.
-    // Keep the last completed prefix projection intact: the queued builder for
-    // this draft may still need that exact account as its planning input.
-    if (entries.value.some(entry => entry.preparing)) {
-      return
-    }
+    // Draft rows stay visible while their previews prepare. Planning can refresh
+    // the completed prefix without including those unfinished rows in a simulation.
+    if (!preparedOnly && entries.value.some(entry => entry.preparing)) return
+    const simulationEntries = entries.value.filter(entry => !entry.preparing)
+    if (!simulationEntries.length) return
 
     isSimulating.value = true
     // NOTE: deliberately do NOT clear simError / walletShortfalls here. A new
@@ -1765,11 +1763,12 @@ export const useTxBatch = () => {
       const baseAccount = (isAccountForContext(baseAccountSnapshot ?? undefined, cid, ownerAddr) ? baseAccountSnapshot : undefined)
         ?? resolvePrefetchedAccounts(cid, ownerAddr).baseAccount
         ?? await fetchBaseAccountSnapshot(sdk, cid, ownerAddr)
+      if (token !== resimToken) return
       baseAccountSnapshot = baseAccount
 
-      const plans = entries.value.map(entry => entry.plan)
+      const plans = simulationEntries.map(entry => entry.plan)
       const extraStateOverrides = mergeStateOverrides(
-        entries.value.flatMap(entry => entry.stateOverrides ?? []),
+        simulationEntries.flatMap(entry => entry.stateOverrides ?? []),
       )
 
       // One simulation, all layers. The SDK interleaves lens reads per
@@ -1915,7 +1914,7 @@ export const useTxBatch = () => {
       const fullLayers: Account<IHasVaultAddress>[] = [baseAccount]
       const cumulativeClosedPositions: BatchClosedPosition[] = []
       for (let i = 1; i < simAccounts.length; i++) {
-        const entry = entries.value[i - 1]
+        const entry = simulationEntries[i - 1]
         if (entry?.closedPositions?.length) cumulativeClosedPositions.push(...entry.closedPositions)
         const stitched = stitchAccount(fullLayers[i - 1]!, simAccounts[i]!)
         const closed = applyClosedPositions(stitched, cumulativeClosedPositions)
@@ -2054,13 +2053,12 @@ export const useTxBatch = () => {
       })
       activeLayer.value = layers.value.length - 1
       syncOverlay()
-      // Completion checkpoint: layerCount/entryCount come from the helper snapshot.
-      // getCurrentFinalLayer needs layerCount === entryCount + 1; escalate to error
-      // if this run finished without satisfying that (the bug condition).
+      // A planning refresh covers the completed prefix; a whole-cart refresh
+      // covers every entry. Each requires one base layer plus one per entry.
       logBatchDiag(
         'resimulate:complete',
         { token, layersBuilt: layers.value.length },
-        layers.value.length === entries.value.length + 1 ? 'warn' : 'error',
+        layers.value.length === simulationEntries.length + 1 ? 'warn' : 'error',
       )
     }
     catch (error) {
@@ -2078,11 +2076,11 @@ export const useTxBatch = () => {
     }
   }
 
-  const runResimulate = (): Promise<void> => {
+  const runResimulate = (options?: { preparedOnly?: boolean }): Promise<void> => {
     // Compare against the *wrapped* promise we store, not the raw resimulate()
     // promise — otherwise the guard never matches and resimulatePromise is never
     // cleared, leaving callers (getEntryPlanningAccount) awaiting a stale run.
-    const wrapped: Promise<void> = resimulate().finally(() => {
+    const wrapped: Promise<void> = resimulate(options).finally(() => {
       // `cleared === false` means a newer run already replaced this promise, so a
       // caller awaiting `resimulatePromise` will pick up the newer run next pass.
       const cleared = resimulatePromise === wrapped
@@ -2155,8 +2153,10 @@ export const useTxBatch = () => {
         return await awaitFinalPlanningLayer<Account<IHasVaultAddress>>({
           getFinalLayer: getCurrentFinalLayer,
           getSimError: () => simError.value,
-          getInFlight: () => resimulatePromise,
-          startRun: runResimulate,
+          // A whole-cart run can skip preparing rows and retain an earlier error.
+          // Start an actual prefix refresh so a recovered indexer can be retried.
+          getInFlight: () => entries.value.some(entry => entry.preparing) ? null : resimulatePromise,
+          startRun: () => runResimulate({ preparedOnly: true }),
           // Found on attempt 0 is the healthy path (warn/quiet). Not finding it —
           // i.e. the awaited run resolved without our layers — is the suspected
           // race; log at error so we capture each re-attempt in the field.
@@ -2233,6 +2233,9 @@ export const useTxBatch = () => {
     const entryId = intent.intentId
     const capturedOwner = owner.value
     const capturedChainId = chainId.value
+    const isCurrentEntry = () => owner.value === capturedOwner
+      && chainId.value === capturedChainId
+      && draftEntries.value.some(candidate => candidate.intentId === entryId && candidate.revision === intent.revision)
     registerReviewAssetMeta(presentation.review)
     // Keep this before the first await/promise continuation. The browser can
     // paint the row while account, plugin, slot-hint, and simulation work uses
@@ -2243,6 +2246,7 @@ export const useTxBatch = () => {
     draftEntries.value = [...draftEntries.value, { intentId: entryId, revision: intent.revision, intent }]
 
     const add = async () => {
+      if (!isCurrentEntry()) return
       execError.value = undefined
       logBatchDiag('addEntry:building', {
         label: entry.label,
@@ -2263,7 +2267,9 @@ export const useTxBatch = () => {
           // The simulator will surface the normal account-loading error later.
         }
       }
-      const preview = await compilePreviewForSimulation([intent], await getEntryPlanningAccount())
+      const planningAccount = await getEntryPlanningAccount()
+      if (!isCurrentEntry()) return
+      const preview = await compilePreviewForSimulation([intent], planningAccount)
       // Migrations can have a distinct simulation-only plan. Bind the executable
       // preview, before simulation or approval resolution can mutate either plan.
       const expectation = captureIntentPlanExpectation(intent, preview.reviewedPlan)
@@ -2280,7 +2286,7 @@ export const useTxBatch = () => {
         await primeBatchSlotHintsFor(cid, missingSlotHintTokens)
       }
       // Clear/account/chain changes and row removal invalidate this late result.
-      if (owner.value !== capturedOwner || chainId.value !== capturedChainId || !draftEntries.value.some(candidate => candidate.intentId === entryId && candidate.revision === intent.revision)) return
+      if (!isCurrentEntry()) return
       entryPlanById.value = { ...entryPlanById.value, [entryId]: plan }
       entryPlanExpectationsById.value = { ...entryPlanExpectationsById.value, [entryId]: expectation }
       if (preview.migrationStateOverrides) {
@@ -2307,6 +2313,7 @@ export const useTxBatch = () => {
       void warmBatchExecutionReview(cartGeneration)
     }
     catch (error) {
+      if (!isCurrentEntry()) return
       logBatchDiag('addEntry:threw', {
         label: entry.label,
         error: error instanceof Error ? error.message : String(error),

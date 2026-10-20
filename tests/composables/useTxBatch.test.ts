@@ -1907,3 +1907,126 @@ describe('batch account confirmation freshness', () => {
     expect(isPlanningAccountCurrent(stitchAccount(base, makeAccount()))).toBe(false)
   })
 })
+
+describe('retained batch after a same-chain confirmation', () => {
+  let block = 1000n
+  const singleOperationPlan = (): TransactionPlan => [{
+    type: 'evcBatch',
+    items: [{ type: 'operation', name: 'supply', items: [] }],
+  }] as unknown as TransactionPlan
+
+  const setupRetainedBatch = async () => {
+    const freshness = await import('~/utils/planning-account-freshness')
+    freshness.requireFreshPlanningAccount(1, ++block, async () => {})
+    const sdk = createMockSdk()
+    sdk.executionService.simulateTransactionPlan.mockImplementation((async (...args: unknown[]) => ({
+      simulatedAccounts: (args[2] as TransactionPlan).map((_, i) => accountWithPosition(subAccount, subAccount, BigInt(i + 2))),
+      simulatedWalletBalances: [],
+      simulatedVaults: [],
+      failedBatchItems: [],
+      insufficientWalletAssets: [],
+    })) as never)
+    vi.mocked(getEulerSdkFresh).mockResolvedValue(sdk as never)
+    const batch = useTxBatch()
+    const first = intentFor(singleOperationPlan(), [subAccount])
+    await batch.addEntry({ intent: first, label: 'First supply', subAccount })
+    await vi.waitFor(() => expect(batch.layers.value).toHaveLength(2))
+    const oldLayer = batch.layers.value[1]!.account
+    sdk.accountService.fetchAccount.mockClear()
+    sdk.executionService.simulateTransactionPlan.mockClear()
+    executionMocks.compilePreview.mockClear()
+    return { batch, sdk, first, oldLayer, ...freshness }
+  }
+
+  it('refreshes only the completed prefix before compiling the next visible draft', async () => {
+    const { batch, sdk, first, oldLayer, requireFreshPlanningAccount, isPlanningAccountCurrent } = await setupRetainedBatch()
+    let catchUp!: () => void
+    const indexed = vi.fn(() => new Promise<void>((resolve) => {
+      catchUp = resolve
+    }))
+    requireFreshPlanningAccount(1, ++block, indexed)
+    const second = intentFor(singleOperationPlan(), [subAccount])
+    const adding = batch.addEntry({ intent: second, label: 'Second supply', subAccount })
+
+    expect(batch.entries.value).toMatchObject([{ id: first.intentId, preparing: false }, { id: second.intentId, preparing: true }])
+    expect(() => batch.prepareBatchExecutionReview()).toThrow(BatchPreviewNotReadyError)
+    expect(isPlanningAccountCurrent(oldLayer)).toBe(false)
+    await vi.waitFor(() => expect(indexed).toHaveBeenCalledOnce())
+    expect(executionMocks.compilePreview).not.toHaveBeenCalled()
+    expect(sdk.accountService.fetchAccount).not.toHaveBeenCalled()
+    catchUp()
+    await adding
+    await vi.waitFor(() => expect(batch.layers.value).toHaveLength(3))
+
+    expect(sdk.accountService.fetchAccount).toHaveBeenCalledOnce()
+    expect(sdk.executionService.simulateTransactionPlan).toHaveBeenNthCalledWith(1, 1, owner, testIntentPlans.get(first.intentId), expect.anything())
+    const planningAccount = executionMocks.compilePreview.mock.calls[0]?.[1]
+    expect(planningAccount).not.toBe(oldLayer)
+    expect(planningAccount?.getPosition(subAccount, vault)?.shares).toBe(2n)
+    expect(isPlanningAccountCurrent(planningAccount)).toBe(true)
+    expect(batch.simError.value).toBeUndefined()
+    expect(batch.entries.value.every(entry => !entry.preparing)).toBe(true)
+  })
+
+  it('retries the next add after failed indexing recovers without reusing the old layer', async () => {
+    const { batch, sdk, oldLayer, requireFreshPlanningAccount, isPlanningAccountCurrent } = await setupRetainedBatch()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1000)
+    let available = false
+    const indexed = vi.fn(async () => {
+      if (!available) throw new Error('Indexer unavailable')
+    })
+    requireFreshPlanningAccount(1, ++block, indexed)
+    await expect(batch.addEntry({ intent: intentFor(singleOperationPlan(), [subAccount]), label: 'Second supply', subAccount }))
+      .rejects.toThrow('Indexer unavailable')
+    await vi.waitFor(() => expect(batch.isSimulating.value).toBe(false))
+    expect(batch.entries.value).toHaveLength(1)
+    expect(executionMocks.compilePreview).not.toHaveBeenCalled()
+    expect(isPlanningAccountCurrent(oldLayer)).toBe(false)
+
+    available = true
+    clock.mockReturnValue(6000)
+    await batch.addEntry({ intent: intentFor(singleOperationPlan(), [subAccount]), label: 'Retry supply', subAccount })
+    await vi.waitFor(() => expect(batch.layers.value).toHaveLength(3))
+    expect(indexed).toHaveBeenCalledTimes(2)
+    expect(sdk.accountService.fetchAccount).toHaveBeenCalledOnce()
+    expect(batch.simError.value).toBeUndefined()
+  })
+
+  it('serializes overlapping adds against refreshed completed layers', async () => {
+    const { batch, requireFreshPlanningAccount, isPlanningAccountCurrent } = await setupRetainedBatch()
+    let catchUp!: () => void
+    const indexed = vi.fn(() => new Promise<void>((resolve) => {
+      catchUp = resolve
+    }))
+    requireFreshPlanningAccount(1, ++block, indexed)
+    const second = batch.addEntry({ intent: intentFor(singleOperationPlan(), [subAccount]), label: 'Second supply', subAccount })
+    const third = batch.addEntry({ intent: intentFor(singleOperationPlan(), [subAccount]), label: 'Third supply', subAccount })
+    await vi.waitFor(() => expect(indexed).toHaveBeenCalledOnce())
+    catchUp()
+    await Promise.all([second, third])
+    await vi.waitFor(() => expect(batch.layers.value).toHaveLength(4))
+    expect(executionMocks.compilePreview.mock.calls.map(call => call[1]?.getPosition(subAccount, vault)?.shares)).toEqual([2n, 3n])
+    expect(executionMocks.compilePreview.mock.calls.every(call => isPlanningAccountCurrent(call[1]))).toBe(true)
+    expect(batch.simError.value).toBeUndefined()
+  })
+
+  it.each(['clear', 'remove'] as const)('discards late preparation after %s removes the pending draft', async (action) => {
+    const { batch, first, requireFreshPlanningAccount } = await setupRetainedBatch()
+    let catchUp!: () => void
+    const indexed = vi.fn(() => new Promise<void>((resolve) => {
+      catchUp = resolve
+    }))
+    requireFreshPlanningAccount(1, ++block, indexed)
+    const pending = intentFor(singleOperationPlan(), [subAccount])
+    const adding = batch.addEntry({ intent: pending, label: 'Second supply', subAccount })
+    await vi.waitFor(() => expect(indexed).toHaveBeenCalledOnce())
+    if (action === 'clear') batch.clearBatch()
+    else batch.removeEntry(pending.intentId)
+    catchUp()
+    await adding
+    expect(batch.entries.value.map(entry => entry.id)).toEqual(action === 'clear' ? [] : [first.intentId])
+    expect(batch.layers.value).toHaveLength(action === 'clear' ? 0 : 2)
+    expect(batch.simError.value).toBeUndefined()
+    expect(executionMocks.compilePreview).not.toHaveBeenCalled()
+  })
+})

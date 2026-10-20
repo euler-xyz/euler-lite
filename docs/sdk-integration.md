@@ -301,6 +301,8 @@ Normal portfolio page activation and 60-second polling call `updatePositions()` 
 
 A confirmation immediately invalidates planning snapshots on that chain, including portfolio fallbacks, prefetched batch accounts and simulated layers derived from an earlier baseline. Planning reads share the catch-up wait, then use a new SDK query generation so they cannot join pre-catch-up requests. A timeout or rejected read leaves the account unavailable for planning. Failed indexer catch-up attempts are shared for five seconds, so repeated refreshes fail promptly during that backoff. A refresh after the backoff starts a new catch-up attempt and can restore planning when the fresh read succeeds. Reads spanning a newer confirmation are discarded. Other chains retain their own freshness state. The successful account and its derived batch layers remain eligible until the next confirmation; ordinary form cache windows still apply.
 
+When a cart remains queued across a same-chain confirmation, the next add refreshes and resimulates its completed operations before compiling the new operation. The new row stays visible as preparing and is excluded from that prefix simulation. Indexer failures leave the existing operations queued; an add after the retry backoff can recover. Clearing the cart or removing the pending row discards its late preparation result.
+
 ## Plan-Time Fresh Fetch
 
 `composables/useEulerTx.ts` defines a tiny helper that every planner uses:
