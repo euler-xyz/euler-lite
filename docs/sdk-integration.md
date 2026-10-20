@@ -31,24 +31,31 @@ Lite's migration compiler, plugin-data collector, and finalizer fail closed when
 
 ### Installing a new SDK release
 
-`.npmrc` sets `min-release-age=7`: a supply-chain cooldown that refuses to
-*resolve* a version published less than seven days ago. It applies to
-`npm install`, which fails with `ETARGET` — "No matching version found ... with
-a date before <date>". It does **not** apply to `npm ci`, which installs the
-lockfile as written, so CI and the Docker build are unaffected either way.
-
-`@eulerxyz/euler-v2-sdk` is listed in `min-release-age-exclude`, but the pinned
-npm 11.10.0 warns that this setting is unknown and still enforces the age gate.
-For an explicitly reviewed same-day SDK release, apply a one-command exception:
+Use npm 11.20.0, the version pinned in `package.json`, CI and the Docker build.
+For local development, select it before installing dependencies:
 
 ```bash
-npm install --save-exact --min-release-age=0 "@eulerxyz/euler-v2-sdk@<reviewed-version>"
+npm install --global npm@11.20.0
 ```
 
-Review the lockfile diff to confirm that only the intended SDK package changes.
-The command does not change `.npmrc`; subsequent installs retain the seven-day
-cooldown, and `npm ci` installs the reviewed lockfile. Dependabot keeps its
-separate seven-day `cooldown` in `.github/dependabot.yml`.
+`.npmrc` sets `min-release-age=7`: new dependency resolution requires versions
+published at least seven days ago. `@eulerxyz/euler-v2-sdk` is the only package in
+`min-release-age-exclude`, so a reviewed SDK release can be installed immediately.
+Its dependencies still follow the seven-day policy unless they are already
+resolved by the committed lockfile.
+
+```bash
+npm install --save-exact "@eulerxyz/euler-v2-sdk@<reviewed-version>"
+```
+
+Review and commit the manifest and lockfile diff, including any dependency changes
+required by the SDK release. Keep the package-specific exemption instead of using
+`--min-release-age=0`, which disables the cooldown for every package resolved by
+that command.
+
+`npm ci` installs the committed lockfile without choosing newer versions; it does
+not prove that the locked versions satisfy the release-age policy. Dependabot
+keeps its separate seven-day `cooldown` in `.github/dependabot.yml`.
 
 ## SDK Entry Points
 

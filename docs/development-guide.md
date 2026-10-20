@@ -5,11 +5,12 @@ This guide covers the concrete steps and scripts needed to work on this reposito
 ## Prerequisites
 
 - Node.js 24+
-- npm
+- npm 11.20.0
 
 ## Install and run
 
 ```bash
+npm install --global npm@11.20.0
 npm ci
 npm run dev
 ```
@@ -43,7 +44,7 @@ npm run typecheck     # Type-check the project
 
 ## Continuous Integration
 
-Pull requests are gated by the `CI` workflow (`.github/workflows/ci.yaml`), which runs on Node 24 (matching the Dockerfile) with npm caching:
+Pull requests are gated by the `CI` workflow (`.github/workflows/ci.yaml`), which runs on Node 24 and npm 11.20.0 (matching the Docker build) with npm caching:
 
 - **typecheck** – `npm run typecheck` (blocking)
 - **test** – `npm run build` then `npm run test:run` (blocking). The build runs first because `tests/utils/logger-bundle.test.ts` inspects the production client bundle (`.output/public/_nuxt`) and hard-fails under CI when it is absent.

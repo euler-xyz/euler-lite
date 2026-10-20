@@ -39,7 +39,7 @@ Welcome to the Euler Lite project! This guide will help you get up and running w
 ### Prerequisites
 
 - Node.js 24+
-- npm package manager
+- npm 11.20.0
 - Git
 - Basic knowledge of Vue.js and TypeScript
 
@@ -55,6 +55,7 @@ Welcome to the Euler Lite project! This guide will help you get up and running w
 2. **Install dependencies**
 
    ```bash
+   npm install --global npm@11.20.0
    npm ci
    ```
 

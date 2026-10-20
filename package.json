@@ -2,7 +2,7 @@
   "name": "nuxt-app",
   "private": true,
   "type": "module",
-  "packageManager": "npm@11.10.0",
+  "packageManager": "npm@11.20.0",
   "scripts": {
     "build": "nuxt build",
     "dev": "nuxt dev",

@@ -30,7 +30,7 @@ Starting from `.env.example` and the common app/RPC setup below, apply the sourc
 
 ## Common setup
 
-Use Node 24, install the locked dependencies with `npm ci`, and copy `.env.example` to `.env`. Apply one of the configurations below. Values under `.example` are placeholders to replace with your own services.
+Use Node 24 and npm 11.20.0 ([installation](../README.md#1-clone-and-install)), install the locked dependencies with `npm ci`, and copy `.env.example` to `.env`. Apply one of the configurations below. Values under `.example` are placeholders to replace with your own services.
 
 ```dotenv
 # Set to your app's public URL (localhost for development).
