@@ -13,6 +13,7 @@ import { readDisableV3, readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-u
 import { LiteEulerLabelsService } from '~/utils/sdk-labels'
 import { getPublicLabelsBundle } from '~/server/utils/public-labels-source'
 import { preferFallbackLogos, replaceV3LogoFlags } from '~/server/utils/token-list-logos'
+import { getEnabledChainIds } from '~/utils/chain-env'
 
 const CACHE_TTL_MS = 300_000
 const DECIMALS_READ_DEADLINE_MS = 5_000
@@ -442,6 +443,9 @@ export default defineEventHandler(async (event) => {
   const chainId = Number(query.chainId)
   if (!Number.isInteger(chainId) || chainId <= 0) {
     throw createError({ statusCode: 400, statusMessage: 'chainId is required and must be a positive integer' })
+  }
+  if (!getEnabledChainIds().includes(chainId)) {
+    throw createError({ statusCode: 400, statusMessage: 'Unsupported chainId' })
   }
 
   const key = String(chainId)

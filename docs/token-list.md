@@ -28,6 +28,8 @@ Keep the requested chain, read decimals() once per token per server process
 
 **`/api/internal/token-list?chainId=<number>`**
 
+Requests require a chain in the deployment's enabled set: a known AppKit chain with a valid configured `RPC_URL_<chainId>`. Admission runs before cache lookups, SDK initialization, and upstream requests. Configured deprecated chains remain valid token-list lookups.
+
 Four data sources, each with its own 5-minute TTL cache and in-flight request deduplication:
 
 | Source | Scope | Role |
@@ -57,6 +59,7 @@ When a `decimals()` read reports `RawContractError` or `ContractFunctionZeroData
 |--------|-----------|------|
 | `200` | At least one source returned tokens | `{ tokens: TokenEntry[] }` |
 | `400` | `chainId` is missing, non-numeric, zero, or negative | `{ statusCode: 400, statusMessage: "chainId is required and must be a positive integer" }` |
+| `400` | `chainId` is not in the deployment's enabled set | `{ statusCode: 400, statusMessage: "Unsupported chainId" }` |
 | `502` | Merged token list is empty after combining all sources | `{ statusCode: 502, statusMessage: "Upstream error" }` |
 
 ## Client Composable
