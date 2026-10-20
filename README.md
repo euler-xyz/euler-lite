@@ -81,7 +81,9 @@ Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for 
 | `DEV_GEO_COUNTRY` | Local/preview country fallback when the edge provides no country. Production (`DOPPLER_ENVIRONMENT=prd`) refuses to boot with it set. |
 | `ADDRESS_SCREENING_URI` / `ADDRESS_SCREENING_API_KEY` | Server-side data-v3 compliance endpoint + restricted API key, proxied by `/api/internal/screen-address` (also serves first-party `*.euler.finance` SPAs). Both unset ⇒ screening disabled (all addresses pass) — except in production (`DOPPLER_ENVIRONMENT=prd`), where missing configuration fails closed; only one set ⇒ fails closed everywhere. URI must be https (localhost http allowed for dev). |
 | `MERKL_API_KEY` | Optional server-side Merkl key. The Merkl API works anonymously (10 req/sec shared across all users via `/api/internal/proxy/merkl`); set this to send `X-API-Key` upstream for a higher quota. Server-only — never exposed to the browser. |
-| `TENDERLY_ACCESS_KEY`, `TENDERLY_ACCOUNT_SLUG`, `TENDERLY_PROJECT_SLUG` | Optional Tenderly simulation configuration. |
+| `TENDERLY_ACCESS_KEY`, `TENDERLY_ACCOUNT_SLUG`, `TENDERLY_PROJECT_SLUG` | Optional Tenderly simulation credentials; requires the shared capacity configuration below. |
+| `TENDERLY_BUDGET_REDIS_REST_URL`, `TENDERLY_BUDGET_REDIS_REST_TOKEN` | HTTPS Upstash-compatible Redis REST endpoint and write token supporting EVAL, TIME, hashes and sorted sets. All replicas sharing a paid project must use the same durable store. |
+| `TENDERLY_DAILY_SIMULATION_LIMIT`, `TENDERLY_MAX_CONCURRENT_SIMULATIONS` | Required positive integers: maximum simulation attempts per UTC day and active simulation leases. Select values against the paid project's capacity. Missing or invalid budget configuration disables simulation. |
 | `FUUL_API_URL` or `NUXT_PUBLIC_FUUL_API_URL` | Optional Fuul API upstream override. |
 | `INCENTRA_API_URL` or `NUXT_PUBLIC_INCENTRA_API_URL` | Optional Incentra/Brevis API upstream override. |
 | `LABELS_SOURCE` | `v3` (default) or `static`; selects the shared label snapshot producer. |

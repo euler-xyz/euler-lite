@@ -403,9 +403,26 @@ The app includes a built-in per-IP rate limiter as a defense-in-depth measure. D
 - **Tenderly simulate**: 10 requests
 - **Address screening**: 10 requests
 
+Tenderly also requires a shared project capacity budget (`server/utils/tenderly-budget.ts`).
+An atomic Redis script reserves one attempt per UTC day and a 45-second concurrency lease
+before contacting Tenderly. The 30-second deadline covers simulation and sharing; completion
+releases only that request's lease. Failed upstream attempts remain charged, and abandoned
+leases expire. Redis errors fail closed (`503`); exhausted daily or concurrent capacity returns
+`429`. Signed-out and spy simulations retain their existing payload and URL/error contracts.
+
+Operators must provision a durable HTTPS [Redis REST endpoint](https://upstash.com/docs/redis/features/restapi)
+with EVAL support and configure the four `TENDERLY_*` budget variables in `.env.example`.
+Credentials alone do not enable this feature; `/api/internal/tenderly/status` reports disabled
+until configuration is complete. All deployments using the same Tenderly account/project must
+share the store and limits, with no eviction or manual deletion of budget keys. Redis loss or
+reset can reset consumption: provider-side spending limits remain the final billing safeguard.
+The budget counts attempts through this route, not monetary cost or calls made by other tools.
+Lease expiry assumes the process honors the upstream abort deadline; long process suspension
+can weaken the instantaneous concurrency bound. No wallet signature is required.
+
 **Wallet screening fail-closed**: connect-time only. `POST /api/internal/screen-address` proxies to data-v3 (`ADDRESS_SCREENING_URI` + `ADDRESS_SCREENING_API_KEY`). Both unset is an opt-out except in `DOPPLER_ENVIRONMENT=prd`, where missing config fails closed. Partial config, non-TLS URIs, upstream errors, and incomplete verdicts all return `addressIsSuspicious: true`. VPN usage is audit metadata and does not gate access. First-party `*.euler.finance` SPAs share this one path via a scoped CORS exception — keep the contract backward-compatible. Full runbook: [Address Screening](./address-screening.md).
 
-**Important**: This is a best-effort safeguard, not a security boundary. It catches accidental abuse (e.g. a client stuck in a retry loop) but will not stop a determined attacker. Known limitations:
+The per-IP limiter is a best-effort safeguard against accidental abuse (e.g. a client stuck in a retry loop). Its known limitation:
 
 - **In-memory state is per-process** — if Nitro spawns multiple workers, each gets its own budget, effectively multiplying the limit.
 

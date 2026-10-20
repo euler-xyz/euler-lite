@@ -4,6 +4,12 @@ export interface TenderlyConfig {
   accessKey: string
   accountSlug: string
   projectSlug: string
+  budget: {
+    url: string
+    token: string
+    dailyLimit: number
+    maxConcurrent: number
+  }
 }
 
 export interface ViemStateOverrideEntry {
@@ -15,12 +21,27 @@ export const resolveTenderlyConfig = (): TenderlyConfig | undefined => {
   const accessKey = process.env.TENDERLY_ACCESS_KEY
   const accountSlug = process.env.TENDERLY_ACCOUNT_SLUG
   const projectSlug = process.env.TENDERLY_PROJECT_SLUG
+  const budgetUrl = process.env.TENDERLY_BUDGET_REDIS_REST_URL
+  const token = process.env.TENDERLY_BUDGET_REDIS_REST_TOKEN
+  const dailyLimit = Number(process.env.TENDERLY_DAILY_SIMULATION_LIMIT)
+  const maxConcurrent = Number(process.env.TENDERLY_MAX_CONCURRENT_SIMULATIONS)
 
-  if (!accessKey || !accountSlug || !projectSlug) {
+  if (!accessKey || !accountSlug || !projectSlug || !budgetUrl || !token
+    || !Number.isSafeInteger(dailyLimit) || dailyLimit < 1
+    || !Number.isSafeInteger(maxConcurrent) || maxConcurrent < 1) {
     return undefined
   }
 
-  return { accessKey, accountSlug, projectSlug }
+  try {
+    const url = new URL(budgetUrl)
+    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
+      return undefined
+    }
+    return { accessKey, accountSlug, projectSlug, budget: { url: url.origin, token, dailyLimit, maxConcurrent } }
+  }
+  catch {
+    return undefined
+  }
 }
 
 export const viemStateOverridesToTenderly = (

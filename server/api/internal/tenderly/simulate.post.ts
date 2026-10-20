@@ -1,14 +1,13 @@
 import { createError, readBody } from 'h3'
 import { logger } from '~/server/utils/logger'
 import { createRateLimiter } from '~/server/utils/rate-limit'
+import { reserveTenderlyCapacity, TENDERLY_UPSTREAM_TIMEOUT_MS } from '~/server/utils/tenderly-budget'
 import {
   resolveTenderlyConfig,
   viemStateOverridesToTenderly,
   type ViemStateOverrideEntry,
 } from '~/server/utils/tenderly'
 import { isAbortError } from '~/utils/errorHandling'
-
-const UPSTREAM_TIMEOUT_MS = 30_000
 
 const rateLimiter = createRateLimiter({
   max: 10,
@@ -153,8 +152,9 @@ export default defineEventHandler(async (event) => {
 
   const stateObjects = viemStateOverridesToTenderly(validatedOverrides)
 
+  const releaseCapacity = await reserveTenderlyCapacity(config)
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS)
+  const timeout = setTimeout(() => controller.abort(), TENDERLY_UPSTREAM_TIMEOUT_MS)
 
   try {
     const requestBody = {
@@ -171,6 +171,7 @@ export default defineEventHandler(async (event) => {
 
     const simulateResponse = await fetch(`${baseUrl}/simulate`, {
       method: 'POST',
+      redirect: 'error',
       headers,
       signal: controller.signal,
       body: JSON.stringify(requestBody),
@@ -201,6 +202,7 @@ export default defineEventHandler(async (event) => {
 
     const shareResponse = await fetch(`${baseUrl}/simulations/${simulationId}/share`, {
       method: 'POST',
+      redirect: 'error',
       headers,
       signal: controller.signal,
     })
@@ -236,5 +238,6 @@ export default defineEventHandler(async (event) => {
   }
   finally {
     clearTimeout(timeout)
+    await releaseCapacity()
   }
 })
