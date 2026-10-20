@@ -255,7 +255,7 @@ curl 'https://<host>/api/public/metadata?chainId=1&addresses=0xD8b27CF359b7D1571
     "entities": [
       {
         "name": "Euler DAO",
-        "logo": "https://token-images.euler.finance/labels/euler",
+        "logo": "https://v3.euler.finance/v3/images/labels/euler",
         "description": "Euler DAO is responsible for the governance of the Euler protocol.",
         "url": "https://euler.finance"
       }

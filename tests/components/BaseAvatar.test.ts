@@ -1,11 +1,15 @@
 import { createSSRApp, h } from 'vue'
 import { renderToString } from '@vue/server-renderer'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { resolveLabelLogo } from '~/utils/label-logo'
 
-const imageState = { isReady: false, error: null as unknown }
+const { imageState, loadImage } = vi.hoisted(() => {
+  const imageState = { isReady: false, error: null as unknown }
+  return { imageState, loadImage: vi.fn(() => imageState) }
+})
 
 vi.mock('@vueuse/core', () => ({
-  useImage: () => imageState,
+  useImage: loadImage,
 }))
 
 const { default: BaseAvatar } = await import('~/components/base/BaseAvatar.vue')
@@ -17,6 +21,21 @@ const render = (props: Record<string, unknown>) =>
   renderToString(createSSRApp({ render: () => h(BaseAvatar, props) }))
 
 describe('BaseAvatar', () => {
+  beforeEach(() => {
+    loadImage.mockClear()
+    imageState.isReady = false
+    imageState.error = null
+  })
+
+  it('shows initials without requesting a rejected label image URL', async () => {
+    const src = resolveLabelLogo('https://token-images.euler.finance/labels/missing-curator.svg')
+    const html = await render({ src, label: 'Missing curator' })
+
+    expect(loadImage).not.toHaveBeenCalled()
+    expect(html).toContain('data-label="Mi"')
+    expect(html).not.toContain('<img')
+  })
+
   it('shows an inline fallback while the remote image is still loading', async () => {
     imageState.isReady = false
     const html = await render({ src: REMOTE_LOGO, fallbackSrc: INLINE_LOGO, label: 'Base' })

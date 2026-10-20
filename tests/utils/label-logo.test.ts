@@ -8,8 +8,8 @@ const mocks = vi.hoisted(() => ({ data: undefined as PublicEulerLabelsData | und
 vi.mock('~/composables/useEulerLabels', () => ({ getEulerLabelsSourceData: () => mocks.data }))
 
 describe('label image hosts', () => {
-  it('allows the dedicated HTTPS host', () => {
-    expect(resolveLabelLogo('https://token-images.euler.finance/labels/kpk')).toBe('https://token-images.euler.finance/labels/kpk')
+  it.each(['kpk', 'kpk.svg', 'kpk.webp?v=old#logo'])('rejects the old label image host: %s', (key) => {
+    expect(resolveLabelLogo(`https://token-images.euler.finance/labels/${key}`)).toBe('')
   })
   it.each(['usual', 'k3', 'clearstar'])('allows a V3 curator image for %s', (slug) => {
     const url = `https://v3.euler.finance/v3/images/labels/${slug}`
@@ -56,6 +56,24 @@ describe('label image hosts', () => {
     expect(getEulerLabelPointLogo(mocks.data.points[KPK_VAULT][0].logo)).toBe(labels.vaults[0].campaigns![0].logo)
     expect(getEulerLabelEntityLogo('https://images.fork.test.evil.test/x')).toBe('')
     expect(getEulerLabelEntityLogo('https://user:secret@images.fork.test/x')).toBe('')
+  })
+  it.each(['v3', 'v3-metadata'] as const)('rejects stale %s entity and campaign image URLs', (source) => {
+    mocks.data = normalizeLabelsBundle(1, {
+      source, labelSet: 'public', version: 'test', sourceFetchedAt: Date.now(), publicLabels: publicLabelsFixture,
+    })
+    expect(getEulerLabelEntityLogo(mocks.data.entities.kpk.logo)).toBe('')
+    expect(getEulerLabelPointLogo(mocks.data.points[KPK_VAULT][0].logo)).toBe('')
+  })
+  it.each(['v3', 'v3-metadata'] as const)('preserves current %s entity and campaign image URLs', (source) => {
+    const labels = structuredClone(publicLabelsFixture)
+    const logo = 'https://v3.euler.finance/v3/images/labels/kpk'
+    labels.entities[0].logo = logo
+    labels.vaults[0].campaigns![0].logo = logo
+    mocks.data = normalizeLabelsBundle(1, {
+      source, labelSet: 'public', version: 'test', sourceFetchedAt: Date.now(), publicLabels: labels,
+    })
+    expect(getEulerLabelEntityLogo(mocks.data.entities.kpk.logo)).toBe(logo)
+    expect(getEulerLabelPointLogo(mocks.data.points[KPK_VAULT][0].logo)).toBe(logo)
   })
   it('keeps static image policy independent of hosted origin approvals', () => {
     const bundle = {
