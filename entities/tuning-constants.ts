@@ -61,10 +61,11 @@ export const MODAL_CLOSE_REDIRECT_DELAY_MS = 400
 // ── Subgraph indexing catch-up ────────────────────────────
 /** Poll interval while waiting for the subgraph to index the tx's block. */
 export const SUBGRAPH_BLOCK_POLL_INTERVAL_MS = 1_000
-/** Hard cap on the catch-up wait. If subgraph is this far behind, we fall
- * back on the immediate triggerPortfolioRefresh + the 60s portfolio page
- * poll to eventually reconcile state. */
+/** Catch-up wait budget. On timeout, planning stays unavailable until a later
+ * attempt succeeds; display refreshes continue independently. */
 export const SUBGRAPH_BLOCK_CATCHUP_TIMEOUT_MS = 30_000
+/** Share a failed catch-up attempt briefly before allowing another poll. */
+export const SUBGRAPH_BLOCK_CATCHUP_RETRY_BACKOFF_MS = 5_000
 // ── Basis Points ──────────────────────────────────────────
 export const BPS_BASE = 10_000n
 /** BPS_BASE + 1: pads amounts by 0.01% to cover interest accrual */

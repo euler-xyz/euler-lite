@@ -1,11 +1,13 @@
 import { shallowReactive } from 'vue'
 import type { Account, IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
+import { SUBGRAPH_BLOCK_CATCHUP_RETRY_BACKOFF_MS } from '~/entities/tuning-constants'
 
 type PlanningAccount = Account<IHasVaultAddress>
 interface Confirmation {
   block: bigint
   waitUntilIndexed: () => Promise<void>
   indexed?: Promise<void>
+  retryAfter?: number
 }
 
 // A confirmation invalidates every pre-confirmation account on that chain,
@@ -25,9 +27,13 @@ export const requireFreshPlanningAccount = (
 }
 
 const waitForIndexing = (confirmation: Confirmation): Promise<void> => {
-  confirmation.indexed ??= confirmation.waitUntilIndexed().catch((error) => {
-    // A later user refresh can retry a failed/lagging indexer.
+  if (confirmation.retryAfter !== undefined && Date.now() >= confirmation.retryAfter) {
     confirmation.indexed = undefined
+    confirmation.retryAfter = undefined
+  }
+  confirmation.indexed ??= confirmation.waitUntilIndexed().catch((error) => {
+    // Repeated refreshes share this failure briefly; a later refresh can retry.
+    confirmation.retryAfter = Date.now() + SUBGRAPH_BLOCK_CATCHUP_RETRY_BACKOFF_MS
     throw error
   })
   return confirmation.indexed

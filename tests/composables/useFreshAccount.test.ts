@@ -32,6 +32,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   scope.stop()
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
@@ -113,7 +114,8 @@ describe('planning account after a confirmed transaction', () => {
     await vi.waitFor(() => expect(app.plan.account.value).toBe(fresh))
   })
 
-  it('does not fetch or adopt an account after catch-up fails, and retries catch-up later', async () => {
+  it('deduplicates failed catch-up during backoff and recovers on an explicit refresh after expiry', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000)
     const stale = makeAccount()
     sdk.fast.mockResolvedValue(result(stale))
     sdk.fresh.mockResolvedValue(result(stale))
@@ -126,8 +128,15 @@ describe('planning account after a confirmed transaction', () => {
     await vi.waitFor(() => expect(app.loader.isLoading.value).toBe(false))
     expect(sdk.fresh).toHaveBeenCalledOnce()
     expect(app.plan.account.value).toBeUndefined()
+    clock.mockReturnValue(5_999)
+    app.loader.refresh()
+    await vi.waitFor(() => expect(app.loader.isLoading.value).toBe(false))
+    expect(wait).toHaveBeenCalledOnce()
+    expect(sdk.fresh).toHaveBeenCalledOnce()
+    expect(app.plan.account.value).toBeUndefined()
     const fresh = makeAccount()
     sdk.fresh.mockResolvedValue(result(fresh))
+    clock.mockReturnValue(6_000)
     app.loader.refresh()
     await vi.waitFor(() => expect(app.plan.account.value).toBe(fresh))
     expect(wait).toHaveBeenCalledTimes(2)
