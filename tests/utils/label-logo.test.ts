@@ -8,8 +8,18 @@ const mocks = vi.hoisted(() => ({ data: undefined as PublicEulerLabelsData | und
 vi.mock('~/composables/useEulerLabels', () => ({ getEulerLabelsSourceData: () => mocks.data }))
 
 describe('label image hosts', () => {
-  it('allows the dedicated HTTPS host', () => {
-    expect(resolveLabelLogo('https://token-images.euler.finance/labels/kpk')).toBe('https://token-images.euler.finance/labels/kpk')
+  it.each(['kpk', 'kpk.svg', 'kpk.PNG', 'kpk.webp?v=old#logo'])('maps the legacy label %s to its V3 image', (key) => {
+    expect(resolveLabelLogo(`https://token-images.euler.finance/labels/${key}`)).toBe('https://v3.euler.finance/v3/images/labels/kpk')
+  })
+  it('preserves the label key and accepts the default HTTPS port', () => {
+    expect(resolveLabelLogo('https://token-images.euler.finance:443/labels/K3_Capital-1.jpg')).toBe('https://v3.euler.finance/v3/images/labels/K3_Capital-1')
+  })
+  it.each([
+    '/1/0x1234', '/sync/1', '/labels/', '/labels/nested/kpk',
+    '/labels/kpk.html', '/labels/kpk.svg/extra', '/labels/kpk%2Fother',
+  ])('rejects unsupported legacy paths even on a configured origin: %s', (path) => {
+    const origin = 'https://token-images.euler.finance'
+    expect(resolveLabelLogo(`${origin}${path}`, origin, [origin])).toBe('')
   })
   it.each(['usual', 'k3', 'clearstar'])('allows a V3 curator image for %s', (slug) => {
     const url = `https://v3.euler.finance/v3/images/labels/${slug}`
@@ -19,6 +29,9 @@ describe('label image hosts', () => {
     'https://token-images.euler.finance.evil.test/x',
     'https://evil.test/logo.svg',
     'http://token-images.euler.finance/x',
+    'http://token-images.euler.finance/labels/kpk',
+    'https://token-images.euler.finance:444/labels/kpk',
+    'https://user:secret@token-images.euler.finance/labels/kpk',
     'https://user@token-images.euler.finance/x',
     'https://v3.euler.finance.evil.test/v3/images/labels/usual',
     'http://v3.euler.finance/v3/images/labels/usual',
@@ -56,6 +69,13 @@ describe('label image hosts', () => {
     expect(getEulerLabelPointLogo(mocks.data.points[KPK_VAULT][0].logo)).toBe(labels.vaults[0].campaigns![0].logo)
     expect(getEulerLabelEntityLogo('https://images.fork.test.evil.test/x')).toBe('')
     expect(getEulerLabelEntityLogo('https://user:secret@images.fork.test/x')).toBe('')
+  })
+  it.each(['v3', 'v3-metadata'] as const)('resolves legacy %s entity and campaign images through the browser helpers', (source) => {
+    mocks.data = normalizeLabelsBundle(1, {
+      source, labelSet: 'public', version: 'test', sourceFetchedAt: Date.now(), publicLabels: publicLabelsFixture,
+    })
+    expect(getEulerLabelEntityLogo(mocks.data.entities.kpk.logo)).toBe('https://v3.euler.finance/v3/images/labels/kpk')
+    expect(getEulerLabelPointLogo(mocks.data.points[KPK_VAULT][0].logo)).toBe('https://v3.euler.finance/v3/images/labels/kpk')
   })
   it('keeps static image policy independent of hosted origin approvals', () => {
     const bundle = {
