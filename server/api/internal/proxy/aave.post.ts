@@ -21,12 +21,10 @@ import {
   forwardProxied,
 } from '~/server/utils/external-proxy'
 import { assertAllowedGraphqlRequest } from '~/server/utils/graphql-proxy-guard'
+import { AAVE_ALLOWED_OPERATIONS, GRAPHQL_RESPONSE_BUDGET } from '~/server/utils/migration-graphql-policy'
 
 const AAVE_GRAPHQL_URL = 'https://api.v3.aave.com/graphql'
 const BROWSER_CACHE_CONTROL = 'no-store'
-
-// The only operation Lite's Aave migration connector sends to this proxy.
-const AAVE_ALLOWED_OPERATIONS = ['AaveMigrationMarkets'] as const
 
 const cache = createProxyCache(0)
 const inFlight = createProxyInFlight()
@@ -59,6 +57,7 @@ export default defineEventHandler(async (event) => {
       body,
       ctx: 'aave-proxy',
       bypassCache: true,
+      responseBudget: GRAPHQL_RESPONSE_BUDGET,
     })
     setResponseStatus(event, res.status, res.statusText)
     setResponseHeaders(event, {

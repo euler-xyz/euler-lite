@@ -85,6 +85,7 @@ describe('/api/internal/proxy/subgraph route', () => {
 
     expect(mocks.forwardProxied).toHaveBeenCalledWith(expect.objectContaining({
       target: 'not a url',
+      responseBudget: { maxBytes: 8 * 1024 * 1024, timeoutMs: 10_000 },
     }))
     expect(mocks.warn).toHaveBeenCalledWith(
       expect.objectContaining({
