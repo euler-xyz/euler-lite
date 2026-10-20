@@ -41,6 +41,8 @@ import type {
 } from '@eulerxyz/euler-v2-sdk'
 import { getEulerSdkForChain, getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
+import { readFreshPlanningAccount } from '~/utils/planning-account-freshness'
+import { assertRuntimeAccountContext } from '~/features/reviewed-execution/planning/app-snapshot'
 import { profAsync } from '~/utils/profiler'
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
 import {
@@ -438,7 +440,7 @@ export const useEulerTx = () => {
    * Uses the "fresh" SDK (always on-chain adapters, short `FORM_STALE_TIMES`
    * windows on plan-critical reads). When the caller provides a pre-fetched
    * Account (typically from `useFreshAccount`'s race-replace cache), it's
-   * reused verbatim — no plan-time `fetchAccount` round-trip. Otherwise the
+   * reused after the confirmation-freshness check. Otherwise the
    * Account is fetched here for totalShares/totalAssets asset/share
    * conversion, sub-account positions for `getPosition`, controller flags for
    * `isControllerEnabled`, etc.
@@ -447,10 +449,9 @@ export const useEulerTx = () => {
    * through the shared QueryClient at each row's form stale time (a minute for
    * `queryAccountVaults`), so a recent snapshot is reused rather than re-read
    * from the latest block. Post-tx `invalidateAfterTx` invalidation marks
-   * those rows stale so a later idle read re-fetches after the user's own
-   * state changes. It does not run after standalone migration grant/revoke
-   * receipts, and it does not cancel an in-flight `fetchQuery` for the same
-   * key — that pending result can still land.
+   * those rows stale. After a confirmation, `readFreshPlanningAccount` waits
+   * for indexer catch-up and a new query generation before fetching. Standalone
+   * migration grant/revoke receipts do not run this confirmation flow.
    *
    * Cheap reads in this fetch path (labels, ABIs, deployments, prices) still
    * hit the QueryClient cache shared with the fast SDK, so the extra RPC
@@ -460,9 +461,15 @@ export const useEulerTx = () => {
     const owner = requireOwner()
     const cid = requireChainId()
     const sdk = await profAsync('sdk', 'getEulerSdkFresh', () => getEulerSdkFresh())
-    if (preloaded) return { sdk, account: preloaded }
-    const fetched = await profAsync('sdk', 'fetchAccount', () => sdk.accountService.fetchAccount(cid, owner))
-    return { sdk, account: fetched.result }
+    if (preloaded) {
+      assertRuntimeAccountContext(preloaded, owner, cid)
+      return { sdk, account: preloaded }
+    }
+    const account = await readFreshPlanningAccount(cid, async () => {
+      const fetched = await profAsync('sdk', 'fetchAccount', () => sdk.accountService.fetchAccount(cid, owner))
+      return fetched.result
+    })
+    return { sdk, account }
   }
 
   // Refresh the sub-account's position list at plan time. The Account snapshot

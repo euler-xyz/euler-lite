@@ -4,6 +4,7 @@ import type { Account, AccountFetchOptions, IHasVaultAddress } from '@eulerxyz/e
 import { getEulerSdkForChain, getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { setBatchPrefetchedPlanningAccount } from '~/composables/batchPrefetchState'
 import { logWarn } from '~/utils/errorHandling'
+import { isPlanningAccountCurrent, readFreshPlanningAccount } from '~/utils/planning-account-freshness'
 
 /**
  * Account-fetch options sized for plan-time consumers:
@@ -19,11 +20,10 @@ const PLAN_ACCOUNT_FETCH_OPTIONS: AccountFetchOptions = {
 }
 
 /**
- * Shared, module-scope account entity used as the plan-time snapshot. It's the
- * "tier-1" (stable metadata) data the old app loaded once at mount and trusted
- * for the duration of a form session — controllers, sub-account positions,
- * vault state for share/asset conversion. Volatile reads (allowances, Pyth
- * update data, simulate state) still hit the SDK's per-query cache on demand.
+ * Shared planning snapshot: controllers, sub-account positions and vault state
+ * for share/asset conversion. Confirmations invalidate its planning eligibility
+ * synchronously; only a subsequent checked on-chain read can restore it.
+ * Allowances, Pyth update data and simulation use the SDK's query cache.
  */
 const account = shallowRef<Account<IHasVaultAddress> | undefined>()
 const isLoading = ref(false)
@@ -41,7 +41,7 @@ const apply = (
   which: Exclude<Freshness, 'none'>,
   result: Account<IHasVaultAddress>,
 ) => {
-  if (cursor !== loadCursor) return // load was superseded
+  if (cursor !== loadCursor || !isPlanningAccountCurrent(result)) return
   const current = freshnessByCursor.get(cursor) ?? 'none'
   // Priority: fresh always replaces; fast only fills 'none'.
   if (which === 'fresh' || current === 'none') {
@@ -69,9 +69,12 @@ const load = async (owner: Address, chainId: number) => {
 
   const freshTask = (async () => {
     try {
-      const sdk = await getEulerSdkFresh()
-      const { result } = await sdk.accountService.fetchAccount(chainId, owner, PLAN_ACCOUNT_FETCH_OPTIONS)
-      apply(cursor, 'fresh', result as Account<IHasVaultAddress>)
+      const result = await readFreshPlanningAccount(chainId, async () => {
+        const sdk = await getEulerSdkFresh()
+        const fetched = await sdk.accountService.fetchAccount(chainId, owner, PLAN_ACCOUNT_FETCH_OPTIONS)
+        return fetched.result
+      })
+      apply(cursor, 'fresh', result)
     }
     catch (err) {
       logWarn('useFreshAccount/fresh', err)
@@ -96,9 +99,10 @@ const reset = () => {
  * Race-replace fresh-account loader.
  *
  * Fires both fast (V3 fallback) and fresh (always on-chain) `fetchAccount`
- * calls in parallel on wallet/chain/refresh-trigger changes. The first arrival
- * lands in the ref; if the fresh result arrives later, it replaces the fast
- * one. A late fast result is discarded.
+ * calls in parallel on wallet/chain/refresh-trigger changes. Before a chain's
+ * first confirmation, fast can fill the ref and fresh replaces it. After a
+ * confirmation, only fresh reads after indexer catch-up are eligible; a failed
+ * refresh cannot expose a V3, portfolio or earlier planning snapshot.
  *
  * Pages that need the plan-time Account entity should consume `account` and
  * pass it into `useEulerTx` planners — that bypasses the per-click
@@ -143,7 +147,7 @@ export const useFreshAccount = () => {
   }
 
   return {
-    account: account as Readonly<Ref<Account<IHasVaultAddress> | undefined>>,
+    account: computed(() => isPlanningAccountCurrent(account.value) ? account.value : undefined) as Readonly<Ref<Account<IHasVaultAddress> | undefined>>,
     isLoading,
     refresh,
   }

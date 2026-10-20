@@ -1,5 +1,6 @@
 import type { Account, IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
 import { activeLayerAccountRef } from '~/composables/useTxBatch'
+import { isPlanningAccountCurrent } from '~/utils/planning-account-freshness'
 
 /**
  * The account forms read for positions/shares and build plans against — the
@@ -11,11 +12,11 @@ export const usePlanAccount = () => {
   const { account: freshAccount } = useFreshAccount()
   const { portfolio } = useEulerAccount()
 
-  const account = computed(() =>
-    (activeLayerAccountRef.value as Account<IHasVaultAddress> | undefined)
-    ?? freshAccount.value
-    ?? (portfolio.value?.account as Account<IHasVaultAddress> | undefined),
-  )
+  const account = computed(() => [
+    activeLayerAccountRef.value as Account<IHasVaultAddress> | undefined,
+    freshAccount.value,
+    portfolio.value?.account as Account<IHasVaultAddress> | undefined,
+  ].find(isPlanningAccountCurrent))
 
   return { account }
 }

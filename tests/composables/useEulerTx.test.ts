@@ -1,8 +1,8 @@
 import { ref } from 'vue'
 import { getAddress, type Address } from 'viem'
-import type { TransactionPlan, TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
+import { Account, type IHasVaultAddress, type TransactionPlan, type TransactionPlanPrepared } from '@eulerxyz/euler-v2-sdk'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { getEulerSdkForChain } from '~/composables/useEulerSdk'
+import { getEulerSdkForChain, getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { useEulerTx } from '~/composables/useEulerTx'
 
 vi.mock('~/composables/useEulerSdk', () => ({
@@ -63,5 +63,27 @@ describe('useEulerTx preparation boundary', () => {
     expect(tx.executePreparedPlanWithPlainCalls).toBeUndefined()
     expect(tx.signMigrationAuthorization).toBeUndefined()
     expect(tx.sendPlainTransactions).toBeUndefined()
+  })
+})
+
+describe('post-confirmation planner boundary', () => {
+  it('rejects an explicitly provided stale account before calling the SDK planner', async () => {
+    const { requireFreshPlanningAccount, readFreshPlanningAccount } = await import('~/utils/planning-account-freshness')
+    const { assertRuntimeAccountContext } = await import('~/features/reviewed-execution/planning/app-snapshot')
+    const stale = new Account<IHasVaultAddress>({ chainId: 1, owner: OWNER, subAccounts: {} })
+    const planDeposit = vi.fn().mockResolvedValue([])
+    vi.mocked(getEulerSdkFresh).mockResolvedValue({ executionService: { planDeposit } } as never)
+    vi.stubGlobal('useWagmi', () => ({ address: ref(OWNER), chainId: ref(1) }))
+    vi.stubGlobal('useSpyMode', () => ({ isSpyMode: ref(false), spyAddress: ref(undefined) }))
+    vi.stubGlobal('useSignaturePreference', () => ({ signaturesEnabled: ref(true) }))
+    vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1) }))
+    requireFreshPlanningAccount(1, 100n, async () => {})
+    await expect(useEulerTx().planDeposit({ vaultAddress: TOKEN, assetAddress: TOKEN, amount: 1n, account: stale }))
+      .rejects.toThrow('Account is updating')
+    expect(() => assertRuntimeAccountContext(stale, OWNER, 1)).toThrow('Account is updating')
+    expect(planDeposit).not.toHaveBeenCalled()
+    const fresh = await readFreshPlanningAccount(1, async () => new Account<IHasVaultAddress>({ chainId: 1, owner: OWNER, subAccounts: {} }))
+    await useEulerTx().planDeposit({ vaultAddress: TOKEN, assetAddress: TOKEN, amount: 1n, account: fresh })
+    expect(planDeposit).toHaveBeenCalledWith(expect.objectContaining({ account: fresh }))
   })
 })

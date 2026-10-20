@@ -3,11 +3,10 @@ import { logWarn } from '~/utils/errorHandling'
 import { advanceSdkQueryGeneration, invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
 import { waitForSubgraphBlock } from '~/utils/subgraph'
+import { requireFreshPlanningAccount } from '~/utils/planning-account-freshness'
 
-const triggerRefresh = (triggerPortfolioRefresh: () => void, forceFresh = false) => {
-  const invalidation = forceFresh
-    ? advanceSdkQueryGeneration([...INVALIDATE_AFTER_TX])
-    : invalidateSdkQueries([...INVALIDATE_AFTER_TX])
+const triggerRefresh = (triggerPortfolioRefresh: () => void) => {
+  const invalidation = invalidateSdkQueries([...INVALIDATE_AFTER_TX])
   void invalidation
     .catch(error => logWarn('reviewedExecution/queryInvalidation', error))
   triggerPortfolioRefresh()
@@ -27,19 +26,27 @@ export const refreshPortfolioAfterReviewedSubmission = async ({
   confirmedBlockNumber?: bigint
   triggerPortfolioRefresh: () => void
 }) => {
+  const waitForPlanningRefresh = confirmedBlockNumber === undefined
+    ? undefined
+    : requireFreshPlanningAccount(
+        chainId,
+        confirmedBlockNumber,
+        async () => {
+          const caughtUp = await waitForSubgraphBlock(buildSubgraphProxyApiPath(chainId), confirmedBlockNumber)
+          if (!caughtUp) throw new Error('Account is still updating after your transaction. Please refresh and try again.')
+          // The planning read must not join a request started before indexer catch-up.
+          await advanceSdkQueryGeneration([...INVALIDATE_AFTER_TX])
+        },
+      )
   triggerRefresh(triggerPortfolioRefresh)
-  if (confirmedBlockNumber === undefined) return
+  if (!waitForPlanningRefresh) return
 
-  const caughtUp = await waitForSubgraphBlock(
-    buildSubgraphProxyApiPath(chainId),
-    confirmedBlockNumber,
-  )
-  if (!caughtUp) {
-    logWarn(
-      'reviewedExecution/subgraphPoll',
-      new Error(`subgraph did not catch up to block ${confirmedBlockNumber} in time`),
-    )
+  try {
+    await waitForPlanningRefresh()
+  }
+  catch (error) {
+    logWarn('reviewedExecution/subgraphPoll', error)
     return
   }
-  triggerRefresh(triggerPortfolioRefresh, true)
+  triggerPortfolioRefresh()
 }

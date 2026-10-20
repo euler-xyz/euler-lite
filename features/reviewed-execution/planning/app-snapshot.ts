@@ -1,3 +1,4 @@
+import { assertPlanningAccountCurrent } from '~/utils/planning-account-freshness'
 import { getAddress, type Address } from 'viem'
 import type { Account, IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
 import { toCanonicalValue } from '../domain/canonical'
@@ -103,4 +104,5 @@ export const assertRuntimeAccountContext = (account: Account<IHasVaultAddress>, 
   if (getAddress(account.owner) !== getAddress(owner) || account.chainId !== chainId) {
     throw new Error('Preview account snapshot belongs to another wallet context')
   }
+  assertPlanningAccountCurrent(account)
 }

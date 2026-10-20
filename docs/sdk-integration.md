@@ -292,12 +292,14 @@ Other callers pass their own narrower name list for an explicit refresh: `compos
 
 ### Post-Tx Portfolio Refresh
 
-Terminal `useReviewedExecution.accept` outcomes immediately invalidate `INVALIDATE_AFTER_TX` and call `triggerPortfolioRefresh()`. When dispatch metadata includes a confirmed block, the post-tx helper waits for the SDK subgraph proxy to index that block, advances the `INVALIDATE_AFTER_TX` query generation, and triggers the portfolio refresh again. The second trigger therefore cannot join SDK queries started by the immediate refresh. The shared `portfolioRefreshCounter` drives these consumers:
+Terminal `useReviewedExecution.accept` outcomes immediately invalidate `INVALIDATE_AFTER_TX` and call `triggerPortfolioRefresh()`. When dispatch metadata includes a confirmed block, the post-tx helper waits for the SDK subgraph proxy to index that block, advances the `INVALIDATE_AFTER_TX` query generation, and triggers the portfolio refresh again. Planning reads after catch-up therefore cannot join SDK queries started before that boundary. The shared `portfolioRefreshCounter` drives these consumers:
 
-- `composables/useFreshAccount.ts` reloads the plan-time account snapshot. It races the fast SDK and fresh SDK account reads; fast can fill an empty ref, but the fresh result always wins for the current load cursor.
+- `composables/useFreshAccount.ts` reloads the planning account. Before a chain has a confirmed transaction in the current session, fast V3 can fill the snapshot and the fresh SDK replaces it. After confirmation, only an on-chain read started after indexer catch-up can supply a planning account. Fast V3 remains available for display.
 - `pages/portfolio.vue` calls `updatePositions({ portfolioSource: 'fresh', preemptPortfolio: true })`. That calls `refreshAllPositions(..., { source: 'fresh', preempt: true })`, so `composables/useEulerAccount.ts` loads the visible portfolio through `getEulerSdkFresh()` for the post-tx refresh. `preempt: true` advances the position race guard and resets the refresh coordinator so preempted fast portfolio reads cannot write stale portfolio data or diagnostics over the fresh result.
 
 Normal portfolio page activation and 60-second polling call `updatePositions()` without options. That leaves `source` undefined, and `useEulerAccount` selects the fast SDK only on an explicit `source === 'fast'` — so routine browsing also reads through `getEulerSdkFresh()`. Post-tx calls differ by passing `preempt: true` and by applying the immediate invalidation or post-indexer query-generation boundary first, not by which SDK instance they use. `'fast'` is opt-in and no current caller passes it.
+
+A confirmation immediately invalidates planning snapshots on that chain, including portfolio fallbacks, prefetched batch accounts and simulated layers derived from an earlier baseline. Planning reads share the catch-up wait, then use a new SDK query generation so they cannot join pre-catch-up requests. A timeout or rejected read leaves the account unavailable for planning; another refresh can retry. Reads spanning a newer confirmation are discarded. Other chains retain their own freshness state. The successful account and its derived batch layers remain eligible until the next confirmation; ordinary form cache windows still apply.
 
 ## Plan-Time Fresh Fetch
 
@@ -308,8 +310,11 @@ const freshPlanContext = async () => {
   const owner = requireOwner()
   const cid = requireChainId()
   const sdk = await getEulerSdkFresh()
-  const fetched = await sdk.accountService.fetchAccount(cid, owner)
-  return { sdk, account: fetched.result }
+  const account = await readFreshPlanningAccount(cid, async () => {
+    const fetched = await sdk.accountService.fetchAccount(cid, owner)
+    return fetched.result
+  })
+  return { sdk, account }
 }
 ```
 
@@ -321,9 +326,9 @@ How fresh that snapshot actually is depends on the path taken:
 
 | Path | Freshness |
 |---|---|
-| `freshPlanContext()` fetches it | Onchain adapters, but served from the shared `QueryClient` at each row's `FORM_STALE_TIMES` window — `queryAccountVaults` is 1 minute, so a snapshot up to a minute old can be reused. No invalidation happens first. |
-| Caller passes `input.account` | The `useFreshAccount()` race-replace snapshot, reloaded on wallet/chain change and on `triggerPortfolioRefresh()`. Its fresh task also calls `getEulerSdkFresh()` and then `fetchAccount()`, so those reads go through the shared `QueryClient` as well — bounded by the trigger cadence *and* the applicable `FORM_STALE_TIMES` windows, not by the cadence alone. (A parallel fast task uses the browsing windows; the fresh result wins whenever it lands.) |
-| After a successful reviewed execution | Acceptance immediately marks the `invalidateAfterTx` rows stale. Once the subgraph reaches the confirmed receipt block, the second refresh advances those query generations; subsequent plan-time reads cannot join the pre-catch-up fetch. CoW hard-cancel applies ordinary invalidation only. |
+| `freshPlanContext()` fetches it | On-chain adapters with the shared `FORM_STALE_TIMES` cache. After confirmation, it waits for indexer catch-up and the new query generation before reading. |
+| Caller passes `input.account` | The shared planning snapshot or a derived batch layer. Its confirmation freshness is checked before reuse; a pre-confirmation account is rejected. |
+| After a successful reviewed execution | Confirmation invalidates account eligibility before the immediate display refresh. Catch-up advances query generations before fresh planning reads and a second display refresh. CoW hard-cancel applies ordinary invalidation only. |
 
 `attachSubAccountSnapshot` re-reads the receiver sub-account before planning, because a stale controller flag makes the planner skip `enableController` and the EVC batch reverts. That re-read goes through the same cache, so it corrects a snapshot carried over from an earlier portfolio load but is itself bounded by the same 1-minute window. A planner that needs a stronger guarantee has to invalidate the relevant rows explicitly.
 ## Where to Extend

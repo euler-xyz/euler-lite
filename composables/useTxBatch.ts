@@ -32,6 +32,7 @@ import { buildPlanMarketLabel } from '~/utils/stepDecoding'
 import { formatSmartAmount } from '~/utils/string-utils'
 import { formatSimulationFailure } from '~/utils/tx-errors'
 import { logWarn } from '~/utils/errorHandling'
+import { inheritPlanningAccountFreshness, isPlanningAccountCurrent, readFreshPlanningAccount } from '~/utils/planning-account-freshness'
 import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
 import type { BatchDraftEntry, OperationIntent } from '~/features/reviewed-execution/domain/intents'
 import { canonicalDigest, deepFreezeSerializable, toCanonicalValue } from '~/features/reviewed-execution/domain/canonical'
@@ -670,13 +671,15 @@ export const fetchBaseAccountSnapshot = async (
   chainId: number,
   owner: Address,
 ): Promise<Account<IHasVaultAddress>> => {
-  const fetched = await sdk.accountService.fetchAccount(chainId, owner, {
-    populateVaults: true,
-    populateMarketPrices: true,
-    populateUserRewards: true,
-    vaultFetchOptions: liteVaultFetchOptions,
+  return readFreshPlanningAccount(chainId, async () => {
+    const fetched = await sdk.accountService.fetchAccount(chainId, owner, {
+      populateVaults: true,
+      populateMarketPrices: true,
+      populateUserRewards: true,
+      vaultFetchOptions: liteVaultFetchOptions,
+    })
+    return fetched.result
   })
-  return fetched.result as Account<IHasVaultAddress>
 }
 
 const isAccountForContext = (
@@ -684,7 +687,7 @@ const isAccountForContext = (
   chainId: number,
   owner: Address,
 ): account is Account<IHasVaultAddress> => {
-  if (!account || account.chainId !== chainId) return false
+  if (!isPlanningAccountCurrent(account) || account.chainId !== chainId) return false
   try {
     return getAddress(account.owner) === owner
   }
@@ -701,7 +704,7 @@ const isAccountForContext = (
  * `useEulerAccount().portfolio`) are layer-aware and resolve to the active
  * *simulated* layer once the batch is non-empty, which must never be adopted as
  * the batch's own layer 0. The registry only ever holds pre-overlay loader
- * output, so chain + owner is the whole validation.
+ * output. Reuse requires matching chain/owner and current confirmation freshness.
  */
 const resolvePrefetchedAccounts = (
   chainId: number,
@@ -1331,6 +1334,7 @@ const applyClosedPositions = (
   }) as Account<IHasVaultAddress>
   next.userRewards = account.userRewards
   next.populated.userRewards = account.populated.userRewards
+  inheritPlanningAccountFreshness(account, next)
   return next
 }
 
@@ -1617,6 +1621,7 @@ export const stitchAccount = (
     ? touched.userRewards
     : prevFull.userRewards
   account.populated.userRewards = touched.populated.userRewards || prevFull.populated.userRewards
+  inheritPlanningAccountFreshness(prevFull, account)
   return account
 }
 
@@ -1755,8 +1760,9 @@ export const useTxBatch = () => {
       const ownerAddr = getAddress(o)
       // Keep the real base state fixed for the lifetime of the cart. Entry plans
       // are immutable add-time payloads; later real-state drift should not cause
-      // the whole batch to rebuild around a different base account.
-      const baseAccount = baseAccountSnapshot
+      // the whole batch to rebuild around a different base account. A confirmed
+      // transaction invalidates that baseline and requires a fresh replacement.
+      const baseAccount = (isAccountForContext(baseAccountSnapshot ?? undefined, cid, ownerAddr) ? baseAccountSnapshot : undefined)
         ?? resolvePrefetchedAccounts(cid, ownerAddr).baseAccount
         ?? await fetchBaseAccountSnapshot(sdk, cid, ownerAddr)
       baseAccountSnapshot = baseAccount
@@ -2133,6 +2139,7 @@ export const useTxBatch = () => {
     const preparedEntryCount = entries.value.filter(entry => !entry.preparing).length
     const getCurrentFinalLayer = () => (
       preparedEntryCount > 0 && layers.value.length === preparedEntryCount + 1
+      && isPlanningAccountCurrent(layers.value[layers.value.length - 1]?.account)
         ? layers.value[layers.value.length - 1]?.account
         : undefined
     )
@@ -2193,7 +2200,7 @@ export const useTxBatch = () => {
       logBatchDiag('getEntryPlanningAccount:prefetched-base-account')
       return baseAccount
     }
-    if (baseAccountSnapshot) {
+    if (isAccountForContext(baseAccountSnapshot ?? undefined, cid, ownerAddress)) {
       logBatchDiag('getEntryPlanningAccount:base-snapshot-cached')
       return baseAccountSnapshot
     }

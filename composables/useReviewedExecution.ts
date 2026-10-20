@@ -38,6 +38,7 @@ import { buildMigrationSimulationPlan, compileCrossProtocolMigrationIntent, prep
 import type { AdditionalMaterializedCall } from '~/features/reviewed-execution/materialization/prepared-plan'
 import { projectEulerSimulation } from '~/features/reviewed-execution/simulation/euler-projection'
 import { refreshPortfolioAfterReviewedSubmission } from '~/features/reviewed-execution/review/post-tx-refresh'
+import { readFreshPlanningAccount } from '~/utils/planning-account-freshness'
 import { logWarn } from '~/utils/errorHandling'
 import { approvalAssetsWithSpenders, fetchWalletForApprovals } from '~/features/reviewed-execution/planning/approval-reads'
 
@@ -205,13 +206,15 @@ const loadPlanningAccount = async (owner: Address, chainId: number): Promise<Acc
     }
     catch { /* a stale preloaded account snapshot is never adopted */ }
   }
-  const sdk = await getEulerSdkFresh()
-  const fetched = await sdk.accountService.fetchAccount(chainId, owner, {
-    populateVaults: true,
-    populateMarketPrices: false,
-    populateUserRewards: true,
+  return readFreshPlanningAccount(chainId, async () => {
+    const sdk = await getEulerSdkFresh()
+    const fetched = await sdk.accountService.fetchAccount(chainId, owner, {
+      populateVaults: true,
+      populateMarketPrices: false,
+      populateUserRewards: true,
+    })
+    return fetched.result
   })
-  return fetched.result as Account<IHasVaultAddress>
 }
 
 const hydrateRequiredSubAccounts = async (
@@ -499,6 +502,7 @@ export const useReviewedExecution = () => {
       after: migrationAfter,
       assertContext: assertPreparationContext,
     })
+    assertRuntimeAccountContext(account, wallet.account, wallet.chainId)
     const previewPlan = pluginPlans.previewPlan as unknown as TransactionPlan
     const preparedReview: PreparedExecutionReview = {
       execution,
@@ -605,6 +609,7 @@ export const useReviewedExecution = () => {
       { snapshot, runtime: asCompilerRuntime(runtime) },
       () => {},
     )
+    assertRuntimeAccountContext(account, requirements.owner, requirements.chainId)
     if (!migrationPlansForSimulation.size) {
       return { reviewedPlan: compiled.plan, plan: compiled.plan }
     }

@@ -1,4 +1,5 @@
 import type { Account, IHasVaultAddress, SlotHints } from '@eulerxyz/euler-v2-sdk'
+import { isPlanningAccountCurrent } from '~/utils/planning-account-freshness'
 
 /**
  * Form-load accounts the batch builder can safely reuse on the first add.
@@ -15,7 +16,8 @@ import type { Account, IHasVaultAddress, SlotHints } from '@eulerxyz/euler-v2-sd
  * layer is active, which must never become the batch's own layer 0. Consumers
  * still have to validate chain + owner before reuse (see `isAccountForContext`
  * in `useTxBatch`) because a wallet or chain switch can land before the
- * matching loader run replaces these.
+ * matching loader run replaces these. Getters also exclude snapshots invalidated
+ * by a transaction confirmation, even before the loaders publish replacements.
  *
  * Slot hints are safe to share independently: ERC20 storage-slot indices are
  * owner- and spender-agnostic, and the registry scopes them by chain. Keeping
@@ -32,7 +34,7 @@ export const setBatchPrefetchedPlanningAccount = (
   planningAccount = account
 }
 
-export const getBatchPrefetchedPlanningAccount = () => planningAccount
+export const getBatchPrefetchedPlanningAccount = () => isPlanningAccountCurrent(planningAccount) ? planningAccount : undefined
 
 export const setBatchPrefetchedBaseAccount = (
   account: Account<IHasVaultAddress> | undefined,
@@ -40,7 +42,7 @@ export const setBatchPrefetchedBaseAccount = (
   baseAccount = account
 }
 
-export const getBatchPrefetchedBaseAccount = () => baseAccount
+export const getBatchPrefetchedBaseAccount = () => isPlanningAccountCurrent(baseAccount) ? baseAccount : undefined
 
 export const mergeBatchPrefetchedSlotHints = (
   chainId: number,

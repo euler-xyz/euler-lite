@@ -1891,3 +1891,19 @@ describe('awaitFinalPlanningLayer', () => {
     expect(resolved).toBe(3) // every started run completed (was awaited) before the throw
   })
 })
+
+describe('batch account confirmation freshness', () => {
+  it('preserves freshness through real batch stitching and rejects the layer after a later confirmation', async () => {
+    const { requireFreshPlanningAccount, readFreshPlanningAccount, isPlanningAccountCurrent } = await import('~/utils/planning-account-freshness')
+    const cid = 31337
+    const makeAccount = () => new Account<IHasVaultAddress>({ chainId: cid, owner, subAccounts: {}, populated: {} })
+    requireFreshPlanningAccount(cid, 100n, async () => {})
+    const base = await readFreshPlanningAccount(cid, async () => makeAccount())
+    const layer = stitchAccount(base, makeAccount())
+    expect(isPlanningAccountCurrent(layer)).toBe(true)
+    requireFreshPlanningAccount(cid, 101n, async () => {})
+    expect(isPlanningAccountCurrent(base)).toBe(false)
+    expect(isPlanningAccountCurrent(layer)).toBe(false)
+    expect(isPlanningAccountCurrent(stitchAccount(base, makeAccount()))).toBe(false)
+  })
+})
