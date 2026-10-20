@@ -51,7 +51,7 @@ import type { EulerSDKQueryName } from '@eulerxyz/euler-v2-sdk'
  *
  * Stale-time classes (organising the rows below):
  *
- *   - **Default / low-volatility reads** (deployments, labels, oracle adapter
+ *   - **Default / low-volatility reads** (deployments, oracle adapter
  *     lists, verified-vault arrays, reward campaign metadata, V3 list pages):
  *     5 min.
  *   - **Plan-critical chain reads** (vault info, account info, vault
@@ -61,7 +61,7 @@ import type { EulerSDKQueryName } from '@eulerxyz/euler-v2-sdk'
  *     invalidation makes display refresh after a deposit/borrow.
  *   - **Pricing / APY** (assetPriceInfo, rewards breakdown, intrinsicApy):
  *     1 min. `queryV3Price` uses 30 s.
- *   - **Time-sensitive** (block reads, swap quotes, Pyth update data + fee,
+ *   - **Time-sensitive** (Public Labels V3, block reads, swap quotes, Pyth update data + fee,
  *     simulate batch): short cache windows. Pyth payloads have a real on-chain
  *     validity window (~60 s); caching longer would make tx revert at
  *     execute.
@@ -88,11 +88,9 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
   queryTokenList: { staleTimeMs: Infinity },
   // The SDK supplies a null cache key, so the wrapper bypasses this policy.
   queryTokenDecimals: { staleTimeMs: 0 },
-  queryEulerLabelsEntities: { staleTimeMs: 5 * MINUTE },
-  queryEulerLabelsProducts: { staleTimeMs: 5 * MINUTE },
-  queryEulerLabelsPoints: { staleTimeMs: 5 * MINUTE },
-  queryEulerLabelsEarnVaults: { staleTimeMs: 5 * MINUTE },
-  queryEulerLabelsAssets: { staleTimeMs: 5 * MINUTE },
+  // Public Labels V3 includes live visibility; retain the SDK's short cache window.
+  // Lite's injected labels service owns its snapshot freshness separately.
+  queryPublicLabels: { staleTimeMs: 5 * SECOND },
   queryV3OracleAdapterAssessment: { staleTimeMs: 5 * MINUTE },
   queryV3VaultAssessment: { staleTimeMs: 5 * MINUTE },
   queryV3OracleAdapterAssessmentsPage: { staleTimeMs: 5 * MINUTE },

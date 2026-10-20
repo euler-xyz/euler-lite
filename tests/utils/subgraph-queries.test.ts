@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { VaultTypeSubgraphAdapter, type BuildQueryFn } from '@eulerxyz/euler-v2-sdk'
+import { AccountVaultsSubgraphAdapter, VaultTypeSubgraphAdapter, type BuildQueryFn } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address } from 'viem'
-import { AccountVaultsSubgraphAdapter } from '../../node_modules/@eulerxyz/euler-v2-sdk/dist/src/services/accountService/adapters/accountOnchainAdapter/accountVaultsSubgraphAdapter.js'
 import { withCheckedSubgraphQueries, requireSubgraphBlock } from '~/utils/subgraph-queries'
 import { advanceSdkQueryGeneration, sdkBuildQuery, sdkQueryClient } from '~/utils/sdk-query-cache'
 import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
@@ -20,7 +19,7 @@ afterEach(() => {
 })
 
 describe('checked published-SDK subgraph queries', () => {
-  it('rejects the 503 JSON body that SDK 4.2.0 turns into empty discovery', async () => {
+  it('rejects an HTTP 503 JSON body without reporting empty discovery', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ statusCode: 503, message: 'retired' }), { status: 503 })))
     await expect(makeQuery('/fixture/error')({ chainId: 1, account: address })).rejects.toThrow('503')
   })

@@ -37,13 +37,18 @@ Lite's migration compiler, plugin-data collector, and finalizer fail closed when
 a date before <date>". It does **not** apply to `npm ci`, which installs the
 lockfile as written, so CI and the Docker build are unaffected either way.
 
-`@eulerxyz/euler-v2-sdk` is listed in `min-release-age-exclude` because it is
-published from this org's own reviewed monorepo and does not carry the
-third-party risk the cooldown absorbs. Without that entry, nobody can run
-`npm install` to write a same-day SDK release into the lockfile in the first
-place — the one-week wait lands on whoever does the bump, not on CI. The
-cooldown still applies to every third-party dependency, and Dependabot keeps its
-own separate seven-day `cooldown` in `.github/dependabot.yml`.
+`@eulerxyz/euler-v2-sdk` is listed in `min-release-age-exclude`, but the pinned
+npm 11.10.0 warns that this setting is unknown and still enforces the age gate.
+For an explicitly reviewed same-day SDK release, apply a one-command exception:
+
+```bash
+npm install --save-exact --min-release-age=0 "@eulerxyz/euler-v2-sdk@<reviewed-version>"
+```
+
+Review the lockfile diff to confirm that only the intended SDK package changes.
+The command does not change `.npmrc`; subsequent installs retain the seven-day
+cooldown, and `npm ci` installs the reviewed lockfile. Dependabot keeps its
+separate seven-day `cooldown` in `.github/dependabot.yml`.
 
 ## SDK Entry Points
 
@@ -137,7 +142,7 @@ The server-side snapshot builder has its own independent `SERVER_VAULT_CACHE_SOU
 | `vaultTypeSubgraphUrls[chainId]` | `/api/internal/proxy/subgraph/{chainId}` | Goldsky subgraph proxy |
 | `rpcUrls[chainId]` | `/api/internal/rpc/{chainId}` | JSON-RPC proxy |
 | Adapter block | `fallbackAdapterConfig` / `onchainAdapterConfig` / `v3AdapterConfig` per `browserVaultSource` (default browsing), `onchainAdapterConfig` (`ONCHAIN_SDK_CHAINS` browsing and plan-time) | — |
-| `disableV3` | `true` only when the resolved fast source is `fallback` and `!enableV3Backend` | — |
+| `disableV3` | Explicit `DISABLE_V3`, or a resolved `fallback` source with `!enableV3Backend` | — |
 
 Reward provider toggles (`rewardsEnableMerkl`, `rewardsEnableBrevis`, `rewardsEnableFuul`, `rewardsEnableTurtle`) are emitted as `false` only when `useDeployConfig()` disables them.
 
@@ -211,6 +216,7 @@ export const SDK_QUERY_POLICY = {
   queryV3AccountPositions: { staleTimeMs: DEFAULT_STALE_TIME_MS, invalidateAfterTx: true },
 
   // Time-sensitive
+  queryPublicLabels: { staleTimeMs: 5 * SECOND },
   queryPythUpdateData: { staleTimeMs: 30 * SECOND },
 
   // Balances
@@ -290,7 +296,9 @@ Two execution paths use the whole `INVALIDATE_AFTER_TX` list:
 
 Both paths source `INVALIDATE_AFTER_TX` from `~/utils/sdk-query-policy`. Post-tx invalidation covers both fast V3 account positions (`queryV3AccountPositions`) and fresh/onchain account-vault discovery (`queryAccountVaults`).
 
-Other callers pass their own narrower name list for an explicit refresh: `composables/useSdkRewards.ts` (user reward rows before a portfolio rebuild), `composables/useEulerLabels.ts` (the five label queries on `loadLabels(true)`), and the lend withdraw page (wallet token balances after a swap output changes). Those narrower invalidations have the same in-flight join caveat. Nothing invalidates on form mount — a form that opens within a row's stale window reads the cached value.
+Other callers pass their own narrower name list for an explicit refresh: `composables/useSdkRewards.ts` (user reward rows before a portfolio rebuild) and the lend withdraw page (wallet token balances after a swap output changes). Those narrower invalidations have the same in-flight join caveat. Nothing invalidates on form mount — a form that opens within a row's stale window reads the cached value.
+
+Lite's injected labels service uses the application-owned bundle and freshness policy. `useEulerLabels.loadLabels(true)` requests `/api/internal/public-labels` with `cache-control: no-cache`; it does not invalidate SDK label queries. The SDK's built-in `queryPublicLabels` has a five-second policy for instances that use that adapter.
 
 ### Post-Tx Portfolio Refresh
 
@@ -380,8 +388,7 @@ retain the published SDK's bundled defaults; `SUBGRAPH_CATALOG_DISABLED=true` or
 `SUBGRAPH_DISABLED_<chainId>=true` prevents this compatibility fallback. An opted-in catalog's missing/retired/invalid records never
 fall back. The browser proxy retains its missing-URL 404 behavior. V3 remains the configured primary where applicable. Both
 paths validate HTTP/GraphQL payloads and the actual response's `_meta.deployment`
-against a catalog deployment ID. Lite retains the published SDK dependency and
-provides these checks at its `buildQuery` boundary for the two subgraph leaf
+against a catalog deployment ID. Lite provides these checks at its `buildQuery` boundary for the two subgraph leaf
 queries (`queryAccountVaults`, `queryVaultFactories`). Other queries retain their
 existing caching policy. The checked leaf queries do not cache results, so source
 switches and retirement cannot reuse old discovery/factory responses.
