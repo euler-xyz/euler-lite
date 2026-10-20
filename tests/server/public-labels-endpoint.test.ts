@@ -67,6 +67,20 @@ describe('public labels aggregate endpoint', () => {
     expect(mocks.getPublicLabelsBundle).toHaveBeenCalledWith(1, undefined)
     expect(mocks.refreshPublicLabelsBundle).not.toHaveBeenCalled()
   })
+  it.each(['cached', 'fetch'] as const)('returns actionable configuration details for a %s failure without caching the error', async (stage) => {
+    const handler = await loadHandler()
+    const { LabelsConfigurationError } = await import('~/server/utils/labels-configuration-error')
+    const message = 'STATIC_LABELS_BASE_URL is required for static labels'
+    const error = new LabelsConfigurationError(message)
+    if (stage === 'cached') mocks.getCachedPublicLabelsBundle.mockImplementation(() => {
+      throw error
+    })
+    else mocks.getPublicLabelsBundle.mockRejectedValue(error)
+    await expect(handler({})).rejects.toMatchObject({
+      statusCode: 503, data: { code: 'LABELS_CONFIGURATION_ERROR', message },
+    })
+    expect(mocks.setResponseHeader).toHaveBeenLastCalledWith({}, 'Cache-Control', 'no-store')
+  })
 
   it('forces the selected deterministic version on no-cache requests', async () => {
     mocks.query = { chainId: '1', version: 'v20260804151305236' }

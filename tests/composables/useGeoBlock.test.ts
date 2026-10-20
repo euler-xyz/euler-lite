@@ -77,6 +77,7 @@ const setCountry = (code: string | null | undefined) => {
 }
 
 const resetState = () => {
+  vi.stubGlobal('useEulerAddresses', () => ({ chainId: { value: 1 } }))
   __setEulerLabelsDataForTest()
   clearAssetGeoCache()
   getVaultMock.mockReset()

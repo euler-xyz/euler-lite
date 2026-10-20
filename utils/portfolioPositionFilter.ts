@@ -1,30 +1,44 @@
 import { getAddress } from 'viem'
-import type { Portfolio, PortfolioPositionFilter, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, isEulerEarn, isSecuritizeCollateralVault, type Portfolio, type PortfolioPositionFilter, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { useEulerLabels } from '~/composables/useEulerLabels'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { isVisiblePortfolioPosition } from '~/utils/portfolioVisibility'
 
-export const hydrateHeldMetadataVaults = async (portfolio: Portfolio<VaultEntity>): Promise<void> => {
-  const { source, vaultCandidates, earnCandidates } = useEulerLabels()
-  if (source.value !== 'v3-metadata') return
-
-  const { get, getOrFetch } = useVaultRegistry()
-  const candidates = new Set([...vaultCandidates.value, ...earnCandidates.value].map(address => getAddress(address).toLowerCase()))
-  const held = new Set<string>()
-  const addCandidate = (address: string | undefined) => {
+/** Populate held metadata before publishing positions, independently of discovery membership. */
+export const hydrateHeldVaults = async (portfolio: Portfolio<VaultEntity>): Promise<void> => {
+  const chainId = portfolio.account.chainId
+  const { chainId: activeChainId } = useEulerAddresses()
+  if (chainId !== activeChainId.value) return
+  const { get, set, getOrFetch } = useVaultRegistry()
+  const held = new Map<string, VaultEntity | undefined>()
+  const add = (address: string | undefined, vault?: VaultEntity) => {
     if (!address) return
     const normalized = getAddress(address).toLowerCase()
-    if (candidates.has(normalized) && !get(normalized)) held.add(normalized)
+    const existing = get(normalized)
+    if (existing && !existing.portfolioOnly) return
+    const resolved = vault?.chainId === chainId && vault.address.toLowerCase() === normalized && vault.asset?.address
+      ? vault
+      : undefined
+    held.set(normalized, resolved ?? held.get(normalized))
   }
 
-  for (const saving of portfolio.savings) addCandidate(saving.position.vaultAddress)
-  for (const borrow of portfolio.borrows) {
-    addCandidate(borrow.borrow.vaultAddress)
-    for (const collateral of borrow.collateralVaults) addCandidate(collateral)
-    for (const collateral of borrow.borrow.liquidity?.collaterals ?? []) addCandidate(collateral.address)
-    for (const collateral of portfolio.account.getSubAccount(borrow.borrow.account)?.enabledCollaterals ?? []) addCandidate(collateral)
+  for (const saving of portfolio.savings) add(saving.position.vaultAddress, saving.vault ?? saving.position.vault)
+  for (const position of portfolio.borrows) {
+    add(position.borrow.vaultAddress, position.borrowVault ?? position.borrow.vault)
+    for (const collateral of position.collaterals ?? []) add(collateral.vaultAddress, collateral.vault)
+    for (const address of position.collateralVaults) add(address, position.collateralVault?.address.toLowerCase() === address.toLowerCase() ? position.collateralVault : undefined)
+    for (const collateral of position.borrow.liquidity?.collaterals ?? []) add(collateral.address, collateral.vault)
+    for (const address of portfolio.account.getSubAccount(position.borrow.account)?.enabledCollaterals ?? []) add(address)
   }
-  await Promise.all([...held].map(address => getOrFetch(address)))
+
+  // Register populated SDK objects synchronously. Only unresolved entries need RPC.
+  const unresolved: string[] = []
+  for (const [address, vault] of held) {
+    const type = vault && (isEVault(vault) ? 'evk' : isEulerEarn(vault) ? 'earn' : isSecuritizeCollateralVault(vault) ? 'securitize' : undefined)
+    if (vault && type) set(address, vault, type, { verified: false, portfolioOnly: true }, chainId)
+    else if (!get(address)) unresolved.push(address)
+  }
+  await Promise.all(unresolved.map(address => getOrFetch(address, { portfolioOnly: true })))
 }
 
 export const buildVisiblePortfolioPositionFilter = (): PortfolioPositionFilter<VaultEntity> => {

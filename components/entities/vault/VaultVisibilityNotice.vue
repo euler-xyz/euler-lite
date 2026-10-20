@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { getNotListedLine } from '~/utils/vault-assessment/presentation'
+import { getFlaggedVaultLine, getFlaggedVerdict } from '~/utils/vault-assessment/flagged'
 
 const props = defineProps<{ address: string }>()
 const { isReady, source, visibility } = useEulerLabels()
 const line = computed(() => {
-  if (!isReady.value || source.value !== 'v3') return null
-  const verdict = visibility.value?.[props.address.toLowerCase()]
-  return getNotListedLine(verdict?.status, verdict?.reason, verdict?.decidedBy)
+  if (!isReady.value) return null
+  const verdict = getFlaggedVerdict(props.address, source.value, visibility.value)
+  return verdict ? getFlaggedVaultLine(verdict.reason) : null
 })
 </script>
 
@@ -14,7 +14,7 @@ const line = computed(() => {
   <p
     v-if="line"
     class="text-p4 text-content-tertiary"
-    data-id="vault-not-listed"
+    data-id="vault-flagged"
   >
     {{ line }}
   </p>

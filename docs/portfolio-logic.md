@@ -218,7 +218,7 @@ totalBorrowedValue = sum of:
   - SDK totalBorrowedValueUsd
 ```
 
-Both are computed reactively and update when position data changes.
+Both are computed reactively and update when position data changes. Those SDK totals sum **priced** positions only. `portfolioPricingGaps` flags unpriced savings, collateral, and debt so Portfolio can show Partial pricing instead of treating a partial subtotal as complete. See [Pricing System → Unpriced and partial USD](./pricing-system.md#unpriced-and-partial-usd).
 
 ## Pyth Oracle Handling
 

@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getAddress } from 'viem'
 import type { Portfolio, VaultEntity } from '@eulerxyz/euler-v2-sdk'
-import { buildVisiblePortfolioPositionFilter, hydrateHeldMetadataVaults } from '~/utils/portfolioPositionFilter'
+import { buildVisiblePortfolioPositionFilter, hydrateHeldVaults } from '~/utils/portfolioPositionFilter'
 
 const state = vi.hoisted(() => ({
   source: 'v3',
@@ -41,10 +41,12 @@ const hidden = getAddress('0x2000000000000000000000000000000000000000')
 const pending = getAddress('0x3000000000000000000000000000000000000000')
 const unknown = getAddress('0x4000000000000000000000000000000000000000')
 const position = (vaultAddress: string) => ({ account: owner, vaultAddress, borrowed: 0n })
-const account = { getSubAccount: () => undefined }
+const account = { chainId: 1, getSubAccount: () => undefined }
 
 describe('V3 portfolio position filter', () => {
+  beforeEach(() => vi.stubGlobal('useEulerAddresses', () => ({ chainId: { value: 1 } })))
   afterEach(() => {
+    vi.unstubAllGlobals()
     state.source = 'v3'
     state.visibility = {}
     state.vaultCandidates = []
@@ -98,12 +100,12 @@ describe('V3 portfolio position filter', () => {
         borrow: { account: owner, vaultAddress: pending, liquidity: { collaterals: [{ address: unknown }] } },
         collateralVaults: [unknown],
       }],
-      account: { getSubAccount: () => ({ enabledCollaterals: [unknown] }) },
+      account: { chainId: 1, getSubAccount: () => ({ enabledCollaterals: [unknown] }) },
     } as unknown as Portfolio<VaultEntity>
     const context = { account } as unknown as Parameters<ReturnType<typeof buildVisiblePortfolioPositionFilter>>[1]
 
     expect(buildVisiblePortfolioPositionFilter()(position(hidden) as Parameters<ReturnType<typeof buildVisiblePortfolioPositionFilter>>[0], context)).toBe(false)
-    await hydrateHeldMetadataVaults(portfolio)
+    await hydrateHeldVaults(portfolio)
     expect(state.resolved).toEqual([hidden.toLowerCase(), pending.toLowerCase(), unknown.toLowerCase()])
 
     state.verifiedMetadata.add(hidden.toLowerCase())

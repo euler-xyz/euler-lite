@@ -125,7 +125,11 @@ watchEffect(async () => {
             :addresses="[vault.address]"
           />
           <GovernanceLimitedBadge v-if="isGovernanceLimited" />
-          <RestrictedBadge v-if="isGeoBlocked" />
+          <RestrictedBadge
+            v-if="isGeoBlocked"
+            :vault-addresses="[vault.address]"
+            :chain-id="vault.chainId"
+          />
           <VaultDeprecatedBadge :addresses="[vault.address]" />
           <VaultAssessmentWarning
             :address="vault.address"

@@ -7,7 +7,7 @@ import { computeMultipliedPriceImpact } from '~/utils/priceImpact'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { createRaceGuard } from '~/utils/race-guard'
-import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
+import { getVaultGeoUnavailableReason, isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { isEVault, SwapperMode, type EVault, type PortfolioBorrowPosition, type SwapQuote, type TransactionPlan, type TransactionPlanPrepared, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
@@ -1064,8 +1064,8 @@ const isMultiplyRestricted = computed(() => {
 const reviewMultiplyDisabled = computed(() => isGeoBlocked.value || isMultiplyRestricted.value || isMultiplySubmitDisabled.value)
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
-  if (isMultiplyRestricted.value) return { message: 'Multiply is not available for this pair in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: getVaultGeoUnavailableReason(multiplyLongVault.value?.address, multiplyShortVault.value?.address) || 'This operation is not available in your region', variant: 'warning' }
+  if (isMultiplyRestricted.value) return { message: getVaultGeoUnavailableReason(multiplyLongVault.value?.address, multiplyShortVault.value?.address) || 'Multiply is not available for this pair in your region', variant: 'warning' }
   if (multiplyErrorText.value) return { message: multiplyErrorText.value, variant: 'error' }
   if (multiplySimulationError.value) return { message: multiplySimulationError.value, variant: 'error' }
   if (!multiplyIsSameAsset.value && isMultiplyQuoteLoading.value && multiplyDebtAmountNano.value > 0n) return { message: 'Fetching swap quotes...', variant: 'warning' }
@@ -1206,19 +1206,16 @@ watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
               :readonly="true"
             />
 
-            <UiAlert
+            <GeoBlockAlert
               v-if="isGeoBlocked"
-              title="Region restricted"
+              :vault-addresses="[multiplyLongVault?.address, multiplyShortVault?.address]"
               description="This operation is not available in your region. You can still repay existing debt."
-              variant="warning"
-              size="compact"
             />
-            <UiAlert
+            <GeoBlockAlert
               v-if="!isGeoBlocked && isMultiplyRestricted"
+              :vault-addresses="[multiplyLongVault?.address, multiplyShortVault?.address]"
               title="Asset restricted"
               description="Multiply is not available for this pair in your region."
-              variant="warning"
-              size="compact"
             />
             <UiAlert
               v-show="multiplyErrorText"

@@ -217,7 +217,11 @@ watchEffect(async () => {
           <KeyringBadge v-if="isKeyring && isGovernorVerified" />
           <GovernanceLimitedBadge v-if="isGovernanceLimited" />
           <CyclicalNoteBadge v-if="isCyclicalNote && isGovernorVerified" />
-          <RestrictedBadge v-if="isGeoBlocked" />
+          <RestrictedBadge
+            v-if="isGeoBlocked"
+            :vault-addresses="[vault.address]"
+            :chain-id="vault.chainId"
+          />
           <VaultDeprecatedBadge :addresses="[vault.address]" />
           <LiquidationCoverageBadge :vault="vault" />
           <VaultAssessmentWarning

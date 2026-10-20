@@ -2,7 +2,7 @@ import { createGeoPolicySource } from './geo-policy-source'
 import { createTtlCache } from './cache'
 import { fetchWithTimeout, withWallClock } from './fetchWithTimeout'
 import { createInFlightDedup } from './in-flight'
-import { readLabelsSource, readV3LabelsSelection, isLabelsOnchainVerificationChain, readLabelsVaultTag } from './labels-base-url'
+import { readLabelsSource, readV3LabelsSelection, isLabelsOnchainVerificationChain, readLabelsVaultTag, readHostedLabelImageOrigins } from './labels-base-url'
 import { getStaticLabelsBundle } from './static-labels-source'
 import { logger } from './logger'
 import { loadEulerChains, peekEulerChains } from '~/server/api/internal/euler-chains.get'
@@ -20,6 +20,7 @@ import {
 } from '~/utils/public-labels'
 import { readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-url-env'
 import { isLabelsSnapshotUsable, LABELS_MAX_STALE_MS } from '~/utils/labels-freshness'
+import { resolveLabelLogo } from '~/utils/label-logo'
 
 const CACHE_TTL_MS = 300_000
 const REFRESH_BUDGET_MS = 30_000
@@ -66,10 +67,28 @@ const buildRequest = (): PublicLabelsRequest => async <T>(
   return await response.json() as PublicLabelsResponse<T>
 }
 
-// Cached source data is complete; deployment selection is attached on every read.
-const withVaultTag = (bundle: PublicLabelsBundle): PublicLabelsBundle => {
+// Cached source data is complete; deployment policy is attached on every read.
+const withDeploymentConfig = (bundle: PublicLabelsBundle): PublicLabelsBundle => {
+  let configuredBundle = bundle
+  if (bundle.source !== 'static') {
+    const allowedOrigins = readHostedLabelImageOrigins()
+    const labels = bundle.publicLabels
+    const logos = [
+      ...labels.entities.map(entity => entity.logo),
+      ...labels.products.map(product => product.logo),
+      ...labels.vaults.flatMap(vault => (vault.campaigns ?? []).map(campaign => campaign.logo)),
+    ]
+    const usedOrigins = new Set(logos.flatMap((logo) => {
+      const resolved = resolveLabelLogo(logo ?? undefined, undefined, allowedOrigins)
+      return resolved ? [new URL(resolved).origin] : []
+    }))
+    // Do not publish a private V3 origin merely because it is configured.
+    // The browser only receives origins already present in approved logo URLs.
+    const logoOrigins = allowedOrigins.filter(origin => usedOrigins.has(origin))
+    if (logoOrigins.length) configuredBundle = { ...bundle, logoOrigins }
+  }
   const vaultTag = readLabelsVaultTag()
-  return vaultTag ? { ...bundle, vaultTag } : bundle
+  return vaultTag ? { ...configuredBundle, vaultTag } : configuredBundle
 }
 
 const hasUsableGeo = (bundle: HostedLabelsBundle): boolean =>
@@ -138,14 +157,14 @@ function refreshV3PublicLabelsBundle(
       }
       throw err
     }
-  }).then(withVaultTag)
+  }).then(withDeploymentConfig)
 }
 
 export function refreshPublicLabelsBundle(
   chainId: number,
   version?: string,
 ): Promise<PublicLabelsBundle> {
-  if (readLabelsSource() === 'static') return getStaticLabelsBundle(chainId, true).then(withVaultTag)
+  if (readLabelsSource() === 'static') return getStaticLabelsBundle(chainId, true).then(withDeploymentConfig)
   const selection = readV3LabelsSelection()
   const selectedVersion = version ?? selection.version
   return loadEulerChains().then(manifest => refreshV3PublicLabelsBundle(
@@ -163,21 +182,21 @@ export function getCachedPublicLabelsBundle(chainId: number, version?: string): 
   if (!manifest) return undefined
   const selection = readV3LabelsSelection()
   const hit = cache.get(cacheKey(chainId, selection.labelSet, version ?? selection.version, isMetadataOnlyChain(chainId, manifest)))
-  return hit && hasUsableGeo(hit) ? withVaultTag(hit) : undefined
+  return hit && hasUsableGeo(hit) ? withDeploymentConfig(hit) : undefined
 }
 
 export async function getPublicLabelsBundle(
   chainId: number,
   version?: string,
 ): Promise<PublicLabelsBundle> {
-  if (readLabelsSource() === 'static') return getStaticLabelsBundle(chainId).then(withVaultTag)
+  if (readLabelsSource() === 'static') return getStaticLabelsBundle(chainId).then(withDeploymentConfig)
   const selection = readV3LabelsSelection()
   const selectedVersion = version ?? selection.version
   const manifest = await loadEulerChains()
   const metadataOnly = isMetadataOnlyChain(chainId, manifest)
   const hit = cache.get(cacheKey(chainId, selection.labelSet, selectedVersion, metadataOnly))
   return hit && hasUsableGeo(hit)
-    ? withVaultTag(hit)
+    ? withDeploymentConfig(hit)
     : refreshV3PublicLabelsBundle(chainId, selection.labelSet, selectedVersion, metadataOnly)
 }
 

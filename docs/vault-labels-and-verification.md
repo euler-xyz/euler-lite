@@ -100,7 +100,18 @@ Lookup rules:
 
 For V3-assessed chains, `useEulerLabels` builds verified membership from visible or warning vaults with a managing entity. The client and `/api/public/is-known` use that membership as the verification verdict. Hidden and pending-review vaults can retain display metadata without becoming verified. Independent on-chain escrow-perspective membership also counts as verified.
 
-Vault configuration checks and listing are separate V3 results. A vault can have passed checks and still be unlisted because it has no published vault label. The Vault checks UI says "Checks passed" for that assessment. The separate listing notice comes from the visibility verdict and its `decidedBy` reason.
+Vault configuration checks and listing are separate V3 results. A vault can have passed checks and still be unlisted because it has no published vault label. The Vault checks UI says "Checks passed" for that assessment.
+
+### Unknown and flagged vaults
+
+The UI sorts every vault that is not verified into one of two groups.
+
+- **Flagged**: the V3 verdict is `hidden`. V3 hides a vault when a required check failed, when a check layer was suspended or revoked, or when the vault was marked as not to be listed. The vault keeps its real name and shows an amber "Flagged" chip; on a borrow pair the chip reads "Collateral flagged" or "Borrow flagged". The chip's tooltip is titled "Vault flagged" and shows V3's reason, or "Euler's checks flagged this vault." when there is none. The line under the name and the cause line under the checks read "Euler's checks flagged this vault: <reason>." The Curator value in the overview reads "Flagged".
+- **Unknown**: every other vault that is not verified. This covers a vault with no V3 verdict, a `pending_review` verdict, and a vault that fails the verification rules (for example, no managing entity). The name and the Curator show the red "Unknown" chip. No line is shown under the name. The cause line under the checks reads "This vault has not been checked yet." (no verdict, or pending review), "This vault is not in the published vault labels." (unclaimed), or "This vault is in the published vault labels but could not be verified." (no managing entity).
+
+`visible` and `warning` vaults with a managing entity are verified and get neither treatment. The "Deprecated", "Warning" and "Restricted" chips are unchanged. The "Warning" chip (and "Collateral warning" / "Borrow warning" on a pair) is still left out when its only failed checks were accepted exceptions. No vault state is described as "not listed". Flagged status needs ready V3 labels. Static and metadata-only sources never flag a vault.
+
+The Lend, Borrow and Earn vault pages open a pop-up once per page, after the vault and the labels have loaded. No wallet is needed. On Borrow, the pop-up opens when either side of the pair is unknown or flagged. If any vault is unknown, the pop-up is the strict one: "Important!", a phishing warning, Yes / Cancel, and Cancel goes to `/`. If every vault that is not verified is flagged, the pop-up is titled "Vault flagged", gives V3's reason, and offers Continue / Go back. Go back returns to the previous page, or to `/` when there is none. Neither pop-up closes from the backdrop. `composables/useVaultOpeningNotice.ts` holds this logic.
 
 Metadata-only and static sources have no V3 visibility verdict. Their verification path matches the on-chain governor, router governor, or Earn owner to the declared managing entity. See `utils/vault/governor-verification.ts` and the "Programmatic verification lookup" section below.
 
@@ -109,6 +120,14 @@ Metadata-only and static sources have no V3 visibility verdict. Their verificati
 Operation guards use the selected chain's verification source. Wallet connection and chain switching remain available before other form gates. New exposure waits for verification data or presents a retry action when that data is unavailable. A V3 `pending_review` verdict keeps the vault out of discovery and requires explicit unverified-vault acknowledgment before deposits and borrows. Existing-position exits remain available during a labels outage.
 
 Vault pages show status in the page. Forms request explicit, account- and operation-scoped acknowledgment for unverified vault risk and a separate acknowledgment for deposits into deprecated vaults. The final execution policy checks the same requirements.
+
+The acknowledgment covers every vault the operation targets, not only the vault of the page. Each form passes the vaults of its operation to `useOperationGuard`, for example the target collateral of a swap and the long vault of a multiply. Repay and position withdraw build that list with `collectPlannerVaultAddresses`, the rule the final policy uses. The final policy checks the acknowledgment against the vaults named in the planner arguments, so a vault a form leaves out blocks the transaction. If every unverified vault in the operation is flagged, the form's button reads "Review flagged vault". The confirmation then reads "This transaction uses a flagged vault: <reason>." with Confirm / Cancel. If any vault is unknown, the strict "Unverified vault" confirmation applies. The batch review reads its vaults from each entry's calldata (EVC batch targets, direct-call targets and approval spenders). It uses the same two texts.
+
+Known gaps:
+
+- The disable-collateral action on the position page has no form guard. For a collateral that is not verified, the final execution policy refuses that transaction, and no confirmation is shown first.
+- The position borrow page lists the collateral beside the borrow vault, and the position swap page lists both sides of the position. Their planner arguments can name fewer vaults. When both a listed-only vault and a planned vault are unverified, the recorded acknowledgment does not match, and the final policy refuses the transaction.
+- The batch review does not decode vaults that appear only as arguments of EVC calls, such as `enableCollateral`, and skips vaults that are not in the registry. The form guard and the final policy still cover those vaults.
 
 ### Governance hydration guard (SDK 2.0)
 

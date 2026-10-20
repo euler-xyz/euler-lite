@@ -161,6 +161,43 @@ describe('public labels server source', () => {
     expect(await getPublicLabelsBundle(1)).not.toHaveProperty('vaultTag')
   })
 
+  it('shares only approved image origins used by the snapshot, keeping private backend configuration out of responses', async () => {
+    vi.stubEnv('RPC_URL_1', 'https://rpc.example.test')
+    vi.stubEnv('DEPRECATED_CHAINS', '1')
+    vi.stubEnv('ONCHAIN_SDK_CHAINS', '1')
+    vi.stubEnv('V3_API_URL', 'https://private-v3.example.test')
+    vi.stubEnv('LABELS_IMAGE_ORIGINS', 'https://images.fork.test,https://points.fork.test,https://products.fork.test,https://unused.fork.test')
+    const labels = structuredClone(publicLabelsFixture)
+    labels.entities[0].logo = 'https://images.fork.test/curator.svg'
+    labels.entities[1].logo = 'https://unapproved.test/curator.svg'
+    labels.products[0].logo = 'https://products.fork.test/product.svg'
+    labels.vaults[0].campaigns![0].logo = 'https://points.fork.test/points.svg'
+    const json = (data: unknown[]) => Response.json({ data, meta: { total: data.length, timestamp: new Date().toISOString() } })
+    mocks.fetchWithTimeout.mockImplementation(async (input: string) => {
+      const path = new URL(input).pathname
+      if (path.endsWith('/versions')) return versionsResponse()
+      if (path === '/v3/labels/vaults') return json(labels.vaults)
+      if (path === '/v3/labels/products') return json(labels.products)
+      if (path === '/v3/labels/entities') return json(labels.entities)
+      if (path.endsWith('/addresses')) return json(labels.entityAddresses.filter(row => row.entityId === path.split('/')[4]))
+      if (path.startsWith('/v3/labels/entities/')) return Response.json({
+        data: labels.entities.find(row => row.id === path.split('/')[4]),
+        meta: { timestamp: new Date().toISOString() },
+      })
+      return emptyListResponse()
+    })
+    const { getPublicLabelsBundle, getCachedPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
+    const bundle = await getPublicLabelsBundle(1)
+    expect(bundle).toMatchObject({ logoOrigins: ['https://images.fork.test', 'https://points.fork.test', 'https://products.fork.test'] })
+    expect(JSON.stringify(bundle)).not.toContain('private-v3.example.test')
+    expect(JSON.stringify(bundle)).not.toContain('unused.fork.test')
+    const fetchCount = mocks.fetchWithTimeout.mock.calls.length
+    vi.stubEnv('LABELS_IMAGE_ORIGINS', 'https://images.fork.test')
+    expect(getCachedPublicLabelsBundle(1)).toMatchObject({ logoOrigins: ['https://images.fork.test'] })
+    expect(await getPublicLabelsBundle(1)).toMatchObject({ logoOrigins: ['https://images.fork.test'] })
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(fetchCount)
+  })
+
   it('includes the deployment selection with static snapshots', async () => {
     vi.stubEnv('LABELS_SOURCE', 'static')
     vi.stubEnv('STATIC_LABELS_BASE_URL', 'https://fork.test')

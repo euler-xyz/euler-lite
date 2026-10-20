@@ -324,10 +324,14 @@ const linkPath = computed(() => ({
             <CyclicalNoteBadge v-if="isCyclicalNote && !isAnyGovernorUnverified" />
             <RestrictedBadge
               v-if="isGeoBlocked"
+              :vault-addresses="[pair.collateral.address, pair.borrow.address]"
+              :chain-id="pair.borrow.chainId"
               variant="blocked"
             />
             <RestrictedBadge
               v-else-if="isGeoRestricted"
+              :vault-addresses="[pair.collateral.address, pair.borrow.address]"
+              :chain-id="pair.borrow.chainId"
               variant="restricted"
             />
             <VaultDeprecatedBadge :addresses="[pair.collateral.address, pair.borrow.address]" />
@@ -340,13 +344,13 @@ const linkPath = computed(() => ({
               :family="isSecuritizeBorrowPair(pair) ? null : 'evk'"
               :hide-deprecated="isAnyDeprecated"
               :hide-checks="assessmentUi !== 'badge'"
-              badge-label="Collateral warning"
+              pair-side="collateral"
             />
             <VaultAssessmentWarning
               :address="pair.borrow.address"
               :hide-deprecated="isAnyDeprecated"
               :hide-checks="assessmentUi !== 'badge'"
-              badge-label="Borrow warning"
+              pair-side="borrow"
             />
           </div>
           <div

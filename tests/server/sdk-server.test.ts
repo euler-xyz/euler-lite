@@ -175,6 +175,40 @@ describe('getServerSdk', () => {
     expect(providerService.getProvider(1)).toBe(providerService.getProvider(1))
     expect(() => providerService.getProvider(146)).toThrow('No provider configured for chainId 146')
   })
+  it('disables optional V3 utilities as well as adapters for an explicit opt-out', async () => {
+    vi.stubEnv('DISABLE_V3', 'true')
+    const priceService = { setBackendClient: vi.fn() }
+    const tokenlistService = { setQueryTokenList: vi.fn() }
+    mocks.buildEulerSDK.mockResolvedValue({ priceService, tokenlistService })
+    const { getServerSdk } = await import('~/server/utils/sdk-server')
+    await getServerSdk(1)
+    const options = mocks.buildEulerSDK.mock.calls[0]?.[0]
+    expect(options.config.disableV3).toBe(true)
+    expect(priceService.setBackendClient).toHaveBeenCalledWith(undefined)
+    expect(tokenlistService.setQueryTokenList).toHaveBeenCalledOnce()
+    expect(await options.servicesOverrides.intrinsicApyService.fetchChainIntrinsicApys(1)).toEqual(new Map())
+  })
+  it('passes an explicit false through to the SDK when the Lite setting overrides its alias', async () => {
+    vi.stubEnv('DISABLE_V3', 'false')
+    vi.stubEnv('EULER_SDK_DISABLE_V3', 'true')
+    const { getServerSdk } = await import('~/server/utils/sdk-server')
+    await getServerSdk(1)
+    expect(mocks.buildEulerSDK.mock.calls[0]?.[0].config.disableV3).toBe(false)
+  })
+
+  it('keeps registry network selection and custom ABIs with V3 disabled in a real SDK', async () => {
+    vi.stubEnv('DISABLE_V3', 'true')
+    vi.stubEnv('NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL', 'https://abis.example/fork')
+    mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(accountLensAbi))
+    const { getServerSdk } = await import('~/server/utils/sdk-server')
+    const sdk = await getServerSdk(463)
+    expect(sdk.providerService.getProvider(463).chain?.name).toBe('Areon Network')
+    await expect(sdk.abiService.fetchABI(463, 'AccountLens')).resolves.toEqual(accountLensAbi)
+    await expect(sdk.tokenlistService.loadTokenlist(463)).resolves.toEqual([])
+    await expect(sdk.intrinsicApyService.fetchChainIntrinsicApys(463)).resolves.toEqual(new Map())
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledExactlyOnceWith('https://abis.example/fork/AccountLens.json')
+    expect(fetch).not.toHaveBeenCalled()
+  })
 
   it('hands the server-only Turtle key and fixed upstream to the rewards adapters', async () => {
     process.env.TURTLE_EARN_API_KEY = ' turtle-secret '

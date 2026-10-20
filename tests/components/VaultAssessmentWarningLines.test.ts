@@ -67,8 +67,8 @@ describe('vault assessment warning lines', () => {
   it('states why an unknown vault is unknown first and lists its failing checks as errors', async () => {
     const html = await render({
       [usdt]: assessmentWith([{ key: 'liquidation.max-discount', description: 'The maximum liquidation discount is 3.5%, outside the 5% to 20% Euler accepts.', outcome: 'fail', required: false }]),
-    }, false, { unverified: true, cause: 'This vault is not listed: the configuration check failed.' })
-    const cause = html.indexOf('This vault is not listed: the configuration check failed.')
+    }, false, { unverified: true, cause: 'This vault has not been checked yet.' })
+    const cause = html.indexOf('This vault has not been checked yet.')
     const check = html.indexOf('The maximum liquidation discount is 3.5%')
     expect(cause).toBeGreaterThan(-1)
     expect(check).toBeGreaterThan(cause)
@@ -79,7 +79,7 @@ describe('vault assessment warning lines', () => {
   it('shows the undecided required check that keeps an unknown vault unlisted as an error, by its cause', async () => {
     const html = await render({
       [usdt]: assessmentWith([{ key: 'oracle.adapters-recognized', description: 'Some oracle route adapters have not been assessed yet', outcome: 'unknown', required: true, cause: { code: 'adapters-pending', subject: 'vault', summary: 'Euler has not finished checking 4 adapters on the oracle routes.', remedy: null } }]),
-    }, false, { unverified: true, cause: 'This vault is not listed in the published vault labels.' })
+    }, false, { unverified: true, cause: 'This vault is not in the published vault labels.' })
     expect(html).toContain('Euler has not finished checking 4 adapters on the oracle routes.')
     expect(html).toContain('data-tone="error"')
     expect(html).not.toContain('data-tone="muted"')

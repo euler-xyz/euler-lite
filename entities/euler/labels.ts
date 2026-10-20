@@ -48,8 +48,10 @@ export const eulerLabelProductEmpty = {
   vaultOverrides: {},
 } as EulerLabelProduct
 
-export const getEulerLabelEntityLogo = (fileName: string) =>
-  resolveLabelLogo(fileName, getEulerLabelsSourceData().logoBaseUrl)
+export const getEulerLabelEntityLogo = (fileName: string) => {
+  const { logoBaseUrl, logoOrigins } = getEulerLabelsSourceData()
+  return resolveLabelLogo(fileName, logoBaseUrl, logoOrigins)
+}
 
 export const getEulerLabelPointLogo = getEulerLabelEntityLogo
 

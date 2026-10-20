@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import type { VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
 import { hasOnlyAcceptedVaultCheckFindings } from '~/utils/vault-assessment/presentation'
+import { FLAGGED_VAULT_LABEL, FLAGGED_VAULT_TITLE, PAIR_SIDE_BADGE_LABELS, getFlaggedVaultLine, type VaultPairSide } from '~/utils/vault-assessment/flagged'
 
-const { address, hideDeprecated = false, hideChecks = false, badgeLabel, family = 'evk' } = defineProps<{
+const { address, hideDeprecated = false, hideChecks = false, pairSide, family = 'evk' } = defineProps<{
   address: string
   hideDeprecated?: boolean
   hideChecks?: boolean
-  badgeLabel?: string
+  pairSide?: VaultPairSide
   family?: VaultAssessmentFamily | null
 }>()
 
@@ -49,12 +50,22 @@ const warning = computed(() => {
       description: verdict.value.reason || 'Some checks could not be completed for this vault.',
     }
   }
-  return {
-    title: verdict.value.status === 'hidden' ? 'Vault not listed' : 'Vault checks',
-    description: verdict.value.reason || (verdict.value.status === 'hidden'
-      ? 'This vault is not listed.'
-      : 'One or more vault checks need review.'),
+  if (verdict.value.status === 'hidden') {
+    return {
+      title: FLAGGED_VAULT_TITLE,
+      description: verdict.value.reason || getFlaggedVaultLine(null),
+    }
   }
+  return {
+    title: 'Vault checks',
+    description: verdict.value.reason || 'One or more vault checks need review.',
+  }
+})
+const badgeLabel = computed(() => {
+  const flagged = verdict.value?.status === 'hidden'
+  if (pairSide) return PAIR_SIDE_BADGE_LABELS[pairSide][flagged ? 'flagged' : 'warning']
+  if (verdict.value?.decidedBy === 'deprecated') return 'Deprecated'
+  return flagged ? FLAGGED_VAULT_LABEL : 'Warning'
 })
 </script>
 
@@ -75,7 +86,7 @@ const warning = computed(() => {
         name="warning"
         class="!h-14 !w-14"
       />
-      {{ badgeLabel || (verdict?.decidedBy === 'deprecated' ? 'Deprecated' : verdict?.status === 'hidden' ? 'Not listed' : 'Warning') }}
+      {{ badgeLabel }}
     </span>
   </UiHoverPreviewTooltip>
 </template>

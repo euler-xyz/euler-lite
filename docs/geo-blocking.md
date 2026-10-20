@@ -115,11 +115,13 @@ The browser tracks geo-rule and labels timestamps separately. Hosted geo rules b
 
 ## Helper functions
 
-- `isVaultBlockedByCountry(address, { asset? })` combines sanctions and matching V3 block policies.
-- `isVaultRestrictedByCountry(address, { asset?, counterpart? })` evaluates soft restrictions.
+- `isVaultBlockedByCountry(vaultOrAddress, { asset? })` combines sanctions and matching block policies. `hydrateHeldVaults` registers chain-matched SDK portfolio vaults before positions are published, with registry resolution as a fallback for missing objects. This covers hosted and static labels independently of listing status, so address-based portfolio, detail and action checks can resolve their underlying assets. Newly held entries are unverified and portfolio-only: discovery groups, collateral discovery and token suggestions exclude them; portfolio refreshes update them without promoting them. Discovery loads can register them normally. Stale vault or hosted policy chain context fails closed, including address-only calls while a hosted policy snapshot belongs to another chain.
+- `getVaultGeoBlockReason(vaultOrAddress)` distinguishes a confirmed `region` restriction from unavailable country, policy or asset data and chain mismatches. Portfolio badges and detail headers display geographic restrictions only for `region`; eligibility helpers retain missing-data safeguards and the policy-outage exit exception.
+- `getVaultGeoUnavailableReason(...vaults)` supplies availability-specific copy to `GeoBlockAlert` and disabled-action explanations. `RestrictedBadge` requires matching geographic evidence. Unknown country, unavailable policies and missing assets do not claim a confirmed geographic restriction. Each form retains its operation-specific eligibility checks, including the policy-outage exit exception.
+- `isVaultRestrictedByCountry(vaultOrAddress, { asset?, counterpart? })` evaluates soft restrictions.
 - `isAnyVaultBlockedByCountry` / `isAnyVaultRestrictedByCountry` combine decisions across vaults.
 - `isAssetBlockedByCountry` / `isAssetRestrictedByCountry` evaluate standalone asset choices.
-- `getVaultTags(address, context)` presents restrictions and deprecation. `swap-target` disables soft-restricted destinations; `supply-source` permits existing exposure to be used for repayment.
+- `getVaultTags(vaultOrAddress, context)` presents restrictions and deprecation. `swap-target` disables soft-restricted destinations; `supply-source` permits existing exposure to be used for repayment.
 - `useGeoBlock().isPolicyAvailable` distinguishes successful empty data from unavailable data.
 
 ## UI Enforcement

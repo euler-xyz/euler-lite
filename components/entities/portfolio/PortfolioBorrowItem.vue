@@ -423,20 +423,11 @@ const openPositionInformationModal = () => {
                     :address="primaryCollateralAddress"
                     hide-deprecated
                   />
-                  <UiHoverPreviewTooltip
+                  <RestrictedBadge
                     v-if="isGeoBlocked"
-                    title="Region restricted"
-                    text="This vault is not available in your region"
-                    placement="top-start"
-                  >
-                    <span class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5 shrink-0">
-                      <SvgIcon
-                        name="warning"
-                        class="!w-14 !h-14"
-                      />
-                      Restricted
-                    </span>
-                  </UiHoverPreviewTooltip>
+                    :vault-addresses="[primaryCollateralAddress, borrowAddress]"
+                    :chain-id="position.borrowVault?.chainId"
+                  />
                   <VaultDeprecatedBadge :addresses="[borrowAddress, primaryCollateralAddress].filter(Boolean)" />
                   <LiquidationCoverageBadge
                     :vault="borrowVault"

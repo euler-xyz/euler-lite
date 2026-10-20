@@ -24,10 +24,21 @@ describe('vault identity marker', () => {
     expect(await renderName('static', true)).toContain('Unknown')
   })
 
-  it('keeps a known V3 vault name when its verdict is hidden or unavailable', async () => {
-    expect(await renderName('v3', true, 'hidden')).toContain('Vault A')
+  it('keeps a flagged V3 vault name, and the name while verification is unavailable', async () => {
+    const flagged = await renderName('v3', true, 'hidden')
+    expect(flagged).toContain('Vault A')
+    expect(flagged).not.toContain('Unknown')
     const expired = await renderName('v3', false)
     expect(expired).toContain('Vault A')
     expect(expired).not.toContain('Unknown')
+  })
+
+  it('calls a V3 vault with no verdict or a pending verdict Unknown', async () => {
+    const missing = await renderName('v3', true)
+    expect(missing).toContain('Unknown')
+    expect(missing).not.toContain('Vault A')
+    const pending = await renderName('v3', true, 'pending_review')
+    expect(pending).toContain('Unknown')
+    expect(pending).not.toContain('Vault A')
   })
 })

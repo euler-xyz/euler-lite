@@ -162,7 +162,7 @@ Start with `docs/README.md` (index) and `docs/architecture.md`. Notable topics:
 `development-guide.md`, `sdk-integration.md`, `transaction-building.md`, `server-side-caching.md`,
 `pricing-system.md`, `pyth-oracle-handling.md`, `portfolio-logic.md`,
 `vault-labels-and-verification.md`, `token-list.md`, `geo-blocking.md`, `tos-signing.md`,
-`keyring-hooks.md`, `public-api.md`, `intrinsic-apy.md`.
+`keyring-hooks.md`, `public-api.md`, `intrinsic-apy.md`, `reul-unlocks.md`.
 
 ## Euler protocol safety invariants
 

@@ -6,7 +6,7 @@ import { getHookDisabledWarning, getUtilisationWarning, getSupplyCapWarning } fr
 import { getAssetOraclePrice, getTokenUsdPrice } from '~/utils/sdk-prices'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo, combineApyWithIntrinsic, resolveVaultIntrinsicApySource } from '~/utils/vault-intrinsic-apy'
-import { isVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
+import { getVaultGeoUnavailableReason, isVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
@@ -352,9 +352,9 @@ const isSwapRestricted = computed(() => needsSwap.value && isVaultRestrictedByCo
 const isSourceAssetBlocked = computed(() => needsSwap.value && isAssetBlockedByCountry(selectedAsset.value))
 const reviewSupplyDisabled = computed(() => isGeoBlocked.value || isSwapRestricted.value || isSourceAssetBlocked.value || isSubmitDisabled.value)
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
-  if (isSourceAssetBlocked.value) return { message: 'Paying with this asset is not available in your region', variant: 'warning' }
-  if (isSwapRestricted.value) return { message: 'Swap deposits are not available in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: getVaultGeoUnavailableReason(vaultAddress) || 'This operation is not available in your region', variant: 'warning' }
+  if (isSourceAssetBlocked.value) return { message: getVaultGeoUnavailableReason(vaultAddress) || 'Paying with this asset is not available in your region', variant: 'warning' }
+  if (isSwapRestricted.value) return { message: getVaultGeoUnavailableReason(vaultAddress) || 'Swap deposits are not available in your region', variant: 'warning' }
   if (eVault.value && isOpDisabled(eVault.value, OP_DEPOSIT)) return { message: 'Deposits are currently disabled for this vault', variant: 'warning' }
   if (isSupplyCapReached.value) return { message: 'Supply cap has been reached', variant: 'warning' }
   if (errorText.value) return { message: errorText.value, variant: 'error' }
@@ -429,6 +429,7 @@ const lendWarnings = computed(() => {
 
 // Check if vault data is loaded
 const isVaultLoaded = computed(() => !!eVault.value || !!securitizeVault.value)
+useVaultOpeningNotice(() => isVaultLoaded.value ? [vaultAddress] : [])
 
 const load = async () => {
   isLoading.value = true
@@ -1186,26 +1187,22 @@ watch([
               />
             </template>
 
-            <UiAlert
+            <GeoBlockAlert
               v-if="isGeoBlocked"
-              title="Region restricted"
+              :vault-addresses="[vaultAddress]"
               description="This operation is not available in your region. You can still withdraw existing deposits."
-              variant="warning"
-              size="compact"
             />
-            <UiAlert
+            <GeoBlockAlert
               v-if="!isGeoBlocked && isSourceAssetBlocked"
+              :vault-addresses="[vaultAddress]"
               title="Asset restricted"
               description="Paying with this asset is not available in your region. Pick a different token."
-              variant="warning"
-              size="compact"
             />
-            <UiAlert
+            <GeoBlockAlert
               v-if="!isGeoBlocked && !isSourceAssetBlocked && isSwapRestricted"
+              :vault-addresses="[vaultAddress]"
               title="Swap restricted"
               description="Swapping into this vault is not available in your region. You can deposit the vault's underlying asset directly."
-              variant="warning"
-              size="compact"
             />
             <UiAlert
               v-show="errorText"

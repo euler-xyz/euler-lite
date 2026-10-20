@@ -238,7 +238,12 @@ const loadLabels = async (forceRefresh = false): Promise<void> => {
     }
   }
   catch (e) {
-    if (isCurrentLoad()) loadError.value = 'Unable to load vault verification. Please retry.'
+    if (isCurrentLoad()) {
+      const code = (e as { data?: { data?: { code?: unknown } } })?.data?.data?.code
+      loadError.value = code === 'LABELS_CONFIGURATION_ERROR'
+        ? 'Vault verification is unavailable because this app\'s labels configuration needs attention. Contact the app operator.'
+        : 'Unable to load vault verification. Please retry.'
+    }
     logWarn('labels/load', e)
   }
   finally {

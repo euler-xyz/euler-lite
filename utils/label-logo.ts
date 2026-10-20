@@ -1,5 +1,5 @@
-/** Hosted labels use Euler image endpoints. Static sources may serve their own images. */
-export const resolveLabelLogo = (value: string | undefined, staticBaseUrl?: string): string => {
+/** Accept Euler image endpoints, configured hosted origins, or the static source's images. */
+export const resolveLabelLogo = (value: string | undefined, staticBaseUrl?: string, trustedOrigins: readonly string[] = []): string => {
   if (!value) return ''
   try {
     const base = staticBaseUrl ? new URL(`${staticBaseUrl.replace(/\/+$/, '')}/logo/`) : undefined
@@ -13,7 +13,8 @@ export const resolveLabelLogo = (value: string | undefined, staticBaseUrl?: stri
         && !url.search && !url.hash)
     )
     const authored = base && url.origin === base.origin && ['http:', 'https:'].includes(url.protocol)
-    return hosted || authored ? url.href : ''
+    const configured = ['http:', 'https:'].includes(url.protocol) && trustedOrigins.includes(url.origin)
+    return hosted || authored || configured ? url.href : ''
   }
   catch { return '' }
 }
