@@ -67,8 +67,25 @@ export function createSubgraphResolver({
       return await withWallClock(async () => {
         const response = await fetch(url, { signal: controller.signal, redirect: 'error' })
         if (!response.ok) throw new Error('Catalog HTTP failure')
-        const text = await response.text()
-        if (text.length > 1_000_000) throw new Error('Catalog exceeds size limit')
+        if (!response.body) throw new Error('Catalog response has no body')
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let size = 0
+        let text = ''
+        try {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            size += value.byteLength
+            if (size > 1_000_000) {
+              void reader.cancel().catch(() => {})
+              throw new Error('Catalog exceeds size limit')
+            }
+            text += decoder.decode(value, { stream: true })
+          }
+          text += decoder.decode()
+        }
+        finally { reader.releaseLock() }
         return JSON.parse(text)
       }, 5_000, 'Subgraph catalog')
     }

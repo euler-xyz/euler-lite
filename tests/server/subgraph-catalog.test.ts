@@ -4,6 +4,16 @@ import { createSubgraphResolver, parseSubgraphCatalog } from '~/server/utils/sub
 
 const active = (chainId = 1) => ({ chainId, family: 'euler-simple', channel: 'stable', status: 'active', version: '1.2.3.4', endpoint: 'https://index.example/query', deploymentId: 'cid-1', capabilities: ['account-vault-discovery', 'vault-factory-lookup'], sourceCommit: 'a'.repeat(40), startBlock: 0 })
 const catalog = (deployments: unknown[] = [active()]) => ({ schemaVersion: 1, revision: 'r1', publishedAt: '2026-10-19T00:00:00Z', deployments })
+const streamedResponse = (chunks: Uint8Array[]) => {
+  let index = 0
+  const cancel = vi.fn()
+  const pull = vi.fn((controller: ReadableStreamDefaultController<Uint8Array>) => {
+    if (index < chunks.length) controller.enqueue(chunks[index++])
+    else controller.close()
+  })
+  const body = new ReadableStream<Uint8Array>({ pull, cancel }, { highWaterMark: 0 })
+  return { response: new Response(body), pull, cancel }
+}
 
 afterEach(() => {
   vi.useRealTimers()
@@ -85,12 +95,68 @@ describe('subgraph catalog resolution', () => {
     expect(fetchCatalog).toHaveBeenCalledTimes(2)
   })
 
+  it('cancels an oversized stream as soon as it crosses the byte limit', async () => {
+    const bytes = new TextEncoder().encode(JSON.stringify(catalog()).padEnd(1_000_001, ' '))
+    const { response, pull, cancel } = streamedResponse([
+      bytes.subarray(0, 500_000), bytes.subarray(500_000, 1_000_000), bytes.subarray(1_000_000),
+      new Uint8Array(100_000).fill(32),
+    ])
+    cancel.mockImplementation(() => new Promise<void>(() => {}))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response))
+    const resolve = createSubgraphResolver({ env: { SUBGRAPH_CATALOG_URL: 'https://fixture' } })
+    await expect(resolve(1)).rejects.toMatchObject({ reason: 'catalog-unavailable' })
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(pull).toHaveBeenCalledTimes(3)
+  })
+
+  it('rejects multibyte catalogs whose byte size exceeds the limit even when their string length does not', async () => {
+    const text = JSON.stringify({ ...catalog(), revision: '€'.repeat(400_000) })
+    const bytes = new TextEncoder().encode(text)
+    expect(text.length).toBeLessThan(1_000_000)
+    expect(bytes.byteLength).toBeGreaterThan(1_000_000)
+    const { response, cancel } = streamedResponse([bytes.subarray(0, 600_000), bytes.subarray(600_000)])
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response))
+    const resolve = createSubgraphResolver({ env: { SUBGRAPH_CATALOG_URL: 'https://fixture' } })
+    await expect(resolve(1)).rejects.toMatchObject({ reason: 'catalog-unavailable' })
+    expect(cancel).toHaveBeenCalledOnce()
+  })
+
+  it('accepts exactly the byte limit and preserves UTF-8 split across chunks', async () => {
+    const deploymentId = 'cid-€'
+    const bytes = new TextEncoder().encode(JSON.stringify(catalog([{ ...active(), deploymentId }])))
+    const split = bytes.indexOf(0xe2) + 1
+    const { response, cancel } = streamedResponse([
+      bytes.subarray(0, split), bytes.subarray(split),
+      new Uint8Array(1_000_000 - bytes.byteLength).fill(32),
+    ])
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response))
+    const resolve = createSubgraphResolver({ env: { SUBGRAPH_CATALOG_URL: 'https://fixture' } })
+    await expect(resolve(1)).resolves.toMatchObject({ deploymentId })
+    expect(cancel).not.toHaveBeenCalled()
+  })
+
+  it('keeps the last-good snapshot after an oversized refresh without extending its lifetime', async () => {
+    let time = 0
+    const oversized = { ...catalog([{ ...active(), status: 'retired' }]), revision: '€'.repeat(400_000) }
+    const fetch = vi.fn().mockResolvedValueOnce(Response.json(catalog()))
+      .mockImplementation(async () => Response.json(oversized))
+    vi.stubGlobal('fetch', fetch)
+    const resolve = createSubgraphResolver({ env: { SUBGRAPH_CATALOG_URL: 'https://fixture' }, now: () => time })
+    await expect(resolve(1)).resolves.toMatchObject({ deploymentId: 'cid-1' })
+    time = 60_000
+    await expect(resolve(1)).resolves.toMatchObject({ deploymentId: 'cid-1' })
+    time = 300_000
+    await expect(resolve(1)).rejects.toMatchObject({ reason: 'catalog-unavailable' })
+    expect(fetch).toHaveBeenCalledTimes(3)
+  })
+
   it('bounds a stalled body and ignores its eventual completion', async () => {
     vi.useFakeTimers()
-    let finishBody!: (value: string) => void
-    const fetch = vi.fn().mockResolvedValue({ ok: true, text: () => new Promise<string>((resolve) => {
-      finishBody = resolve
-    }) })
+    let bodyController!: ReadableStreamDefaultController<Uint8Array>
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) { bodyController = controller },
+    })
+    const fetch = vi.fn().mockResolvedValue(new Response(body))
     vi.stubGlobal('fetch', fetch)
     const resolve = createSubgraphResolver({ env: { SUBGRAPH_CATALOG_URL: 'https://fixture' } })
     const first = resolve(1)
@@ -98,7 +164,8 @@ describe('subgraph catalog resolution', () => {
     await vi.advanceTimersByTimeAsync(5_000)
     await rejected
     expect(fetch.mock.calls[0][1].signal.aborted).toBe(true)
-    finishBody(JSON.stringify(catalog()))
+    bodyController.enqueue(new TextEncoder().encode(JSON.stringify(catalog())))
+    bodyController.close()
     await Promise.resolve()
     await expect(resolve(1)).rejects.toMatchObject({ reason: 'catalog-unavailable' })
     expect(fetch).toHaveBeenCalledOnce()
