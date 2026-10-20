@@ -49,8 +49,8 @@ export const eulerLabelProductEmpty = {
 } as EulerLabelProduct
 
 export const getEulerLabelEntityLogo = (fileName: string) => {
-  const { logoBaseUrl, logoOrigins } = getEulerLabelsSourceData()
-  return resolveLabelLogo(fileName, logoBaseUrl, logoOrigins)
+  const { logoBaseUrl, logoOrigins, imagesBaseUrl } = getEulerLabelsSourceData()
+  return resolveLabelLogo(fileName, logoBaseUrl, logoOrigins, imagesBaseUrl)
 }
 
 export const getEulerLabelPointLogo = getEulerLabelEntityLogo

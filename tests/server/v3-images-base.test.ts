@@ -13,7 +13,7 @@ vi.mock('~/server/utils/logger', () => ({
   logger: { warn: mocks.warn, info: vi.fn(), error: vi.fn() },
 }))
 
-const { createV3ImagesBaseSource, readV3ImagesBaseUrl, V3_IMAGES_REFRESH_MS, V3_IMAGES_RETRY_MS }
+const { createV3ImagesBaseSource, getV3ImagesBaseSource, readV3ImagesBaseUrl, V3_IMAGES_REFRESH_MS, V3_IMAGES_RETRY_MS }
   = await import('~/server/utils/v3-images-base')
 
 const BASE = 'https://v3.example/v3/images'
@@ -186,5 +186,28 @@ describe('createV3ImagesBaseSource', () => {
     source.stop()
     await vi.advanceTimersByTimeAsync(V3_IMAGES_REFRESH_MS * 2)
     expect(read).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('shared V3 images source', () => {
+  it('shares the configured upstream discovery without publishing its private URL', async () => {
+    vi.useFakeTimers()
+    vi.stubEnv('V3_API_URL', env.V3_API_URL)
+    mocks.fetchWithTimeout.mockReset().mockResolvedValue(answer(BASE))
+    const source = getV3ImagesBaseSource()
+    try {
+      await source.start()
+      expect(getV3ImagesBaseSource()).toBe(source)
+      expect(source.get()).toBe(BASE)
+      expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(1)
+      expect(mocks.fetchWithTimeout.mock.calls[0][0]).toBe('https://v3-internal.example/v3/images')
+      expect(source.get()).not.toContain('v3-internal.example')
+    }
+    finally {
+      source.stop()
+      mocks.fetchWithTimeout.mockReset()
+      vi.unstubAllEnvs()
+      vi.useRealTimers()
+    }
   })
 })

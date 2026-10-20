@@ -18,9 +18,10 @@ import {
   type PublicLabelsResponse,
   type PublicGeoPolicy,
 } from '~/utils/public-labels'
-import { readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-url-env'
+import { readDisableV3, readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-url-env'
 import { isLabelsSnapshotUsable, LABELS_MAX_STALE_MS } from '~/utils/labels-freshness'
 import { resolveLabelLogo } from '~/utils/label-logo'
+import { getV3ImagesBaseSource } from './v3-images-base'
 
 const CACHE_TTL_MS = 300_000
 const REFRESH_BUDGET_MS = 30_000
@@ -69,7 +70,8 @@ const buildRequest = (): PublicLabelsRequest => async <T>(
 
 // Cached source data is complete; deployment policy is attached on every read.
 const withDeploymentConfig = (bundle: PublicLabelsBundle): PublicLabelsBundle => {
-  let configuredBundle = bundle
+  const imagesBaseUrl = readDisableV3() ? '' : getV3ImagesBaseSource().get()
+  let configuredBundle: PublicLabelsBundle = { ...bundle, imagesBaseUrl }
   if (bundle.source !== 'static') {
     const allowedOrigins = readHostedLabelImageOrigins()
     const labels = bundle.publicLabels
@@ -79,13 +81,13 @@ const withDeploymentConfig = (bundle: PublicLabelsBundle): PublicLabelsBundle =>
       ...labels.vaults.flatMap(vault => (vault.campaigns ?? []).map(campaign => campaign.logo)),
     ]
     const usedOrigins = new Set(logos.flatMap((logo) => {
-      const resolved = resolveLabelLogo(logo ?? undefined, undefined, allowedOrigins)
+      const resolved = resolveLabelLogo(logo ?? undefined, undefined, allowedOrigins, imagesBaseUrl)
       return resolved ? [new URL(resolved).origin] : []
     }))
     // Do not publish a private V3 origin merely because it is configured.
     // The browser only receives origins already present in approved logo URLs.
     const logoOrigins = allowedOrigins.filter(origin => usedOrigins.has(origin))
-    if (logoOrigins.length) configuredBundle = { ...bundle, logoOrigins }
+    if (logoOrigins.length) configuredBundle = { ...bundle, imagesBaseUrl, logoOrigins }
   }
   const vaultTag = readLabelsVaultTag()
   return vaultTag ? { ...configuredBundle, vaultTag } : configuredBundle

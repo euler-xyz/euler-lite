@@ -10,7 +10,10 @@ const mocks = vi.hoisted(() => ({
   warn: vi.fn(),
   loadEulerChains: vi.fn(),
   peekEulerChains: vi.fn(),
+  imagesBaseUrl: '',
 }))
+
+vi.mock('~/server/utils/v3-images-base', () => ({ getV3ImagesBaseSource: () => ({ get: () => mocks.imagesBaseUrl }) }))
 
 vi.mock('~/server/api/internal/euler-chains.get', () => ({
   loadEulerChains: mocks.loadEulerChains,
@@ -78,6 +81,7 @@ describe('public labels server source', () => {
         : emptyListResponse(),
     )
     mocks.warn.mockReset()
+    mocks.imagesBaseUrl = ''
   })
 
   afterEach(async () => {
@@ -131,8 +135,8 @@ describe('public labels server source', () => {
     ])
     const cached = await getPublicLabelsBundle(1)
 
-    expect(concurrent).toBe(first)
-    expect(cached).toBe(first)
+    expect(concurrent).toEqual(first)
+    expect(cached).toEqual(first)
     expect(first.version).toBe('v20260804151305236')
     expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(5)
     expect(mocks.fetchWithTimeout.mock.calls.map(([url]) => new URL(url).pathname)).toEqual([
@@ -166,6 +170,7 @@ describe('public labels server source', () => {
     vi.stubEnv('DEPRECATED_CHAINS', '1')
     vi.stubEnv('ONCHAIN_SDK_CHAINS', '1')
     vi.stubEnv('V3_API_URL', 'https://private-v3.example.test')
+    mocks.imagesBaseUrl = 'https://images.fork.test/assets'
     vi.stubEnv('LABELS_IMAGE_ORIGINS', 'https://images.fork.test,https://points.fork.test,https://products.fork.test,https://unused.fork.test')
     const labels = structuredClone(publicLabelsFixture)
     labels.entities[0].logo = 'https://images.fork.test/curator.svg'
@@ -189,12 +194,15 @@ describe('public labels server source', () => {
     const { getPublicLabelsBundle, getCachedPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
     const bundle = await getPublicLabelsBundle(1)
     expect(bundle).toMatchObject({ logoOrigins: ['https://images.fork.test', 'https://points.fork.test', 'https://products.fork.test'] })
+    expect(bundle.imagesBaseUrl).toBe('https://images.fork.test/assets')
     expect(JSON.stringify(bundle)).not.toContain('private-v3.example.test')
     expect(JSON.stringify(bundle)).not.toContain('unused.fork.test')
     const fetchCount = mocks.fetchWithTimeout.mock.calls.length
     vi.stubEnv('LABELS_IMAGE_ORIGINS', 'https://images.fork.test')
     expect(getCachedPublicLabelsBundle(1)).toMatchObject({ logoOrigins: ['https://images.fork.test'] })
     expect(await getPublicLabelsBundle(1)).toMatchObject({ logoOrigins: ['https://images.fork.test'] })
+    mocks.imagesBaseUrl = 'https://images.fork.test/updated'
+    expect(getCachedPublicLabelsBundle(1)?.imagesBaseUrl).toBe('https://images.fork.test/updated')
     expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(fetchCount)
   })
 

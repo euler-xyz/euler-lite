@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('~/server/utils/v3-images-base', () => ({
-  createV3ImagesBaseSource: () => ({ get: mocks.get, start: mocks.start, stop: mocks.stop, refresh: vi.fn() }),
+  getV3ImagesBaseSource: () => ({ get: mocks.get, start: mocks.start, stop: mocks.stop, refresh: vi.fn() }),
 }))
 
 const BASE = 'https://v3.example/v3/images'
@@ -93,11 +93,13 @@ describe('app-config plugin images base', () => {
   })
   it('publishes the V3 opt-out and skips image discovery even with an upstream configured', async () => {
     vi.stubEnv('DISABLE_V3', 'true')
+    mocks.get.mockReturnValue(BASE)
     const { render } = await bootPlugin()
     const html = await render()
     expect(html).toContain('"disableV3":true')
     expect(html).toContain('"enableV3Backend":false')
     expect(mocks.start).not.toHaveBeenCalled()
+    expect(html).toContain('"v3ImagesUrl":""')
     expect(html).not.toContain(PRIVATE_V3)
   })
 

@@ -93,3 +93,9 @@ export function createV3ImagesBaseSource(options: {
     },
   }
 }
+
+let sharedSource: V3ImagesBaseSource | undefined
+
+/** Public image discovery is shared by HTML configuration and label metadata. */
+export const getV3ImagesBaseSource = (): V3ImagesBaseSource =>
+  sharedSource ??= createV3ImagesBaseSource()

@@ -66,7 +66,7 @@ describe('public metadata resolved V3 content', () => {
     await metadata('evk')
     const view = await mocks.view()
     mocks.view.mockResolvedValue({
-      ...view, labelsSource: 'v3', sourceFetchedAt: Date.now(),
+      ...view, labelsSource: 'v3', sourceFetchedAt: Date.now(), imagesBaseUrl: 'https://images.fork.test/assets',
       managingEntityByVault: { [address.toLowerCase()]: 'kpk' },
       entitiesRaw: { kpk: { name: 'KPK', logo } },
     })
@@ -79,14 +79,44 @@ describe('public metadata resolved V3 content', () => {
     await metadata('evk')
     const view = await mocks.view()
     mocks.view.mockResolvedValue({
-      ...view, labelsSource: 'v3', sourceFetchedAt: Date.now(),
+      ...view, labelsSource: 'v3', sourceFetchedAt: Date.now(), imagesBaseUrl: 'https://images.fork.test/assets',
       managingEntityByVault: { [address.toLowerCase()]: 'kpk' },
       entitiesRaw: { kpk: { name: 'KPK', logo: `https://token-images.euler.finance/labels/${key}` } },
     })
     const { refreshChainVaultMetadata } = await import('~/server/utils/vault-metadata')
     expect((await refreshChainVaultMetadata(1)).get(address)?.entities).toMatchObject([
-      { name: 'KPK', logo: 'https://v3.euler.finance/v3/images/labels/kpk' },
+      { name: 'KPK', logo: 'https://images.fork.test/assets/labels/kpk' },
     ])
+  })
+
+  it('uses the discovered public image host in metadata without exposing the private V3 origin', async () => {
+    vi.stubEnv('V3_API_URL', 'https://private-v3.fork.test')
+    mocks.verified.mockResolvedValue(new Set([address]))
+    await metadata('evk')
+    const view = await mocks.view()
+    mocks.view.mockResolvedValue({
+      ...view, labelsSource: 'v3', sourceFetchedAt: Date.now(),
+      imagesBaseUrl: 'https://images.fork.test/assets',
+      managingEntityByVault: { [address.toLowerCase()]: 'kpk' },
+      entitiesRaw: { kpk: { name: 'KPK', logo: 'https://token-images.euler.finance/labels/kpk.svg' } },
+    })
+    const { refreshChainVaultMetadata } = await import('~/server/utils/vault-metadata')
+    const result = (await refreshChainVaultMetadata(1)).get(address)
+    expect(result?.entities).toMatchObject([{ name: 'KPK', logo: 'https://images.fork.test/assets/labels/kpk' }])
+    expect(JSON.stringify(result)).not.toContain('private-v3.fork.test')
+  })
+
+  it('omits the image URL when no public V3 image base is available', async () => {
+    mocks.verified.mockResolvedValue(new Set([address]))
+    await metadata('evk')
+    const view = await mocks.view()
+    mocks.view.mockResolvedValue({
+      ...view, labelsSource: 'v3', sourceFetchedAt: Date.now(), imagesBaseUrl: '',
+      managingEntityByVault: { [address.toLowerCase()]: 'kpk' },
+      entitiesRaw: { kpk: { name: 'KPK', logo: 'https://token-images.euler.finance/labels/kpk' } },
+    })
+    const { refreshChainVaultMetadata } = await import('~/server/utils/vault-metadata')
+    expect((await refreshChainVaultMetadata(1)).get(address)?.entities).toMatchObject([{ name: 'KPK', logo: '' }])
   })
 
   it('does not expose synthetic display groups as V3 product IDs', async () => {

@@ -86,6 +86,7 @@ export interface LabelsView {
   publishedVerifiedAddresses: Set<Address>
   managingEntityByVault: Record<string, string>
   logoBaseUrl?: string
+  imagesBaseUrl?: string
   snapshot: ChainVaultsSnapshot
   productByVault: Map<Address, ProductDescriptor>
   deprecatedSet: Set<Address>
@@ -410,6 +411,7 @@ async function assembleLabelsView(chainId: number): Promise<LabelsView> {
     ])),
     managingEntityByVault: labels.value.managingEntityByVault ?? {},
     logoBaseUrl: labels.value.logoBaseUrl,
+    imagesBaseUrl: labels.value.imagesBaseUrl,
     snapshot,
     productByVault,
     deprecatedSet,
