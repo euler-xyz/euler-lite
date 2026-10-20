@@ -17,7 +17,7 @@ import {
 import { buildAnnouncementConfig } from '~/utils/announcement-config'
 import { edgeProvidesVpnEvidence, parseEdgeProvider } from '~/utils/edge-presets'
 import { escapeScriptJson } from '~/server/utils/escape-script-json'
-import { getV3ImagesBaseSource } from '~/server/utils/v3-images-base'
+import { createV3ImagesBaseSource } from '~/server/utils/v3-images-base'
 
 export { escapeScriptJson }
 
@@ -137,7 +137,7 @@ function injectSocialImage(html: { head: string[] }, socialImageUrl: string) {
 
 export default defineNitroPlugin((nitroApp) => {
   const appConfig = readAppConfig()
-  const v3ImagesBase = getV3ImagesBaseSource()
+  const v3ImagesBase = createV3ImagesBaseSource()
   // Prerendered pages are static, so they must not bake in a value read at build time.
   const bootRead = import.meta.prerender || appConfig.disableV3
     ? Promise.resolve()
@@ -146,7 +146,7 @@ export default defineNitroPlugin((nitroApp) => {
 
   nitroApp.hooks.hook('render:html', async (html) => {
     await bootRead
-    const config = { ...appConfig, v3ImagesUrl: appConfig.disableV3 ? '' : v3ImagesBase.get() }
+    const config = { ...appConfig, v3ImagesUrl: v3ImagesBase.get() }
     html.head.push(`<script>window.__APP_CONFIG__=${escapeScriptJson(JSON.stringify(config))}</script>`)
     patchMeta(html, appConfig)
     injectSocialImage(html, appConfig.socialImageUrl)

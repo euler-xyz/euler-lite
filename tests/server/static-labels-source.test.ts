@@ -8,7 +8,6 @@ import { normalizeLabelsBundle } from '~/utils/public-labels'
 const fetchMock = vi.hoisted(() => vi.fn())
 vi.mock('~/server/utils/fetchWithTimeout', async original => ({ ...await original<typeof import('~/server/utils/fetchWithTimeout')>(), fetchWithTimeout: fetchMock }))
 vi.mock('~/server/utils/logger', () => ({ logger: { warn: vi.fn() } }))
-vi.mock('~/server/utils/v3-images-base', () => ({ getV3ImagesBaseSource: () => ({ get: () => 'https://images.fork.test/assets' }) }))
 
 describe('static authoring source', () => {
   let directory: string
@@ -34,7 +33,6 @@ describe('static authoring source', () => {
     vi.stubEnv('DISABLE_V3', 'true')
     const { getPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
     const raw = await getPublicLabelsBundle(1)
-    expect(raw.imagesBaseUrl).toBe('')
     const data = normalizeLabelsBundle(1, raw)
     expect(fetchMock).toHaveBeenCalledTimes(6)
     expect(fetchMock.mock.calls.every(([url]) => url.startsWith('https://fork.test/labels/'))).toBe(true)

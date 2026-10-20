@@ -1,35 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
 import { resolveLabelLogo } from '~/utils/label-logo'
-import { eulerLabelEntityEmpty, getEulerLabelEntityLogo, getEulerLabelPointLogo } from '~/entities/euler/labels'
+import { getEulerLabelEntityLogo, getEulerLabelPointLogo } from '~/entities/euler/labels'
 import { normalizeLabelsBundle, type PublicEulerLabelsData } from '~/utils/public-labels'
 import { KPK_VAULT, publicLabelsFixture } from '~/tests/fixtures/public-labels-v20260804151305236'
 
 const mocks = vi.hoisted(() => ({ data: undefined as PublicEulerLabelsData | undefined }))
 vi.mock('~/composables/useEulerLabels', () => ({ getEulerLabelsSourceData: () => mocks.data }))
 
-const IMAGES_BASE = 'https://images.fork.test/assets'
-
 describe('label image hosts', () => {
-  it.each([IMAGES_BASE, 'https://images.fork.test:8443/assets'])('uses the discovered public image base %s and accepts its canonical result', (base) => {
-    const resolved = resolveLabelLogo('https://token-images.euler.finance/labels/kpk.svg', undefined, [], base)
-    expect(resolved).toBe(`${base}/labels/kpk`)
-    expect(resolveLabelLogo(resolved, undefined, [], base)).toBe(resolved)
-  })
-  it.each(['', undefined, 'http://images.fork.test/assets', 'https://user:secret@images.fork.test/assets'])('does not use a production fallback when the public image base is %s', (base) => {
-    expect(resolveLabelLogo('https://token-images.euler.finance/labels/kpk', undefined, [], base)).toBe('')
-  })
-  it.each(['kpk', 'kpk.svg', 'kpk.PNG', 'kpk.webp?v=old#logo'])('maps the legacy label %s to its V3 image', (key) => {
-    expect(resolveLabelLogo(`https://token-images.euler.finance/labels/${key}`, undefined, [], IMAGES_BASE)).toBe(`${IMAGES_BASE}/labels/kpk`)
-  })
-  it('preserves the label key and accepts the default HTTPS port', () => {
-    expect(resolveLabelLogo('https://token-images.euler.finance:443/labels/K3_Capital-1.jpg', undefined, [], IMAGES_BASE)).toBe(`${IMAGES_BASE}/labels/K3_Capital-1`)
-  })
-  it.each([
-    '/1/0x1234', '/sync/1', '/labels/', '/labels/nested/kpk',
-    '/labels/kpk.html', '/labels/kpk.svg/extra', '/labels/kpk%2Fother',
-  ])('rejects unsupported legacy paths even on a configured origin: %s', (path) => {
-    const origin = 'https://token-images.euler.finance'
-    expect(resolveLabelLogo(`${origin}${path}`, origin, [origin], IMAGES_BASE)).toBe('')
+  it.each(['kpk', 'kpk.svg', 'kpk.webp?v=old#logo'])('rejects the old label image host: %s', (key) => {
+    expect(resolveLabelLogo(`https://token-images.euler.finance/labels/${key}`)).toBe('')
   })
   it.each(['usual', 'k3', 'clearstar'])('allows a V3 curator image for %s', (slug) => {
     const url = `https://v3.euler.finance/v3/images/labels/${slug}`
@@ -39,9 +19,6 @@ describe('label image hosts', () => {
     'https://token-images.euler.finance.evil.test/x',
     'https://evil.test/logo.svg',
     'http://token-images.euler.finance/x',
-    'http://token-images.euler.finance/labels/kpk',
-    'https://token-images.euler.finance:444/labels/kpk',
-    'https://user:secret@token-images.euler.finance/labels/kpk',
     'https://user@token-images.euler.finance/x',
     'https://v3.euler.finance.evil.test/v3/images/labels/usual',
     'http://v3.euler.finance/v3/images/labels/usual',
@@ -80,27 +57,23 @@ describe('label image hosts', () => {
     expect(getEulerLabelEntityLogo('https://images.fork.test.evil.test/x')).toBe('')
     expect(getEulerLabelEntityLogo('https://user:secret@images.fork.test/x')).toBe('')
   })
-  it.each(['v3', 'v3-metadata'] as const)('resolves legacy %s entity and campaign images through the browser helpers', (source) => {
+  it.each(['v3', 'v3-metadata'] as const)('rejects stale %s entity and campaign image URLs', (source) => {
     mocks.data = normalizeLabelsBundle(1, {
-      source, labelSet: 'public', version: 'test', sourceFetchedAt: Date.now(), publicLabels: publicLabelsFixture, imagesBaseUrl: IMAGES_BASE,
-    })
-    expect(getEulerLabelEntityLogo(mocks.data.entities.kpk.logo)).toBe(`${IMAGES_BASE}/labels/kpk`)
-    expect(getEulerLabelPointLogo(mocks.data.points[KPK_VAULT][0].logo)).toBe(`${IMAGES_BASE}/labels/kpk`)
-  })
-  it('uses the discovered base for static legacy labels and keeps the normalized URL renderable', () => {
-    mocks.data = normalizeLabelsBundle(1, {
-      source: 'static', version: 'test', fetchedAt: Date.now(), logoBaseUrl: 'https://static.fork.test', imagesBaseUrl: IMAGES_BASE,
-      files: { products: {}, entities: { curator: { ...eulerLabelEntityEmpty, logo: 'https://token-images.euler.finance/labels/kpk.svg' } }, points: [], earnVaults: [], assets: [] },
-    })
-    expect(mocks.data.entities.curator.logo).toBe(`${IMAGES_BASE}/labels/kpk`)
-    expect(getEulerLabelEntityLogo(mocks.data.entities.curator.logo)).toBe(`${IMAGES_BASE}/labels/kpk`)
-  })
-  it('does not send legacy labels to production without a discovered image base', () => {
-    mocks.data = normalizeLabelsBundle(1, {
-      source: 'v3-metadata', labelSet: 'public', version: 'test', sourceFetchedAt: Date.now(), publicLabels: publicLabelsFixture, imagesBaseUrl: '',
+      source, labelSet: 'public', version: 'test', sourceFetchedAt: Date.now(), publicLabels: publicLabelsFixture,
     })
     expect(getEulerLabelEntityLogo(mocks.data.entities.kpk.logo)).toBe('')
     expect(getEulerLabelPointLogo(mocks.data.points[KPK_VAULT][0].logo)).toBe('')
+  })
+  it.each(['v3', 'v3-metadata'] as const)('preserves current %s entity and campaign image URLs', (source) => {
+    const labels = structuredClone(publicLabelsFixture)
+    const logo = 'https://v3.euler.finance/v3/images/labels/kpk'
+    labels.entities[0].logo = logo
+    labels.vaults[0].campaigns![0].logo = logo
+    mocks.data = normalizeLabelsBundle(1, {
+      source, labelSet: 'public', version: 'test', sourceFetchedAt: Date.now(), publicLabels: labels,
+    })
+    expect(getEulerLabelEntityLogo(mocks.data.entities.kpk.logo)).toBe(logo)
+    expect(getEulerLabelPointLogo(mocks.data.points[KPK_VAULT][0].logo)).toBe(logo)
   })
   it('keeps static image policy independent of hosted origin approvals', () => {
     const bundle = {

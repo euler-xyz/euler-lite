@@ -31,7 +31,7 @@ export type {
 
 export type PublicEulerLabelsData = Omit<SdkPublicEulerLabelsData, 'visibility' | 'managingEntityByVault'>
   & Partial<Pick<SdkPublicEulerLabelsData, 'visibility' | 'managingEntityByVault'>>
-  & { geoContext?: HostedGeoContext, source?: 'v3' | 'v3-metadata' | 'static', sourceFetchedAt?: number, geoFetchedAt?: number, logoBaseUrl?: string, imagesBaseUrl?: string, logoOrigins?: readonly string[], candidateVaultAddresses?: string[], candidateEarnVaultAddresses?: string[], vaultTagAddresses?: Set<string> }
+  & { geoContext?: HostedGeoContext, source?: 'v3' | 'v3-metadata' | 'static', sourceFetchedAt?: number, geoFetchedAt?: number, logoBaseUrl?: string, logoOrigins?: readonly string[], candidateVaultAddresses?: string[], candidateEarnVaultAddresses?: string[], vaultTagAddresses?: Set<string> }
 
 export const PUBLIC_LABELS_FIXTURE_VERSION = 'v20260804151305236'
 
@@ -57,11 +57,7 @@ export type HostedLabelsBundle = (V3LabelsBundle | V3MetadataLabelsBundle) & {
   /** Server-approved public origins already used by this snapshot's logos. */
   logoOrigins?: string[]
 }
-export type PublicLabelsBundle = (HostedLabelsBundle | StaticLabelsBundle) & {
-  vaultTag?: string
-  /** Public image base discovered from the deployment's configured V3. */
-  imagesBaseUrl?: string
-}
+export type PublicLabelsBundle = (HostedLabelsBundle | StaticLabelsBundle) & { vaultTag?: string }
 
 /** V3 owns hosted membership, published content and per-side visibility. */
 export const normalizePublicLabelsData = (chainId: number, source: PublicLabelsSource): PublicEulerLabelsData => {
@@ -112,7 +108,7 @@ const normalizeLabelsSource = (chainId: number, bundle: PublicLabelsBundle): Pub
   if (bundle.source !== 'static') return normalizePublicLabelsData(chainId, bundle.publicLabels)
   const data = normalizeEulerLabelsFileData(structuredClone(bundle.files))
   // Static authoring uses filenames; resolve them only against the operator's source.
-  const logo = (value: string | undefined) => resolveLabelLogo(value, bundle.logoBaseUrl, [], bundle.imagesBaseUrl)
+  const logo = (value: string | undefined) => resolveLabelLogo(value, bundle.logoBaseUrl)
   for (const entity of Object.values(data.entities)) entity.logo = logo(entity.logo)
   for (const product of Object.values(data.products)) if (product.logo) product.logo = logo(product.logo)
   for (const points of Object.values(data.points)) for (const point of points) point.logo = logo(point.logo)
@@ -123,7 +119,6 @@ const normalizeLabelsSource = (chainId: number, bundle: PublicLabelsBundle): Pub
 export const normalizeLabelsBundle = (chainId: number, bundle: PublicLabelsBundle): PublicEulerLabelsData => {
   const data = {
     ...normalizeLabelsSource(chainId, bundle),
-    imagesBaseUrl: bundle.imagesBaseUrl,
     sourceFetchedAt: bundle.source === 'static' ? undefined : bundle.sourceFetchedAt,
     geoFetchedAt: bundle.source === 'static' ? undefined : bundle.geoFetchedAt,
     logoOrigins: bundle.source === 'static' ? undefined : bundle.logoOrigins,

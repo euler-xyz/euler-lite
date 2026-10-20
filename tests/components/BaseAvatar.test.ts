@@ -27,24 +27,13 @@ describe('BaseAvatar', () => {
     imageState.error = null
   })
 
-  it('requests the V3 label image and shows initials when it is unavailable', async () => {
-    imageState.error = new Error('404 Not Found')
-    const src = resolveLabelLogo('https://token-images.euler.finance/labels/missing-curator.svg', undefined, [], 'https://images.fork.test/assets')
+  it('shows initials without requesting a rejected label image URL', async () => {
+    const src = resolveLabelLogo('https://token-images.euler.finance/labels/missing-curator.svg')
     const html = await render({ src, label: 'Missing curator' })
 
-    expect(loadImage).toHaveBeenCalledWith({
-      src: 'https://images.fork.test/assets/labels/missing-curator',
-      referrerPolicy: 'no-referrer',
-    })
+    expect(loadImage).not.toHaveBeenCalled()
     expect(html).toContain('data-label="Mi"')
     expect(html).not.toContain('<img')
-  })
-
-  it('shows initials without making an image request when the public base is unavailable', async () => {
-    const src = resolveLabelLogo('https://token-images.euler.finance/labels/kpk', undefined, [], '')
-    const html = await render({ src, label: 'KPK' })
-    expect(loadImage).not.toHaveBeenCalled()
-    expect(html).toContain('data-label="KP"')
   })
 
   it('shows an inline fallback while the remote image is still loading', async () => {

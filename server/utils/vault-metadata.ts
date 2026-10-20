@@ -105,7 +105,7 @@ function buildAsset(asset: VaultAsset | undefined, tokenLogos: Map<string, strin
   }
 }
 
-function buildEntityInfo(entityKey: string, entities: Record<string, EntityEntryFull>, logoBaseUrl?: string, imagesBaseUrl?: string): EntityInfo | null {
+function buildEntityInfo(entityKey: string, entities: Record<string, EntityEntryFull>, logoBaseUrl?: string): EntityInfo | null {
   const entity = entities[entityKey]
   if (!entity) return null
   const name = strOrEmpty(entity.name)
@@ -114,7 +114,7 @@ function buildEntityInfo(entityKey: string, entities: Record<string, EntityEntry
   const url = strOrNull(entity.url)
   return {
     name,
-    logo: logoFile ? resolveLabelLogo(logoFile, logoBaseUrl, logoBaseUrl ? [] : readHostedLabelImageOrigins(), imagesBaseUrl) : '',
+    logo: logoFile ? resolveLabelLogo(logoFile, logoBaseUrl, logoBaseUrl ? [] : readHostedLabelImageOrigins()) : '',
     description: strOrNull(entity.description),
     url: url && /^https?:\/\//i.test(url) ? url : null,
   }
@@ -163,7 +163,7 @@ function buildEvkMetadata(
     else entityKeys = resolveGoverningEntityKeys(vault, ctx.view.verificationLabels)
   }
   const entities = entityKeys
-    .map(key => buildEntityInfo(key, ctx.view.entitiesRaw, ctx.view.logoBaseUrl, ctx.view.imagesBaseUrl))
+    .map(key => buildEntityInfo(key, ctx.view.entitiesRaw, ctx.view.logoBaseUrl))
     .filter((e): e is EntityInfo => e !== null)
 
   return {
@@ -208,7 +208,7 @@ function buildEarnMetadata(vault: EulerEarn, ctx: BuildContext): VaultMetadata |
     else entityKeys = resolveEarnGoverningEntityKeys(vault, ctx.view.verificationLabels)
   }
   const entities = entityKeys
-    .map(key => buildEntityInfo(key, ctx.view.entitiesRaw, ctx.view.logoBaseUrl, ctx.view.imagesBaseUrl))
+    .map(key => buildEntityInfo(key, ctx.view.entitiesRaw, ctx.view.logoBaseUrl))
     .filter((e): e is EntityInfo => e !== null)
 
   return {
