@@ -4,7 +4,7 @@ import type { Account, AccountFetchOptions, IHasVaultAddress } from '@eulerxyz/e
 import { getEulerSdkForChain, getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { setBatchPrefetchedPlanningAccount } from '~/composables/batchPrefetchState'
 import { logWarn } from '~/utils/errorHandling'
-import { isPlanningAccountCurrent, readFreshPlanningAccount } from '~/utils/planning-account-freshness'
+import { isPlanningAccountCurrent, isPlanningAccountForContext, readFreshPlanningAccount } from '~/utils/planning-account-freshness'
 
 /**
  * Account-fetch options sized for plan-time consumers:
@@ -132,6 +132,8 @@ export const useFreshAccount = () => {
       reset()
       return
     }
+    // Preserve eligible same-context snapshots during ordinary refreshes.
+    if (!isPlanningAccountForContext(account.value, owner, cid)) reset()
     void load(owner, cid)
   }
 
@@ -147,7 +149,7 @@ export const useFreshAccount = () => {
   }
 
   return {
-    account: computed(() => isPlanningAccountCurrent(account.value) ? account.value : undefined) as Readonly<Ref<Account<IHasVaultAddress> | undefined>>,
+    account: computed(() => isPlanningAccountForContext(account.value, effectiveOwner.value, chainId.value) ? account.value : undefined) as Readonly<Ref<Account<IHasVaultAddress> | undefined>>,
     isLoading,
     refresh,
   }

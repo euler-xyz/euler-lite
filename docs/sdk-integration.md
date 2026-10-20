@@ -320,6 +320,8 @@ const freshPlanContext = async () => {
 
 Plan builders call `freshPlanContext()` or receive a preloaded account from `useFreshAccount()` and pass that `account` into the SDK. Simulation and reviewed execution preparation use `getEulerSdkFresh()`. Matching account, slot-hint, plugin-prefetch, and simulation preview cache remains reusable only through context-complete canonical identities; SDK object identity is never an authorization or cache key.
 
+Planning selection requires the active wallet and chain as well as confirmation freshness. Wallet or chain changes immediately hide mismatched loader, batch-layer and portfolio snapshots, including before reset watchers run. The loader clears its prefetched snapshot when the context changes; late responses cannot replace a newer load. Ordinary refreshes in the same context retain an eligible snapshot while the replacement loads.
+
 The plan-time `Account` snapshot is what gives planners their entity math: `totalShares` / `totalAssets` for asset↔share conversion, sub-account positions for `getPosition`, controller flags for `isControllerEnabled`.
 
 How fresh that snapshot actually is depends on the path taken:

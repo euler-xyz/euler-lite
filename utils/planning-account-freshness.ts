@@ -1,4 +1,5 @@
 import { shallowReactive } from 'vue'
+import { getAddress } from 'viem'
 import type { Account, IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
 import { SUBGRAPH_BLOCK_CATCHUP_RETRY_BACKOFF_MS } from '~/entities/tuning-constants'
 
@@ -43,6 +44,21 @@ export const isPlanningAccountCurrent = (account: PlanningAccount | undefined): 
   if (!account) return false
   const confirmation = confirmations.get(account.chainId)
   return !confirmation || accountConfirmations.get(account) === confirmation
+}
+
+/** Select only snapshots belonging to the active wallet and chain. */
+export const isPlanningAccountForContext = (
+  account: PlanningAccount | undefined,
+  owner: string | undefined,
+  chainId: number | undefined,
+): account is PlanningAccount => {
+  if (!owner || !chainId || !isPlanningAccountCurrent(account) || account.chainId !== chainId) return false
+  try {
+    return getAddress(account.owner) === getAddress(owner)
+  }
+  catch {
+    return false
+  }
 }
 
 export const assertPlanningAccountCurrent = (account: PlanningAccount) => {
