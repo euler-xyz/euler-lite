@@ -210,7 +210,9 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 | `/api/internal/vaults` | 2 min (V3) / 5 min (no V3) | Pre-computed chain vault snapshot. Handler is read-only — no request-triggered refresh; warm-cache rewrites at the same cadence as the TTL |
 | `/api/internal/proxy/{merkl,fuul,incentra}/{path}` | 60 s | Rewards-provider proxies built with `createProviderProxy`; allowlists, credentials and browser hints in [Server-Side Caching](./server-side-caching.md#per-host-proxies) |
 | `/api/internal/proxy/turtle/{path}` | none (`no-store`) | Same factory; per-wallet proofs bypass the cache and the server-only Turtle key is required (503 without it) |
-| `/api/internal/proxy/subgraph/{chainId}` | none (`no-store`) | Same-origin proxy to per-chain Goldsky subgraph; POST only; bypasses the server cache, in-flight coalescing only |
+| `/api/internal/proxy/subgraph/{chainId}` | none (`no-store`) | Same-origin proxy to per-chain Goldsky subgraph; POST only; in-flight coalescing only; 8 MiB decoded response cap and 10 s total fetch/body deadline; budget failures return 502 |
+| `/api/internal/proxy/aave` | none (`no-store`) | Aave migration markets; POST only; exact document and single-chain variables; in-flight coalescing only; 8 MiB / 10 s total response budget |
+| `/api/internal/proxy/morpho` | none (`no-store`) | Morpho migration markets and wallet positions; POST only; exact documents and bounded variables; in-flight coalescing only; 8 MiB / 10 s total response budget |
 | `/api/internal/proxy/intrinsic-apy-overrides` | 5 min | Lite overlay aggregator for HyperEVM (`999`) / Monad (`143`); cache key is `chainId` only |
 | `/api/internal/v3/{...path}` | request-scoped | Rate-limited proxy for the exact SDK browser V3 endpoint allowlist; no TTL — V3 manages its own caching |
 

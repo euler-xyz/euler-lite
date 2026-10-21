@@ -35,6 +35,7 @@ import {
 } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { logger } from '~/server/utils/logger'
+import { GRAPHQL_RESPONSE_BUDGET } from '~/server/utils/fetch-text-with-budget'
 import { safeErrorLogFields, safeUrlLogFields } from '~/server/utils/observability'
 import {
   createProxyCache,
@@ -104,6 +105,7 @@ export default defineEventHandler(async (event) => {
       body,
       ctx: 'subgraph-proxy',
       bypassCache: true,
+      responseBudget: GRAPHQL_RESPONSE_BUDGET,
     })
     setResponseStatus(event, res.status, res.statusText)
     setResponseHeaders(event, {

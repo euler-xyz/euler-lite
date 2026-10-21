@@ -4,12 +4,15 @@ import { createError } from 'h3'
 // headroom while keeping these public endpoints from accepting large payloads.
 const DEFAULT_MAX_GRAPHQL_BODY_BYTES = 16 * 1024
 
-// Captures the operation name in `query Foo(...)` / `mutation Foo` / `subscription Foo`.
-const OPERATION_NAME_RE = /\b(?:query|mutation|subscription)\s+([A-Za-z_][A-Za-z0-9_]*)/
+export interface AllowedGraphqlOperation {
+  name: string
+  query: string
+  validateVariables: (variables: Record<string, unknown>) => boolean
+}
 
 export interface GraphqlProxyGuardOptions {
-  /** Operation names Lite is allowed to forward through this proxy. */
-  allowedOperations: readonly string[]
+  /** Exact documents and variable contracts Lite forwards through this proxy. */
+  allowedOperations: readonly AllowedGraphqlOperation[]
   /** Overrides the default request body cap. */
   maxBytes?: number
 }
@@ -22,10 +25,10 @@ export interface GraphqlProxyGuardOptions {
  *  - JSON content-type
  *  - a small body-size cap
  *  - a well-formed `{ query: string, variables?: object, operationName?: string }`
- *  - an allowlisted operation name (also blocks introspection/arbitrary queries)
+ *  - an exact allowlisted document and bounded variables
  *
- * Throws an h3 4xx error on any violation; returns the original raw body to
- * forward on success.
+ * Throws an h3 4xx error on any violation; serializes the validated payload
+ * so upstream JSON parsing sees the same fields and values as the guard.
  */
 export function assertAllowedGraphqlRequest(
   rawBody: string,
@@ -67,12 +70,18 @@ export function assertAllowedGraphqlRequest(
     throw createError({ statusCode: 400, statusMessage: 'Invalid GraphQL operationName' })
   }
 
-  const resolvedOperation = (typeof operationName === 'string' && operationName)
-    || query.match(OPERATION_NAME_RE)?.[1]
-    || ''
-  if (!options.allowedOperations.includes(resolvedOperation)) {
+  // Match the whole document: names alone do not constrain fields, aliases,
+  // fragments, extra operations, or pagination. Only outer whitespace varies.
+  const allowed = options.allowedOperations.find(operation => operation.query.trim() === query.trim())
+  if (!allowed || (operationName !== undefined && operationName !== allowed.name)) {
     throw createError({ statusCode: 403, statusMessage: 'GraphQL operation not allowed' })
   }
+  if (Object.keys(parsed).some(key => !['query', 'variables', 'operationName'].includes(key))) {
+    throw createError({ statusCode: 400, statusMessage: 'Invalid GraphQL request' })
+  }
+  if (!allowed.validateVariables((variables ?? {}) as Record<string, unknown>)) {
+    throw createError({ statusCode: 400, statusMessage: 'Invalid GraphQL variables' })
+  }
 
-  return rawBody
+  return JSON.stringify({ query: allowed.query, variables, operationName })
 }
