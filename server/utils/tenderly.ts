@@ -17,7 +17,12 @@ export interface ViemStateOverrideEntry {
   stateDiff?: { slot: Hex, value: Hex }[]
 }
 
-export const resolveTenderlyConfig = (): TenderlyConfig | undefined => {
+type TenderlyConfigState = { config: TenderlyConfig, reason?: never } | {
+  config?: never
+  reason: 'credentials-incomplete' | 'budget-store-missing' | 'budget-limit-invalid' | 'budget-url-invalid'
+}
+
+export const resolveTenderlyConfigState = (): TenderlyConfigState => {
   const accessKey = process.env.TENDERLY_ACCESS_KEY
   const accountSlug = process.env.TENDERLY_ACCOUNT_SLUG
   const projectSlug = process.env.TENDERLY_PROJECT_SLUG
@@ -26,23 +31,26 @@ export const resolveTenderlyConfig = (): TenderlyConfig | undefined => {
   const dailyLimit = Number(process.env.TENDERLY_DAILY_SIMULATION_LIMIT)
   const maxConcurrent = Number(process.env.TENDERLY_MAX_CONCURRENT_SIMULATIONS)
 
-  if (!accessKey || !accountSlug || !projectSlug || !budgetUrl || !token
-    || !Number.isSafeInteger(dailyLimit) || dailyLimit < 1
+  if (!accessKey || !accountSlug || !projectSlug) return { reason: 'credentials-incomplete' }
+  if (!budgetUrl || !token) return { reason: 'budget-store-missing' }
+  if (!Number.isSafeInteger(dailyLimit) || dailyLimit < 1
     || !Number.isSafeInteger(maxConcurrent) || maxConcurrent < 1) {
-    return undefined
+    return { reason: 'budget-limit-invalid' }
   }
 
   try {
     const url = new URL(budgetUrl)
     if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
-      return undefined
+      return { reason: 'budget-url-invalid' }
     }
-    return { accessKey, accountSlug, projectSlug, budget: { url: url.origin, token, dailyLimit, maxConcurrent } }
+    return { config: { accessKey, accountSlug, projectSlug, budget: { url: url.origin, token, dailyLimit, maxConcurrent } } }
   }
   catch {
-    return undefined
+    return { reason: 'budget-url-invalid' }
   }
 }
+
+export const resolveTenderlyConfig = (): TenderlyConfig | undefined => resolveTenderlyConfigState().config
 
 export const viemStateOverridesToTenderly = (
   overrides: ViemStateOverrideEntry[],

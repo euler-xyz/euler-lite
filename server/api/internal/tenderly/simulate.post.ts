@@ -152,7 +152,7 @@ export default defineEventHandler(async (event) => {
 
   const stateObjects = viemStateOverridesToTenderly(validatedOverrides)
 
-  const releaseCapacity = await reserveTenderlyCapacity(config)
+  const releaseCapacity = await reserveTenderlyCapacity(config, event)
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), TENDERLY_UPSTREAM_TIMEOUT_MS)
 

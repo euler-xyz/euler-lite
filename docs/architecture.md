@@ -408,17 +408,37 @@ An atomic Redis script reserves one attempt per UTC day and a 45-second concurre
 before contacting Tenderly. The 30-second deadline covers simulation and sharing; completion
 releases only that request's lease. Failed upstream attempts remain charged, and abandoned
 leases expire. Redis errors fail closed (`503`); exhausted daily or concurrent capacity returns
-`429`. Signed-out and spy simulations retain their existing payload and URL/error contracts.
+`429` with `Retry-After` seconds from Redis's clock: until UTC midnight for daily exhaustion,
+or until enough leases expire for concurrent capacity. Daily exhaustion takes priority when
+both limits apply. Signed-out and spy simulations retain their existing payload and URL/error contracts.
 
 Operators must provision a durable HTTPS [Redis REST endpoint](https://upstash.com/docs/redis/features/restapi)
-with EVAL support and configure the four `TENDERLY_*` budget variables in `.env.example`.
+with EVAL support. The URL must be an HTTPS origin only, without credentials, path, query or
+fragment; proxies mounted under a path are unsupported. Configure these four variables:
+
+- `TENDERLY_BUDGET_REDIS_REST_URL`
+- `TENDERLY_BUDGET_REDIS_REST_TOKEN`
+- `TENDERLY_DAILY_SIMULATION_LIMIT`
+- `TENDERLY_MAX_CONCURRENT_SIMULATIONS`
+
 Credentials alone do not enable this feature; `/api/internal/tenderly/status` reports disabled
-until configuration is complete. All deployments using the same Tenderly account/project must
+until configuration is complete. Startup emits one warning with a fixed reason code when any
+Tenderly credential is present but configuration is incomplete or invalid. Budget failures log
+only fixed reason codes, HTTP status when available, and an allowlisted error name.
+All deployments using the same Tenderly account/project must
 share the store and limits, with no eviction or manual deletion of budget keys. Redis loss or
 reset can reset consumption: provider-side spending limits remain the final billing safeguard.
 The budget counts attempts through this route, not monetary cost or calls made by other tools.
 Lease expiry assumes the process honors the upstream abort deadline; long process suspension
 can weaken the instantaneous concurrency bound. No wallet signature is required.
+
+The optional local Redis regression suite runs the actual reservation script through an owned
+loopback REST fixture. It starts a disposable Redis with TCP disabled, an isolated Unix socket,
+and persistence disabled; it never connects to an existing store. With `redis-server` and
+`redis-cli` installed beside each other, run
+`REDIS_SERVER_BINARY=/absolute/path/to/redis-server npx vitest run tests/server/tenderly-budget-redis.test.ts`.
+This verifies Redis Lua and the string argument contract; deployment acceptance still requires
+checking the selected REST provider's EVAL permissions, persistence and no-eviction configuration.
 
 **Wallet screening fail-closed**: connect-time only. `POST /api/internal/screen-address` proxies to data-v3 (`ADDRESS_SCREENING_URI` + `ADDRESS_SCREENING_API_KEY`). Both unset is an opt-out except in `DOPPLER_ENVIRONMENT=prd`, where missing config fails closed. Partial config, non-TLS URIs, upstream errors, and incomplete verdicts all return `addressIsSuspicious: true`. VPN usage is audit metadata and does not gate access. First-party `*.euler.finance` SPAs share this one path via a scoped CORS exception — keep the contract backward-compatible. Full runbook: [Address Screening](./address-screening.md).
 
