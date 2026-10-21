@@ -309,7 +309,7 @@ Lite's injected labels service uses the application-owned bundle and freshness p
 
 ### Post-Tx Portfolio Refresh
 
-Terminal `useReviewedExecution.accept` outcomes immediately invalidate `INVALIDATE_AFTER_TX` and call `triggerPortfolioRefresh()`. When dispatch metadata includes a confirmed block, the post-tx helper waits for the SDK subgraph proxy to index that block, advances the `INVALIDATE_AFTER_TX` query generation, and triggers the portfolio refresh again. The second trigger therefore cannot join SDK queries started by the immediate refresh. The shared `portfolioRefreshCounter` drives these consumers:
+Terminal `useReviewedExecution.accept` outcomes immediately invalidate `INVALIDATE_AFTER_TX` and call `triggerPortfolioRefresh()`. When dispatch metadata includes a confirmed block, the post-tx helper polls the SDK subgraph proxy in the background within a bounded catch-up budget. If the subgraph reaches that block, the helper advances the `INVALIDATE_AFTER_TX` query generation and triggers the portfolio refresh again. The second trigger therefore cannot join SDK queries started by the immediate refresh. A catch-up timeout logs a warning; ordinary discovery reads and planning account fallbacks remain available. The shared `portfolioRefreshCounter` drives these consumers:
 
 - `composables/useFreshAccount.ts` reloads the plan-time account snapshot. It races the fast SDK and fresh SDK account reads; fast can fill an empty ref, but the fresh result always wins for the current load cursor.
 - `pages/portfolio.vue` calls `updatePositions({ portfolioSource: 'fresh', preemptPortfolio: true })`. That calls `refreshAllPositions(..., { source: 'fresh', preempt: true })`, so `composables/useEulerAccount.ts` loads the visible portfolio through `getEulerSdkFresh()` for the post-tx refresh. `preempt: true` advances the position race guard and resets the refresh coordinator so preempted fast portfolio reads cannot write stale portfolio data or diagnostics over the fresh result.
@@ -400,13 +400,15 @@ queries (`queryAccountVaults`, `queryVaultFactories`). Other queries retain thei
 existing caching policy. The checked leaf queries do not cache results, so source
 switches and retirement cannot reuse old discovery/factory responses.
 
-After a confirmed transaction, the browser retains a minimum indexed block per
-proxy URL/chain for its session. The immediate refresh and subsequent discovery
-reads validate `_meta.block.number` in the same response as the data. If catalog
-selection changes after catch-up polling, a lagging replacement is retried within
-the catch-up timeout and then fails explicitly. Post-catch-up cache generation
-advancement still refreshes RPC/V3 values; portfolio generation guards discard
-preempted reads. Successful empty arrays are accepted only after response checks.
+After a confirmed transaction, the browser refreshes immediately and polls the
+subgraph in the background for an additional refresh. Discovery accepts valid
+responses at the selected provider's current indexed height, including while
+catch-up is pending or after it times out. Catch-up success advances query
+generations to refresh RPC/V3 values; portfolio generation guards discard
+preempted reads. These refreshes are best-effort and do not guarantee the latest
+chain state. HTTP/GraphQL errors, malformed data and deployment identity
+mismatches still fail validation. Successful empty arrays are accepted only
+after response checks.
 
 Catalog membership does not enable RPC chains, change Interfaces lifecycle or
 production staging filtering, or replace `ONCHAIN_SDK_CHAINS`, V3, custom/static

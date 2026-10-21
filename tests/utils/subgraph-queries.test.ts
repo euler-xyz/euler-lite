@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AccountVaultsSubgraphAdapter, VaultTypeSubgraphAdapter, type BuildQueryFn } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address } from 'viem'
-import { withCheckedSubgraphQueries, requireSubgraphBlock } from '~/utils/subgraph-queries'
+import { withCheckedSubgraphQueries } from '~/utils/subgraph-queries'
 import { advanceSdkQueryGeneration, sdkBuildQuery, sdkQueryClient } from '~/utils/sdk-query-cache'
 import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
 
@@ -46,36 +46,22 @@ describe('checked published-SDK subgraph queries', () => {
     await parent()
     expect(fetch).toHaveBeenCalledTimes(2)
   })
-  it('rechecks actual data after source switch and waits for the replacement deployment to catch up', async () => {
-    vi.useFakeTimers()
-    const url = '/fixture/source-switch'
-    requireSubgraphBlock(url, 100n)
+  it('reads each selected source even when a replacement has indexed an older block', async () => {
     const fetch = vi.fn()
+      .mockResolvedValueOnce(Response.json(reply(100, 'A')))
       .mockResolvedValueOnce(Response.json(reply(90, 'B')))
-      .mockResolvedValueOnce(Response.json(reply(100, 'B')))
     vi.stubGlobal('fetch', fetch)
-    const pending = makeQuery(url)({ chainId: 1, account: address })
-    let settled = false
-    void pending.then(() => {
-      settled = true
-    })
-    await vi.advanceTimersByTimeAsync(50)
-    expect(settled).toBe(false)
-    await vi.advanceTimersByTimeAsync(5000)
-    await expect(pending).resolves.toMatchObject({ data: { trackingActiveAccount: { id: prefix } } })
+    const query = makeQuery('/fixture/source-switch')
+    await expect(query({ chainId: 1, account: address })).resolves.toMatchObject({ data: { trackingActiveAccount: { id: prefix } } })
+    await expect(query({ chainId: 1, account: address })).resolves.toMatchObject({ data: { trackingActiveAccount: { id: prefix } } })
     expect(fetch).toHaveBeenCalledTimes(2)
   })
-  it('checks an already in-flight read against a newly confirmed block', async () => {
-    let resolveResponse!: (value: Response) => void
-    const fetch = vi.fn(() => new Promise<Response>((resolve) => {
-      resolveResponse = resolve
-    }))
-    vi.stubGlobal('fetch', fetch)
-    const pending = makeQuery('/fixture/inflight')({ chainId: 1, account: address })
-    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce())
-    requireSubgraphBlock('/fixture/inflight', 100n)
-    resolveResponse(Response.json({ data: { trackingActiveAccounts: [] } }))
-    await expect(pending).rejects.toThrow('Invalid subgraph block')
+  it('rejects deployment mismatches even when the response is otherwise valid', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json(reply(90, 'wrong-deployment'))))
+    const query = withCheckedSubgraphQueries(sdkBuildQuery, async () => ({
+      endpoint: '/fixture/pinned', deploymentId: 'selected-deployment',
+    }))('queryAccountVaults', async (_key: { chainId: number, account: typeof address }) => null, {})
+    await expect(query({ chainId: 1, account: address })).rejects.toThrow('Subgraph deployment identity mismatch')
   })
   it('isolates a failed chain while coalescing same-chain callers', async () => {
     const fetch = vi.fn(async (url: string) => url.endsWith('/2')
@@ -200,10 +186,7 @@ describe('checked account pagination through the published SDK adapter', () => {
     expect(fetch).toHaveBeenCalledTimes(3)
   })
 
-  it('checks the confirmed block watermark on every page before returning accounts', async () => {
-    vi.useFakeTimers()
-    const url = '/fixture/account-pages/watermark'
-    requireSubgraphBlock(url, 100n)
+  it('accepts different indexed heights across pages from the same deployment', async () => {
     let request = 0
     const fetch = vi.fn(async (_url: string, init: RequestInit) => {
       const { variables: { ids } } = readAccountRequest(init)
@@ -211,18 +194,10 @@ describe('checked account pagination through the published SDK adapter', () => {
       return Response.json(accountPage(ids, request === 2 ? 99 : 100))
     })
     vi.stubGlobal('fetch', fetch)
-    const adapter = accountAdapter({ 1: url })
-    const pending = Promise.all(owners(1001).map(account => adapter.fetchAccountVaults(1, account)))
-    let settled = false
-    void pending.then(() => {
-      settled = true
-    })
-    await vi.advanceTimersByTimeAsync(50)
+    const adapter = accountAdapter()
+    const accounts = owners(1001)
+    const results = await Promise.all(accounts.map(account => adapter.fetchAccountVaults(1, account)))
+    expect(results).toEqual(accounts.map(account => ({ [getAddress(account)]: { deposits: [address], borrows: [] } })))
     expect(fetch).toHaveBeenCalledTimes(2)
-    expect(settled).toBe(false)
-    await vi.advanceTimersByTimeAsync(5000)
-    await expect(pending).resolves.toHaveLength(1001)
-    expect(fetch).toHaveBeenCalledTimes(3)
-    expect(readAccountRequest(fetch.mock.calls[1][1]).variables.ids).toEqual(readAccountRequest(fetch.mock.calls[2][1]).variables.ids)
   })
 })
