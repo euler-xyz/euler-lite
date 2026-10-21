@@ -3,6 +3,7 @@ import { once } from 'node:events'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { dirname, join } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { promisify } from 'node:util'
 import type { H3Event } from 'h3'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -35,17 +36,25 @@ describe.skipIf(!binary)('Tenderly EVAL against disposable local Redis', () => {
     directory = await mkdtemp('/tmp/tenderly-redis-')
     redis = spawn(binary!, ['--port', '0', '--unixsocket', join(directory, 'redis.sock'),
       '--unixsocketperm', '700', '--save', '', '--appendonly', 'no', '--dir', directory], { stdio: ['ignore', 'pipe', 'pipe'] })
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('Disposable Redis startup timed out')), 5000)
-      redis.once('error', reject)
-      redis.once('exit', code => reject(new Error(`Disposable Redis exited: ${code}`)))
-      redis.stdout!.on('data', (chunk) => {
-        if (String(chunk).includes('Ready to accept connections')) {
-          clearTimeout(timer)
-          resolve()
-        }
-      })
+    let startupError: Error | undefined
+    redis.once('error', (error) => {
+      startupError = error
     })
+    const deadline = Date.now() + 5000
+    // Redis versions use different startup log messages. Probe only our owned
+    // socket, and require a protocol response before starting the REST fixture.
+    while (true) {
+      if (startupError) throw startupError
+      if (redis.exitCode !== null) throw new Error(`Disposable Redis exited: ${redis.exitCode}`)
+      try {
+        const { stdout } = await run(join(dirname(binary!), 'redis-cli'),
+          ['-s', join(directory, 'redis.sock'), '--json', 'PING'], { timeout: 500 })
+        if (JSON.parse(stdout) === 'PONG') break
+      }
+      catch { /* The socket may not exist until Redis finishes starting. */ }
+      if (Date.now() >= deadline) throw new Error('Disposable Redis startup timed out')
+      await delay(25)
+    }
     rest = createServer(async (request, response) => {
       try {
         expect(request.headers.authorization).toBe('Bearer local-synthetic-token')
