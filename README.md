@@ -11,7 +11,7 @@ Euler Lite provides all the core functionality of Euler Finance in a customizabl
 
 ## Prerequisites
 
-- **Node.js** 24+ (recommended: 24.14.1)
+- **Node.js** 24.22.1 (see `.nvmrc`)
 - **npm** package manager
 - **Git**
 - A **Reown Project ID** for AppKit wallet connections - get one at [reown.com](https://reown.com/)
@@ -406,7 +406,7 @@ Before deploying:
 
 ### Build Errors
 
-- Ensure Node.js version is 24+ (24.14.1 recommended)
+- Ensure Node.js version is 24.22.1 (see `.nvmrc`)
 - Clear and reinstall: `rm -rf node_modules && npm ci`
 
 ### Wallet Connection Issues
