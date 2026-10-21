@@ -135,9 +135,17 @@ describe('/api/internal/rpc batch budget', () => {
       expect(event.context.responseHeaders['content-type']).toBe('application/json')
       expect(fetchMock).toHaveBeenLastCalledWith('https://rpc.example.test/one', expect.objectContaining({ body: JSON.stringify(body) }))
     }
+    expect(fetchMock).toHaveBeenCalledTimes(bodies.length)
+  })
+
+  it('charges singles and batches by their combined number of calls', async () => {
+    await handler(makeEvent(request()))
+    await handler(makeEvent([request()]))
+    await handler(makeEvent(batch(3)))
     // The five admitted calls leave 9,995 units: 99 full batches and 95 calls.
     await consumeCalls(99)
     await handler(makeEvent(batch(95)))
     await expect(handler(makeEvent(request()))).rejects.toMatchObject({ statusCode: 429 })
+    expect(fetchMock).toHaveBeenCalledTimes(103)
   })
 })

@@ -390,7 +390,7 @@ The Nuxt server layer (`server/api/`) proxies requests to external services (RPC
 | Batch | Max 100 items; empty batches are `400`. |
 | Method | Not in the allowlist → `403 Method not allowed`. |
 | Upstream | 30 s timeout → `504`; fetch failure → `502`. Response body is the upstream text. |
-| Rate limit | 10,000 units / 60 s; each HTTP request costs 1, including a batch of up to 100 JSON-RPC items. |
+| Rate limit | 10,000 units / 60 s per client IP, shared across chains. Each JSON-RPC call costs 1 unit, so a 100-item batch costs 100. An over-budget batch gets `429` before any calls are forwarded and consumes no budget. |
 
 **Public-RPC fallback can mask a 403.** `plugins/00.wagmi.ts` builds a viem `fallback` of `[/api/internal/rpc/{chainId}, ...network.rpcUrls.default.http]` with `retryCount: 0`. If the proxy rejects a method, the public URL may still succeed, so a missing allowlist entry can look fine in the browser while the proxy log shows `method-not-allowed`. Add the method to `ALLOWED_METHODS` (only if it is a read/simulation call) rather than relying on the fallback. Both legs use `{ batchSize: 100, wait: 100 }`.
 
@@ -398,10 +398,12 @@ The Nuxt server layer (`server/api/`) proxies requests to external services (RPC
 
 The app includes a built-in per-IP rate limiter as a defense-in-depth measure. Default budgets per 60-second window:
 
-- **RPC proxy**: 10,000 units (one unit per HTTP request, including batches)
+- **RPC proxy**: 10,000 units per client IP, shared across chains (one unit per JSON-RPC call; a 100-item batch costs 100)
 - **All other proxies**: 1,000 requests (token list, Pyth updates, labels, euler chains, intrinsic APY, TOS, V3)
 - **Tenderly simulate**: 10 requests
 - **Address screening**: 10 requests
+
+RPC budget rejections emit structured JSON warning logs with `ctx: "rpc"`, `msg: "rate limited"`, and `ip` (`server/utils/rate-limit.ts`). Monitor their frequency and affected IPs after deployment, especially shared corporate, VPN, or carrier NAT exits. Only tune the RPC limiter's `max` after comparing observed rejections with legitimate traffic volume; retain per-call charging and whole-batch rejection. These warnings report rejected attempts, not remaining capacity or successful-call volume.
 
 **Wallet screening fail-closed**: connect-time only. `POST /api/internal/screen-address` proxies to data-v3 (`ADDRESS_SCREENING_URI` + `ADDRESS_SCREENING_API_KEY`). Both unset is an opt-out except in `DOPPLER_ENVIRONMENT=prd`, where missing config fails closed. Partial config, non-TLS URIs, upstream errors, and incomplete verdicts all return `addressIsSuspicious: true`. VPN usage is audit metadata and does not gate access. First-party `*.euler.finance` SPAs share this one path via a scoped CORS exception — keep the contract backward-compatible. Full runbook: [Address Screening](./address-screening.md).
 
