@@ -14,7 +14,8 @@ import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
 import { getAddress, type Address, zeroAddress, maxUint256 } from 'viem'
 import { FixedPoint } from '~/utils/fixed-point'
-import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
+import { getBorrowLtvWithdrawLimit, getBorrowLtvWithdrawNotice, getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
+import { getPositionCollateralEdge } from '~/entities/account'
 import { collectPlannerVaultAddresses } from '~/features/reviewed-execution/planning/requirements'
 
 import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
@@ -31,7 +32,6 @@ const { eulerLensAddresses } = useEulerAddresses()
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
 
-// Withdraw-specific state
 const selectedOutputAsset = ref<VaultAsset | undefined>()
 const isUnknownSwapToken = ref(false)
 
@@ -48,10 +48,26 @@ const needsSwap = computed(() => {
 const cashLimitedCollateralAssets = () =>
   getCashLimitedWithdrawAmount(form.collateralAssets.value, form.collateralVault.value)
 
+const borrowLtvWithdrawLimit = () => {
+  const collateralVault = form.collateralVault.value
+  if (!collateralVault) return undefined
+  return getBorrowLtvWithdrawLimit({
+    liquidity: form.position.value?.borrow.liquidity,
+    collateralAddress: collateralVault.address,
+    collateralAssets: form.collateralAssets.value,
+  })
+}
+
+const withdrawableCollateralAssets = computed(() => {
+  const cashLimited = cashLimitedCollateralAssets()
+  const borrowLimit = borrowLtvWithdrawLimit()
+  return borrowLimit !== undefined && borrowLimit < cashLimited ? borrowLimit : cashLimited
+})
+
 const form = useCollateralForm({
   mode: 'withdraw',
   needsSwap,
-  effectiveBalance: computed(() => cashLimitedCollateralAssets()),
+  effectiveBalance: withdrawableCollateralAssets,
   effectiveAsset: computed(() => form.asset.value),
 
   computePriceFixed: (_pos, borrowVault, collateralVault) => {
@@ -75,10 +91,14 @@ const form = useCollateralForm({
   },
 
   validateEstimate: ({ suppliedFixed, amountFixed, userLtvFixed }) => {
-    if (suppliedFixed.lte(amountFixed)) {
+    const borrowLimit = borrowLtvWithdrawLimit()
+    if (suppliedFixed.lt(amountFixed) || (borrowLimit === undefined && suppliedFixed.lte(amountFixed))) {
       throw new Error('Not enough liquidity in your position')
     }
     if (!form.position.value) return
+    if (borrowLimit !== undefined && borrowLimit < amountFixed.value) {
+      throw new Error('Amount exceeds the borrow LTV limit')
+    }
     const effectiveLiquidationLtv = getBorrowPositionEffectiveLiquidationLTV(form.position.value)
     if (effectiveLiquidationLtv === undefined) {
       throw new Error('Liquidation LTV unavailable')
@@ -187,19 +207,12 @@ useOperationGuard(computed(() => collectPlannerVaultAddresses({
   vaultAddress: form.collateralVault.value?.address,
   swapQuote: needsSwap.value ? form.swapSelectedQuote.value : undefined,
 })), { acquiresExposure: false })
-const withdrawableCollateralAssets = computed(() => cashLimitedCollateralAssets())
 
-// True when the requested amount covers the entire collateral balance. The Max
-// button fills the exact full-precision balance, so this is an exact match when
-// the position isn't cash-limited. A full withdraw must redeem ALL shares
-// (maxUint256) rather than a fixed asset amount — otherwise share-price rounding
-// and interest accrued since the snapshot leave dust behind.
 const isFullCollateralWithdraw = (assetsNano: bigint) => {
   const full = form.collateralAssets.value
   return full > 0n && assetsNano >= full
 }
 
-// Add this collateral withdrawal to the batch — direct or non-CoW swap-out.
 const isCowSwapSelected = computed(() =>
   needsSwap.value && isCowProviderOrQuote(form.swapSelectedProvider.value, form.swapSelectedQuote.value),
 )
@@ -291,10 +304,22 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
 })
 const pairAssetsLabel = usePositionPairLabel(form.position)
 
-// Withdraw-specific computeds
+const borrowLtvNotice = computed(() => {
+  const collateralVault = form.collateralVault.value
+  const asset = form.asset.value
+  if (!collateralVault || !asset) return null
+  return getBorrowLtvWithdrawNotice({
+    liquidity: form.position.value?.borrow.liquidity,
+    collateralAddress: collateralVault.address,
+    collateralBorrowLTV: getPositionCollateralEdge(form.borrowVault.value, collateralVault.address)?.borrowLTV,
+    symbol: asset.symbol,
+  })
+})
+
 const withdrawWarnings = computed(() => {
   const collateralVault = form.collateralVault.value
   return [
+    borrowLtvNotice.value,
     form.hookWarning.value,
     collateralVault && isEVault(collateralVault)
       ? getUtilisationWarning(collateralVault, 'lend')
@@ -317,7 +342,6 @@ const openSwapTokenSelector = () => {
   )
 }
 
-// Withdraw-specific watchers
 watch(address, async () => {
   if (form.isPositionLoaded.value) {
     await form.loadSelectedCollateral()
@@ -368,7 +392,6 @@ watch(selectedOutputAsset, () => {
               maxable
             />
 
-            <!-- Receive as token selector -->
             <div class="flex items-center gap-8">
               <span class="text-p3 text-content-tertiary">Receive as</span>
               <button
@@ -388,7 +411,6 @@ watch(selectedOutputAsset, () => {
               </button>
             </div>
 
-            <!-- Swap info block -->
             <template v-if="needsSwap && selectedOutputAsset">
               <SwapRouteSelector
                 :items="form.swapRouteItems.value"

@@ -20,6 +20,7 @@ import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { isOpDisabled, OP_DEPOSIT, OP_WITHDRAW } from '~/utils/vault-hooks'
 import { getHookDisabledWarning } from '~/composables/useVaultWarnings'
 import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
+import { isLiveCollateralEdge } from '~/utils/vault/ltv'
 import { type Address, formatUnits, zeroAddress } from 'viem'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
@@ -753,9 +754,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       const priceFl = priceFixed.value.toUnsafeFloat()
       const amountFl = amount18.toUnsafeFloat()
 
-      // Only apply delta if this collateral is accepted by the controller (BLTV > 0)
       const affectsLtv = borrowVault.value?.collaterals.some(
-        ltv => ltv.address.toLowerCase() === collateralVault.value!.address.toLowerCase() && ltv.borrowLTV > 0,
+        ltv => ltv.address.toLowerCase() === collateralVault.value!.address.toLowerCase() && isLiveCollateralEdge(ltv),
       ) ?? false
 
       const collateralValueFl = totalValue !== null && priceFl > 0

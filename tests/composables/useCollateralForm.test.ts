@@ -4,6 +4,7 @@ import type { EVault, SwapQuote } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import type { RewardCampaign } from '~/entities/reward-campaign'
 import { FixedPoint } from '~/utils/fixed-point'
+import { getTotalCollateralValue } from '~/utils/position-estimates'
 import { useCollateralForm, type UseCollateralFormOptions } from '~/composables/position/useCollateralForm'
 
 const { COLLATERAL_VAULT, NEW_COLLATERAL_VAULT, wethAsset, usdcAsset, collateralVault, borrowVault, mocks } = vi.hoisted(() => {
@@ -312,6 +313,7 @@ describe('useCollateralForm', () => {
       }),
     }))
     vi.clearAllMocks()
+    vi.mocked(getTotalCollateralValue).mockReturnValue(null)
     mocks.getCollateralApySnapshot.mockResolvedValue({ supplyUsd: 0, weightedSupplyApy: null })
     mocks.getBorrowRewardApyForCollaterals.mockReturnValue(0)
     mocks.getBorrowRewardCampaignsForCollaterals.mockReturnValue([])
@@ -588,6 +590,79 @@ describe('useCollateralForm', () => {
     } as unknown as SwapQuote
     await flush()
     expect(form.amountFixed.value.value).toBe(2n * 10n ** 18n)
+  })
+
+  it.each([
+    ['ramping down with a borrow LTV of 0', { borrowLTV: 0, liquidationLTV: 0, currentLiquidationLTV: 0.79 }],
+    ['borrowable', { borrowLTV: 0.8, liquidationLTV: 0.86, currentLiquidationLTV: 0.86 }],
+  ])('withdraw: projected LTV rises when the collateral is %s', async (_label, ltv) => {
+    vi.mocked(getTotalCollateralValue).mockReturnValue(20_000)
+    const pairBorrowVault = { ...borrowVault, collaterals: [{ address: COLLATERAL_VAULT, ...ltv }] }
+    vi.stubGlobal('useEulerAccount', () => ({
+      isPositionsLoaded: ref(true),
+      getPositionBySubAccountIndex: () => ({ ...makePosition(), borrowVault: pairBorrowVault }),
+    }))
+    const form = makeForm({
+      mode: 'withdraw',
+      needsSwap: computed(() => false),
+      effectiveAsset: computed(() => wethAsset as VaultAsset),
+      computePriceFixed: () => FixedPoint.fromValue(1_000n * 10n ** 18n, 18),
+    })
+    await flush()
+
+    form.amount.value = '5'
+    await flush()
+
+    const expectedLtvPercent = 5_000 / (20_000 - 5 * 1_000) * 100
+    expect(Number(form.estimateUserLTV.value) / 1e18).toBeCloseTo(expectedLtvPercent, 6)
+  })
+
+  it('withdraw: projected LTV ignores a collateral that no longer counts at all', async () => {
+    vi.mocked(getTotalCollateralValue).mockReturnValue(20_000)
+    const pairBorrowVault = {
+      ...borrowVault,
+      collaterals: [{ address: COLLATERAL_VAULT, borrowLTV: 0, liquidationLTV: 0, currentLiquidationLTV: 0 }],
+    }
+    vi.stubGlobal('useEulerAccount', () => ({
+      isPositionsLoaded: ref(true),
+      getPositionBySubAccountIndex: () => ({ ...makePosition(), borrowVault: pairBorrowVault }),
+    }))
+    const form = makeForm({
+      mode: 'withdraw',
+      needsSwap: computed(() => false),
+      effectiveAsset: computed(() => wethAsset as VaultAsset),
+      computePriceFixed: () => FixedPoint.fromValue(1_000n * 10n ** 18n, 18),
+    })
+    await flush()
+
+    form.amount.value = '5'
+    await flush()
+
+    expect(Number(form.estimateUserLTV.value) / 1e18).toBeCloseTo(25, 6)
+  })
+
+  it('direct supply: projected LTV falls when the collateral is ramping down with a borrow LTV of 0', async () => {
+    vi.mocked(getTotalCollateralValue).mockReturnValue(20_000)
+    const pairBorrowVault = {
+      ...borrowVault,
+      collaterals: [{ address: COLLATERAL_VAULT, borrowLTV: 0, liquidationLTV: 0, currentLiquidationLTV: 0.79 }],
+    }
+    vi.stubGlobal('useEulerAccount', () => ({
+      isPositionsLoaded: ref(true),
+      getPositionBySubAccountIndex: () => ({ ...makePosition(), borrowVault: pairBorrowVault }),
+    }))
+    const form = makeForm({
+      needsSwap: computed(() => false),
+      effectiveAsset: computed(() => wethAsset as VaultAsset),
+      computePriceFixed: () => FixedPoint.fromValue(1_000n * 10n ** 18n, 18),
+    })
+    await flush()
+
+    form.amount.value = '5'
+    await flush()
+
+    const expectedLtvPercent = 5_000 / (20_000 + 5 * 1_000) * 100
+    expect(Number(form.estimateUserLTV.value) / 1e18).toBeCloseTo(expectedLtvPercent, 6)
   })
 
   it('uses the projected collateral set when a new collateral adds borrow rewards', async () => {
