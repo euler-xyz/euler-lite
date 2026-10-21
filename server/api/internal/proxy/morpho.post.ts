@@ -21,7 +21,8 @@ import {
   forwardProxied,
 } from '~/server/utils/external-proxy'
 import { assertAllowedGraphqlRequest } from '~/server/utils/graphql-proxy-guard'
-import { MORPHO_ALLOWED_OPERATIONS, GRAPHQL_RESPONSE_BUDGET } from '~/server/utils/migration-graphql-policy'
+import { MORPHO_ALLOWED_OPERATIONS } from '~/server/utils/migration-graphql-policy'
+import { GRAPHQL_RESPONSE_BUDGET } from '~/server/utils/fetch-text-with-budget'
 
 const MORPHO_GRAPHQL_URL = 'https://api.morpho.org/graphql'
 const BROWSER_CACHE_CONTROL = 'no-store'

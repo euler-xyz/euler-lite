@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AAVE_MARKETS_QUERY, MORPHO_MARKETS_QUERY, MORPHO_USER_POSITIONS_QUERY } from '~/utils/migration-graphql'
-import { GRAPHQL_RESPONSE_BUDGET } from '~/server/utils/migration-graphql-policy'
+import { GRAPHQL_RESPONSE_BUDGET } from '~/server/utils/fetch-text-with-budget'
 
 const mocks = vi.hoisted(() => ({ forward: vi.fn(), consume: vi.fn() }))
 type Event = { body: string, headers: Record<string, string> }

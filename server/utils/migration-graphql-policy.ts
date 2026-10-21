@@ -1,9 +1,5 @@
 import { AAVE_MARKETS_QUERY, MORPHO_MARKETS_QUERY, MORPHO_USER_POSITIONS_QUERY } from '~/utils/migration-graphql'
 import type { AllowedGraphqlOperation } from './graphql-proxy-guard'
-import { UPSTREAM_FETCH_TIMEOUT_MS } from './fetchWithTimeout'
-
-// Leave room for SDK vault catalogues while bounding public response buffering.
-export const GRAPHQL_RESPONSE_BUDGET = { maxBytes: 8 * 1024 * 1024, timeoutMs: UPSTREAM_FETCH_TIMEOUT_MS }
 
 const hasKeys = (value: Record<string, unknown>, keys: string[]) =>
   Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key))

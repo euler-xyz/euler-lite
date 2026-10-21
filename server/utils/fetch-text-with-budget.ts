@@ -1,3 +1,6 @@
+// Bounds buffering and total fetch/body time for the public GraphQL proxies.
+export const GRAPHQL_RESPONSE_BUDGET = { maxBytes: 8 * 1024 * 1024, timeoutMs: 10_000 }
+
 export interface ResponseBudget {
   maxBytes: number
   timeoutMs: number

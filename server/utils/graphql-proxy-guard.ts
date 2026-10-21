@@ -83,5 +83,5 @@ export function assertAllowedGraphqlRequest(
     throw createError({ statusCode: 400, statusMessage: 'Invalid GraphQL variables' })
   }
 
-  return JSON.stringify({ query, variables, operationName })
+  return JSON.stringify({ query: allowed.query, variables, operationName })
 }

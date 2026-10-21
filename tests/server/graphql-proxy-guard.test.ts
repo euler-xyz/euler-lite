@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { AavePositionMigrationConnector, MorphoPositionMigrationConnector } from '@eulerxyz/euler-v2-sdk'
 import { assertAllowedGraphqlRequest } from '~/server/utils/graphql-proxy-guard'
 import { AAVE_ALLOWED_OPERATIONS, MORPHO_ALLOWED_OPERATIONS } from '~/server/utils/migration-graphql-policy'
 import { AAVE_MARKETS_QUERY, MORPHO_MARKETS_QUERY, MORPHO_USER_POSITIONS_QUERY } from '~/utils/migration-graphql'
@@ -27,21 +27,35 @@ const rejectsWith = (statusCode: number, run: () => unknown) => {
   throw new Error(`Expected ${statusCode}`)
 }
 
+afterEach(() => vi.unstubAllGlobals())
+
 describe('migration GraphQL proxy policy', () => {
   it.each(cases)('preserves the actual $name document and variables', ({ name, query, variables, allowedOperations }) => {
     for (const operationName of [undefined, name]) {
-      const body = JSON.stringify({ query: `\n${query}\n`, variables, operationName })
-      expect(assertAllowedGraphqlRequest(body, 'application/json; charset=utf-8', { allowedOperations })).toBe(body)
+      const canonical = JSON.stringify({ query, variables, operationName })
+      for (const whitespace of ['\n', '\uFEFF', '\u00A0', '\u2028']) {
+        const body = JSON.stringify({ query: `${whitespace}${query}${whitespace}`, variables, operationName })
+        expect(assertAllowedGraphqlRequest(body, 'application/json; charset=utf-8', { allowedOperations })).toBe(canonical)
+      }
     }
   })
 
   it.each([
-    ['aave', 'AAVE_MARKETS_QUERY', AAVE_MARKETS_QUERY],
-    ['morpho', 'MORPHO_MARKETS_QUERY', MORPHO_MARKETS_QUERY],
-  ])('matches the installed SDK %s document', (connector, name, document) => {
-    const source = readFileSync(`node_modules/@eulerxyz/euler-v2-sdk/dist/src/services/positionMigrationService/connectors/${connector}/${connector}Connector.js`, 'utf8')
-    const literal = source.match(new RegExp('const ' + name + ' = `([\\s\\S]*?)`;'))?.[1]
-    expect(literal).toBe(document)
+    { name: 'Aave', Connector: AavePositionMigrationConnector, contract: cases[0], variables: { request: { chainIds: [8453] } } },
+    { name: 'Morpho', Connector: MorphoPositionMigrationConnector, contract: cases[1], variables: { chainIds: [8453], loanAssets: [address], collateralAssets: ['0x0000000000000000000000000000000000000002'] } },
+  ])('admits the installed SDK $name connector request, including variables', async ({ name, Connector, contract, variables }) => {
+    const data = name === 'Morpho' ? { markets: { items: [] } } : { markets: [] }
+    const fetch = vi.fn(async () => Response.json({ data }))
+    vi.stubGlobal('fetch', fetch)
+    // Empty upstream markets need no deployment, provider, or execution reads.
+    const connector = new Connector({} as never, {} as never, {} as never)
+    await expect(connector.listTargets({ chainId: 8453, debtAsset: address, collateralAsset: '0x0000000000000000000000000000000000000002' })).resolves.toEqual([])
+    expect(fetch).toHaveBeenCalledTimes(1)
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
+    expect(init.method).toBe('POST')
+    const payload = JSON.parse(init.body as string)
+    expect(payload).toEqual({ query: contract.query, variables })
+    expect(assertAllowedGraphqlRequest(init.body as string, 'application/json', { allowedOperations: contract.allowedOperations })).toBe(init.body)
   })
 
   it.each(cases)('blocks introspection under the approved $name name', ({ name, allowedOperations }) => {
