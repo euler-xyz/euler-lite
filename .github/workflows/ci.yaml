@@ -71,4 +71,13 @@ jobs:
       # the build must run before the test suite.
       - run: npm run build
 
+      - name: Install Redis for the real Lua integration tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends redis-server redis-tools
+          /usr/bin/redis-server --version
+          /usr/bin/redis-cli --version
+
       - run: npm run test:run
+        env:
+          REDIS_SERVER_BINARY: /usr/bin/redis-server

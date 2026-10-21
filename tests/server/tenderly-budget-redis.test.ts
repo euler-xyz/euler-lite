@@ -14,6 +14,9 @@ vi.mock('~/server/utils/logger', () => ({ logger: { warn: vi.fn() } }))
 // Opt in with a local Redis installation. This suite starts its own Redis with
 // TCP disabled and a fresh Unix socket; it never connects to an existing store.
 const binary = process.env.REDIS_SERVER_BINARY
+if (process.env.CI && !binary) {
+  throw new Error('CI requires REDIS_SERVER_BINARY; the real Redis integration tests must not skip')
+}
 const run = promisify(execFile)
 describe.skipIf(!binary)('Tenderly EVAL against disposable local Redis', () => {
   let directory: string

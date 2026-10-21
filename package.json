@@ -21,6 +21,7 @@
     "execution:transfer-min": "node scripts/execution-sdk-transfer-min.mjs",
     "test": "vitest",
     "test:run": "vitest run",
+    "test:tenderly:upstash": "RUN_UPSTASH_TENDERLY_ACCEPTANCE=1 vitest run tests/server/tenderly-budget-upstash.test.ts",
     "test:golden": "vitest run tests/golden",
     "test:golden:update": "UPDATE_GOLDEN=1 vitest run tests/golden",
     "test:golden:fetch-fixtures": "jiti tests/golden/fetch-fixtures.ts",

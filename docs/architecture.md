@@ -412,6 +412,13 @@ leases expire. Redis errors fail closed (`503`); exhausted daily or concurrent c
 or until enough leases expire for concurrent capacity. Daily exhaustion takes priority when
 both limits apply. Signed-out and spy simulations retain their existing payload and URL/error contracts.
 
+**Accepted latency trade-off:** the route awaits lease release in `finally` before delivering
+either a success or an error. Cleanup can add up to three seconds to the response; keeping it
+attached to the request is intentional. Reservation and release each have a three-second
+store deadline, separate from the 30-second simulate/share deadline. The 45-second lease
+covers these stages, with expiry as the recovery path if release fails. Release errors are
+logged safely and do not replace the simulation result. Cleanup is not detached after response delivery.
+
 Operators must provision a durable HTTPS [Redis REST endpoint](https://upstash.com/docs/redis/features/restapi)
 with EVAL support. The URL must be an HTTPS origin only, without credentials, path, query or
 fragment; proxies mounted under a path are unsupported. Configure these four variables:
@@ -432,13 +439,24 @@ The budget counts attempts through this route, not monetary cost or calls made b
 Lease expiry assumes the process honors the upstream abort deadline; long process suspension
 can weaken the instantaneous concurrency bound. No wallet signature is required.
 
-The optional local Redis regression suite runs the actual reservation script through an owned
-loopback REST fixture. It starts a disposable Redis with TCP disabled, an isolated Unix socket,
-and persistence disabled; it never connects to an existing store. With `redis-server` and
-`redis-cli` installed beside each other, run
+CI installs `redis-server` and `redis-cli` and sets `REDIS_SERVER_BINARY` for the full test job.
+The Redis regression suite fails collection if CI omits that setting. It executes the actual
+reservation script through an owned loopback REST fixture, using a disposable Redis with
+TCP and persistence disabled and an isolated Unix socket; it never connects to an existing store.
+Locally it is opt-in:
 `REDIS_SERVER_BINARY=/absolute/path/to/redis-server npx vitest run tests/server/tenderly-budget-redis.test.ts`.
-This verifies Redis Lua and the string argument contract; deployment acceptance still requires
-checking the selected REST provider's EVAL permissions, persistence and no-eviction configuration.
+This verifies Redis Lua and string arguments through the test fixture, not the selected provider's REST behavior.
+
+For the real Upstash acceptance check, load `UPSTASH_REDIS_REST_URL` and
+`UPSTASH_REDIS_REST_TOKEN` from a disposable test database into the environment, then run
+`npm run test:tenderly:upstash`. This explicit opt-in calls the production reservation client
+with native fetch against an HTTPS `*.upstash.io` origin. It generates random account/project
+identifiers, checks concurrency, release, daily priority and retry headers, then deletes only
+its two generated keys. The normal successful path makes seven Redis REST requests, with no
+Tenderly calls, store flush, key scan or operator project namespace. The token must also permit
+deleting those test keys. A cleanup failure fails the check; residual test keys expire within
+48 hours. Credentials alone never opt the external check in, and CI does not receive Upstash secrets.
+Before rollout, record the manual result and verify the selected database's persistence and no-eviction settings.
 
 **Wallet screening fail-closed**: connect-time only. `POST /api/internal/screen-address` proxies to data-v3 (`ADDRESS_SCREENING_URI` + `ADDRESS_SCREENING_API_KEY`). Both unset is an opt-out except in `DOPPLER_ENVIRONMENT=prd`, where missing config fails closed. Partial config, non-TLS URIs, upstream errors, and incomplete verdicts all return `addressIsSuspicious: true`. VPN usage is audit metadata and does not gate access. First-party `*.euler.finance` SPAs share this one path via a scoped CORS exception — keep the contract backward-compatible. Full runbook: [Address Screening](./address-screening.md).
 

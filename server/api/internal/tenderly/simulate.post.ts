@@ -238,6 +238,9 @@ export default defineEventHandler(async (event) => {
   }
   finally {
     clearTimeout(timeout)
+    // Accepted latency trade-off: wait up to 3 seconds for request-scoped
+    // cleanup rather than detach it after the response. The 45-second lease
+    // covers reservation, simulate/share and release; expiry recovers failures.
     await releaseCapacity()
   }
 })
