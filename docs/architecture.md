@@ -203,7 +203,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 |----------|-----|-------|
 | `/api/internal/public-labels` | 5 min | One chain/version-scoped Public Labels V3 bundle; in-flight dedup and bounded stale fallback |
 | `/api/internal/liquidation-coverage` | 5 min | One chain's default liquidation bot coverage (`LIQUIDATION_BOT_API_URL`); last answer kept 30 min, then `no-bot` |
-| `/api/internal/token-list` | 5 min | Four sources merged via `Promise.allSettled` (Euler SDK, DefiLlama, Uniswap, Merkl); per-source cache with stale fallback |
+| `/api/internal/token-list` | 5 min | Checks the current configured AppKit/RPC chain set before cache or upstream work; four sources merged via `Promise.allSettled` (Euler SDK, DefiLlama, Uniswap, Merkl), with per-source cache and stale fallback. Browser registry visibility rules do not narrow server admission; see [Token List](./token-list.md#server-endpoint) |
 | `/api/internal/v3/oracles/adapter-assessments/{address}?chainId={chainId}` | request-scoped | Lazy per-address Data V3 assessment fetch through the exact SDK browser endpoint allowlist |
 | `/api/internal/euler-chains` | 5 min | Static chain-agnostic config from `euler-interfaces` repo. 7-day stale window so a running instance outlives upstream outages |
 | `/api/internal/abis/{contract}` | 5 min | Runtime ABI documents from `euler-interfaces` (`AccountLens`/`VaultLens`/`UtilsLens` allowlist; SDK `setQueryABI` target). Same 7-day stale window as euler-chains |
