@@ -74,6 +74,19 @@ describe('public metadata resolved V3 content', () => {
     expect((await refreshChainVaultMetadata(1)).get(address)?.entities).toMatchObject([{ name: 'KPK', logo }])
   })
 
+  it.each(['kpk', 'kpk.svg?v=old'])('omits an unsupported curator image from public metadata: %s', async (key) => {
+    mocks.verified.mockResolvedValue(new Set([address]))
+    await metadata('evk')
+    const view = await mocks.view()
+    mocks.view.mockResolvedValue({
+      ...view, labelsSource: 'v3', sourceFetchedAt: Date.now(),
+      managingEntityByVault: { [address.toLowerCase()]: 'kpk' },
+      entitiesRaw: { kpk: { name: 'KPK', logo: `https://token-images.euler.finance/labels/${key}` } },
+    })
+    const { refreshChainVaultMetadata } = await import('~/server/utils/vault-metadata')
+    expect((await refreshChainVaultMetadata(1)).get(address)?.entities).toMatchObject([{ name: 'KPK', logo: '' }])
+  })
+
   it('does not expose synthetic display groups as V3 product IDs', async () => {
     expect(await metadata('evk', true)).toMatchObject({ name: 'Vault-specific name', productId: null })
   })
