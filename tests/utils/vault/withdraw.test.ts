@@ -74,6 +74,48 @@ describe('getBorrowLtvWithdrawLimit', () => {
     })).toBe(100n * WAD)
   })
 
+  it.each([1_000n * WAD + 1n, 1_005n * WAD, 1_010n * WAD])(
+    'allows all zero-value collateral when other borrowing value is %s, inside or at the margin',
+    (otherBorrowingValue) => {
+      const liquidity = makeLiquidity({
+        liability: 1_000n * WAD,
+        collaterals: [
+          { address: COLLATERAL, borrowing: 0n },
+          { address: OTHER_COLLATERAL, borrowing: otherBorrowingValue },
+        ],
+      })
+
+      expect(getBorrowLtvWithdrawLimit({
+        liquidity,
+        collateralAddress: COLLATERAL,
+        collateralAssets: 100n * WAD,
+      })).toBe(100n * WAD)
+      expect(getBorrowLtvWithdrawNotice({
+        liquidity,
+        collateralAddress: COLLATERAL,
+        collateralBorrowLTV: 0,
+        symbol: 'wstHYPE',
+      })).toBeNull()
+    },
+  )
+
+  it.each([999n * WAD, 1_000n * WAD])(
+    'blocks zero-value collateral when other borrowing value is %s and does not exceed the liability',
+    (otherBorrowingValue) => {
+      expect(getBorrowLtvWithdrawLimit({
+        liquidity: makeLiquidity({
+          liability: 1_000n * WAD,
+          collaterals: [
+            { address: COLLATERAL, borrowing: 0n },
+            { address: OTHER_COLLATERAL, borrowing: otherBorrowingValue },
+          ],
+        }),
+        collateralAddress: COLLATERAL,
+        collateralAssets: 100n * WAD,
+      })).toBe(0n)
+    },
+  )
+
   it('caps the amount so the borrow-adjusted collateral value keeps a 1% margin over the liability', () => {
     const limit = getBorrowLtvWithdrawLimit({
       liquidity: makeLiquidity({ liability: 4_000n * WAD, collaterals: [{ address: COLLATERAL, borrowing: 8_000n * WAD }] }),

@@ -51,10 +51,10 @@ export const getBorrowLtvWithdrawLimit = ({
 }): bigint | undefined => {
   if (!liquidity) return undefined
   if (liquidity.liabilityValue.borrowing === 0n) return collateralAssets
+  const collateralValue = getCollateralBorrowingValue(liquidity, collateralAddress)
+  if (collateralValue === 0n) return isAtBorrowLtvLimit(liquidity) ? 0n : collateralAssets
   const headroom = getBorrowingHeadroom(liquidity)
   if (headroom <= 0n) return 0n
-  const collateralValue = getCollateralBorrowingValue(liquidity, collateralAddress)
-  if (collateralValue === 0n) return collateralAssets
   const limit = headroom * collateralAssets / collateralValue
   return limit < collateralAssets ? limit : collateralAssets
 }
