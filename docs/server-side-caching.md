@@ -108,7 +108,7 @@ The browser removes expired answers when checking for a refresh, including the v
 
 ### V3 proxy
 
-`/api/internal/v3/{...path}` is a deliberately narrow same-origin proxy for browser-side SDK V3 calls and a few Lite-owned chart endpoints. It normalizes browser paths to `/v3/...`, validates the exact path/method allowlist, consumes a local rate-limit budget, injects the server-side V3 API key when configured, and forwards only JSON-safe headers to the upstream V3 API. Query strings and POST bodies are forwarded unchanged after the route/method check; V3 remains responsible for domain-level validation.
+`/api/internal/v3/{...path}` is a deliberately narrow same-origin proxy for browser-side SDK V3 calls and a few Lite-owned chart endpoints. It normalizes browser paths to `/v3/...`, validates the exact path/method allowlist, consumes a local rate-limit budget, injects the server-side V3 API key when configured, and forwards only JSON-safe headers to the upstream V3 API. Query strings and POST bodies are forwarded unchanged after the route/method check, except that the V3 refresh parameters `forceFresh`, `maxAge` and `minBlock` are removed from every query string, because they would spend this deployment's V3 refresh budget; V3 remains responsible for domain-level validation.
 
 Request flow:
 

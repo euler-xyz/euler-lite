@@ -39,6 +39,9 @@ const POST_ONLY_PATHS = new Set([
   '/v3/resolve/vaults',
 ])
 
+// They spend this deployment's V3 refresh budget, and Lite never sends them.
+const UPSTREAM_REFRESH_PARAMS = new Set(['forceFresh', 'maxAge', 'minBlock'])
+
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/
 const INTEGER_RE = /^[0-9]{1,16}$/
 const CHAIN_ID_LIST_RE = /^(?=.{1,256}$)[1-9][0-9]{0,15}(?:,[1-9][0-9]{0,15})*$/
@@ -115,12 +118,20 @@ export function validateV3ProxyUrl(method: string, requestUrl: URL): V3ProxyVali
   return { ok: true }
 }
 
+const isUpstreamRefreshParam = (pair: string) =>
+  [...new URLSearchParams(pair).keys()].some(name => UPSTREAM_REFRESH_PARAMS.has(name))
+
+const stripUpstreamRefreshParams = (search: string): string => {
+  const kept = search.slice(1).split('&').filter(pair => !isUpstreamRefreshParam(pair)).join('&')
+  return kept ? `?${kept}` : ''
+}
+
 export function buildV3ProxyTarget(requestUrl: URL, env: NodeJS.ProcessEnv = process.env): string {
   const upstream = new URL(readResolvedV3ApiUrl(env))
   const suffix = getV3ProxyPath(requestUrl)
 
   upstream.pathname = `${cleanBasePath(upstream.pathname)}${suffix.startsWith('/') ? suffix : `/${suffix}`}`
-  upstream.search = requestUrl.search
+  upstream.search = stripUpstreamRefreshParams(requestUrl.search)
   upstream.hash = ''
   return upstream.toString()
 }
