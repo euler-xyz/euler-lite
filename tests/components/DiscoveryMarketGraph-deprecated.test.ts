@@ -5,11 +5,12 @@ import type { MarketGroup, MiniDiagramData } from '~/entities/lend-discovery'
 import DiscoveryMarketGraph from '~/components/entities/vault/discovery/DiscoveryMarketGraph.vue'
 
 const address = '0x00000000000000000000000000000000000000aa'
-const labels = vi.hoisted(() => ({ deprecated: true }))
+const labels = vi.hoisted(() => ({ deprecated: true, unlisted: false }))
 
 vi.mock('~/utils/eulerLabelsUtils', async importOriginal => ({
   ...(await importOriginal<typeof import('~/utils/eulerLabelsUtils')>()),
   isVaultDeprecated: () => labels.deprecated,
+  isVaultNotExplorable: () => labels.unlisted,
   getVaultDeprecation: () => labels.deprecated
     ? { deprecated: true, reason: 'Migrate to the new sUSDe vault.' }
     : { deprecated: false, reason: '' },
@@ -56,7 +57,31 @@ const renderGraph = (verdict: { status: string, decidedBy: string, reason: strin
   return renderToString(app)
 }
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  labels.unlisted = false
+  vi.unstubAllGlobals()
+})
+
+describe('graph node badge for unlisted vaults', () => {
+  it('marks a vault hidden from both tables as Unlisted', async () => {
+    labels.unlisted = true
+    const html = await renderGraph({ status: 'visible', decidedBy: 'verified', reason: null }, false)
+    expect(html).toContain('data-title="Unlisted"')
+    expect(html).toContain('data-text="Hidden from the lend and borrow tables."')
+  })
+
+  it('prefers the Deprecated badge for a deprecated vault', async () => {
+    labels.unlisted = true
+    const html = await renderGraph({ status: 'warning', decidedBy: 'deprecated', reason: null }, true)
+    expect(html).toContain('data-title="Deprecated"')
+    expect(html).not.toContain('data-title="Unlisted"')
+  })
+
+  it('shows no listing badge for a listed vault', async () => {
+    const html = await renderGraph({ status: 'visible', decidedBy: 'verified', reason: null }, false)
+    expect(html).not.toContain('data-title="Unlisted"')
+  })
+})
 
 describe('graph node badge for deprecated vaults', () => {
   it('shows the Deprecated badge with the reason instead of a vault-checks warning', async () => {

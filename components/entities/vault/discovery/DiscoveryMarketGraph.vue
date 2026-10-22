@@ -2,7 +2,7 @@
 import { isEulerEarn, isSecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import type { MarketGroup, MiniDiagramData } from '~/entities/lend-discovery'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
-import { getVaultDeprecation, isVaultDeprecated, isVaultKeyring, isVaultCyclicalNote } from '~/utils/eulerLabelsUtils'
+import { getVaultDeprecation, isVaultDeprecated, isVaultKeyring, isVaultCyclicalNote, isVaultNotExplorable } from '~/utils/eulerLabelsUtils'
 import { isDeprecationWarning } from '~/utils/vault-assessment/flagged'
 import { hasResolvedGovernorAdmin } from '~/utils/vault/governor-verification'
 import { stringToColor } from '~/utils/string-utils'
@@ -349,6 +349,23 @@ const isNodeCuratorUnknown = (address: string): boolean => {
               stroke-linejoin="round"
             />
           </g>
+          <foreignObject
+            v-else-if="isVaultNotExplorable(node.address)"
+            :x="node.x + 1"
+            :y="node.y - 17"
+            width="16"
+            height="16"
+          >
+            <UiHoverPreviewTooltip
+              title="Unlisted"
+              text="Hidden from the lend and borrow tables."
+              :aria-label="`${node.assetSymbol} vault is unlisted`"
+              placement="top"
+              class="!flex !w-16 !h-16"
+            >
+              <span class="flex h-12 w-12 items-center justify-center rounded-full bg-content-muted text-[9px] font-bold text-white">–</span>
+            </UiHoverPreviewTooltip>
+          </foreignObject>
           <!-- Keyring (private vault) badge -->
           <g v-else-if="isVaultKeyring(node.address)">
             <circle
