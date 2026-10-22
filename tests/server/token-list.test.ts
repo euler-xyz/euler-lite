@@ -77,6 +77,7 @@ const bySymbol = (tokens: { symbol: string, decimals: number | string }[]) =>
 
 describe('/api/internal/token-list decimals', () => {
   beforeEach(() => {
+    vi.stubEnv('RPC_URL_43114', 'https://rpc.example/avalanche')
     mocks.fetchWithTimeout.mockImplementation(async (url: string) => {
       const chainId = Number(url.match(/tokenlists-(\d+)\.json$/)?.[1])
       const body = url.includes('uniswap')
@@ -91,6 +92,7 @@ describe('/api/internal/token-list decimals', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.clearAllMocks()
+    vi.unstubAllEnvs()
   })
 
   it('serves contract decimals for the requested chain and drops tokens without decimals()', async () => {

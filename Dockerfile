@@ -1,5 +1,5 @@
 # ── Doppler CLI stage ──
-FROM --platform=$BUILDPLATFORM node:24.14.1 AS doppler
+FROM --platform=$BUILDPLATFORM node:24.22.1 AS doppler
 
 ARG TARGETARCH
 RUN set -eux; \
@@ -25,7 +25,7 @@ RUN set -eux; \
   chmod 0755 /usr/local/bin/doppler
 
 # ── Build stage ──
-FROM node:24.14.1 AS builder
+FROM node:24.22.1 AS builder
 
 RUN npm install --global npm@11.20.0
 
@@ -46,6 +46,10 @@ RUN npm run build
 
 # ── Production stage (distroless: no shell, no tools, non-root) ──
 FROM gcr.io/distroless/nodejs24-debian13:nonroot AS production
+
+# Use the patched build-stage executable independently of the distroless release cycle.
+COPY --from=builder /usr/local/bin/node /nodejs/bin/node
+RUN ["/nodejs/bin/node", "-e", "if (process.versions.node !== '24.22.1') throw new Error('Unexpected Node.js runtime')"]
 
 ENV MODE=production
 ENV NODE_ENV=production

@@ -16,11 +16,9 @@ Euler Lite is the only service. Standard commands live in `README.md` ("Availabl
 `package.json`.
 
 ### Node version
-- The app requires **Node 24** (24.14.1 is installed via `nvm` and set as the default). The VM's
-  system `node` at `/exec-daemon/node` is Node 22, so `~/.bashrc` prepends the Node 24 bin to
-  `PATH`. New login shells already resolve `node -v` to 24.x — no action needed. If you spawn a
-  non-login/non-interactive shell and get Node 22, run `nvm use default` or prepend
-  `$HOME/.nvm/versions/node/v24.14.1/bin` to `PATH`. CI also pins Node 24 (`.github/workflows/ci.yaml`).
+- Use **Node 24.22.1**, pinned in `.nvmrc`, for local and cloud work. Run `nvm install` and
+  `nvm use` from the repository root before installing dependencies. Non-login shells must
+  also select this version or include its `bin` directory in `PATH`. CI reads `.nvmrc`.
 
 ### Environment config (`.env`)
 - The app reads runtime config from `.env` (gitignored). A working dev `.env` is created during

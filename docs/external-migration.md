@@ -40,6 +40,38 @@ Unsupported Morpho chains return `[]` (nothing to migrate) instead of surfacing
 an upstream indexer error. Aave needs no equivalent allowlist — missing pool
 config simply yields no candidates.
 
+## GraphQL proxy contract
+
+The POST routes `/api/internal/proxy/aave` and `/api/internal/proxy/morpho`
+accept only the exact documents in `utils/migration-graphql.ts`, with optional
+outer whitespace. The proxy forwards the canonical document. The JSON body
+contains `query`, `variables`, and optionally the matching `operationName`;
+extra fields and batched requests are rejected.
+
+| Route / operation | Exact variable shape |
+|-------------------|----------------------|
+| Aave / `AaveMigrationMarkets` | `{ request: { chainIds: [chainId] } }` |
+| Morpho / `EulerMigrationMorphoMarkets` | `{ chainIds: [chainId], loanAssets: [address], collateralAssets: [address] }` |
+| Morpho / `LiteMorphoMigrationPositions` | `{ chainId, address }` |
+
+Each chain ID is a positive signed 32-bit integer, each address is a 20-byte
+`0x` hexadecimal string, and each array has exactly one entry. Additional
+variable keys are rejected. Unknown documents return 403; invalid variables
+return 400. Aave position scans use onchain reads; the Aave GraphQL route serves
+SDK migration target discovery.
+
+Both routes bypass the server cache, return `Cache-Control: no-store`, and
+coalesce identical concurrent requests. Responses, including error bodies,
+have an 8 MiB decoded byte cap and a 10-second total deadline covering fetch
+and full body consumption. A budget failure returns 502.
+
+When bumping the SDK, run `tests/server/graphql-proxy-guard.test.ts`, which
+captures requests from the installed Aave and Morpho connectors and validates
+their documents and variables against the proxy policy. Mirror document
+changes in `utils/migration-graphql.ts` and review variable changes in
+`server/utils/migration-graphql-policy.ts` in the same SDK update; a mismatch
+rejects migration discovery with 403 or 400.
+
 ## Aave position shapes
 
 For each supplied asset on the user's Aave pool:
@@ -129,6 +161,8 @@ inside the atomic proposal — see [Safe Wallet Compatibility](./safe-wallets.md
 - `tests/composables/useExternalMigrationPositions.test.ts` — supply-only Aave,
   Morpho chain gating, per-asset skip vs whole-source configured-read
   failures, allSettled partial failure
+- `tests/server/graphql-proxy-guard.test.ts` — installed SDK connector request compatibility and exact document/variable policy
+- `tests/server/graphql-response-budget-route.test.ts` — oversized and stalled upstream responses return 502
 
 ## Files
 

@@ -9,6 +9,7 @@ import {
 import { resolveSubgraphSource, SubgraphUnavailableError, type SubgraphSource } from '~/server/utils/subgraph-catalog'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { logger } from '~/server/utils/logger'
+import { GRAPHQL_RESPONSE_BUDGET } from '~/server/utils/fetch-text-with-budget'
 import { safeErrorLogFields, safeUrlLogFields } from '~/server/utils/observability'
 import {
   createProxyCache,
@@ -73,6 +74,7 @@ export default defineEventHandler(async (event) => {
       ctx: 'subgraph-proxy',
       bypassCache: true,
       redirect: 'error',
+      responseBudget: GRAPHQL_RESPONSE_BUDGET,
     })
     // Checked clients include _meta in the actual data query, so alias drift is
     // detected on the response that supplies account membership/factory data.

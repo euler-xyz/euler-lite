@@ -1,13 +1,16 @@
 import { createServer } from 'node:http'
 import { once } from 'node:events'
-import { createApp, eventHandler, readBody, toNodeListener } from 'h3'
+import { createApp, eventHandler, readBody, sendRedirect, toNodeListener } from 'h3'
 import { expect, it, vi } from 'vitest'
 import fixture from '../fixtures/subgraph/catalog.v1.json'
+import { GRAPHQL_RESPONSE_BUDGET } from '~/server/utils/fetch-text-with-budget'
 
-it('smokes the real HTTP proxy with local catalog and upstream fixtures only', async () => {
+it('enforces response budgets, identity, and redirect policy through the real catalog proxy', async () => {
   const handler = (await import('~/server/api/internal/proxy/subgraph/[chainId].post')).default
   const app = createApp()
   let upstreamCalls = 0
+  let redirectedCalls = 0
+  let mode: 'valid' | 'oversized' | 'drift' | 'redirect' = 'valid'
   app.use('/catalog', eventHandler(() => ({ ...fixture, deployments: [
     { ...fixture.deployments[0], endpoint: 'https://subgraph-fixture.invalid/query' }, fixture.deployments[1],
   ] })))
@@ -15,7 +18,15 @@ it('smokes the real HTTP proxy with local catalog and upstream fixtures only', a
     const body = await readBody(event)
     expect(body.query).toContain('_meta')
     upstreamCalls++
-    return { data: { _meta: { deployment: 'QmFixtureDeployment', block: { number: 123 } }, trackingActiveAccounts: [] } }
+    if (mode === 'redirect') return sendRedirect(event, '/redirected', 302)
+    return {
+      data: { _meta: { deployment: mode === 'drift' ? 'another-deployment' : 'QmFixtureDeployment', block: { number: 123 } }, trackingActiveAccounts: [] },
+      ...(mode === 'oversized' ? { padding: 'x'.repeat(GRAPHQL_RESPONSE_BUDGET.maxBytes + 1) } : {}),
+    }
+  }))
+  app.use('/redirected', eventHandler(() => {
+    redirectedCalls++
+    return { data: { _meta: { deployment: 'QmFixtureDeployment' }, trackingActiveAccounts: [] } }
   }))
   app.use('/proxy', eventHandler(async (event) => {
     event.context.params = { chainId: event.path.endsWith('/8453') ? '8453' : '1' }
@@ -44,9 +55,17 @@ it('smokes the real HTTP proxy with local catalog and upstream fixtures only', a
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(response.headers.get('x-subgraph-source')).toMatch(/^[a-f0-9]{64}$/)
     expect(await response.json()).toMatchObject({ data: { trackingActiveAccounts: [] } })
+    for (const failure of ['oversized', 'drift', 'redirect'] as const) {
+      mode = failure
+      const rejected = await fetch(`${origin}/proxy/1`, query)
+      expect(rejected.status, failure).toBe(502)
+      expect(rejected.headers.get('cache-control'), failure).toBe('no-store')
+      await rejected.text()
+    }
+    expect(redirectedCalls).toBe(0)
     const retired = await fetch(`${origin}/proxy/8453`, query)
     expect(retired.status).toBe(503)
-    expect(upstreamCalls).toBe(1)
+    expect(upstreamCalls).toBe(4)
   }
   finally {
     vi.unstubAllEnvs()
