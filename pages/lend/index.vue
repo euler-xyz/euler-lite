@@ -11,6 +11,7 @@ import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
 import { isOpDisabled, OP_DEPOSIT } from '~/utils/vault-hooks'
+import { hasBorrowTablePair, isBorrowTableCollateral } from '~/utils/vault/borrow-table'
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
@@ -118,7 +119,7 @@ watch(chainId, (newChainId, oldChainId) => {
 const borrowableVaults = computed(() => {
   return list.value.filter(vault =>
     (showAllLabelEntries.value || !isVaultNotExplorableLend(vault.address))
-    && borrowList.value.some(pair => pair.borrow.address === vault.address)
+    && hasBorrowTablePair(vault.address, borrowList.value, address => isBorrowTableCollateral(address, showAllLabelEntries.value))
     && !isOpDisabled(vault, OP_DEPOSIT),
   )
 })
