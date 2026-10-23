@@ -2,10 +2,12 @@ import { createSSRApp, defineComponent, h, ref } from 'vue'
 import { renderToString } from '@vue/server-renderer'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { MarketGroup, MiniDiagramData } from '~/entities/lend-discovery'
+import type { VaultVerdictLike } from '~/utils/vault-assessment/flagged'
 import DiscoveryMarketGraph from '~/components/entities/vault/discovery/DiscoveryMarketGraph.vue'
 
 const address = '0x00000000000000000000000000000000000000aa'
 const labels = vi.hoisted(() => ({ deprecated: true, unlisted: false }))
+const warnings = vi.hoisted(() => ({ text: '', acceptedOnly: false }))
 
 vi.mock('~/utils/eulerLabelsUtils', async importOriginal => ({
   ...(await importOriginal<typeof import('~/utils/eulerLabelsUtils')>()),
@@ -20,9 +22,9 @@ vi.mock('~/utils/eulerLabelsUtils', async importOriginal => ({
 vi.mock('~/composables/useTokenList', () => ({ getAssetLogoUrl: () => '' }))
 vi.mock('~/composables/useDiscoveryVaultWarningDetails', () => ({
   useDiscoveryVaultWarningDetails: () => ({
-    getWarningText: (_vault: unknown, fallback?: string | null) => fallback || 'Vault checks need review',
+    getWarningText: (_vault: unknown, fallback?: string | null) => warnings.text || fallback || 'Vault checks need review',
     loadWarningDetails: vi.fn(),
-    isAcceptedOnlyWarning: () => false,
+    isAcceptedOnlyWarning: () => warnings.acceptedOnly,
   }),
 }))
 
@@ -37,16 +39,22 @@ const market = {
   unknownCollateral: [],
 } as unknown as MarketGroup
 
-const renderGraph = (verdict: { status: string, decidedBy: string, reason: string | null }, deprecatedInLabels: boolean) => {
+const renderGraph = (
+  verdict: VaultVerdictLike | undefined,
+  deprecatedInLabels: boolean,
+  options: { ready?: boolean, source?: 'v3' | 'v3-metadata' | 'static', warningText?: string, acceptedOnly?: boolean } = {},
+) => {
   labels.deprecated = deprecatedInLabels
+  warnings.text = options.warningText ?? ''
+  warnings.acceptedOnly = options.acceptedOnly ?? false
   vi.stubGlobal('useVaults', () => ({
     isVaultGovernorVerified: () => true,
     isSecuritizeGovernorVerified: () => true,
     isEarnVaultOwnerVerified: () => true,
   }))
   vi.stubGlobal('useEulerLabels', () => ({
-    isReady: ref(true),
-    source: ref('v3'),
+    isReady: ref(options.ready ?? true),
+    source: ref(options.source ?? 'v3'),
     visibility: ref({ [address]: verdict }),
   }))
   const app = createSSRApp({ render: () => h(DiscoveryMarketGraph, { market, diagram, selectedNodeAddress: null }) })
@@ -70,11 +78,14 @@ describe('graph node badge for unlisted vaults', () => {
     expect(html).toContain('data-text="Hidden from the lend and borrow tables."')
   })
 
-  it('prefers the Deprecated badge for a deprecated vault', async () => {
+  it('prefers the Deprecated badge and effective reason for an unlisted deprecated vault', async () => {
     labels.unlisted = true
-    const html = await renderGraph({ status: 'warning', decidedBy: 'deprecated', reason: null }, true)
-    expect(html).toContain('data-title="Deprecated"')
+    const html = await renderGraph({ status: 'warning', decidedBy: 'deprecated', reason: 'Euler has decommissioned this vault.' }, true)
+    expect(html.match(/data-title="Deprecated"/g)).toHaveLength(1)
+    expect(html).toContain('data-text="Euler has decommissioned this vault."')
+    expect(html).not.toContain('Migrate to the new sUSDe vault.')
     expect(html).not.toContain('data-title="Unlisted"')
+    expect(html).not.toContain('data-title="Vault checks"')
   })
 
   it('shows no listing badge for a listed vault', async () => {
@@ -84,22 +95,79 @@ describe('graph node badge for unlisted vaults', () => {
 })
 
 describe('graph node badge for deprecated vaults', () => {
-  it('shows the Deprecated badge with the reason instead of a vault-checks warning', async () => {
-    const html = await renderGraph({ status: 'warning', decidedBy: 'deprecated', reason: null }, true)
+  it('uses the effective platform deprecation reason in one Deprecated badge', async () => {
+    const html = await renderGraph({ status: 'warning', decidedBy: 'deprecated', reason: '  Euler has decommissioned this vault.  ' }, true)
+    expect(html.match(/data-title="Deprecated"/g)).toHaveLength(1)
+    expect(html).toContain('data-text="Euler has decommissioned this vault."')
+    expect(html).not.toContain('Migrate to the new sUSDe vault.')
+    expect(html).not.toContain('data-title="Vault checks"')
+  })
+
+  it.each([null, undefined, '', '   '])('falls back to the label reason when the effective reason is %j', async (reason) => {
+    const html = await renderGraph({ status: 'warning', decidedBy: 'deprecated', reason }, true)
     expect(html).toContain('data-title="Deprecated"')
     expect(html).toContain('data-text="Migrate to the new sUSDe vault."')
     expect(html).not.toContain('data-title="Vault checks"')
   })
 
-  it('keeps the vault-checks warning when labels do not carry the deprecation', async () => {
-    const html = await renderGraph({ status: 'warning', decidedBy: 'deprecated', reason: null }, false)
+  it.each(['static', 'v3-metadata'] as const)('uses the label reason for a %s source', async (source) => {
+    const html = await renderGraph({ status: 'warning', decidedBy: 'deprecated', reason: 'Stale V3 reason.' }, true, { source })
+    expect(html).toContain('data-title="Deprecated"')
+    expect(html).toContain('data-text="Migrate to the new sUSDe vault."')
+    expect(html).not.toContain('Stale V3 reason.')
+    expect(html).not.toContain('data-title="Vault checks"')
+  })
+
+  it('uses the label reason while V3 labels are not ready', async () => {
+    const html = await renderGraph({ status: 'warning', decidedBy: 'deprecated', reason: 'Stale V3 reason.' }, true, { ready: false })
+    expect(html).toContain('data-title="Deprecated"')
+    expect(html).toContain('data-text="Migrate to the new sUSDe vault."')
+    expect(html).not.toContain('Stale V3 reason.')
+    expect(html).not.toContain('data-title="Vault checks"')
+  })
+
+  it('keeps label-only deprecation when no verdict exists', async () => {
+    const html = await renderGraph(undefined, true)
+    expect(html).toContain('data-title="Deprecated"')
+    expect(html).toContain('data-text="Migrate to the new sUSDe vault."')
+    expect(html).not.toContain('data-title="Vault checks"')
+  })
+
+  it('keeps the verdict and its reason when labels do not carry the deprecation', async () => {
+    const html = await renderGraph({ status: 'warning', decidedBy: 'deprecated', reason: 'Euler has decommissioned this vault.' }, false)
     expect(html).toContain('data-title="Vault checks"')
+    expect(html).toContain('data-text="Euler has decommissioned this vault."')
     expect(html).not.toContain('data-title="Deprecated"')
   })
 
-  it('keeps vault-checks warnings that are not decided by deprecation', async () => {
-    const html = await renderGraph({ status: 'warning', decidedBy: 'assessment', reason: 'Review the oracle.' }, true)
+  it.each([
+    { status: 'warning', decidedBy: 'assessment' },
+    { status: 'hidden', decidedBy: 'config-failed' },
+  ])('keeps $status/$decidedBy vault checks even with deprecated labels', async (verdict) => {
+    const html = await renderGraph({ ...verdict, reason: 'Review the oracle.' }, true)
     expect(html).toContain('data-title="Vault checks"')
     expect(html).toContain('data-text="Review the oracle."')
+    expect(html).not.toContain('data-title="Deprecated"')
+  })
+
+  it('does not use an unrelated verdict reason for the Deprecated tooltip', async () => {
+    const html = await renderGraph({ status: 'pending_review', decidedBy: 'awaiting-verification', reason: 'An unrelated review reason.' }, true)
+    expect(html).toContain('data-title="Deprecated"')
+    expect(html).toContain('data-text="Migrate to the new sUSDe vault."')
+    expect(html).not.toContain('An unrelated review reason.')
+  })
+
+  it('keeps the single Deprecated badge when advisory findings also exist', async () => {
+    const html = await renderGraph({ status: 'warning', decidedBy: 'deprecated', reason: 'Euler has decommissioned this vault.' }, true, { warningText: 'A liquidation discount advisory needs review.' })
+    expect(html.match(/data-title="Deprecated"/g)).toHaveLength(1)
+    expect(html).toContain('data-text="Euler has decommissioned this vault."')
+    expect(html).not.toContain('data-title="Vault checks"')
+    expect(html).not.toContain('A liquidation discount advisory needs review.')
+  })
+
+  it('keeps accepted-only advisory warnings suppressed', async () => {
+    const html = await renderGraph({ status: 'warning', decidedBy: 'advisories', reason: 'An accepted advisory.' }, false, { acceptedOnly: true })
+    expect(html).not.toContain('data-title="Vault checks"')
+    expect(html).not.toContain('data-title="Deprecated"')
   })
 })

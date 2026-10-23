@@ -52,6 +52,13 @@ const getNodeWarning = (address: string) => {
   if (isDeprecationWarning(verdict, isVaultDeprecated(address))) return null
   return verdict?.status === 'warning' || verdict?.status === 'hidden' ? verdict : null
 }
+const getNodeDeprecationReason = (address: string): string => {
+  const deprecation = getVaultDeprecation(address)
+  const verdict = isReady.value && source.value === 'v3'
+    ? visibility.value?.[address.toLowerCase()]
+    : undefined
+  return (isDeprecationWarning(verdict, deprecation.deprecated) ? verdict?.reason?.trim() : '') || deprecation.reason
+}
 const getNodeWarningText = (address: string) =>
   getWarningText(findVault(props.market, address), getNodeWarning(address)?.reason)
 const loadNodeWarningDetails = (address: string) =>
@@ -324,7 +331,7 @@ const isNodeCuratorUnknown = (address: string): boolean => {
           >
             <UiHoverPreviewTooltip
               title="Deprecated"
-              :text="getVaultDeprecation(node.address).reason"
+              :text="getNodeDeprecationReason(node.address)"
               :aria-label="`${node.assetSymbol} vault is deprecated`"
               placement="top"
               class="!flex !w-16 !h-16"
