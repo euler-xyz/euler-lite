@@ -378,7 +378,7 @@ watch(selectedOutputAsset, () => {
               :asset="form.asset.value"
               :vault="(form.collateralVault.value as EVault)"
               :balance="withdrawableCollateralAssets"
-              maxable
+              :maxable="borrowLtvWithdrawLimit() !== undefined"
             />
 
             <div class="flex items-center gap-8">
