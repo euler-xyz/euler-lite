@@ -107,25 +107,26 @@ describe('cors internal API boundary', () => {
     expect(event.headers['Access-Control-Allow-Origin']).toBe('https://preview.example')
   })
 
-  it('requires explicit CORS configuration for a hosting-provider domain', async () => {
+  it('allows the HTTPS Railway hostname without explicit app origin configuration', async () => {
     vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
-    vi.stubEnv('RAILWAY_PUBLIC_DOMAIN', 'preview.example')
+    vi.stubEnv('NUXT_PUBLIC_APP_URL', '')
+    vi.stubEnv('CORS_ALLOWED_ORIGINS', '')
+    vi.stubEnv('RAILWAY_PUBLIC_DOMAIN', 'fork.up.railway.app')
     const handler = await loadHandler()
+    const event = makeEvent('/api/internal/vaults', { origin: 'https://fork.up.railway.app' })
 
-    try {
-      handler(makeEvent('/api/internal/vaults', { origin: 'https://preview.example' }))
-      throw new Error('Expected an unconfigured hosting-provider origin to be rejected')
+    expect(handler(event)).toBeUndefined()
+    expect(event.headers['Access-Control-Allow-Origin']).toBe('https://fork.up.railway.app')
+
+    for (const origin of ['http://fork.up.railway.app', 'https://other.up.railway.app']) {
+      try {
+        handler(makeEvent('/api/internal/vaults', { origin }))
+        throw new Error('Expected a different hosting-provider origin to be rejected')
+      }
+      catch (err) {
+        expect(err).toMatchObject({ statusCode: 403, statusMessage: 'Origin not allowed' })
+      }
     }
-    catch (err) {
-      expect(err).toMatchObject({ statusCode: 403, statusMessage: 'Origin not allowed' })
-    }
-
-    vi.stubEnv('CORS_ALLOWED_ORIGINS', 'https://preview.example')
-    const explicitlyConfiguredHandler = await loadHandler()
-    const event = makeEvent('/api/internal/vaults', { origin: 'https://preview.example' })
-
-    expect(explicitlyConfiguredHandler(event)).toBeUndefined()
-    expect(event.headers['Access-Control-Allow-Origin']).toBe('https://preview.example')
   })
 
   it('rejects the screening route for lookalike and non-https origins', async () => {
@@ -271,6 +272,36 @@ describe('cors internal API boundary', () => {
     const second = getFirstPartyCookies(await loadHandler())
 
     expect(first).toEqual(second)
+  })
+
+  it('accepts a cookie minted by another instance sharing only the Railway hostname', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    vi.stubEnv('NUXT_PUBLIC_APP_URL', '')
+    vi.stubEnv('FIRST_PARTY_COOKIE_SECRET', '')
+    vi.stubEnv('RAILWAY_PUBLIC_DOMAIN', 'fork.up.railway.app')
+    const cookiesFromInstanceA = getFirstPartyCookies(await loadHandler())
+    const handlerB = await loadHandler()
+    const event = makeEvent('/api/internal/token-list', {}, 'GET', cookiesFromInstanceA)
+
+    expect(handlerB(event)).toBeUndefined()
+  })
+
+  it.each([
+    ['NUXT_PUBLIC_APP_URL', 'https://app.example'],
+    ['FIRST_PARTY_COOKIE_SECRET', 'stable-secret'],
+  ])('keeps cookies stable when the Railway hostname changes and %s is configured', async (key, value) => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    vi.stubEnv('NUXT_PUBLIC_APP_URL', '')
+    vi.stubEnv('FIRST_PARTY_COOKIE_SECRET', '')
+    vi.stubEnv(key, value)
+    vi.stubEnv('RAILWAY_PUBLIC_DOMAIN', 'first.up.railway.app')
+    const cookiesFromInstanceA = getFirstPartyCookies(await loadHandler())
+
+    vi.stubEnv('RAILWAY_PUBLIC_DOMAIN', 'second.up.railway.app')
+    const handlerB = await loadHandler()
+    const event = makeEvent('/api/internal/token-list', {}, 'GET', cookiesFromInstanceA)
+
+    expect(handlerB(event)).toBeUndefined()
   })
 
   it('rejects spoofed same-origin fetch metadata without a first-party cookie', async () => {

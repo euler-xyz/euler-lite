@@ -31,6 +31,12 @@ function parseAllowedOrigins(): Set<string> {
     origins.add(appUrl)
   }
 
+  // Railway provides the public hostname to hosted services, including forks.
+  const railwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN?.trim()
+  if (railwayDomain) {
+    origins.add(`https://${railwayDomain}`)
+  }
+
   return origins
 }
 
@@ -68,10 +74,12 @@ const FIRST_PARTY_COOKIE_NAME = 'euler_lite_first_party'
 //
 // Derive the value from FIRST_PARTY_COOKIE_SECRET when configured so
 // every replica and every deploy agrees on it. Without the secret, use
-// the configured app URL as a stable non-secret seed. Instances without
-// a secret or app URL use a random per-process value.
+// the configured app URL or platform-provided hostname as a stable
+// non-secret seed. Instances without any of these use a random per-process value.
 const FIRST_PARTY_COOKIE_SECRET = process.env.FIRST_PARTY_COOKIE_SECRET?.trim()
-const FIRST_PARTY_COOKIE_DEPLOYMENT_SEED = process.env.NUXT_PUBLIC_APP_URL?.trim()
+const FIRST_PARTY_COOKIE_DEPLOYMENT_SEED
+  = process.env.NUXT_PUBLIC_APP_URL?.trim()
+    || process.env.RAILWAY_PUBLIC_DOMAIN?.trim()
 const FIRST_PARTY_COOKIE_VALUE = createHash('sha256')
   .update(FIRST_PARTY_COOKIE_SECRET
     ? `euler-lite-first-party-secret:${FIRST_PARTY_COOKIE_SECRET}`
