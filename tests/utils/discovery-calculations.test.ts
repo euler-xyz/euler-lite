@@ -258,6 +258,31 @@ describe('getMiniDiagram', () => {
     expect(diagram.pairCount).toBe(4)
     expect(diagram.nodes.map(node => node.address)).not.toContain('0xunrelated')
   })
+
+  it('keeps each connected group together on the ring and puts isolated vaults last', () => {
+    const l1 = makeVault('0xL1', [makeLtv({ address: '0xA', borrowLTV: 0.7 })])
+    const l2 = makeVault('0xL2', [makeLtv({ address: '0xB', borrowLTV: 0.7 })])
+    const l3 = makeVault('0xL3', [makeLtv({ address: '0xA', borrowLTV: 0.7 })])
+    const market = makeMarket([
+      makeVault('0xIso', []),
+      l1,
+      l2,
+      l3,
+      makeVault('0xA', []),
+      makeVault('0xB', []),
+    ])
+
+    const diagram = getMiniDiagram(market)
+
+    expect(diagram.nodes.map(node => node.address)).toEqual([
+      '0xa',
+      '0xl1',
+      '0xl3',
+      '0xl2',
+      '0xb',
+      '0xiso',
+    ])
+  })
 })
 
 describe('getActiveExternalCollateral', () => {
