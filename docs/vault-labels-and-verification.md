@@ -107,7 +107,7 @@ A hosted URL is kept only when it matches one of:
 | Extra CDN | Origins listed in `LABELS_IMAGE_ORIGINS` (comma-separated HTTP(S) origins, no path) |
 | Static files | Filename `{name}.{svg\|png\|jpg\|jpeg\|webp\|gif}` resolved to `{STATIC_LABELS_BASE_URL}/logo/{filename}`, or an absolute URL on that same origin |
 
-`https://token-images.euler.finance/...` is rejected. User/password, lookalike hosts, `http://v3.euler.finance`, query strings, and path traversal (`/v3/images/labels/../other`) are rejected. A rejected URL becomes `''` and the avatar shows initials.
+`https://token-images.euler.finance/...` is rejected by default. Credentials and unapproved origins (including lookalike hosts) are rejected for every source. The built-in Euler V3 rule also rejects HTTP, query strings, fragments, and paths outside `/v3/images/labels/{slug}`. Custom V3/CDN origins and absolute URLs on the static source's origin may include query strings or fragments. A rejected URL becomes `''` and the avatar shows initials.
 
 The server publishes `logoOrigins` as the intersection of those configured origins with origins already present in **approved** logos in the bundle. Unused private V3 origins never reach the browser. `getEulerLabelEntityLogo` / `getEulerLabelPointLogo` re-run the same allowlist with that published list. Static bundles do not publish `logoOrigins`; `LABELS_IMAGE_ORIGINS` does not extend static image rules. Euler's V3 label image URLs still pass in static mode.
 
