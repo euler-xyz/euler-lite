@@ -4,7 +4,7 @@ This guide covers the concrete steps and scripts needed to work on this reposito
 
 ## Prerequisites
 
-- Node.js 24+
+- Node.js 24.22.1 (see `.nvmrc`)
 - npm
 
 ## Install and run
@@ -43,7 +43,7 @@ npm run typecheck     # Type-check the project
 
 ## Continuous Integration
 
-Pull requests are gated by the `CI` workflow (`.github/workflows/ci.yaml`), which runs on Node 24 (matching the Dockerfile) with npm caching:
+Pull requests are gated by the `CI` workflow (`.github/workflows/ci.yaml`), which runs on Node 24.22.1 from `.nvmrc` (matching the Dockerfile) with npm caching:
 
 - **typecheck** – `npm run typecheck` (blocking)
 - **test** – `npm run build` then `npm run test:run` (blocking). The build runs first because `tests/utils/logger-bundle.test.ts` inspects the production client bundle (`.output/public/_nuxt`) and hard-fails under CI when it is absent.
@@ -151,11 +151,13 @@ The `/api/internal/pyth/updates` endpoint proxies Pyth Hermes price update reque
 
 ## Troubleshooting
 
-- If the app fails to start, ensure Node 24+ and reinstall deps.
+- If the app fails to start, ensure Node 24.22.1 (`nvm use` from `.nvmrc`; `engines` rejects anything below 24.22.1) and reinstall deps.
 - If blockchain calls fail, verify `RPC_URL_<chainId>` env vars and check that matching `SUBGRAPH_URL_<chainId>` or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` is set.
 - If Sonic (chain `146`) vault snapshots or server-side label reads fail with oversized Multicall / RPC batch errors, do not raise `EVAULT_FETCH_CHUNK_CHAINS` as the first fix. Server Sonic reads use SDK `chains` transport options in `server/utils/sdk-server.ts`, which shrink Multicall3 aggregates independently of the SDK `fetchVaults` chunk list. A changed override needs a process restart. See [Server-Side Caching → Server provider overrides](./server-side-caching.md#server-provider-overrides).
 - If token logos don't load, verify `V3_API_URL` (or `EULER_SDK_V3_API_URL` / `NUXT_PUBLIC_V3_API_URL`) and, when required by the upstream, `EULER_SDK_V3_API_KEY`. Token data is fetched server-side via `/api/internal/token-list` which aggregates Euler V3, Uniswap, DefiLlama, and Merkl sources with fallback.
-- Chain and oracle-provider logo URLs start from V3's public images base. At boot the server reads `GET /v3/images` (`{ data: { publicBaseUrl } }`) from its own `V3_API_URL` and passes the value to the browser as `window.__APP_CONFIG__.v3ImagesUrl` (`server/utils/v3-images-base.ts`). Only a plain https URL is accepted. The server refreshes it hourly, or every 5 minutes while it has none. A failed refresh keeps the last good value; an invalid answer clears it. With no base, chain logos use the bundled files and oracle-provider logos are not shown. There is no setting for this host.
+- Chain and oracle-provider logo URLs start from V3's public images base. At boot the server reads `GET /v3/images` (`{ data: { publicBaseUrl } }`) from its own `V3_API_URL` and passes the value to the browser as `window.__APP_CONFIG__.v3ImagesUrl` (`server/utils/v3-images-base.ts`). Only a plain https URL is accepted. The server refreshes it hourly, or every 5 minutes while it has none. A failed refresh keeps the last good value; an invalid answer clears it. With no base, chain logos use the bundled files and oracle-provider logos are not shown. There is no setting for this host. Curator, product, and campaign logos are a separate allowlist (`resolveLabelLogo`); they do not use `v3ImagesUrl`. See [Vault Labels → Label logos](./vault-labels-and-verification.md#label-logos).
+- If curator or campaign avatars show initials instead of a logo, the URL failed that allowlist. Euler hosted labels must be `https://v3.euler.finance/v3/images/labels/{slug}`. The retired `token-images.euler.finance` host is rejected. Custom V3 origins are accepted automatically; extra CDNs need `LABELS_IMAGE_ORIGINS`. Static labels resolve filenames against `{STATIC_LABELS_BASE_URL}/logo/`.
+- If every borrowable vault shows **Not covered by default liquidation bot**, the chain is `no-bot` (unset or invalid `LIQUIDATION_BOT_API_URL`, or the bot has not answered for 30 minutes). A failed Lite fetch after that window shows no badge. Earn and collateral-only EVKs never badge. See [Server-Side Caching → Liquidation bot coverage](./server-side-caching.md#liquidation-bot-coverage).
 - Oracle **provider** logos (Chainlink, Pyth, Midas, …) are a separate client fetch from `{base}/oracle-providers/{key}`. An unknown provider name renders no logo rather than borrowing the adapter's brand. With no provider name, the logo comes from `meta.name` or the adapter type, and an unknown one of those renders no logo; see [Vault Labels & Verification](./vault-labels-and-verification.md#oracle-provider-logos).
 - Chain logos in the header and chain selector load `{base}/chains/{chainId}`. The bundled `assets/chains/{chainId}` file shows while that loads, replaces it when it fails, and is used directly when there is no base, so logos keep working when V3 is unreachable or a fork runs a chain V3 doesn't support. A chain with neither shows the chain name's initials.
 - Saved Explore / Lend / Borrow filter links use `?curator=`, not `?riskManager=`. Old `riskManager` (and Earn `allocator`) links still apply, then rewrite to `curator`. Custom metric chips are session-only and will not appear in a copied URL. See [Architecture → Shareable list query parameters](./architecture.md#shareable-list-query-parameters).
