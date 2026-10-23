@@ -86,3 +86,28 @@ export const getBorrowLtvWithdrawNotice = ({
     message: 'Your position is at its borrow LTV limit, so no collateral can be withdrawn. Repay debt or supply more collateral first.',
   }
 }
+
+/** Validate a direct withdrawal; batched withdrawals are checked with the whole batch. */
+export const validateCollateralWithdraw = ({
+  amount,
+  collateralAssets,
+  borrowLimit,
+  cashLimit,
+  hasLiquidationLiquidity,
+}: {
+  amount: bigint
+  collateralAssets: bigint
+  borrowLimit: bigint | undefined
+  cashLimit: bigint
+  hasLiquidationLiquidity: boolean | undefined
+}): void => {
+  if (amount > collateralAssets || (borrowLimit === undefined && amount >= collateralAssets)) {
+    throw new Error('Not enough liquidity in your position')
+  }
+  if (borrowLimit !== undefined && amount > borrowLimit) {
+    throw new Error('Amount exceeds the borrow LTV limit')
+  }
+  if (hasLiquidationLiquidity === undefined) throw new Error('Position liquidity unavailable')
+  if (!hasLiquidationLiquidity) throw new Error('Not enough liquidity for the vault, LTV is too large')
+  if (amount > cashLimit) throw new Error('Not enough liquidity in vault')
+}

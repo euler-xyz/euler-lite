@@ -5,6 +5,7 @@ import {
   getBorrowLtvWithdrawNotice,
   getCashLimitedWithdrawAmount,
   isAtBorrowLtvLimit,
+  validateCollateralWithdraw,
 } from '~/utils/vault/withdraw'
 
 const COLLATERAL = '0x64a3052570F5A1c241C6c8cd32F8F9aD411e6990'
@@ -316,5 +317,29 @@ describe('getCashLimitedWithdrawAmount', () => {
   it('caps EulerEarn by availableAssets', () => {
     expect(getCashLimitedWithdrawAmount(2_000n, earnVault(1_000n))).toBe(1_000n)
     expect(getCashLimitedWithdrawAmount(500n, earnVault(1_000n))).toBe(500n)
+  })
+})
+
+describe('validateCollateralWithdraw', () => {
+  const valid = { amount: 60n, collateralAssets: 100n, borrowLimit: 100n, cashLimit: 100n, hasLiquidationLiquidity: true }
+
+  it('allows full redemption when both borrowing and liquidation checks permit it', () => {
+    expect(() => validateCollateralWithdraw({ ...valid, amount: 100n })).not.toThrow()
+  })
+
+  it('retains balance and cash limits independently of health', () => {
+    expect(() => validateCollateralWithdraw({ ...valid, amount: 101n })).toThrow('Not enough liquidity in your position')
+    expect(() => validateCollateralWithdraw({ ...valid, cashLimit: 59n })).toThrow('Not enough liquidity in vault')
+  })
+
+  it('retains the supplied borrow limit, including its margin and zero-value exception', () => {
+    expect(() => validateCollateralWithdraw({ ...valid, borrowLimit: 59n })).toThrow('Amount exceeds the borrow LTV limit')
+    expect(() => validateCollateralWithdraw({ ...valid, borrowLimit: 60n })).not.toThrow()
+    expect(() => validateCollateralWithdraw({ ...valid, borrowLimit: 0n })).toThrow('Amount exceeds the borrow LTV limit')
+  })
+
+  it('requires known and strictly sufficient liquidation coverage', () => {
+    expect(() => validateCollateralWithdraw({ ...valid, hasLiquidationLiquidity: undefined })).toThrow('Position liquidity unavailable')
+    expect(() => validateCollateralWithdraw({ ...valid, hasLiquidationLiquidity: false })).toThrow('Not enough liquidity for the vault, LTV is too large')
   })
 })

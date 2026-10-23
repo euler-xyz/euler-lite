@@ -1,10 +1,10 @@
 import { computed, effectScope, nextTick, ref, shallowRef, getCurrentScope, type EffectScope, type Ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { EVault, SwapQuote } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, IAccountLiquidity, SwapQuote } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import type { RewardCampaign } from '~/entities/reward-campaign'
 import { FixedPoint } from '~/utils/fixed-point'
-import { getTotalCollateralValue } from '~/utils/position-estimates'
+import { getBorrowLtvWithdrawLimit, validateCollateralWithdraw } from '~/utils/vault/withdraw'
 import { useCollateralForm, type UseCollateralFormOptions } from '~/composables/position/useCollateralForm'
 
 const { COLLATERAL_VAULT, NEW_COLLATERAL_VAULT, wethAsset, usdcAsset, collateralVault, borrowVault, mocks } = vi.hoisted(() => {
@@ -28,6 +28,8 @@ const { COLLATERAL_VAULT, NEW_COLLATERAL_VAULT, wethAsset, usdcAsset, collateral
     totalCash: 100n * 10n ** 18n,
     totalBorrowed: 0n,
     collaterals: [],
+    convertToShares: (assets: bigint) => assets,
+    previewWithdraw: (assets: bigint) => assets,
   } as unknown as EVault
   const borrowVault = {
     address: BORROW_VAULT,
@@ -227,10 +229,6 @@ vi.mock('~/utils/race-guard', () => ({
   },
 }))
 
-vi.mock('~/utils/position-estimates', () => ({
-  getTotalCollateralValue: vi.fn(() => null),
-}))
-
 vi.mock('~/utils/tx-errors', () => ({
   getTxErrorMessage: vi.fn(async () => ''),
 }))
@@ -256,6 +254,60 @@ const makePosition = () => ({
   healthFactor: 2n * 10n ** 18n,
   userLTV: 4000n,
   currentLTV: 4000n,
+})
+
+const WAD = 10n ** 18n
+const riskValue = (oracleMid: bigint, liquidation = oracleMid, borrowing = liquidation) => ({ oracleMid, liquidation, borrowing })
+const installRiskContext = ({ assets = 100n * WAD, enabled = true } = {}) => {
+  const selectedValue = enabled ? riskValue(assets, assets / 10n, 0n) : riskValue(0n)
+  const liquidity: IAccountLiquidity = {
+    vaultAddress: borrowVault.address, unitOfAccount: usdcAsset.address as `0x${string}`, daysToLiquidation: 'Infinity',
+    liabilityValue: riskValue(70n * WAD),
+    totalCollateralValue: riskValue(100n * WAD + selectedValue.oracleMid, 80n * WAD + selectedValue.liquidation, 75n * WAD),
+    collaterals: [
+      ...(selectedValue.oracleMid ? [{ address: COLLATERAL_VAULT as `0x${string}`, value: selectedValue }] : []),
+      { address: NEW_COLLATERAL_VAULT as `0x${string}`, value: riskValue(100n * WAD, 80n * WAD, 75n * WAD) },
+    ],
+  }
+  const pairBorrowVault = {
+    ...borrowVault,
+    collaterals: [{
+      address: COLLATERAL_VAULT, borrowLTV: 0, liquidationLTV: 0, currentLiquidationLTV: 0.1,
+      isLiquidationLTVRamping: true, rampTimeRemaining: 100n,
+      ramping: { initialLiquidationLTV: 1, targetTimestamp: 1000, rampDuration: 1000n },
+      oraclePriceRaw: { amountIn: WAD, amountOutMid: WAD, queryFailure: false },
+    }],
+  }
+  const controllerPosition: { liquidity: IAccountLiquidity | undefined } = { liquidity }
+  const collateralPosition = { assets, shares: assets }
+  const accountRef = shallowRef({
+    getSubAccount: () => ({ enabledCollaterals: enabled ? [COLLATERAL_VAULT] : [] }),
+    getPosition: (_subAccount: string, vault: string): { liquidity?: IAccountLiquidity, assets?: bigint, shares?: bigint } =>
+      vault === borrowVault.address ? controllerPosition : collateralPosition,
+    isCollateralEnabled: () => enabled,
+  })
+  vi.stubGlobal('usePlanAccount', () => ({ account: accountRef }))
+  vi.stubGlobal('useEulerAccount', () => ({
+    isPositionsLoaded: ref(true),
+    getPositionBySubAccountIndex: () => ({
+      ...makePosition(), borrowVault: pairBorrowVault, supplied: assets,
+      collaterals: [{ vaultAddress: COLLATERAL_VAULT, assets, shares: assets }],
+      borrow: { liquidity },
+    }),
+  }))
+  return { accountRef, liquidity, controllerPosition, pairBorrowVault, assets }
+}
+const makeRiskForm = (context: ReturnType<typeof installRiskContext>, mode: 'supply' | 'withdraw', swap = false) => makeForm({
+  mode, needsSwap: computed(() => swap),
+  effectiveBalance: computed(() => 1_000n * WAD),
+  effectiveAsset: computed(() => (swap ? usdcAsset : wethAsset) as VaultAsset),
+  validateEstimate: mode === 'supply'
+    ? () => {}
+    : ({ amountFixed, suppliedFixed, hasLiquidationLiquidity }) => validateCollateralWithdraw({
+        amount: amountFixed.value, collateralAssets: suppliedFixed.value,
+        borrowLimit: getBorrowLtvWithdrawLimit({ liquidity: context.liquidity, collateralAddress: COLLATERAL_VAULT, collateralAssets: context.assets }),
+        cashLimit: 100n * WAD, hasLiquidationLiquidity,
+      }),
 })
 
 const makeCampaign = (
@@ -313,7 +365,6 @@ describe('useCollateralForm', () => {
       }),
     }))
     vi.clearAllMocks()
-    vi.mocked(getTotalCollateralValue).mockReturnValue(null)
     mocks.getCollateralApySnapshot.mockResolvedValue({ supplyUsd: 0, weightedSupplyApy: null })
     mocks.getBorrowRewardApyForCollaterals.mockReturnValue(0)
     mocks.getBorrowRewardCampaignsForCollaterals.mockReturnValue([])
@@ -592,77 +643,157 @@ describe('useCollateralForm', () => {
     expect(form.amountFixed.value.value).toBe(2n * 10n ** 18n)
   })
 
-  it.each([
-    ['ramping down with a borrow LTV of 0', { borrowLTV: 0, liquidationLTV: 0, currentLiquidationLTV: 0.79 }],
-    ['borrowable', { borrowLTV: 0.8, liquidationLTV: 0.86, currentLiquidationLTV: 0.86 }],
-  ])('withdraw: projected LTV rises when the collateral is %s', async (_label, ltv) => {
-    vi.mocked(getTotalCollateralValue).mockReturnValue(20_000)
-    const pairBorrowVault = { ...borrowVault, collaterals: [{ address: COLLATERAL_VAULT, ...ltv }] }
-    vi.stubGlobal('useEulerAccount', () => ({
-      isPositionsLoaded: ref(true),
-      getPositionBySubAccountIndex: () => ({ ...makePosition(), borrowVault: pairBorrowVault }),
-    }))
-    const form = makeForm({
-      mode: 'withdraw',
-      needsSwap: computed(() => false),
-      effectiveAsset: computed(() => wethAsset as VaultAsset),
-      computePriceFixed: () => FixedPoint.fromValue(1_000n * 10n ** 18n, 18),
-    })
+  it.each(['60', '100'])('withdraw: accepts %s of zero-borrow-LTV collateral when other collateral covers debt', async (amount) => {
+    const context = installRiskContext()
+    const form = makeRiskForm(context, 'withdraw')
     await flush()
-
-    form.amount.value = '5'
+    form.amount.value = amount
     await flush()
-
-    const expectedLtvPercent = 5_000 / (20_000 - 5 * 1_000) * 100
-    expect(Number(form.estimateUserLTV.value) / 1e18).toBeCloseTo(expectedLtvPercent, 6)
+    expect(form.estimatesError.value).toBe('')
+    expect(form.estimateHealth.value).toBe((90n * WAD - BigInt(amount) * WAD / 10n) * WAD / (70n * WAD))
+    expect(form.estimateUserLTV.value).toBe(70n * WAD / (200n - BigInt(amount)) * 100n)
   })
 
-  it('withdraw: projected LTV ignores a collateral that no longer counts at all', async () => {
-    vi.mocked(getTotalCollateralValue).mockReturnValue(20_000)
-    const pairBorrowVault = {
-      ...borrowVault,
-      collaterals: [{ address: COLLATERAL_VAULT, borrowLTV: 0, liquidationLTV: 0, currentLiquidationLTV: 0 }],
+  it.each([false, true])('withdraw: preserves direct redeem-all versus swap exact-assets intent after balance refresh (swap=%s)', async (swap) => {
+    const context = installRiskContext()
+    const latestLiquidity = {
+      ...context.liquidity,
+      totalCollateralValue: riskValue(201n * WAD, 901n * WAD / 10n, 75n * WAD),
+      collaterals: [
+        { address: COLLATERAL_VAULT as `0x${string}`, value: riskValue(101n * WAD, 101n * WAD / 10n, 0n) },
+        context.liquidity.collaterals[1],
+      ],
     }
-    vi.stubGlobal('useEulerAccount', () => ({
-      isPositionsLoaded: ref(true),
-      getPositionBySubAccountIndex: () => ({ ...makePosition(), borrowVault: pairBorrowVault }),
-    }))
-    const form = makeForm({
-      mode: 'withdraw',
-      needsSwap: computed(() => false),
-      effectiveAsset: computed(() => wethAsset as VaultAsset),
-      computePriceFixed: () => FixedPoint.fromValue(1_000n * 10n ** 18n, 18),
-    })
+    context.accountRef.value = {
+      ...context.accountRef.value,
+      getPosition: (_subAccount: string, vault: string) => vault === borrowVault.address
+        ? { liquidity: latestLiquidity }
+        : { assets: 101n * WAD, shares: 101n * WAD },
+    }
+    const form = makeRiskForm(context, 'withdraw', swap)
     await flush()
-
-    form.amount.value = '5'
+    form.amount.value = '100'
     await flush()
-
-    expect(Number(form.estimateUserLTV.value) / 1e18).toBeCloseTo(25, 6)
+    expect(form.estimatesError.value).toBe('')
+    expect(form.estimateHealth.value).toBe((swap ? 801n * WAD / 10n : 80n * WAD) * WAD / (70n * WAD))
   })
 
-  it('direct supply: projected LTV falls when the collateral is ramping down with a borrow LTV of 0', async () => {
-    vi.mocked(getTotalCollateralValue).mockReturnValue(20_000)
-    const pairBorrowVault = {
-      ...borrowVault,
-      collaterals: [{ address: COLLATERAL_VAULT, borrowLTV: 0, liquidationLTV: 0, currentLiquidationLTV: 0.79 }],
+  it('withdraw: retains the borrow-LTV rejection when zero-LTV collateral is the only collateral', async () => {
+    const context = installRiskContext()
+    context.liquidity.totalCollateralValue = riskValue(100n * WAD, 10n * WAD, 0n)
+    context.liquidity.collaterals.pop()
+    const form = makeRiskForm(context, 'withdraw')
+    await flush()
+    form.amount.value = '1'
+    await flush()
+    expect(form.estimatesError.value).toBe('Amount exceeds the borrow LTV limit')
+  })
+
+  it('withdraw: rejects insufficient liquidation coverage with a different liquidation liability', async () => {
+    const context = installRiskContext()
+    context.liquidity.liabilityValue.liquidation = 85n * WAD
+    const form = makeRiskForm(context, 'withdraw')
+    await flush()
+    form.amount.value = '60'
+    await flush()
+    expect(form.estimatesError.value).toBe('Not enough liquidity for the vault, LTV is too large')
+    expect(form.estimateHealth.value).toBeNull()
+  })
+
+  it('direct supply: projects the ramping collateral top-up with its current liquidation LTV', async () => {
+    const context = installRiskContext()
+    const form = makeRiskForm(context, 'supply')
+    await flush()
+    form.amount.value = '60'
+    await flush()
+    expect(form.estimateUserLTV.value).toBe(70n * WAD / 260n * 100n)
+    expect(form.estimateHealth.value).toBe(96n * WAD / 70n)
+  })
+
+  it.each([true, false])('direct supply: handles an empty collateral according to its actual enablement (%s)', async (enabled) => {
+    const context = installRiskContext({ assets: 0n, enabled })
+    const form = makeRiskForm(context, 'supply')
+    await flush()
+    form.amount.value = '60'
+    await flush()
+    expect(form.estimatesError.value).toBe('')
+    expect(form.estimateHealth.value).toBe((enabled ? 86n : 80n) * WAD / 70n)
+    expect(form.estimateUserLTV.value).toBe(70n * WAD / (enabled ? 160n : 100n) * 100n)
+  })
+
+  it('swap supply: credits quoted output and held shares when the plan enables collateral', async () => {
+    const context = installRiskContext({ enabled: false })
+    const swapApi = await getSwapApi()
+    const form = makeRiskForm(context, 'supply', true)
+    await flush()
+    form.amount.value = '600'
+    await flush()
+    expect(form.estimateHealth.value).toBeNull()
+    swapApi.effectiveQuote.value = { amountIn: '600000000', amountOut: (60n * WAD).toString(), tokenIn: usdcAsset } as SwapQuote
+    await flush()
+    expect(form.estimateHealth.value).toBe(96n * WAD / 70n)
+    expect(form.estimateUserLTV.value).toBe(70n * WAD / 260n * 100n)
+  })
+
+  it.each(['liquidity', 'quote'] as const)('supply remains available when the %s estimate is missing', async (missing) => {
+    const context = installRiskContext({ assets: 0n })
+    if (missing === 'liquidity') context.controllerPosition.liquidity = undefined
+    else context.pairBorrowVault.collaterals[0].oraclePriceRaw.queryFailure = true
+    const form = makeRiskForm(context, 'supply')
+    await flush()
+    form.amount.value = '60'
+    await flush()
+    expect(form.estimatesError.value).toBe('')
+    expect(form.estimateHealth.value).toBeNull()
+    expect(form.estimateUserLTV.value).toBeNull()
+    expect(form.estimateLiquidationPrice.value).toBeUndefined()
+    expect(form.isSubmitDisabled.value).toBe(false)
+  })
+
+  it('withdraw: fails closed when the controller liquidity is unavailable', async () => {
+    const context = installRiskContext()
+    context.controllerPosition.liquidity = undefined
+    const form = makeRiskForm(context, 'withdraw')
+    await flush()
+    form.amount.value = '60'
+    await flush()
+    expect(form.estimatesError.value).toBe('Position liquidity unavailable')
+  })
+
+  it('uses shares and controller liquidity from the same replacement account snapshot', async () => {
+    const context = installRiskContext()
+    const form = makeRiskForm(context, 'supply')
+    await flush()
+    form.amount.value = '60'
+    await flush()
+    const latestLiquidity = {
+      ...context.liquidity,
+      liabilityValue: riskValue(140n * WAD),
+      totalCollateralValue: riskValue(400n * WAD, 180n * WAD, 150n * WAD),
+      collaterals: context.liquidity.collaterals.map(c => ({ ...c, value: riskValue(c.value.oracleMid * 2n, c.value.liquidation * 2n, c.value.borrowing * 2n) })),
     }
-    vi.stubGlobal('useEulerAccount', () => ({
-      isPositionsLoaded: ref(true),
-      getPositionBySubAccountIndex: () => ({ ...makePosition(), borrowVault: pairBorrowVault }),
-    }))
-    const form = makeForm({
-      needsSwap: computed(() => false),
-      effectiveAsset: computed(() => wethAsset as VaultAsset),
-      computePriceFixed: () => FixedPoint.fromValue(1_000n * 10n ** 18n, 18),
-    })
+    const latestHoldings = { assets: 200n * WAD, shares: 200n * WAD }
+    context.accountRef.value = {
+      ...context.accountRef.value,
+      getPosition: (_subAccount: string, vault: string) => vault === borrowVault.address ? { liquidity: latestLiquidity } : latestHoldings,
+    }
     await flush()
+    expect(form.estimateUserLTV.value).toBe(140n * WAD / 460n * 100n)
+    expect(form.estimateHealth.value).toBe(186n * WAD / 140n)
+  })
 
-    form.amount.value = '5'
+  it('recomputes an entered amount when the account snapshot hydrates', async () => {
+    const context = installRiskContext()
+    const snapshot = context.accountRef.value
+    context.accountRef.value = null
+    const form = makeRiskForm(context, 'supply')
     await flush()
-
-    const expectedLtvPercent = 5_000 / (20_000 + 5 * 1_000) * 100
-    expect(Number(form.estimateUserLTV.value) / 1e18).toBeCloseTo(expectedLtvPercent, 6)
+    form.amount.value = '60'
+    await flush()
+    expect(form.estimateHealth.value).toBeNull()
+    context.accountRef.value = snapshot
+    await flush()
+    expect(form.estimateHealth.value).toBe(96n * WAD / 70n)
   })
 
   it('uses the projected collateral set when a new collateral adds borrow rewards', async () => {

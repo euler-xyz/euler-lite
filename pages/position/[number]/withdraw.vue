@@ -11,10 +11,9 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { useCollateralForm } from '~/composables/position/useCollateralForm'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
 import { getAddress, type Address, zeroAddress, maxUint256 } from 'viem'
 import { FixedPoint } from '~/utils/fixed-point'
-import { getBorrowLtvWithdrawLimit, getBorrowLtvWithdrawNotice, getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
+import { getBorrowLtvWithdrawLimit, getBorrowLtvWithdrawNotice, getCashLimitedWithdrawAmount, validateCollateralWithdraw } from '~/utils/vault/withdraw'
 import { getPositionCollateralEdge } from '~/entities/account'
 import { collectPlannerVaultAddresses } from '~/features/reviewed-execution/planning/requirements'
 
@@ -90,25 +89,15 @@ const form = useCollateralForm({
     return ratio / health
   },
 
-  validateEstimate: ({ suppliedFixed, amountFixed, userLtvFixed }) => {
-    const borrowLimit = borrowLtvWithdrawLimit()
-    if (suppliedFixed.lt(amountFixed) || (borrowLimit === undefined && suppliedFixed.lte(amountFixed))) {
-      throw new Error('Not enough liquidity in your position')
-    }
+  validateEstimate: ({ suppliedFixed, amountFixed, hasLiquidationLiquidity }) => {
     if (!form.position.value) return
-    if (borrowLimit !== undefined && borrowLimit < amountFixed.value) {
-      throw new Error('Amount exceeds the borrow LTV limit')
-    }
-    const effectiveLiquidationLtv = getBorrowPositionEffectiveLiquidationLTV(form.position.value)
-    if (effectiveLiquidationLtv === undefined) {
-      throw new Error('Liquidation LTV unavailable')
-    }
-    if (userLtvFixed.gte(FixedPoint.fromValue(decimalLtvToBps(effectiveLiquidationLtv), 2))) {
-      throw new Error('Not enough liquidity for the vault, LTV is too large')
-    }
-    if (cashLimitedCollateralAssets() < amountFixed.value) {
-      throw new Error('Not enough liquidity in vault')
-    }
+    validateCollateralWithdraw({
+      amount: amountFixed.value,
+      collateralAssets: suppliedFixed.value,
+      borrowLimit: borrowLtvWithdrawLimit(),
+      cashLimit: cashLimitedCollateralAssets(),
+      hasLiquidationLiquidity,
+    })
   },
 
   buildDirectPlan: async ({ vaultAddress, amountNano, subAccount, account }) => {
