@@ -6,7 +6,7 @@
  * by server/plugins/chain-config.ts via the render:html hook.
  *
  * This avoids runtimeConfig (which is frozen in production) and works
- * with runtime-injected env vars (e.g. Doppler on Railway).
+ * with environment variables injected at runtime by Doppler.
  */
 import { getChainEnvIssues, getConfiguredChainIds, getEnabledChainIds, type ChainEnvIssues } from '~/utils/chain-env'
 import { getUnknownChainIds } from '~/entities/chainRegistry'
