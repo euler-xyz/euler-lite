@@ -12,6 +12,7 @@ import { getVaultGeoUnavailableReason, isAnyVaultBlockedByCountry, isVaultRestri
 import { getVaultDeprecation, getVaultNotice } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
 import { getPositionCollateralEdge, getPositionRampStatus, getPositionRampTargetTimestamp } from '~/entities/account'
+import { getBorrowLtvWithdrawNotice, isAtBorrowLtvLimit } from '~/utils/vault/withdraw'
 import { DateTime } from 'luxon'
 import { VaultOverviewModal, VaultApyModal, VaultNetApyModal, PortfolioRoeModal, VaultRampDownModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
@@ -191,11 +192,23 @@ const isPositionGeoBlocked = computed(() => {
 
 const isOverBorrowLTV = computed(() => {
   if (!position.value || hasNoBorrow.value) return false
+  const isAtLimit = isAtBorrowLtvLimit(position.value.borrow.liquidity)
+  if (isAtLimit !== undefined) return isAtLimit
   const userLtv = positionLTVPercent.value
   if (userLtv === null) return false
   if (position.value.borrowLTV === undefined) return false
   const borrowLtv = ltvToPercent(position.value.borrowLTV)
   return borrowLtv > 0 && userLtv >= borrowLtv
+})
+
+const zeroBorrowLtvNotice = computed(() => {
+  if (!position.value || !collateralVault.value || position.value.borrowLTV !== 0) return null
+  return getBorrowLtvWithdrawNotice({
+    liquidity: position.value.borrow.liquidity,
+    collateralAddress: collateralVault.value.address,
+    collateralBorrowLTV: position.value.borrowLTV,
+    symbol: collateralVault.value.asset.symbol,
+  })
 })
 
 const isBorrowRestricted = computed(() =>
@@ -208,7 +221,6 @@ const isMultiplyRestricted = computed(() => {
       || isVaultRestrictedByCountry(collateralVault.value.address))
 })
 
-// Both vaults restricted = pair effectively blocked (no borrow, no multiply, no useful swaps)
 const isPairFullyRestricted = computed(() => {
   if (!position.value) return false
   return !!borrowVault.value && !!collateralVault.value
@@ -323,7 +335,6 @@ const rampWarning = computed<VaultWarning | null>(() => {
   }
 })
 
-// Warnings for borrow vault
 const positionWarnings = computed(() => {
   if (!borrowVault.value) return []
   return [
@@ -333,7 +344,6 @@ const positionWarnings = computed(() => {
   ]
 })
 
-// Pre-computed collateral row data (USD values computed asynchronously)
 const collateralRowsData = ref<{
   value: UsdAmount
   unitPriceUsd: number
@@ -358,7 +368,6 @@ const collateralRows = computed(() => {
   })
 })
 
-// Update collateral rows data when collateral items change
 watchEffect(async () => {
   if (!position.value || !borrowVault.value || !collateralItems.value.length) {
     collateralRowsData.value = []
@@ -404,7 +413,6 @@ watchEffect(async () => {
   collateralRowsData.value = results
 })
 
-// Pre-computed collateral USD value (async)
 const collateralValue = ref<UsdAmount>({ usd: 0, hasPrice: false })
 
 watchEffect(async () => {
@@ -436,7 +444,6 @@ watchEffect(async () => {
   }
 })
 
-// Pre-computed borrow market value in USD (async)
 const borrowMarketValue = ref<UsdAmount>({ usd: 0, hasPrice: false })
 
 watchEffect(async () => {
@@ -587,7 +594,6 @@ const isPrimaryCollateral = (vault: EVault | SecuritizeCollateralVault) => {
   return getAddress(vault.address) === primaryCollateralAddress.value
 }
 
-// Pre-computed borrow oracle price for display (always on-chain)
 const borrowOraclePrice = ref(0)
 const hasBorrowPrice = ref(false)
 
@@ -610,7 +616,6 @@ watchEffect(async () => {
   }
 })
 
-// Pre-computed borrow unit price (1 unit in USD) for display
 const borrowUnitPrice = ref<UsdAmount>({ usd: 0, hasPrice: false })
 
 watchEffect(async () => {
@@ -766,7 +771,6 @@ const disableCollateral = async (vault: EVault) => {
 }
 const load = async () => {
   const sequence = ++loadSequence
-  // Redirect to portfolio if not connected and not in spy mode
   if (!isConnected.value && !isSpyMode.value) {
     router.replace('/portfolio')
     return
@@ -1281,8 +1285,8 @@ watch([isConnected, isSpyMode, address, activeLayerData, () => _route.params.num
             <UiAlert
               v-if="isOverBorrowLTV && !isEligibleForLiquidation"
               class="my-12"
-              title="LTV limit reached"
-              description="Your current LTV exceeds the borrow limit. Repay debt or supply more collateral to borrow again."
+              :title="zeroBorrowLtvNotice?.title ?? 'LTV limit reached'"
+              :description="zeroBorrowLtvNotice?.message ?? 'Your current LTV exceeds the borrow limit. Repay debt or supply more collateral to borrow again.'"
               variant="warning"
               size="compact"
             />
