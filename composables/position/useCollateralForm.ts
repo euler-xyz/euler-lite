@@ -231,7 +231,20 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     (selectedCollateral.value || (position.value ? position.value.collateralVault : undefined)) as EVault | SecuritizeCollateralVault | undefined,
   )
   const borrowVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
-  const collateralAssets = computed(() => selectedCollateralAssets.value)
+  const accountSnapshot = computed(() => {
+    const account = planAccount.value
+    const subAccount = position.value?.subAccount as Address | undefined
+    if (!account || !subAccount || !account.getSubAccount(subAccount)) return undefined
+    return {
+      collateral: collateralVault.value ? account.getPosition(subAccount, collateralVault.value.address) : undefined,
+      liquidity: borrowVault.value ? account.getPosition(subAccount, borrowVault.value.address)?.liquidity : undefined,
+      isCollateralEnabled: collateralVault.value ? account.isCollateralEnabled(subAccount, collateralVault.value.address) : undefined,
+    }
+  })
+  const controllerLiquidity = computed(() => accountSnapshot.value?.liquidity)
+  const collateralAssets = computed(() => accountSnapshot.value
+    ? accountSnapshot.value.collateral?.assets ?? 0n
+    : selectedCollateralAssets.value)
   const asset = computed(() => collateralVault.value?.asset)
 
   const priceInvert = usePriceInvert(
@@ -741,21 +754,17 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     if (!collateralVault.value) return
 
     try {
-      const account = planAccount.value
-      const subAccount = position.value?.subAccount
-      const accountSnapshot = subAccount ? account?.getSubAccount(subAccount as Address) : undefined
-      const collateralPosition = subAccount ? account?.getPosition(subAccount as Address, collateralVault.value.address) : undefined
-      const borrowPosition = subAccount && borrowVault.value ? account?.getPosition(subAccount as Address, borrowVault.value.address) : undefined
+      const snapshot = accountSnapshot.value
       const hasCollateralAmount = options.mode !== 'supply' || !options.needsSwap.value || (swapCollateralDeltaNano.value ?? 0n) > 0n
       const liquidityEstimate = hasCollateralAmount
         ? estimateCollateralLiquidityChange({
-            liquidity: accountSnapshot ? borrowPosition?.liquidity : position.value?.borrow?.liquidity,
+            liquidity: controllerLiquidity.value,
             borrowVault: borrowVault.value,
             collateralVault: collateralVault.value,
-            collateralAssets: collateralPosition?.assets ?? (accountSnapshot ? 0n : undefined),
-            collateralShares: collateralPosition?.shares ?? (accountSnapshot ? 0n : undefined),
+            collateralAssets: snapshot ? collateralAssets.value : undefined,
+            collateralShares: snapshot ? snapshot.collateral?.shares ?? 0n : undefined,
             assetsDelta: options.mode === 'supply' ? amountFixed.value.value : -amountFixed.value.value,
-            isCollateralEnabled: accountSnapshot ? account?.isCollateralEnabled(subAccount as Address, collateralVault.value.address) : undefined,
+            isCollateralEnabled: snapshot?.isCollateralEnabled,
             // Direct deposits retain enablement; the swap-deposit planner enables its output vault.
             enableCollateral: options.mode === 'supply' && options.needsSwap.value,
             // The direct withdrawal planner redeems all shares at the form's full balance.
@@ -1254,6 +1263,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     collateralVault,
     borrowVault,
     collateralAssets,
+    controllerLiquidity,
     asset,
     priceInvert,
 

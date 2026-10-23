@@ -4,7 +4,7 @@ import type { EVault, IAccountLiquidity, SwapQuote } from '@eulerxyz/euler-v2-sd
 import type { VaultAsset } from '~/types/asset'
 import type { RewardCampaign } from '~/entities/reward-campaign'
 import { FixedPoint } from '~/utils/fixed-point'
-import { getBorrowLtvWithdrawLimit, validateCollateralWithdraw } from '~/utils/vault/withdraw'
+import { getBorrowLtvWithdrawLimit, getBorrowLtvWithdrawNotice, validateCollateralWithdraw } from '~/utils/vault/withdraw'
 import { useCollateralForm, type UseCollateralFormOptions } from '~/composables/position/useCollateralForm'
 
 const { COLLATERAL_VAULT, NEW_COLLATERAL_VAULT, wethAsset, usdcAsset, collateralVault, borrowVault, mocks } = vi.hoisted(() => {
@@ -297,18 +297,25 @@ const installRiskContext = ({ assets = 100n * WAD, enabled = true } = {}) => {
   }))
   return { accountRef, liquidity, controllerPosition, pairBorrowVault, assets }
 }
-const makeRiskForm = (context: ReturnType<typeof installRiskContext>, mode: 'supply' | 'withdraw', swap = false) => makeForm({
-  mode, needsSwap: computed(() => swap),
-  effectiveBalance: computed(() => 1_000n * WAD),
-  effectiveAsset: computed(() => (swap ? usdcAsset : wethAsset) as VaultAsset),
-  validateEstimate: mode === 'supply'
-    ? () => {}
-    : ({ amountFixed, suppliedFixed, hasLiquidationLiquidity }) => validateCollateralWithdraw({
-        amount: amountFixed.value, collateralAssets: suppliedFixed.value,
-        borrowLimit: getBorrowLtvWithdrawLimit({ liquidity: context.liquidity, collateralAddress: COLLATERAL_VAULT, collateralAssets: context.assets }),
-        cashLimit: 100n * WAD, hasLiquidationLiquidity,
-      }),
-})
+const makeRiskForm = (_context: ReturnType<typeof installRiskContext>, mode: 'supply' | 'withdraw', swap = false) => {
+  const borrowLimit = () => getBorrowLtvWithdrawLimit({
+    liquidity: form.controllerLiquidity.value,
+    collateralAddress: form.collateralVault.value!.address,
+    collateralAssets: form.collateralAssets.value,
+  })
+  const form = makeForm({
+    mode, needsSwap: computed(() => swap),
+    effectiveBalance: computed(() => mode === 'withdraw' ? borrowLimit() ?? form.collateralAssets.value : 1_000n * WAD),
+    effectiveAsset: computed(() => (swap && mode === 'supply' ? usdcAsset : wethAsset) as VaultAsset),
+    validateEstimate: mode === 'supply'
+      ? () => {}
+      : ({ amountFixed, suppliedFixed, hasLiquidationLiquidity }) => validateCollateralWithdraw({
+          amount: amountFixed.value, collateralAssets: suppliedFixed.value,
+          borrowLimit: borrowLimit(), cashLimit: 1_000n * WAD, hasLiquidationLiquidity,
+        }),
+  })
+  return form
+}
 
 const makeCampaign = (
   campaignId: string,
@@ -654,7 +661,7 @@ describe('useCollateralForm', () => {
     expect(form.estimateUserLTV.value).toBe(70n * WAD / (200n - BigInt(amount)) * 100n)
   })
 
-  it.each([false, true])('withdraw: preserves direct redeem-all versus swap exact-assets intent after balance refresh (swap=%s)', async (swap) => {
+  it.each([false, true])('withdraw: uses the refreshed balance for partial and full withdrawal (swap=%s)', async (swap) => {
     const context = installRiskContext()
     const latestLiquidity = {
       ...context.liquidity,
@@ -675,7 +682,135 @@ describe('useCollateralForm', () => {
     form.amount.value = '100'
     await flush()
     expect(form.estimatesError.value).toBe('')
-    expect(form.estimateHealth.value).toBe((swap ? 801n * WAD / 10n : 80n * WAD) * WAD / (70n * WAD))
+    expect(form.collateralAssets.value).toBe(101n * WAD)
+    expect(form.estimateHealth.value).toBe(801n * WAD / 700n)
+    form.amount.value = '101'
+    await flush()
+    expect(form.estimatesError.value).toBe('')
+    expect(form.estimateHealth.value).toBe(80n * WAD / 70n)
+  })
+
+  it.each([
+    { oldDebt: 70n, currentDebt: 50n, amount: '7', blocked: false },
+    { oldDebt: 50n, currentDebt: 70n, amount: '10', blocked: true },
+  ])('withdraw: updates validation after debt changes from $oldDebt to $currentDebt', async ({ oldDebt, currentDebt, amount, blocked }) => {
+    const context = installRiskContext()
+    const selectedValue = riskValue(100n * WAD, 80n * WAD, 75n * WAD)
+    context.liquidity.liabilityValue = riskValue(oldDebt * WAD)
+    context.liquidity.totalCollateralValue = selectedValue
+    context.liquidity.collaterals = [{ address: COLLATERAL_VAULT as `0x${string}`, value: selectedValue }]
+    Object.assign(context.pairBorrowVault.collaterals[0], {
+      borrowLTV: 0.75, liquidationLTV: 0.8, currentLiquidationLTV: 0.8, isLiquidationLTVRamping: false,
+    })
+    const form = makeRiskForm(context, 'withdraw')
+    await flush()
+    form.amount.value = amount
+    await flush()
+    expect(form.isSubmitDisabled.value).toBe(!blocked)
+
+    const currentLiquidity = { ...context.liquidity, liabilityValue: riskValue(currentDebt * WAD) }
+    context.accountRef.value = {
+      ...context.accountRef.value,
+      getPosition: (_subAccount: string, vault: string) => vault === borrowVault.address
+        ? { liquidity: currentLiquidity }
+        : { assets: 100n * WAD, shares: 100n * WAD },
+    }
+    await flush()
+
+    expect(form.position.value!.borrow.liquidity.liabilityValue.borrowing).toBe(oldDebt * WAD)
+    expect(form.controllerLiquidity.value).toBe(currentLiquidity)
+    expect(getBorrowLtvWithdrawLimit({
+      liquidity: form.controllerLiquidity.value,
+      collateralAddress: form.collateralVault.value!.address,
+      collateralAssets: form.collateralAssets.value,
+    })).toBe((75n * WAD - currentDebt * WAD * 101n / 100n) * 100n / 75n)
+    expect(form.isSubmitDisabled.value).toBe(blocked)
+    expect(form.estimatesError.value).toBe(blocked ? 'Amount exceeds the borrow LTV limit' : '')
+    if (!blocked) expect(form.estimateHealth.value).toBe(744n * WAD / 500n)
+  })
+
+  it('withdraw: scales the cap with refreshed holdings without treating the old balance as redeem-all', async () => {
+    const context = installRiskContext()
+    const selectedValue = riskValue(100n * WAD, 80n * WAD, 75n * WAD)
+    context.liquidity.liabilityValue = riskValue(50n * WAD)
+    context.liquidity.totalCollateralValue = selectedValue
+    context.liquidity.collaterals = [{ address: COLLATERAL_VAULT as `0x${string}`, value: selectedValue }]
+    Object.assign(context.pairBorrowVault.collaterals[0], {
+      borrowLTV: 0.75, liquidationLTV: 0.8, currentLiquidationLTV: 0.8, isLiquidationLTVRamping: false,
+    })
+    const form = makeRiskForm(context, 'withdraw')
+    await flush()
+    form.amount.value = '100'
+    await flush()
+    expect(form.isSubmitDisabled.value).toBe(true)
+
+    const currentValue = riskValue(200n * WAD, 160n * WAD, 150n * WAD)
+    const currentLiquidity = {
+      ...context.liquidity, totalCollateralValue: currentValue,
+      collaterals: [{ address: COLLATERAL_VAULT as `0x${string}`, value: currentValue }],
+    }
+    context.accountRef.value = {
+      ...context.accountRef.value,
+      getPosition: (_subAccount: string, vault: string) => vault === borrowVault.address
+        ? { liquidity: currentLiquidity }
+        : { assets: 200n * WAD, shares: 200n * WAD },
+    }
+    await flush()
+
+    expect(form.collateralAssets.value).toBe(200n * WAD)
+    expect(form.suppliedFixed.value.value).toBe(200n * WAD)
+    expect(getBorrowLtvWithdrawLimit({
+      liquidity: form.controllerLiquidity.value,
+      collateralAddress: form.collateralVault.value!.address,
+      collateralAssets: form.collateralAssets.value,
+    })).toBe(995n * WAD / 10n * 200n / 150n)
+    expect(form.estimatesError.value).toBe('')
+    expect(form.isSubmitDisabled.value).toBe(false)
+    expect(form.estimateHealth.value).toBe(8n * WAD / 5n)
+  })
+
+  it('withdraw: updates the zero-borrow-LTV notice when other collateral covers repaid debt', async () => {
+    const context = installRiskContext()
+    context.liquidity.liabilityValue = riskValue(80n * WAD)
+    const form = makeRiskForm(context, 'withdraw')
+    await flush()
+    const notice = () => getBorrowLtvWithdrawNotice({
+      liquidity: form.controllerLiquidity.value,
+      collateralAddress: form.collateralVault.value!.address,
+      collateralBorrowLTV: 0,
+      symbol: wethAsset.symbol,
+    })
+    expect(notice()).not.toBeNull()
+    const currentLiquidity = { ...context.liquidity, liabilityValue: riskValue(50n * WAD) }
+    context.accountRef.value = {
+      ...context.accountRef.value,
+      getPosition: (_subAccount: string, vault: string) => vault === borrowVault.address
+        ? { liquidity: currentLiquidity }
+        : { assets: 100n * WAD, shares: 100n * WAD },
+    }
+    await flush()
+    expect(notice()).toBeNull()
+  })
+
+  it('withdraw: treats an absent holding in a known account as zero instead of reusing the portfolio balance', async () => {
+    const context = installRiskContext()
+    const form = makeRiskForm(context, 'withdraw')
+    await flush()
+    const currentLiquidity = {
+      ...context.liquidity,
+      totalCollateralValue: riskValue(100n * WAD, 80n * WAD, 75n * WAD),
+      collaterals: [context.liquidity.collaterals[1]],
+    }
+    context.accountRef.value = {
+      ...context.accountRef.value,
+      getPosition: (_subAccount: string, vault: string) => vault === borrowVault.address ? { liquidity: currentLiquidity } : undefined,
+    }
+    await flush()
+    form.amount.value = '1'
+    await flush()
+    expect(form.collateralAssets.value).toBe(0n)
+    expect(form.isSubmitDisabled.value).toBe(true)
+    expect(form.estimatesError.value).toBe('Not enough liquidity in your position')
   })
 
   it('withdraw: retains the borrow-LTV rejection when zero-LTV collateral is the only collateral', async () => {

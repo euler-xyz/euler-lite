@@ -51,7 +51,7 @@ const borrowLtvWithdrawLimit = () => {
   const collateralVault = form.collateralVault.value
   if (!collateralVault) return undefined
   return getBorrowLtvWithdrawLimit({
-    liquidity: form.position.value?.borrow.liquidity,
+    liquidity: form.controllerLiquidity.value,
     collateralAddress: collateralVault.address,
     collateralAssets: form.collateralAssets.value,
   })
@@ -298,7 +298,7 @@ const borrowLtvNotice = computed(() => {
   const asset = form.asset.value
   if (!collateralVault || !asset) return null
   return getBorrowLtvWithdrawNotice({
-    liquidity: form.position.value?.borrow.liquidity,
+    liquidity: form.controllerLiquidity.value,
     collateralAddress: collateralVault.address,
     collateralBorrowLTV: getPositionCollateralEdge(form.borrowVault.value, collateralVault.address)?.borrowLTV,
     symbol: asset.symbol,
