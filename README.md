@@ -12,7 +12,7 @@ Euler Lite provides all the core functionality of Euler Finance in a customizabl
 ## Prerequisites
 
 - **Node.js** 24.22.1 (see `.nvmrc`)
-- **npm** package manager
+- **npm** 11.20.0 (pinned in `package.json`, CI and the Docker build)
 - **Git**
 - A **Reown Project ID** for AppKit wallet connections - get one at [reown.com](https://reown.com/)
 
@@ -23,6 +23,7 @@ Euler Lite provides all the core functionality of Euler Finance in a customizabl
 ```bash
 git clone <repository-url>
 cd euler-lite
+npm install --global npm@11.20.0
 npm ci
 ```
 

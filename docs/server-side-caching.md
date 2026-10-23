@@ -80,7 +80,7 @@ Turtle is the only provider whose credential is required: Turtle rejects unauthe
 
 ### Goldsky subgraph
 
-`/api/internal/proxy/subgraph/{chainId}` (`[chainId].post.ts`) is not built with the factory: its upstream is selected per chain from the router param (`SUBGRAPH_URL_<chainId>`, then `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`), an unconfigured chain is a 404 rather than a 503, and an empty body is a 400. It still forwards through `external-proxy.ts` (POST only) with `bypassCache: true` and a `no-store` browser hint — account positions are freshness-critical, so nothing is cached server-side and concurrent identical queries are only coalesced in flight. It carries its own rate limiter.
+`/api/internal/proxy/subgraph/{chainId}` (`[chainId].post.ts`) is not built with the factory: its upstream is selected per chain from the router param (`SUBGRAPH_URL_<chainId>`, then `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`), an unconfigured chain is a 404 rather than a 503, and an empty body is a 400. It still forwards through `external-proxy.ts` (POST only) with `bypassCache: true` and a `no-store` browser hint; the proxy coalesces concurrent identical queries without caching completed responses. It carries its own rate limiter. Optional catalog metadata refreshes after 60 seconds and retains the last successful snapshot for up to seven days during outages. The SDK separately caches checked query results according to its browsing/form/server policies; see [Subgraph catalog resolution](./sdk-integration.md#subgraph-catalog-resolution).
 
 The response budget is 8 MiB of decoded body bytes and 10 seconds total for fetching headers and consuming the full body, including upstream error responses. Oversized or slow responses return 502, allowing the SDK to use its onchain secondary. The total deadline intentionally includes body consumption. The proxy retains the SDK's dynamic GraphQL query surface; these limits bound buffering and waiting, not upstream query computation.
 
@@ -88,7 +88,7 @@ The response budget is 8 MiB of decoded body bytes and 10 seconds total for fetc
 
 - **Fuul, Incentra/Brevis, Merkl**: provider APIs don't set permissive CORS; direct browser fetches fail. Proxying also shares one warm response across every connected wallet and keeps the optional Merkl key server-side.
 - **Turtle**: the API key must stay off the client; the browser only fetches reward proofs through the proxy, while stream discovery happens in the server-side SDK (see below).
-- **Goldsky subgraph**: each chain's URL is a per-deployment Goldsky deployment ID. Proxying keeps the project ID server-side; responses are not cached because account positions must reflect the latest block.
+- **Goldsky subgraph**: each chain's URL is a per-deployment Goldsky deployment ID. Proxying keeps the project ID server-side; proxy responses are not cached. SDK query caches have bounded stale windows and post-transaction invalidation. Fresh reads validate payloads and, for catalog sources, the selected deployment. Reads are best-effort rather than a guarantee of the latest block.
 
 ### Intrinsic APY overlay
 

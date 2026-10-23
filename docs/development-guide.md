@@ -4,12 +4,13 @@ This guide covers the concrete steps and scripts needed to work on this reposito
 
 ## Prerequisites
 
-- Node.js 24+
-- npm
+- Node.js 24.22.1 (see `.nvmrc`)
+- npm 11.20.0
 
 ## Install and run
 
 ```bash
+npm install --global npm@11.20.0
 npm ci
 npm run dev
 ```
@@ -43,7 +44,7 @@ npm run typecheck     # Type-check the project
 
 ## Continuous Integration
 
-Pull requests are gated by the `CI` workflow (`.github/workflows/ci.yaml`), which runs on Node 24 (matching the Dockerfile) with npm caching:
+Pull requests are gated by the `CI` workflow (`.github/workflows/ci.yaml`), which runs on Node 24.22.1 and npm 11.20.0 (matching the Docker build) with npm caching:
 
 - **typecheck** – `npm run typecheck` (blocking)
 - **test** – `npm run build` then `npm run test:run` (blocking). The build runs first because `tests/utils/logger-bundle.test.ts` inspects the production client bundle (`.output/public/_nuxt`) and hard-fails under CI when it is absent.
@@ -151,7 +152,7 @@ The `/api/internal/pyth/updates` endpoint proxies Pyth Hermes price update reque
 
 ## Troubleshooting
 
-- If the app fails to start, ensure Node 24+ and reinstall deps.
+- If the app fails to start, ensure Node 24.22.1 (see `.nvmrc`) and reinstall deps.
 - If blockchain calls fail, verify `RPC_URL_<chainId>` env vars and check that matching `SUBGRAPH_URL_<chainId>` or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` is set.
 - If Sonic (chain `146`) vault snapshots or server-side label reads fail with oversized Multicall / RPC batch errors, do not raise `EVAULT_FETCH_CHUNK_CHAINS` as the first fix. Server Sonic reads use SDK `chains` transport options in `server/utils/sdk-server.ts`, which shrink Multicall3 aggregates independently of the SDK `fetchVaults` chunk list. A changed override needs a process restart. See [Server-Side Caching → Server provider overrides](./server-side-caching.md#server-provider-overrides).
 - If token logos don't load, verify `V3_API_URL` (or `EULER_SDK_V3_API_URL` / `NUXT_PUBLIC_V3_API_URL`) and, when required by the upstream, `EULER_SDK_V3_API_KEY`. Token data is fetched server-side via `/api/internal/token-list` which aggregates Euler V3, Uniswap, DefiLlama, and Merkl sources with fallback.

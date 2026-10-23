@@ -14,6 +14,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 ### [Fork Setup](./fork-setup.md)
 
 - Operator-owned V3 and static labels, with complete environment examples
+- Direct subgraph URLs or an optional custom catalog, with explicit controls to prevent bundled subgraph fallback
 - Explicit V3 opt-out, custom image hosts, SDK/Lite settings and remaining external services
 - Configuration diagnostics and verification steps
 
