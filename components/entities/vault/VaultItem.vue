@@ -5,7 +5,6 @@ import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault, useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
 import { isVaultGovernanceLimited, isVaultRecentlyAdded, isVaultKeyring, isVaultCyclicalNote, getVaultDeprecation } from '~/utils/eulerLabelsUtils'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
-import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
@@ -41,10 +40,6 @@ const entityName = computed(() => {
   if (entities.length === 1) return entities[0].name
   if (entities.length === 2) return `${entities[0].name} & ${entities[1].name}`
   return `${entities[0].name} & others`
-})
-const entityLogos = computed(() => {
-  if (!entityName.value || entities.length === 0) return []
-  return entities.map(e => getEulerLabelEntityLogo(e.logo))
 })
 const isEscrow = computed(() => getVaultCategory(vault.address) === 'escrow')
 const isBorrowable = computed(() => isVaultBorrowable(vault))
@@ -318,20 +313,14 @@ watchEffect(async () => {
           :class="{ 'opacity-20': isGovernanceLimited }"
         >
           <VaultEntityDisclosureTooltip :entities="entities">
-            <span class="inline-flex min-w-0 items-center gap-6">
-              <BaseAvatar
-                class="icon--20"
-                :label="entityName"
-                :src="entityLogos"
-              />
-              <span
-                class="text-p2 text-content-primary truncate"
-                data-id="data-point"
-                :data-key="vault.address.toLowerCase()"
-                data-field="curator"
-                :data-value="entityName"
-              >{{ entityName }}</span>
-            </span>
+            <CuratorEntityLink
+              :entities="entities"
+              :label="entityName"
+              span-link
+              text-class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors truncate"
+              :data-key="vault.address.toLowerCase()"
+              data-field="curator"
+            />
           </VaultEntityDisclosureTooltip>
         </div>
         <div
@@ -484,12 +473,12 @@ watchEffect(async () => {
             class="flex items-center gap-8"
             :class="{ 'opacity-20': isGovernanceLimited }"
           >
-            <BaseAvatar
-              class="icon--20"
+            <CuratorEntityLink
+              :entities="entities"
               :label="entityName"
-              :src="entityLogos"
+              span-link
+              text-class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors truncate"
             />
-            <span class="text-p2 text-content-primary truncate">{{ entityName }}</span>
           </div>
           <div
             v-else

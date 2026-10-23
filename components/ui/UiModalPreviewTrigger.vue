@@ -169,6 +169,7 @@ const showPopover = (allowWithoutHover = false) => {
   updatePreferredPlacement()
   isRendered.value = true
   nextTick(() => {
+    if (!isRendered.value) return
     isVisible.value = true
     nextTick(update)
   })
@@ -350,10 +351,18 @@ onMounted(() => {
   mediaQuery.addEventListener('change', updateHoverCapability)
 })
 
+const resetPopover = () => {
+  hidePopover()
+  isRendered.value = false
+  isPointerInTrigger.value = false
+  removeDocumentKeydownListener()
+}
+
+onDeactivated(resetPopover)
+
 onBeforeUnmount(() => {
   mediaQuery?.removeEventListener('change', updateHoverCapability)
-  removeDocumentKeydownListener()
-  hidePopover()
+  resetPopover()
 })
 </script>
 

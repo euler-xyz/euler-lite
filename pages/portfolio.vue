@@ -27,6 +27,8 @@ const { locks, refreshLocks } = useREULLocks()
 const { isConnected, address, spyAddress, effectiveAddress, isSpyMode } = useEffectiveAddress()
 const { isLoaded: isBalancesLoaded, updateBalances } = useWallets()
 const { chainId, eulerLensAddresses } = useEulerAddresses()
+const { isReady: labelsReady, loadError: labelsError } = useEulerLabels()
+const labelsUnavailable = computed(() => !labelsReady.value && Boolean(labelsError.value))
 const { portfolioRefreshCounter } = usePortfolioRefresh()
 const showAllLabelEntries = useShowAllLabelEntries()
 const {
@@ -229,12 +231,17 @@ watch(showAllLabelEntries, (showAll) => {
 </script>
 
 <template>
-  <section class="flex flex-col gap-16 min-h-[calc(100dvh-178px)] mobile:-mx-16">
+  <section
+    class="flex flex-col gap-16 min-h-[calc(100dvh-178px)] mobile:-mx-16"
+  >
     <div class="flex items-center justify-between px-16">
       <h2 class="text-h2 text-content-primary">
         Your Portfolio
       </h2>
-      <div class="flex items-center gap-8">
+      <div
+        v-if="!labelsUnavailable"
+        class="flex items-center gap-8"
+      >
         <span class="text-h6 text-content-secondary">Show all</span>
         <UiHoverPreviewTooltip
           title="Show all"
@@ -247,11 +254,14 @@ watch(showAllLabelEntries, (showAll) => {
       </div>
     </div>
 
-    <PortfolioShowAllHint />
+    <PortfolioShowAllHint v-if="!labelsUnavailable" />
 
-    <PortfolioRampingBanner />
+    <PortfolioRampingBanner v-if="!labelsUnavailable" />
 
-    <div class="flex flex-col gap-16 mx-16 laptop:flex-row laptop:items-stretch">
+    <div
+      v-if="!labelsUnavailable"
+      class="flex flex-col gap-16 mx-16 laptop:flex-row laptop:items-stretch"
+    >
       <div class="flex flex-col gap-16 p-16 rounded-12 border border-line-default bg-card shadow-card laptop:flex-1">
         <div class="text-h4 text-content-primary">
           Portfolio performance

@@ -60,7 +60,7 @@ export interface VerificationLabels {
   hasEntityAddress: (entityKey: string, address: Address) => boolean
 }
 
-/** Hosted labels must explicitly declare a manager; absence cannot use static Earn trust. */
+/** Hosted labels must explicitly declare a curator; absence cannot use static Earn trust. */
 export const getHostedEntityKeys = (labels: Pick<PublicEulerLabelsData, 'source' | 'managingEntityByVault'>, address: string): string[] | undefined => {
   if (labels.source !== 'v3' && labels.source !== 'v3-metadata') return undefined
   const entity = labels.managingEntityByVault?.[address.toLowerCase()]

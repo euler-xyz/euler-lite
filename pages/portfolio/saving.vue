@@ -6,6 +6,8 @@ const { isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { depositPositions, removedDepositPositions, isDepositsLoaded } = useEulerAccount()
 const { isReady } = useVaults()
+const { isReady: labelsReady, loadError: labelsError } = useEulerLabels()
+const labelsUnavailable = computed(() => !labelsReady.value && Boolean(labelsError.value))
 const { isEarnVault } = useVaultRegistry()
 const hasActiveSession = computed(() => isConnected.value || isSpyMode.value)
 
@@ -53,7 +55,15 @@ usePortfolioBatchScrollTarget(computed(() => [
 </script>
 
 <template>
-  <div class="mx-16">
+  <LabelsUnavailableState
+    v-if="labelsUnavailable"
+    title="Deposits unavailable"
+    description="Vault verification could not be loaded, so deposits cannot be shown reliably. Try again to load your deposits."
+  />
+  <div
+    v-else
+    class="mx-16"
+  >
     <div class="flex justify-between items-center mb-8">
       <h3 class="text-h3 font-normal text-neutral-800">
         Curated lending
