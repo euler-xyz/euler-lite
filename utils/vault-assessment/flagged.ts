@@ -42,6 +42,10 @@ export const getFlaggedVerdict = (
   return verdict?.status === 'hidden' ? verdict : undefined
 }
 
+/** Without the label deprecation there is no Deprecated badge, so the verdict stays the only signal. */
+export const isDeprecationWarning = (verdict: VaultVerdictLike | undefined, deprecatedInLabels: boolean): boolean =>
+  verdict?.status === 'warning' && verdict.decidedBy === 'deprecated' && deprecatedInLabels
+
 /** The lighter confirmation applies only when every unverified vault in the transaction is flagged. */
 export const getFlaggedActionNotice = (
   addresses: readonly string[],

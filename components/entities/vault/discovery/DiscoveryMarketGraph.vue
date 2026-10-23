@@ -2,7 +2,8 @@
 import { isEulerEarn, isSecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import type { MarketGroup, MiniDiagramData } from '~/entities/lend-discovery'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
-import { isVaultDeprecated, isVaultKeyring, isVaultCyclicalNote } from '~/utils/eulerLabelsUtils'
+import { getVaultDeprecation, isVaultDeprecated, isVaultKeyring, isVaultCyclicalNote } from '~/utils/eulerLabelsUtils'
+import { isDeprecationWarning } from '~/utils/vault-assessment/flagged'
 import { hasResolvedGovernorAdmin } from '~/utils/vault/governor-verification'
 import { stringToColor } from '~/utils/string-utils'
 import { getEnlargedDiagram, getArrow, getLabelPosition, getGraphConnectedAddresses, isNodeRampingDown, isExternalCollateral, findVault } from '~/utils/discoveryCalculations'
@@ -48,7 +49,15 @@ const getNodeWarning = (address: string) => {
   const verdict = visibility.value?.[address.toLowerCase()]
   if (verdict?.status === 'warning' && verdict.decidedBy === 'advisories'
     && isAcceptedOnlyWarning(findVault(props.market, address))) return null
+  if (isDeprecationWarning(verdict, isVaultDeprecated(address))) return null
   return verdict?.status === 'warning' || verdict?.status === 'hidden' ? verdict : null
+}
+const getNodeDeprecationReason = (address: string): string => {
+  const deprecation = getVaultDeprecation(address)
+  const verdict = isReady.value && source.value === 'v3'
+    ? visibility.value?.[address.toLowerCase()]
+    : undefined
+  return (isDeprecationWarning(verdict, deprecation.deprecated) ? verdict?.reason?.trim() : '') || deprecation.reason
 }
 const getNodeWarningText = (address: string) =>
   getWarningText(findVault(props.market, address), getNodeWarning(address)?.reason)
@@ -313,25 +322,23 @@ const isNodeCuratorUnknown = (address: string): boolean => {
               <span class="flex h-12 w-12 items-center justify-center rounded-full bg-warning-500 text-[9px] font-bold text-white">!</span>
             </UiHoverPreviewTooltip>
           </foreignObject>
-          <!-- Deprecated badge -->
-          <g v-else-if="isVaultDeprecated(node.address)">
-            <circle
-              :cx="node.x + 9"
-              :cy="node.y - 9"
-              r="6"
-              style="fill: var(--warning-500)"
-            />
-            <text
-              :x="node.x + 9"
-              :y="node.y - 5.5"
-              text-anchor="middle"
-              fill="white"
-              font-size="9"
-              font-weight="700"
+          <foreignObject
+            v-else-if="isVaultDeprecated(node.address)"
+            :x="node.x + 1"
+            :y="node.y - 17"
+            width="16"
+            height="16"
+          >
+            <UiHoverPreviewTooltip
+              title="Deprecated"
+              :text="getNodeDeprecationReason(node.address)"
+              :aria-label="`${node.assetSymbol} vault is deprecated`"
+              placement="top"
+              class="!flex !w-16 !h-16"
             >
-              !
-            </text>
-          </g>
+              <span class="flex h-12 w-12 items-center justify-center rounded-full bg-warning-500 text-[9px] font-bold text-white">!</span>
+            </UiHoverPreviewTooltip>
+          </foreignObject>
           <!-- Ramping down badge -->
           <g v-else-if="isNodeRampingDown(market, node.address)">
             <circle
