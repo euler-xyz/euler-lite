@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { withWallClock } from './fetchWithTimeout'
+import { MANIFEST_MAX_STALE_MS } from './euler-interfaces'
 
 export type SubgraphUnavailableReason = 'disabled' | 'missing' | 'retired' | 'invalid' | 'unsupported-capability' | 'catalog-unavailable'
 export class SubgraphUnavailableError extends Error {
@@ -57,7 +58,7 @@ export function parseSubgraphCatalog(input: unknown): Map<number, Row> {
   return rows
 }
 
-/** Metadata only: freshness 60s, last successful snapshot usable for at most 5m. */
+/** Metadata only: freshness 60s, last successful snapshot usable for at most 7 days. */
 export function createSubgraphResolver({
   env = process.env,
   now = Date.now,
@@ -103,7 +104,7 @@ export function createSubgraphResolver({
     if (cached?.url === url && now() - cached.fetchedAt < 60_000) return cached.rows
     if (pending?.url === url) return pending.promise
     if (failed?.url === url && now() < failed.retryAt) {
-      if (cached?.url === url && now() - cached.fetchedAt < 300_000) return cached.rows
+      if (cached?.url === url && now() - cached.fetchedAt < MANIFEST_MAX_STALE_MS) return cached.rows
       throw new SubgraphUnavailableError(failed.reason)
     }
     const promise = (async () => {
@@ -116,7 +117,7 @@ export function createSubgraphResolver({
       catch (error) {
         const reason = error instanceof SubgraphUnavailableError ? error.reason : 'catalog-unavailable'
         failed = { url, retryAt: now() + 10_000, reason }
-        if (cached?.url === url && now() - cached.fetchedAt < 300_000) return cached.rows
+        if (cached?.url === url && now() - cached.fetchedAt < MANIFEST_MAX_STALE_MS) return cached.rows
         throw new SubgraphUnavailableError(reason)
       }
       finally { pending = undefined }

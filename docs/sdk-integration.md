@@ -70,9 +70,9 @@ The app exposes three SDK entry points, all produced by the same factory in `com
 
 - **`getEulerSdkForChain(chainId)` — chain-aware browsing instance.** Chains listed in `ONCHAIN_SDK_CHAINS` use the onchain backend regardless of `NUXT_PUBLIC_BROWSER_VAULT_SOURCE`; all other chains use the default browsing backend. This keeps the browsing cache policy while avoiding V3-backed account/vault/Earn adapters for the pinned chains (typically deprecated chains whose V3 data is gone). Surfaces with an explicit chain id use this entry point.
 
-- **`getEulerSdkFresh()` — form-time / plan-time instance.** Account and vault adapters are pinned to on-chain / subgraph reads regardless of `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` or `enableV3Backend`; rewards use fallback so V3 reward rows can be paired with direct provider proof data. Cache wrapper is `sdkFreshBuildQuery`, which applies `FORM_STALE_TIMES` — pre-resolved `formStaleTimeMs ?? staleTimeMs` per row. Plan-critical account and vault reads use shorter form-time windows than browsing reads: for example, `queryEVaultInfoFull` uses 1 minute and balance-like migration reads use 15 seconds. The checked subgraph leaf queries `queryAccountVaults` and `queryVaultFactories` bypass this result cache. Catalogue / labels / prices fall through to the configured stale-time value and continue to hit the shared cache. `composables/useEulerTx.ts` consumes this instance through a small `freshPlanContext()` helper which also fetches an `Account` through those onchain adapters.
+- **`getEulerSdkFresh()` — form-time / plan-time instance.** Account and vault adapters are pinned to on-chain / subgraph reads regardless of `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` or `enableV3Backend`; rewards use fallback so V3 reward rows can be paired with direct provider proof data. Cache wrapper is `sdkFreshBuildQuery`, which applies `FORM_STALE_TIMES` — pre-resolved `formStaleTimeMs ?? staleTimeMs` per row. Plan-critical account and vault reads use shorter form-time windows than browsing reads: for example, `queryEVaultInfoFull` uses 1 minute and balance-like migration reads use 15 seconds. Checked subgraph account discovery uses a 1-minute form window; factory lookup retains its 5-minute window. Catalogue / labels / prices fall through to the configured stale-time value and continue to hit the shared cache. `composables/useEulerTx.ts` consumes this instance through a small `freshPlanContext()` helper which also fetches an `Account` through those onchain adapters.
 
-  Pinning the adapters changes the *data source*, not the cache. `sdkFreshBuildQuery` still runs through the shared `QueryClient`, and `freshPlanContext()` does not invalidate before fetching, so a plan-time `Account` uses cached RPC/V3 values according to their `FORM_STALE_TIMES` windows. Subgraph discovery and factory reads are checked on each request. Immediate reviewed-execution invalidation (`invalidateAfterTx`) marks those rows stale so a later idle read re-fetches after the user's own state changes; the fresh instance alone does not. Ordinary invalidation joins an in-flight `fetchQuery` for the same key. The post-indexer portfolio refresh uses a new query generation, so reads triggered after the subgraph reaches the confirmed block cannot join the pre-catch-up request. Neither entry point by itself guarantees a latest-block read.
+  Pinning the adapters changes the *data source*, not the cache. `sdkFreshBuildQuery` still runs through the shared `QueryClient`, and `freshPlanContext()` does not invalidate before fetching, so a plan-time `Account` uses cached RPC/V3 values according to their `FORM_STALE_TIMES` windows. Subgraph discovery and factory payloads are checked on cache misses; cached reads follow the same stale-time and invalidation policy. Immediate reviewed-execution invalidation (`invalidateAfterTx`) marks those rows stale so a later idle read re-fetches after the user's own state changes; the fresh instance alone does not. Ordinary invalidation joins an in-flight `fetchQuery` for the same key. The post-indexer portfolio refresh uses a new query generation, so reads triggered after the subgraph reaches the confirmed block cannot join the pre-catch-up request. Neither entry point by itself guarantees a latest-block read.
 
 All entry points share the same `QueryClient`, so a refetch driven by the fresh instance writes back to the cache that the browsing entry points read from. A subsequent UI render will see the just-refreshed value within its own staleness window.
 
@@ -264,7 +264,7 @@ export const INVALIDATE_AFTER_TX: readonly EulerSDKQueryName[]               // 
 | `formStaleTimeMs` | plan-time SDK | Same mechanism but on the fresh SDK's wrapper. Setting `0` forces re-fetch on every plan-time call regardless of cache age. |
 | `invalidateAfterTx` | shared QueryClient | Names listed are marked stale via `invalidateSdkQueries(INVALIDATE_AFTER_TX)` after reviewed submission and CoW permit hard-cancellation. After the reviewed submission's subgraph catch-up, `advanceSdkQueryGeneration(INVALIDATE_AFTER_TX)` invalidates again and assigns subsequent reads distinct cache keys. Standalone migration grant/revoke receipts do not run either boundary. |
 
-The checked subgraph leaf queries `queryAccountVaults` and `queryVaultFactories` bypass these result-cache windows; their transport checks are described [below](#subgraph-catalog-resolution).
+The checked subgraph leaf queries `queryAccountVaults` and `queryVaultFactories` use these result-cache windows with source-scoped keys; their transport checks are described [below](#subgraph-catalog-resolution).
 
 `formStaleTimeMs` and `invalidateAfterTx` cover different scopes — `formStaleTimeMs` only affects the plan-time SDK per-fetch behaviour, while `invalidateAfterTx` marks entries stale in the shared cache so a later idle matching read re-fetches too. Some queries need only one (V3-only plan reads, Pyth simulation, etc.); some need both.
 
@@ -338,8 +338,8 @@ How fresh that snapshot actually is depends on the path taken:
 
 | Path | Freshness |
 |---|---|
-| `freshPlanContext()` fetches it | Onchain adapters with uncached, checked subgraph discovery. RPC reads use the shared `QueryClient` at each row's `FORM_STALE_TIMES` window; for example, `queryEVaultInfoFull` can reuse a value up to 1 minute old. No invalidation happens first. |
-| Caller passes `input.account` | The `useFreshAccount()` race-replace snapshot, reloaded on wallet/chain change and on `triggerPortfolioRefresh()`. Its fresh task also calls `getEulerSdkFresh()` and then `fetchAccount()`, so checked subgraph discovery is uncached, while cached RPC reads are bounded by the trigger cadence *and* the applicable `FORM_STALE_TIMES` windows, not by the cadence alone. (A parallel fast task uses the browsing windows; the fresh result wins whenever it lands.) |
+| `freshPlanContext()` fetches it | Onchain adapters with checked subgraph discovery cached for up to 1 minute. RPC reads use the shared `QueryClient` at each row's `FORM_STALE_TIMES` window; for example, `queryEVaultInfoFull` can reuse a value up to 1 minute old. No invalidation happens first. |
+| Caller passes `input.account` | The `useFreshAccount()` race-replace snapshot, reloaded on wallet/chain change and on `triggerPortfolioRefresh()`. Its fresh task also calls `getEulerSdkFresh()` and then `fetchAccount()`, so subgraph discovery and RPC reads are bounded by the trigger cadence *and* the applicable `FORM_STALE_TIMES` windows, not by the cadence alone. (A parallel fast task uses the browsing windows; the fresh result wins whenever it lands.) |
 | After a successful reviewed execution | Acceptance immediately marks the `invalidateAfterTx` rows stale. Once the subgraph reaches the confirmed receipt block, the second refresh advances those query generations; subsequent plan-time reads cannot join the pre-catch-up fetch. CoW hard-cancel applies ordinary invalidation only. |
 
 `attachSubAccountSnapshot` re-reads the receiver sub-account before planning, because a stale controller flag makes the planner skip `enableController` and the EVC batch reverts. That re-read goes through the same cache, so it corrects a snapshot carried over from an earlier portfolio load but is itself bounded by the same 1-minute window. A planner that needs a stronger guarantee has to invalidate the relevant rows explicitly.
@@ -383,10 +383,12 @@ catalog sources return HTTP 503 with a reason. Upstream and deployment-identity
 failures return HTTP 502. These failures are not successful empty discovery.
 
 Catalog metadata is fresh for 60 seconds. A failed refresh can reuse the last
-successful snapshot for at most five minutes from that success; retries are
+successful snapshot for at most seven days from that success (`MANIFEST_MAX_STALE_MS`); retries are
 single-flight with a ten-second failure backoff. Failures never extend that age.
-A successful retirement replaces active metadata immediately. Query responses
-remain `no-store` and are only deduplicated while in flight.
+A successful retirement or omission replaces active metadata immediately. The cache is
+in memory per server process and scoped to its catalog URL; a cold start has no
+last-good snapshot. Proxy responses remain `no-store` and are only deduplicated
+while in flight. SDK result caching is separate from the proxy cache.
 
 Browser SDK subgraph queries use checked transport through the existing proxy.
 Server snapshot/labels SDK subgraph queries use the same resolver directly,
@@ -397,8 +399,16 @@ fall back. The browser proxy retains its missing-URL 404 behavior. V3 remains th
 paths validate HTTP/GraphQL payloads and the actual response's `_meta.deployment`
 against a catalog deployment ID. Lite provides these checks at its `buildQuery` boundary for the two subgraph leaf
 queries (`queryAccountVaults`, `queryVaultFactories`). Other queries retain their
-existing caching policy. The checked leaf queries do not cache results, so source
-switches and retirement cannot reuse old discovery/factory responses.
+existing caching policy. Checked leaf queries use the supplied cache builder: the
+browser shares 5-minute browsing windows, a 1-minute account form window, and
+transaction invalidation/generation handling. Server SDK leaf results use the
+SDK's default 5-second cache. Keys include the chain, endpoint, source identity and deployment ID when available,
+and the SDK's original query key; a null SDK key opts out of caching.
+Server leaf reads resolve current metadata before cache lookup, so retirement rejects
+and a different selected source cannot reuse prior results. Browser cache hits
+need no proxy request: changes behind the proxy are checked on the next miss,
+expiry or invalidation, within the applicable window. Every fetched response is
+validated and a paginated lookup rejects a source/deployment change between pages.
 
 After a confirmed transaction, the browser refreshes immediately and polls the
 subgraph in the background for an additional refresh. Discovery accepts valid

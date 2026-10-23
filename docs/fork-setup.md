@@ -60,7 +60,7 @@ Resolution follows this order for each chain:
 4. Otherwise, a nonempty `SUBGRAPH_CATALOG_URL` selects the chain's stable `euler-simple` record, unless `SUBGRAPH_CATALOG_DISABLED=true`.
 5. Without a catalog URL or either explicit disable, the **server SDK** can use the published SDK's bundled Euler endpoint. The **browser proxy** instead reports a missing source.
 
-**`SUBGRAPH_CATALOG_DISABLED=true` prevents both catalog resolution and bundled server SDK subgraph fallback, while retaining explicit URLs.** Leaving `SUBGRAPH_CATALOG_URL` blank alone does not prevent that server fallback. Empty URL variables mean unset; a missing, retired, invalid or unavailable opted-in catalog entry does not fall back to a bundled endpoint. The resolver can reuse a last-good catalog snapshot for up to five minutes during refresh failures; see [Catalog cache and query checks](./sdk-integration.md#subgraph-catalog-resolution).
+**`SUBGRAPH_CATALOG_DISABLED=true` prevents both catalog resolution and bundled server SDK subgraph fallback, while retaining explicit URLs.** Leaving `SUBGRAPH_CATALOG_URL` blank alone does not prevent that server fallback. Empty URL variables mean unset; a missing, retired, invalid or unavailable opted-in catalog entry does not fall back to a bundled endpoint. The resolver can reuse a last-good catalog snapshot for up to seven days from the last successful fetch during refresh failures; see [Catalog cache and query checks](./sdk-integration.md#subgraph-catalog-resolution).
 
 ### Direct URLs without Euler subgraph fallback
 

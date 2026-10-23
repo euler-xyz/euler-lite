@@ -1,4 +1,4 @@
-import { createCallBundler, type BuildQueryFn } from '@eulerxyz/euler-v2-sdk'
+import { createCallBundler, serializeQueryArgs, type BuildQueryContext, type BuildQueryFn } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address } from 'viem'
 import { SUBGRAPH_TIMEOUT_MS } from '~/entities/tuning-constants'
 
@@ -9,10 +9,17 @@ const isPosition = (value: unknown): value is string => typeof value === 'string
 export interface CheckedSubgraphSource { endpoint: string, deploymentId?: string, identity?: string }
 type Sources = Record<number, string> | ((chainId: number) => Promise<CheckedSubgraphSource>)
 
-async function querySubgraph(sources: Sources, chainId: number, query: string, ids: string[], selection?: { identity?: string }) {
+const sourceKey = (source: CheckedSubgraphSource) => JSON.stringify([source.endpoint, source.deploymentId, source.identity])
+const resolveSource = async (sources: Sources, chainId: number): Promise<CheckedSubgraphSource> => {
   const source = typeof sources === 'function' ? await sources(chainId) : { endpoint: sources[chainId] }
+  if (!source.endpoint) throw new Error(`Subgraph proxy missing for chain ${chainId}`)
+  return source
+}
+
+async function querySubgraph(sources: Sources, chainId: number, query: string, ids: string[], expectedSourceKey: string, selection: { identity?: string }) {
+  const source = await resolveSource(sources, chainId)
+  if (sourceKey(source) !== expectedSourceKey) throw new Error('Subgraph source changed during lookup')
   const url = source.endpoint
-  if (!url) throw new Error(`Subgraph proxy missing for chain ${chainId}`)
   const response = await fetch(url, {
     method: 'POST',
     redirect: 'error',
@@ -41,27 +48,14 @@ async function querySubgraph(sources: Sources, chainId: number, query: string, i
 type AccountKey = { chainId: number, account: Address }
 type FactoryKey = { chainId: number, address: Address }
 
-// A failed chain must not reject another chain's queued discovery request.
-function bundleByChain<K extends { chainId: number }, V>(run: (keys: K[]) => Promise<V[]>) {
-  const chains = new Map<number, (key: K) => Promise<V>>()
-  return (key: K): Promise<V> => {
-    let query = chains.get(key.chainId)
-    if (!query) {
-      query = createCallBundler(run)
-      chains.set(key.chainId, query)
-    }
-    return query(key)
-  }
-}
-
 /**
  * Checked transport boundary for the published SDK's two subgraph leaf queries.
- * Leaf results are not cached; each read validates the selected source and payload.
- * Valid discovery remains available at the provider's current indexed height.
- * Higher-level SDK queries retain the app's cache/generation policy.
+ * Results use the caller's cache policy, scoped to the resolved endpoint/source.
+ * Server resolvers run before cache lookup; browser proxy selection is checked
+ * on cache misses. Valid discovery accepts the provider's current indexed height.
  */
 export const withCheckedSubgraphQueries = (buildQuery: BuildQueryFn, sources: Sources): BuildQueryFn => {
-  const accounts = bundleByChain(async (keys: AccountKey[]) => {
+  const accounts = async (keys: AccountKey[], expectedSourceKey: string) => {
     const results = new Map<string, Record<string, unknown>>()
     for (const chainId of new Set(keys.map(key => key.chainId))) {
       const ids = [...new Set(keys.filter(key => key.chainId === chainId).map(key => key.account.toLowerCase().slice(0, 40)))]
@@ -71,7 +65,7 @@ export const withCheckedSubgraphQueries = (buildQuery: BuildQueryFn, sources: So
         const data = await querySubgraph(sources, chainId, `query AccountVaults($ids: [String!]!) {
           _meta { deployment block { number } }
           trackingActiveAccounts(first: 1000, where: { id_in: $ids }) { id deposits borrows }
-        }`, page, selection)
+        }`, page, expectedSourceKey, selection)
         if (!Array.isArray(data.trackingActiveAccounts)) throw new Error('Invalid subgraph accounts')
         for (const entry of data.trackingActiveAccounts) {
           if (!object(entry) || typeof entry.id !== 'string' || !page.includes(entry.id.toLowerCase())
@@ -82,8 +76,8 @@ export const withCheckedSubgraphQueries = (buildQuery: BuildQueryFn, sources: So
       }
     }
     return keys.map(key => ({ data: { trackingActiveAccount: results.get(`${key.chainId}:${key.account.toLowerCase().slice(0, 40)}`) ?? null } }))
-  })
-  const factories = bundleByChain(async (keys: FactoryKey[]) => {
+  }
+  const factories = async (keys: FactoryKey[], expectedSourceKey: string) => {
     const results = new Map<string, { id: Address, factory: Address }>()
     for (const chainId of new Set(keys.map(key => key.chainId))) {
       const ids = [...new Set(keys.filter(key => key.chainId === chainId).map(key => key.address.toLowerCase()))]
@@ -93,7 +87,7 @@ export const withCheckedSubgraphQueries = (buildQuery: BuildQueryFn, sources: So
         const data = await querySubgraph(sources, chainId, `query VaultFactories($ids: [String!]!) {
           _meta { deployment block { number } }
           vaults(first: 1000, where: { id_in: $ids }) { id factory }
-        }`, page, selection)
+        }`, page, expectedSourceKey, selection)
         if (!Array.isArray(data.vaults)) throw new Error('Invalid subgraph vaults')
         for (const entry of data.vaults) {
           if (!object(entry) || !isAddress(entry.id) || !page.includes(entry.id.toLowerCase()) || !isAddress(entry.factory)) throw new Error('Invalid subgraph vault')
@@ -102,10 +96,32 @@ export const withCheckedSubgraphQueries = (buildQuery: BuildQueryFn, sources: So
       }
     }
     return keys.map(key => results.get(`${key.chainId}:${key.address.toLowerCase()}`))
-  })
+  }
+  const cacheBySource = <K extends { chainId: number }, V>(
+    name: string, run: (keys: K[], selectedSourceKey: string) => Promise<V[]>, target: object, context?: BuildQueryContext,
+  ) => {
+    // Each chain/source owns its bundler so failure or a switch cannot mix reads.
+    const chains = new Map<number, { sourceKey: string, query: (key: K) => Promise<V> }>()
+    return async (key: K): Promise<V> => {
+      const selectedSourceKey = sourceKey(await resolveSource(sources, key.chainId))
+      let cached = chains.get(key.chainId)
+      if (!cached || cached.sourceKey !== selectedSourceKey) {
+        const query = buildQuery(name, createCallBundler((keys: K[]) => run(keys, selectedSourceKey)), target, {
+          ...context,
+          getCacheKey: (args) => {
+            const argsKey = context ? context.getCacheKey(args) : serializeQueryArgs(args)
+            return argsKey === null ? null : JSON.stringify([key.chainId, selectedSourceKey, argsKey])
+          },
+        })
+        cached = { sourceKey: selectedSourceKey, query }
+        chains.set(key.chainId, cached)
+      }
+      return cached.query(key)
+    }
+  }
   return ((name, fn, target, context) => {
-    if (name === 'queryAccountVaults') return accounts
-    if (name === 'queryVaultFactories') return factories
+    if (name === 'queryAccountVaults') return cacheBySource(name, accounts, target, context)
+    if (name === 'queryVaultFactories') return cacheBySource(name, factories, target, context)
     return buildQuery(name, fn, target, context)
   }) as BuildQueryFn
 }

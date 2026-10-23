@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { AccountVaultsSubgraphAdapter, VaultTypeSubgraphAdapter } from '@eulerxyz/euler-v2-sdk'
 import { refreshPortfolioAfterReviewedSubmission } from '~/features/reviewed-execution/review/post-tx-refresh'
 import { withCheckedSubgraphQueries } from '~/utils/subgraph-queries'
-import { sdkBuildQuery, sdkQueryClient } from '~/utils/sdk-query-cache'
+import { clearSdkQueryFailureCacheForTest, clearSdkQueryGenerationsForTest, sdkBuildQuery, sdkQueryClient } from '~/utils/sdk-query-cache'
 
 const mocks = vi.hoisted(() => ({ post: vi.fn() }))
 vi.mock('axios', () => ({ default: { post: mocks.post } }))
@@ -14,6 +14,8 @@ afterEach(() => {
   vi.unstubAllGlobals()
   vi.useRealTimers()
   sdkQueryClient.clear()
+  clearSdkQueryFailureCacheForTest()
+  clearSdkQueryGenerationsForTest()
 })
 
 it('advances query generations after catch-up while accepting valid older in-flight discovery', async () => {
@@ -87,6 +89,10 @@ it.each(['direct', 'catalog'] as const)('keeps %s discovery usable during indexe
   await vi.advanceTimersByTimeAsync(30_000)
   await refresh
   expect(triggerPortfolioRefresh).toHaveBeenCalledOnce()
+  await expectDiscoveryAvailable()
+  expect(fetch).toHaveBeenCalledTimes(2)
+  // Timeout leaves discovery usable, with the ordinary five-minute cache policy.
+  await vi.advanceTimersByTimeAsync(300_000)
   await expectDiscoveryAvailable()
   expect(fetch).toHaveBeenCalledTimes(4)
 })

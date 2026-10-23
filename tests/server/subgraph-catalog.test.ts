@@ -1,6 +1,7 @@
 import fixture from '../fixtures/subgraph/catalog.v1.json'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createSubgraphResolver, parseSubgraphCatalog } from '~/server/utils/subgraph-catalog'
+import { MANIFEST_MAX_STALE_MS } from '~/server/utils/euler-interfaces'
 
 const active = (chainId = 1) => ({ chainId, family: 'euler-simple', channel: 'stable', status: 'active', version: '1.2.3.4', endpoint: 'https://index.example/query', deploymentId: 'cid-1', capabilities: ['account-vault-discovery', 'vault-factory-lookup'], sourceCommit: 'a'.repeat(40), startBlock: 0 })
 const catalog = (deployments: unknown[] = [active()]) => ({ schemaVersion: 1, revision: 'r1', publishedAt: '2026-10-19T00:00:00Z', deployments })
@@ -68,8 +69,19 @@ describe('subgraph catalog resolution', () => {
     time = 60_000
     fetchCatalog.mockRejectedValue(new Error('offline'))
     await expect(resolve(1)).resolves.toMatchObject({ deploymentId: 'cid-1' })
-    time = 300_000
+    time = 60_001
+    await expect(resolve(1)).resolves.toMatchObject({ deploymentId: 'cid-1' })
+    expect(fetchCatalog).toHaveBeenCalledTimes(2)
+    time = MANIFEST_MAX_STALE_MS - 1
+    await expect(resolve(1)).resolves.toMatchObject({ deploymentId: 'cid-1' })
+    expect(fetchCatalog).toHaveBeenCalledTimes(3)
+    time = MANIFEST_MAX_STALE_MS
     await expect(resolve(1)).rejects.toMatchObject({ reason: 'catalog-unavailable' })
+    // The last-good limit applies during backoff too; failed reads never renew it.
+    expect(fetchCatalog).toHaveBeenCalledTimes(3)
+    time += 10_000
+    fetchCatalog.mockResolvedValue(catalog([{ ...active(), deploymentId: 'cid-2' }]))
+    await expect(resolve(1)).resolves.toMatchObject({ deploymentId: 'cid-2' })
   })
   it('applies retirement immediately on successful refresh and retains it through transport failure', async () => {
     let time = 0
@@ -79,9 +91,38 @@ describe('subgraph catalog resolution', () => {
     time = 60_000
     fetchCatalog.mockResolvedValue(catalog([{ ...active(), status: 'retired' }]))
     await expect(resolve(1)).rejects.toMatchObject({ reason: 'retired' })
-    time = 120_000
+    time = 24 * 60 * 60_000
     fetchCatalog.mockRejectedValue(new Error('offline'))
     await expect(resolve(1)).rejects.toMatchObject({ reason: 'retired' })
+  })
+  it('does not revive omitted chains after a successful empty catalog', async () => {
+    let time = 0
+    const fetchCatalog = vi.fn().mockResolvedValue(catalog())
+    const resolve = createSubgraphResolver({ env: { SUBGRAPH_CATALOG_URL: 'fixture' }, now: () => time, fetchCatalog })
+    await resolve(1)
+    time = 60_000
+    fetchCatalog.mockResolvedValue(catalog([]))
+    await expect(resolve(1)).rejects.toMatchObject({ reason: 'missing' })
+    time = 24 * 60 * 60_000
+    fetchCatalog.mockRejectedValue(new Error('offline'))
+    await expect(resolve(1)).rejects.toMatchObject({ reason: 'missing' })
+  })
+  it('never uses another catalog URL’s last-good snapshot during failure or recovery', async () => {
+    let time = 0
+    const env = { SUBGRAPH_CATALOG_URL: 'first' }
+    const fetchCatalog = vi.fn().mockResolvedValue(catalog())
+    const resolve = createSubgraphResolver({ env, now: () => time, fetchCatalog })
+    await resolve(1)
+    env.SUBGRAPH_CATALOG_URL = 'second'
+    fetchCatalog.mockRejectedValue(new Error('offline'))
+    await expect(resolve(1)).rejects.toMatchObject({ reason: 'catalog-unavailable' })
+    expect(fetchCatalog).toHaveBeenLastCalledWith('second')
+    time = 10_000
+    fetchCatalog.mockResolvedValue(catalog([{ ...active(), deploymentId: 'cid-second' }]))
+    await expect(resolve(1)).resolves.toMatchObject({ deploymentId: 'cid-second' })
+    env.SUBGRAPH_CATALOG_URL = 'first'
+    fetchCatalog.mockRejectedValue(new Error('offline'))
+    await expect(resolve(1)).rejects.toMatchObject({ reason: 'catalog-unavailable' })
   })
   it('backs off cold failures without a cached snapshot', async () => {
     let time = 0
@@ -145,7 +186,7 @@ describe('subgraph catalog resolution', () => {
     await expect(resolve(1)).resolves.toMatchObject({ deploymentId: 'cid-1' })
     time = 60_000
     await expect(resolve(1)).resolves.toMatchObject({ deploymentId: 'cid-1' })
-    time = 300_000
+    time = MANIFEST_MAX_STALE_MS
     await expect(resolve(1)).rejects.toMatchObject({ reason: 'catalog-unavailable' })
     expect(fetch).toHaveBeenCalledTimes(3)
   })
