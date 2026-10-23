@@ -16,6 +16,7 @@ import { computeSupplyApy, computeBorrowApy, type ApyVisibilitySettings } from '
 import { getMaxLiquidationDiscountDisplayPercent } from '~/utils/vault/liquidation'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import { formatBadDebtHint, formatBadDebtUsd, type VaultBadDebtCacheEntry } from '~/utils/vault-bad-debt'
+import { getRingBlocks, getRingSlots, type RingLink, type RingSlots } from '~/utils/discovery-graph-layout'
 
 // ============================================================
 // Types & Constants
@@ -243,6 +244,11 @@ export const findVault = (market: MarketGroup, address: string): EVault | Securi
 // Mini Relationship Graph
 // ============================================================
 
+const toRingLink = (edgeKey: string): RingLink => {
+  const [from, to] = edgeKey.split(':')
+  return { from, to }
+}
+
 export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
   const vaultByAddr = new Map<string, AnyVault>()
   for (const v of [...market.vaults, ...market.externalCollateral]) {
@@ -310,7 +316,11 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
     // tracked in unknownCollateral (the curator's label is an attestation).
     ...disconnectedVaults.map(d => ({ ...d, isUnknown: false })),
   ]
-  const count = allNodeEntries.length
+  const entryByAddress = new Map(allNodeEntries.map(entry => [entry.address, entry]))
+  const ringEntries = getRingBlocks([...entryByAddress.keys()], [...displayEdges].map(toRingLink))
+    .flat()
+    .map(address => entryByAddress.get(address)!)
+  const count = ringEntries.length
   const baseR = Math.min(24, 10 + count * 2)
   const stretch = count > 6 ? 1.6 : count > 3 ? 1.3 : 1.0
   const rx = baseR * stretch
@@ -319,7 +329,7 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
   const cy = 30
   const assetSymbols = new Set<string>()
 
-  const nodes: MiniNode[] = allNodeEntries.map(({ address, vault, isUnknown }, i) => {
+  const nodes: MiniNode[] = ringEntries.map(({ address, vault, isUnknown }, i) => {
     const angle = (Math.PI * 2 * i) / Math.max(count, 1) - Math.PI / 2
     // Placeholder nodes have no asset metadata. Use the truncated vault
     // address as the label so the curator can identify the missing entry,
@@ -530,14 +540,33 @@ export const formatMetricValue = (value: number, metric: DotMetric): string => {
 
 export const estimateLabelWidth = (symbol: string): number => symbol.length * 7
 
+const ENLARGED_NODE_RADIUS = 12
+const MIN_GAPPED_NODE_SPACING = ENLARGED_NODE_RADIUS * 3
+
+const getEnlargedRadii = (slotCount: number) => {
+  const baseR = Math.min(120, 40 + slotCount * 12)
+  const stretch = slotCount > 6 ? 1.6 : slotCount > 3 ? 1.3 : 1.0
+  return { rx: baseR * stretch, ry: baseR }
+}
+
+// Neighbouring slots sit closest at the left and right ends of the ellipse,
+// where they are 2 * ry * sin(π / slots) apart.
+const gapsKeepNodesApart = (slotCount: number): boolean =>
+  2 * getEnlargedRadii(slotCount).ry * Math.sin(Math.PI / slotCount) >= MIN_GAPPED_NODE_SPACING
+
+const getEnlargedRingSlots = ({ nodes, edges }: MiniDiagramData): RingSlots => {
+  const blocks = getRingBlocks(
+    nodes.map(node => node.address),
+    edges.map(edge => ({ from: edge.from.address, to: edge.to.address })),
+  )
+  const gapped = getRingSlots(blocks, true)
+  return gapsKeepNodesApart(gapped.slotCount) ? gapped : getRingSlots(blocks, false)
+}
+
 export const getEnlargedDiagram = (diagram: MiniDiagramData) => {
   const { nodes, edges } = diagram
-  const count = nodes.length
-  const baseR = Math.min(120, 40 + count * 12)
-
-  const stretch = count > 6 ? 1.6 : count > 3 ? 1.3 : 1.0
-  const rx = baseR * stretch
-  const ry = baseR
+  const { slotByAddress, slotCount } = getEnlargedRingSlots(diagram)
+  const { rx, ry } = getEnlargedRadii(slotCount)
 
   const labelOffset = 20
   const maxLabelWidth = Math.max(...nodes.map(n => estimateLabelWidth(n.assetSymbol)), 0)
@@ -548,10 +577,10 @@ export const getEnlargedDiagram = (diagram: MiniDiagramData) => {
   const cy = marginY
   const viewWidth = marginX * 2
   const viewHeight = marginY * 2
-  const nodeRadius = 12
+  const nodeRadius = ENLARGED_NODE_RADIUS
 
-  const enlargedNodes = nodes.map((node, i) => {
-    const angle = (Math.PI * 2 * i) / Math.max(count, 1) - Math.PI / 2
+  const enlargedNodes = nodes.map((node) => {
+    const angle = (Math.PI * 2 * (slotByAddress.get(node.address) ?? 0)) / Math.max(slotCount, 1) - Math.PI / 2
     return {
       ...node,
       x: cx + rx * Math.cos(angle),
@@ -567,7 +596,7 @@ export const getEnlargedDiagram = (diagram: MiniDiagramData) => {
     to: nodeMap.get(edge.to.address)!,
   }))
 
-  return { nodes: enlargedNodes, edges: enlargedEdges, viewWidth, viewHeight, cx, cy, nodeRadius }
+  return { nodes: enlargedNodes, edges: enlargedEdges, viewWidth, viewHeight, cx, cy, nodeRadius, slotCount }
 }
 
 export const ARROW_SIZE = 6
