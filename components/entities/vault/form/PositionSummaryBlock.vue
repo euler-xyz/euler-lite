@@ -60,14 +60,14 @@ const form = props.form
     <SummaryRow label="LTV">
       <SummaryValue
         :before="formatNumber(ltvToPercent(nanoToValue(form.position.value.userLTV ?? form.position.value.currentLTV ?? 0n, 18)))"
-        :after="formatNumber(nanoToValue(form.estimateUserLTV.value, 18))"
+        :after="form.estimateUserLTV.value === null ? '—' : formatNumber(nanoToValue(form.estimateUserLTV.value, 18))"
         suffix="%"
       />
     </SummaryRow>
     <SummaryRow label="Health score">
       <SummaryValue
         :before="formatHealthScore(nanoToValue(form.position.value.healthFactor ?? 0n, 18))"
-        :after="formatHealthScore(nanoToValue(form.estimateHealth.value, 18))"
+        :after="formatHealthScore(form.estimateHealth.value === null ? null : nanoToValue(form.estimateHealth.value, 18))"
       />
     </SummaryRow>
   </VaultFormInfoBlock>

@@ -42,15 +42,23 @@ describe('buildOracleAdapterView', () => {
         checks: [{ id: 'staleness', message: 'ok', outcome: OracleAdapterCheckOutcome.Pass, severity: OracleAdapterCheckSeverity.Info }],
       }),
     }
-    const view = buildOracleAdapterView(adapterStep(), meta)
+    const view = buildOracleAdapterView(adapterStep(), meta, 'https://v3.example/v3/images')
 
     expect(view.provider).toBe('Chainlink')
     expect(view.name).toBe('Chainlink WETH/USD')
     expect(view.isCustomAdapter).toBe(false)
     expect(view.methodology).toBe('Market price')
-    expect(view.logo).toBe('https://v3.euler.finance/v3/images/oracle-providers/chainlink')
+    expect(view.logo).toBe('https://v3.example/v3/images/oracle-providers/chainlink')
     expect(view.label).toEqual({ primary: 'Chainlink WETH/USD', suffix: '(Primary)' })
     expect(view.checksStatus).toBe('positive')
+  })
+
+  it('shows no provider logo when the images base is unknown', () => {
+    const meta: Record<string, OracleAdapterMeta> = {
+      [oracle.toLowerCase()]: assessed({ base: weth, quote: usd, name: 'Chainlink WETH/USD', provider: 'Chainlink' }),
+    }
+
+    expect(buildOracleAdapterView(adapterStep(), meta, '').logo).toBeUndefined()
   })
 
   it('flags an adapter with no curated entry as custom (no onchain-name leak, no logo)', () => {
@@ -155,6 +163,24 @@ describe('buildOracleAdapterView', () => {
     expect(view.assessmentState).toBe('recognized')
     expect(view.passedChecks).toBe(1)
     expect(view.checks).toHaveLength(2)
+  })
+
+  it('counts an accepted failure as passed and keeps it out of the failed list', () => {
+    const meta: Record<string, OracleAdapterMeta> = {
+      [oracle.toLowerCase()]: assessed({
+        provider: 'Chainlink',
+        checksStatus: 'positive',
+        checks: [
+          { id: 'adapter-exists', message: 'ok', outcome: OracleAdapterCheckOutcome.Pass, severity: OracleAdapterCheckSeverity.High },
+          { id: 'quote-price-consistency', message: 'fixed rate by design', outcome: OracleAdapterCheckOutcome.Fail, severity: OracleAdapterCheckSeverity.High, exempted: true },
+          { id: 'quote-liveness', message: 'stale', outcome: OracleAdapterCheckOutcome.Fail, severity: OracleAdapterCheckSeverity.Medium },
+        ],
+      }),
+    }
+    const view = buildOracleAdapterView(adapterStep(), meta)
+
+    expect(view.passedChecks).toBe(2)
+    expect(view.failedChecks.map(check => check.id)).toEqual(['quote-liveness'])
   })
 
   it('keeps the configured route separate from a proxy feed label', () => {

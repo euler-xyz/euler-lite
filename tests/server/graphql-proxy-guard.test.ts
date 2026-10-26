@@ -1,96 +1,123 @@
-import { describe, expect, it, vi } from 'vitest'
-
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { AavePositionMigrationConnector, MorphoPositionMigrationConnector } from '@eulerxyz/euler-v2-sdk'
 import { assertAllowedGraphqlRequest } from '~/server/utils/graphql-proxy-guard'
+import { AAVE_ALLOWED_OPERATIONS, MORPHO_ALLOWED_OPERATIONS } from '~/server/utils/migration-graphql-policy'
+import { AAVE_MARKETS_QUERY, MORPHO_MARKETS_QUERY, MORPHO_USER_POSITIONS_QUERY } from '~/utils/migration-graphql'
 
-// Mirror the h3 mock used by other server tests: createError just returns the
-// descriptor so a thrown error carries a readable `statusCode`.
-vi.mock('h3', () => ({
-  createError: (error: unknown) => error,
-}))
+vi.mock('h3', () => ({ createError: (error: unknown) => error }))
 
-const JSON_CT = 'application/json'
-const MORPHO_OPS = ['EulerMigrationMorphoMarkets'] as const
-
-const morphoBody = (overrides: Record<string, unknown> = {}) =>
-  JSON.stringify({
-    query: '#graphql\nquery EulerMigrationMorphoMarkets($chainIds: [Int!]) {\n  markets { id }\n}',
-    variables: { chainIds: [1] },
-    ...overrides,
-  })
+const address = '0x0000000000000000000000000000000000000001'
+const cases = [
+  { name: 'AaveMigrationMarkets', query: AAVE_MARKETS_QUERY, variables: { request: { chainIds: [1] } }, allowedOperations: AAVE_ALLOWED_OPERATIONS },
+  { name: 'EulerMigrationMorphoMarkets', query: MORPHO_MARKETS_QUERY, variables: { chainIds: [1], loanAssets: [address], collateralAssets: [address] }, allowedOperations: MORPHO_ALLOWED_OPERATIONS },
+  { name: 'LiteMorphoMigrationPositions', query: MORPHO_USER_POSITIONS_QUERY, variables: { chainId: 1, address }, allowedOperations: MORPHO_ALLOWED_OPERATIONS },
+]
+const run = (payload: unknown, allowedOperations = MORPHO_ALLOWED_OPERATIONS, contentType = 'application/json') =>
+  assertAllowedGraphqlRequest(JSON.stringify(payload), contentType, { allowedOperations })
 
 const rejectsWith = (statusCode: number, run: () => unknown) => {
+  expect.assertions(1)
   try {
     run()
   }
-  catch (err) {
-    expect((err as { statusCode?: number }).statusCode).toBe(statusCode)
+  catch (error) {
+    expect(error).toMatchObject({ statusCode })
     return
   }
-  throw new Error(`expected rejection with status ${statusCode}`)
+  throw new Error(`Expected ${statusCode}`)
 }
 
-describe('assertAllowedGraphqlRequest', () => {
-  it('accepts the exact operation Lite sends and returns the raw body unchanged', () => {
-    const body = morphoBody()
-    expect(assertAllowedGraphqlRequest(body, JSON_CT, { allowedOperations: MORPHO_OPS })).toBe(body)
-    // content-type with charset suffix still passes
-    expect(assertAllowedGraphqlRequest(body, 'application/json; charset=utf-8', { allowedOperations: MORPHO_OPS })).toBe(body)
+afterEach(() => vi.unstubAllGlobals())
+
+describe('migration GraphQL proxy policy', () => {
+  it.each(cases)('preserves the actual $name document and variables', ({ name, query, variables, allowedOperations }) => {
+    for (const operationName of [undefined, name]) {
+      const canonical = JSON.stringify({ query, variables, operationName })
+      for (const whitespace of ['\n', '\uFEFF', '\u00A0', '\u2028']) {
+        const body = JSON.stringify({ query: `${whitespace}${query}${whitespace}`, variables, operationName })
+        expect(assertAllowedGraphqlRequest(body, 'application/json; charset=utf-8', { allowedOperations })).toBe(canonical)
+      }
+    }
   })
 
-  it('honours an explicit operationName field', () => {
-    const body = morphoBody({ operationName: 'EulerMigrationMorphoMarkets' })
-    expect(assertAllowedGraphqlRequest(body, JSON_CT, { allowedOperations: MORPHO_OPS })).toBe(body)
+  it.each([
+    { name: 'Aave', Connector: AavePositionMigrationConnector, contract: cases[0], variables: { request: { chainIds: [8453] } } },
+    { name: 'Morpho', Connector: MorphoPositionMigrationConnector, contract: cases[1], variables: { chainIds: [8453], loanAssets: [address], collateralAssets: ['0x0000000000000000000000000000000000000002'] } },
+  ])('admits the installed SDK $name connector request, including variables', async ({ name, Connector, contract, variables }) => {
+    const data = name === 'Morpho' ? { markets: { items: [] } } : { markets: [] }
+    const fetch = vi.fn(async () => Response.json({ data }))
+    vi.stubGlobal('fetch', fetch)
+    // Empty upstream markets need no deployment, provider, or execution reads.
+    const connector = new Connector({} as never, {} as never, {} as never)
+    await expect(connector.listTargets({ chainId: 8453, debtAsset: address, collateralAsset: '0x0000000000000000000000000000000000000002' })).resolves.toEqual([])
+    expect(fetch).toHaveBeenCalledTimes(1)
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
+    expect(init.method).toBe('POST')
+    const payload = JSON.parse(init.body as string)
+    expect(payload).toEqual({ query: contract.query, variables })
+    expect(assertAllowedGraphqlRequest(init.body as string, 'application/json', { allowedOperations: contract.allowedOperations })).toBe(init.body)
   })
 
-  it('accepts every operation in a multi-operation allowlist (markets + positions)', () => {
-    const ops = ['EulerMigrationMorphoMarkets', 'LiteMorphoMigrationPositions'] as const
-    const positionsBody = JSON.stringify({
-      query: '#graphql\nquery LiteMorphoMigrationPositions($chainId: Int!, $address: String!) {\n  userByAddress { marketPositions { market { id } } }\n}',
-      variables: { chainId: 1, address: '0x0000000000000000000000000000000000000001' },
-    })
-    expect(assertAllowedGraphqlRequest(morphoBody(), JSON_CT, { allowedOperations: ops })).toBe(morphoBody())
-    expect(assertAllowedGraphqlRequest(positionsBody, JSON_CT, { allowedOperations: ops })).toBe(positionsBody)
+  it.each(cases)('blocks introspection under the approved $name name', ({ name, allowedOperations }) => {
+    rejectsWith(403, () => run({ query: `query ${name} { __schema { types { name } } }`, operationName: name }, allowedOperations))
   })
 
-  it('rejects a non-JSON content-type (415)', () => {
-    rejectsWith(415, () => assertAllowedGraphqlRequest(morphoBody(), 'text/plain', { allowedOperations: MORPHO_OPS }))
+  it.each([
+    ['extra operation', (query: string) => `${query}\nquery Hidden { __schema { types { name } } }`],
+    ['fragment', (query: string) => `${query}\nfragment Hidden on Query { __typename }`],
+    ['alias', (query: string) => query.replace('markets(', 'other: markets(')],
+    ['pagination', (query: string) => query.replace('first: 100', 'first: 1000000')],
+    ['comment spoofing', () => '# query EulerMigrationMorphoMarkets\n{ __schema { types { name } } }'],
+    ['mutation', (query: string) => query.replace('query Euler', 'mutation Euler')],
+  ])('rejects an altered document: %s', (_, transform) => {
+    rejectsWith(403, () => run({ query: transform(MORPHO_MARKETS_QUERY), operationName: 'EulerMigrationMorphoMarkets', variables: cases[1].variables }))
   })
 
-  it('rejects an empty body (400)', () => {
-    rejectsWith(400, () => assertAllowedGraphqlRequest('', JSON_CT, { allowedOperations: MORPHO_OPS }))
+  it('rejects a mismatched explicit operation name', () => {
+    rejectsWith(403, () => run({ ...cases[1], operationName: 'LiteMorphoMigrationPositions' }))
   })
 
-  it('rejects an oversized body (413)', () => {
-    const huge = JSON.stringify({ query: `query EulerMigrationMorphoMarkets { ${'a'.repeat(20_000)} }` })
-    rejectsWith(413, () => assertAllowedGraphqlRequest(huge, JSON_CT, { allowedOperations: MORPHO_OPS }))
+  it.each([
+    {},
+    { chainIds: null, loanAssets: [address], collateralAssets: [address] },
+    { chainIds: [1, 2], loanAssets: [address], collateralAssets: [address] },
+    { chainIds: [1], loanAssets: null, collateralAssets: [address] },
+    { chainIds: [1], loanAssets: [address, address], collateralAssets: [address] },
+    { chainIds: [1], loanAssets: [address], collateralAssets: [address], first: 1000000 },
+  ])('rejects widened Morpho filters %j', (variables) => {
+    rejectsWith(400, () => run({ query: MORPHO_MARKETS_QUERY, variables }))
   })
 
-  it('rejects malformed JSON (400)', () => {
-    rejectsWith(400, () => assertAllowedGraphqlRequest('{ not json', JSON_CT, { allowedOperations: MORPHO_OPS }))
+  it('rejects Aave request fields outside the single chain contract', () => {
+    rejectsWith(400, () => run({ query: AAVE_MARKETS_QUERY, variables: { request: { chainIds: [1], first: 1000000 } } }, AAVE_ALLOWED_OPERATIONS))
   })
 
-  it('rejects a JSON array / non-object (400)', () => {
-    rejectsWith(400, () => assertAllowedGraphqlRequest('[]', JSON_CT, { allowedOperations: MORPHO_OPS }))
+  it.each([0, -1, 1.5, '1', 0x80000000])('rejects invalid position chain %j', (chainId) => {
+    rejectsWith(400, () => run({ query: MORPHO_USER_POSITIONS_QUERY, variables: { chainId, address } }))
   })
 
-  it('rejects a missing/non-string query (400)', () => {
-    rejectsWith(400, () => assertAllowedGraphqlRequest(JSON.stringify({ variables: {} }), JSON_CT, { allowedOperations: MORPHO_OPS }))
+  it('rejects an invalid address', () => {
+    rejectsWith(400, () => run({ query: MORPHO_USER_POSITIONS_QUERY, variables: { chainId: 1, address: 'anything' } }))
   })
 
-  it('rejects non-object variables (400)', () => {
-    rejectsWith(400, () => assertAllowedGraphqlRequest(morphoBody({ variables: 'nope' }), JSON_CT, { allowedOperations: MORPHO_OPS }))
+  it('rejects extensions that can change upstream execution', () => {
+    rejectsWith(400, () => run({ query: MORPHO_MARKETS_QUERY, variables: cases[1].variables, extensions: { persistedQuery: {} } }))
   })
 
-  it('rejects a disallowed operation, including introspection (403)', () => {
-    rejectsWith(403, () => assertAllowedGraphqlRequest(
-      JSON.stringify({ query: 'query SomethingElse { markets { id } }' }),
-      JSON_CT,
-      { allowedOperations: MORPHO_OPS },
-    ))
-    rejectsWith(403, () => assertAllowedGraphqlRequest(
-      JSON.stringify({ query: 'query IntrospectionQuery { __schema { types { name } } }' }),
-      JSON_CT,
-      { allowedOperations: MORPHO_OPS },
-    ))
+  it('forwards only the validated value of duplicate JSON keys', () => {
+    const body = `{"query":"query Hidden { __schema { types { name } } }",${JSON.stringify({ query: MORPHO_MARKETS_QUERY, variables: cases[1].variables }).slice(1)}`
+    const forwarded = assertAllowedGraphqlRequest(body, 'application/json', { allowedOperations: MORPHO_ALLOWED_OPERATIONS })
+    expect(forwarded).toBe(JSON.stringify({ query: MORPHO_MARKETS_QUERY, variables: cases[1].variables }))
   })
+
+  it.each([
+    [415, () => run({}, undefined, 'text/plain')],
+    [400, () => assertAllowedGraphqlRequest('', 'application/json', { allowedOperations: MORPHO_ALLOWED_OPERATIONS })],
+    [400, () => assertAllowedGraphqlRequest('{broken', 'application/json', { allowedOperations: MORPHO_ALLOWED_OPERATIONS })],
+    [400, () => run([])],
+    [400, () => run({ variables: {} })],
+    [400, () => run({ query: MORPHO_MARKETS_QUERY, variables: 'nope' })],
+    [400, () => run({ query: MORPHO_MARKETS_QUERY, operationName: 1 })],
+    [413, () => run({ query: 'x'.repeat(20000) })],
+  ] as const)('preserves input rejection %s', (status, action) => rejectsWith(status, action))
 })

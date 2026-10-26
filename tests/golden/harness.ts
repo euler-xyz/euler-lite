@@ -1,45 +1,34 @@
 import { type Address, getAddress, maxUint256, zeroAddress } from 'viem'
 import { Account, ExecutionService, WalletService, type Deployment, type IDeploymentService, type IWalletAdapter } from '@eulerxyz/euler-v2-sdk'
 
-// Addresses used by golden scenarios.
-//   - Chain core (evc, permit2, swapper, swapVerifier, accountLens) are the
-//     real Ethereum mainnet deployment from
-//     https://raw.githubusercontent.com/euler-xyz/euler-interfaces/refs/heads/master/EulerChains.json
-//     The swap-quote tests need real values here so the quotes fetched from
-//     swap-dev.euler.finance pass the SDK's verifier-address check.
-//   - Tokens (assetUsdc, assetDai, assetWeth, assetUsdt) are real mainnet
-//     ERC20s. The swap API requires real tokenIn/tokenOut.
-//   - Vaults are placeholder addresses — the swap API doesn't validate them,
-//     and the test only asserts they're encoded into batch items consistently
-//     between legacy and SDK.
-//
-// We checksum at module load so the same form is used everywhere; some SDK
-// internals (resolveRequiredApprovalsWithWallet) look up allowances by raw
-// spender key, so feeding non-checksum addresses there would miss.
+import { loadDeploymentFixture } from './load-fixture'
+
+export const CHAIN_ID = 1
+
+const deployment = loadDeploymentFixture(CHAIN_ID)
+
+// Checksummed because resolveRequiredApprovalsWithWallet looks up allowances by
+// raw spender key. Tokens must be real mainnet ERC20s for the swap API; vaults
+// are placeholders it does not validate.
 const a = (raw: string) => getAddress(raw)
 export const ADDR = {
   user: a('0x1111111111111111111111111111111111111111'),
   subAccount1: a('0x1111111111111111111111111111111111111101'),
-  // Real Ethereum mainnet (chainId 1) Euler deployment.
-  evc: a('0x0C9a3dd6b8F28529d72d7f9cE918D493519EE383'),
-  permit2: a('0x000000000022D473030F116dDEE9F6B43aC78BA3'),
-  swapper: a('0x719F8b330CcA71cb6195D032A43194C7D3F9Fb45'),
-  swapVerifier: a('0x786c900d7D348662703C38B46f24c1cda2C582AB'),
-  accountLens: a('0xA60c4257c809353039A71527dfe701B577e34bc7'),
-  // Real mainnet ERC20s (needed for swap API quotes).
+  evc: deployment.evc,
+  permit2: deployment.permit2,
+  swapper: deployment.swapper,
+  swapVerifier: deployment.swapVerifier,
+  accountLens: deployment.accountLens,
   assetUsdc: a('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'),
   assetUsdt: a('0xdAC17F958D2ee523a2206206994597C13D831ec7'),
   assetDai: a('0x6B175474E89094C44Da98b954EedeAC495271d0F'),
   assetWeth: a('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'),
-  // Placeholder vaults: swap API doesn't validate them. We use distinguishable
-  // prefixes (0xa00...) so they're easy to spot in calldata diffs.
   vaultUsdc: a('0xa000000000000000000000000000000000000001'),
   vaultUsdt: a('0xa000000000000000000000000000000000000004'),
   vaultDai: a('0xa000000000000000000000000000000000000002'),
   vaultWeth: a('0xa000000000000000000000000000000000000003'),
 } as const
 
-export const CHAIN_ID = 1
 export const HIGH_ALLOWANCE = maxUint256
 
 // ---------------------------------------------------------------------------
@@ -49,7 +38,7 @@ export const HIGH_ALLOWANCE = maxUint256
 const stubDeployment: Deployment = {
   chainId: CHAIN_ID,
   name: 'golden',
-  status: 'active',
+  status: 'production',
   addresses: {
     coreAddrs: {
       balanceTracker: zeroAddress as Address,

@@ -8,15 +8,19 @@ import {
 } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { type MenuItem, getMenuItems } from '~/entities/menu'
+import { getChainById } from '~/entities/chainRegistry'
 import { getChainLogoUrl } from '~/utils/chain-logo'
+import { v3ChainLogoUrl } from '~/utils/v3-images'
 
 // Wallet connect modal (lazy-initializes AppKit on first call)
 const { connect } = useWagmi()
 
-// Wagmi account info
 const { address, isConnected } = useWagmi()
 const { chainId, allowedChainIds } = useEulerAddresses()
-const chainLogoSrc = computed(() => getChainLogoUrl(chainId.value))
+const { v3ImagesUrl } = useEnvConfig()
+const chainLogoSrc = computed(() => v3ChainLogoUrl(chainId.value, v3ImagesUrl))
+const fallbackChainLogoSrc = computed(() => getChainLogoUrl(chainId.value))
+const chainName = computed(() => getChainById(chainId.value)?.name ?? String(chainId.value))
 const { isSpyMode, spyShortAddress } = useSpyMode()
 const modal = useModal()
 const route = useRoute()
@@ -199,12 +203,12 @@ onClickOutside(wrapperRef, () => {
 
     <!-- Navigation -->
     <div class="hidden laptop:block min-w-0 tablet:absolute tablet:left-1/2 tablet:-translate-x-1/2">
-      <div class="flex gap-4 tablet:gap-0">
+      <div class="flex gap-4">
         <NuxtLink
           v-for="item in menuItems"
           :key="item.name"
           :to="'/' + item.name"
-          class="flex gap-8 text-[13px] font-medium no-underline py-6 px-12 tablet:px-16 rounded-8 text-content-secondary items-center justify-center hover:text-content-primary hover:bg-surface-secondary transition-all"
+          class="flex gap-8 text-[13px] font-medium no-underline py-6 px-6 tablet:px-10 rounded-8 text-content-secondary items-center justify-center hover:text-content-primary hover:bg-surface-secondary transition-all"
           :class="[
             getIsMenuItemActive(item)
               ? 'bg-surface-secondary text-content-primary'
@@ -218,16 +222,11 @@ onClickOutside(wrapperRef, () => {
                 ? 'text-accent-600'
                 : 'text-content-muted',
             ]"
-            :name="item.icon"
+            :name="getIsMenuItemActive(item) ? item.activeIcon : item.icon"
           />
-          <span
-            v-if="item.sublabel"
-            class="flex flex-col items-start leading-[1.15]"
-          >
-            <span>{{ item.label }}</span>
-            <span class="text-[10px] font-normal text-content-tertiary">{{ item.sublabel }}</span>
+          <span class="whitespace-nowrap">
+            {{ item.sublabel ? `${item.label} / ${item.sublabel}` : item.label }}
           </span>
-          <span v-else>{{ item.label }}</span>
         </NuxtLink>
       </div>
     </div>
@@ -245,7 +244,8 @@ onClickOutside(wrapperRef, () => {
       >
         <BaseAvatar
           :src="chainLogoSrc"
-          :label="String(chainId)"
+          :fallback-src="fallbackChainLogoSrc"
+          :label="chainName"
         />
       </UiButton>
       <div
@@ -256,7 +256,8 @@ onClickOutside(wrapperRef, () => {
         <div class="ui-button__wrap">
           <BaseAvatar
             :src="chainLogoSrc"
-            :label="String(chainId)"
+            :fallback-src="fallbackChainLogoSrc"
+            :label="chainName"
           />
         </div>
       </div>

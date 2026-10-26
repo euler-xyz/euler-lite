@@ -1,11 +1,12 @@
 import { isEVault, type EVault } from '@eulerxyz/euler-v2-sdk'
+import { getEulerLabelProductBrandEntities } from '@eulerxyz/euler-v2-sdk/public-labels'
 import { getAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import type { EulerLabelEntity, EulerLabelProduct } from '~/entities/euler/labels'
 import type { MarketGroup, MarketGroupMetrics, CuratorGroup } from '~/entities/lend-discovery'
 import type { AnyVault } from '~/composables/useVaultRegistry'
-import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
-import { isVaultNotExplorable, isVaultRecentlyAdded, isVaultDeprecated, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
+import { getAssetUsdValueForEstimate, getAssetUsdValueOrZero } from '~/utils/sdk-prices'
+import { isVaultNotExplorable, isVaultRecentlyAdded, isVaultDeprecated, getProductKeyByVault, isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
 import { isLiveCollateralEdge } from '~/utils/vault/ltv'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import { hasResolvedGovernorAdmin } from '~/utils/vault/governor-verification'
@@ -13,6 +14,8 @@ import { groupHasExplorableMarket } from '~/utils/vault/market-group-visibility'
 import { liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
 import { resolveEulerRouterGovernors } from '~/utils/vault/euler-router-governance'
 import { governableGovernorAbi } from '~/abis/oracle'
+import { getEulerLabelsSourceData } from '~/composables/useEulerLabels'
+import { getPublishedVaultCandidates } from '~/utils/public-labels'
 
 // -- Helpers --
 
@@ -74,6 +77,7 @@ export const buildProductGroups = (
   const groups: MarketGroup[] = []
 
   for (const [productKey, product] of Object.entries(products)) {
+    if (product.isStandalone) continue
     const memberVaults: AnyVault[] = []
     const allProductAddresses = [...product.vaults, ...(product.deprecatedVaults || [])]
     for (const vaultAddr of allProductAddresses) {
@@ -104,10 +108,12 @@ export const buildProductGroups = (
       source: 'product',
       curator,
       curatorKey,
+      brandEntities: getEulerLabelProductBrandEntities(product, entities),
       vaults: memberVaults,
       externalCollateral: [],
       unknownCollateral: [],
       metrics: computeMetricsSync(memberVaults),
+      ...(listNonMarketGroups && { showsAllMembers: true }),
     })
   }
 
@@ -323,7 +329,7 @@ const computeMetricsSync = (vaults: AnyVault[]): MarketGroupMetrics => {
 
 // -- Async TVL Resolution --
 
-const resolveGroupTVL = async (group: MarketGroup): Promise<MarketGroup> => {
+export const resolveGroupTVL = async (group: MarketGroup): Promise<MarketGroup> => {
   let totalTVL = 0
   let pricedCount = 0
   let allPriced = true
@@ -333,7 +339,8 @@ const resolveGroupTVL = async (group: MarketGroup): Promise<MarketGroup> => {
   const results = await Promise.all(
     group.vaults.map(async (vault: AnyVault) => {
       const totalAssets = 'totalAssets' in vault ? vault.totalAssets as bigint : 0n
-      const usdValue = await getAssetUsdValueOrZero(totalAssets, vault, 'off-chain')
+      const pricedValue = await getAssetUsdValueForEstimate(totalAssets, vault, 'off-chain')
+      const usdValue = pricedValue ?? 0
       const borrowable = isBorrowableVault(vault)
       let liquidity = 0
       let borrowUsd = 0
@@ -341,7 +348,7 @@ const resolveGroupTVL = async (group: MarketGroup): Promise<MarketGroup> => {
         borrowUsd = await getAssetUsdValueOrZero(vault.totalBorrowed, vault, 'off-chain')
         liquidity = usdValue - borrowUsd
       }
-      return { priced: usdValue > 0, value: usdValue, liquidity, borrowUsd, borrowable }
+      return { priced: pricedValue !== undefined, value: usdValue, liquidity, borrowUsd, borrowable }
     }),
   )
 
@@ -375,7 +382,7 @@ const resolveGroupTVL = async (group: MarketGroup): Promise<MarketGroup> => {
 // -- Main Composable --
 
 export const useMarketGroups = () => {
-  const { getAll } = useVaultRegistry()
+  const { getAll, isKnownEscrowAddress } = useVaultRegistry()
   const { products, entities, isReady: labelsReady } = useEulerLabels()
   const { isVaultGovernorVerified, isCollateralResolved, isMarketDataResolved, isReady: vaultsReady } = useVaults()
   const showAllLabelEntries = useShowAllLabelEntries()
@@ -386,9 +393,18 @@ export const useMarketGroups = () => {
 
   /** All vaults available for grouping */
   const allVaults = computed((): AnyVault[] => {
-    return registryVaults.value.filter((vault) => {
+    const labels = getEulerLabelsSourceData()
+    const candidates = getPublishedVaultCandidates(labels)
+    const published = labels.source === 'v3' || labels.source === 'v3-metadata'
+      ? new Set([...candidates.vaults, ...candidates.earn].map(address => address.toLowerCase()))
+      : null
+    return getAll().filter(entry => !entry.portfolioOnly).map(entry => entry.vault).filter((vault) => {
       const address = getVaultAddress(vault)
-      return address ? showAllLabelEntries.value || !isVaultNotExplorable(address) : true
+      if (!address) return false
+      // Escrow perspective membership is an independent discovery source.
+      return (!published || published.has(address.toLowerCase()) || isKnownEscrowAddress(address))
+        && isVaultSelectedByTag(address)
+        && (showAllLabelEntries.value || !isVaultNotExplorable(address))
     })
   })
 
@@ -511,7 +527,7 @@ export const useMarketGroups = () => {
   /** Fetch a market group on demand for non-explorable products accessed via direct URL */
   const fetchMarketGroupOnDemand = async (productKey: string): Promise<MarketGroup | null> => {
     const product = products[productKey]
-    if (!product) return null
+    if (!product || product.isStandalone) return null
 
     const allAddresses = [...product.vaults, ...(product.deprecatedVaults || [])]
     if (allAddresses.length === 0) return null
@@ -575,10 +591,12 @@ export const useMarketGroups = () => {
       source: 'product',
       curator,
       curatorKey,
+      brandEntities: getEulerLabelProductBrandEntities(product, entities),
       vaults: memberVaults,
       externalCollateral: [],
       unknownCollateral: [],
       metrics: computeMetricsSync(memberVaults),
+      showsAllMembers: true,
     }
 
     // The direct market page waits for labels and the unresolved-collateral

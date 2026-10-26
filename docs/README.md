@@ -11,6 +11,12 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Development environment setup
 - Quick start guide
 
+### [Fork Setup](./fork-setup.md)
+
+- Operator-owned V3 and static labels, with complete environment examples
+- Explicit V3 opt-out, custom image hosts, SDK/Lite settings and remaining external services
+- Configuration diagnostics and verification steps
+
 ### 🏗️ [Architecture Overview](./architecture.md)
 
 - High-level system architecture
@@ -18,11 +24,18 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Data flow patterns
 - Technology decisions
 - Shareable Explore / Lend / Borrow / Earn query parameters and curator aliases
+- JSON-RPC proxy allowlist (`eth_createAccessList` for simulation), batch/timeout limits, and wagmi public-RPC fallback
 
 ### 🚀 [Development Guide](./development-guide.md)
 
 - Development workflow
 - Shareable listing-filter URLs (`?curator=` plus legacy `riskManager` / Earn `allocator`)
+- JSON-RPC proxy, `/healthz` liveness, and Advanced-mode localStorage pitfalls
+
+### ⛓️ [Adding a Chain](./adding-a-chain.md)
+
+- SDK release, code release, Doppler variables, ECS redeploy, and testing on dev
+- How the `EulerChains.json` status (`staging`, `production`, `deprecated`, `unlisted`) shows in Lite
 
 ### 💰 [Pricing System](./pricing-system.md)
 
@@ -30,6 +43,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - On-chain vs off-chain price sources
 - Pyth oracle simulation for price reads
 - SDK/V3-populated intrinsic APY for yield-bearing assets
+- Unpriced / partial USD: listing hints, market totals, USD filters that keep partly priced rows, portfolio gaps, bad-debt unpriced collateral
 
 ### 📐 [Projected Yield](./projected-yield.md)
 
@@ -37,6 +51,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - USD-weighted multi-collateral snapshots
 - Net APY, ROE, intrinsic yield, and reward breakdowns
 - Provider-owned reward eligibility notices (`complete` / `incomplete` / `none`)
+- Settings `enableIntrinsicApy` / `enableRewardsApy` display toggles and spy-mode viewer (no wallet fallback while verifying)
 - Transaction-batch layer consistency and fail-closed estimates
 
 ### 📊 [Portfolio Logic](./portfolio-logic.md)
@@ -46,6 +61,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Borrow, deposit, and earn position loading
 - External Aave / Morpho migrate discovery is covered in [External Migration Discovery](./external-migration.md)
 - Cross-position exact-vault repayment is covered in [Cross-Position Repay](./cross-position-repay.md)
+- SDK portfolio USD totals omit unpriced positions; gap flags and Partial pricing copy are in [Pricing System](./pricing-system.md#unpriced-and-partial-usd)
 
 ### 🏷️ [Vault Labels & Verification](./vault-labels-and-verification.md)
 
@@ -54,7 +70,11 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Unknown vault resolution
 - Earn refresh re-derives `verified` from current `earn-vaults.json` (unlisted/delisted vaults are not promoted)
 - SDK 2.0 governance hydration guard (`hasResolvedGovernorAdmin`)
-- Oracle provider logos from the V3 managed-image namespace (not `V3_API_URL`)
+- Oracle provider logos from the public images base the server reads from its V3 (`GET /v3/images`)
+- Curator / campaign logos use a separate allowlist (`https://v3.euler.finance/v3/images/labels/{slug}`); `token-images.euler.finance` is rejected
+- Vault checks pop-up: one row per subject vault; Earn collateral is the strategies'
+- Default liquidation-bot coverage badge is borrow-side only; unknown coverage renders nothing
+- `cyclical note` is the UI gate for the cyclical IRM overview (on-chain IRM type alone is not enough)
 - Shared Oracles-block / Explore-matrix adapter display is covered in [Oracle Adapter Display](./oracle-adapter-display.md)
 
 ### 🧿 [Oracle Adapter Display](./oracle-adapter-display.md)
@@ -75,6 +95,16 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Add-time `captureSwapReview` keeps Swap row amounts when the live quote resets; batch close discards cached preparation so reopen reprepares
 - Spy-mode review uses `prepareReadOnly` and a synthetic approval-only wallet binding; confirm stays disabled
 - Wallet screening is connect-time only; reviewed execution does not re-screen or consult VPN evidence
+- `transferMin` `verify.vault` is a transfer recipient, not an Euler vault to snapshot
+- Brevis/Incentra `rewardClaimId` includes `epoch` so same-campaign epochs do not collide
+- rEUL early unlock is covered in [rEUL Unlocks](./reul-unlocks.md)
+
+### 🎁 [rEUL Unlocks](./reul-unlocks.md)
+
+- UTC-day open-lock gate vs 180-day maturity
+- Chain-time `allowRemainderLoss` (contract has no max-loss argument)
+- Burn warning only when raw `amountToBeBurned > 0n`
+- Spy-safe lock loading and no Add-to-batch path
 
 ### 🔁 [Cross-Position Repay](./cross-position-repay.md)
 
@@ -114,6 +144,9 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Vault snapshot pipeline (`/api/internal/vaults`) with two-pass client hydration
 - V3 proxy allowlist, rate limits, failure backoff, and troubleshooting
 - V3-conditional warm-cache cadence (1-min vaults timer with V3, 5-min without)
+- First per-chain warms wait for the EulerChains manifest read (10 s cap) so `deprecated` status is applied
+- Liquidation-bot `/vault-filter` modes (`None` / `Blacklist` / `Whitelist`) and borrow-side-only UI
+- Server provider overrides: Sonic Multicall byte cap vs SDK `fetchVaults` chunking
 - Bigint wire codec and adversary-safe wrapper tag
 
 ### 🔮 [Pyth Oracle Handling](./pyth-oracle-handling.md)
@@ -141,6 +174,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 
 - Four-source token list (Euler SDK, DefiLlama, Uniswap, Merkl reward tokens)
 - Parallel fetch via `Promise.allSettled` with per-source stale fallback
+- On-chain decimals with a 5 s read deadline; tokens with missing or reverting `decimals()` are dropped, unread tokens retry
 - Pre-populated at server startup by `warm-cache.ts`
 - CSP considerations for logo URLs
 
@@ -151,6 +185,11 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Asset-level pattern matching (exact `symbols`/`names` + `symbolRegex`/`nameRegex`) and cross-chain `all/assets.json`
 - Country group aliases (EU, EEA, EFTA)
 - UI enforcement across browse, detail, action, and modal pages, plus the arbitrary-asset swap selector
+
+### ✍️ [Terms of Use Signing](./tos-signing.md)
+
+- On-chain TOS signature gated by `NUXT_PUBLIC_CONFIG_TOS_MD_URL`
+- Content-hash message construction; users re-sign when markdown or the TOS URL changes
 
 ### 🛂 [Address Screening](./address-screening.md)
 

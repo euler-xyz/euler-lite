@@ -9,7 +9,7 @@ import { getCollateralOracleRouteSteps, getDebtOracleRouteSteps, getOracleRouteA
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { getNewSubAccount } from '~/composables/useSubAccounts'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
+import { getVaultGeoUnavailableReason, isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
@@ -18,7 +18,7 @@ import { useBorrowForm } from '~/composables/borrow/useBorrowForm'
 import { useMultiplyForm, type MultiplyBatchSnapshot } from '~/composables/borrow/useMultiplyForm'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
-import { SlippageSettingsModal, VaultUnverifiedDisclaimerModal } from '#components'
+import { SlippageSettingsModal } from '#components'
 import { formatUnits, getAddress, type Address } from 'viem'
 import { areRoeCollateralVaultsCorrelatedWithBorrow, mergeRoeCollateralVaults } from '~/utils/position-roe'
 import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
@@ -54,7 +54,7 @@ const openSlippageSettings = () => {
 
 const collateralAddress = route.params.collateral as string
 const borrowAddress = route.params.borrow as string
-useOperationGuard([collateralAddress, borrowAddress])
+const { warning: assessmentWarning } = useVaultAssessmentWarning(borrowAddress)
 
 const formTabFromQuery = (value: unknown): 'borrow' | 'multiply' | undefined => {
   const tabValue = Array.isArray(value) ? value[0] : value
@@ -69,7 +69,6 @@ const formTab = ref<'borrow' | 'multiply'>(formTabFromQuery(route.query.tab) ?? 
 const pendingSubAccount = ref<string | null>(null)
 const isPendingSubAccountLoading = ref(false)
 let pendingSubAccountPromise: Promise<string> | null = null
-let unverifiedDisclaimerShown = false
 
 // Load vault pair (non-blocking to avoid Suspense + pageTransition crash on direct navigation)
 const pair: Ref<AnyBorrowVaultPair | undefined> = ref()
@@ -79,6 +78,7 @@ getBorrowVaultPair(collateralAddress, borrowAddress).then((p) => {
   logWarn('[borrow] failed to load vault pair', e)
   void router.replace({ path: '/borrow', query: route.query })
 })
+useVaultOpeningNotice(() => pair.value ? [pair.value.collateral.address, pair.value.borrow.address] : [])
 
 const borrowVault = computed(() => pair.value?.borrow)
 const collateralVault = computed(() => pair.value?.collateral)
@@ -180,6 +180,16 @@ const multiply = useMultiplyForm({
   isGeoBlocked,
   isMultiplyRestricted,
 })
+useOperationGuard(computed(() => formTab.value === 'multiply'
+  ? [collateralAddress, borrowAddress, multiply.multiplySupplyVault.value?.address, multiply.multiplyLongVault.value?.address].filter(Boolean)
+  : [collateralAddress, borrowAddress]), {
+  depositedVaultAddresses: computed(() => formTab.value === 'multiply'
+    ? [
+        ...(multiply.isMultiplySavingCollateral.value ? [] : [multiply.multiplySupplyVault.value?.address]),
+        multiply.multiplyLongVault.value?.address,
+      ].filter(Boolean)
+    : borrow.isSavingCollateral.value ? [] : [collateralAddress]),
+})
 const showMultiplyRoe = computed(() =>
   areRoeCollateralVaultsCorrelatedWithBorrow(
     mergeRoeCollateralVaults([
@@ -228,10 +238,10 @@ const reviewBorrowDisabled = computed(() => isGeoBlocked.value || isBorrowRestri
 const reviewMultiplyDisabled = computed(() => isGeoBlocked.value || isMultiplyRestricted.value || multiply.isMultiplySubmitDisabled.value)
 
 const borrowDisabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
-  if (isBorrowRestricted.value) return { message: 'Borrowing this asset is not available in your region', variant: 'warning' }
-  if (borrow.isBorrowPayWithBlocked.value) return { message: 'Paying with this asset is not available in your region', variant: 'warning' }
-  if (borrow.isBorrowSwapRestricted.value) return { message: 'Swapping into this collateral vault is not available in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: getVaultGeoUnavailableReason(collateralAddress, borrowAddress) || 'This operation is not available in your region', variant: 'warning' }
+  if (isBorrowRestricted.value) return { message: getVaultGeoUnavailableReason(collateralAddress, borrowAddress) || 'Borrowing this asset is not available in your region', variant: 'warning' }
+  if (borrow.isBorrowPayWithBlocked.value) return { message: getVaultGeoUnavailableReason(collateralAddress, borrowAddress) || 'Paying with this asset is not available in your region', variant: 'warning' }
+  if (borrow.isBorrowSwapRestricted.value) return { message: getVaultGeoUnavailableReason(collateralAddress, borrowAddress) || 'Swapping into this collateral vault is not available in your region', variant: 'warning' }
   if (borrow.errorText.value) return { message: borrow.errorText.value, variant: 'error' }
   if (borrow.borrowSimulationError.value) return { message: borrow.borrowSimulationError.value, variant: 'error' }
   if (borrow.borrowNeedsSwap.value && borrow.isBorrowSwapQuoteLoading.value && +borrow.collateralAmount.value > 0) return { message: 'Fetching swap quotes...', variant: 'warning' }
@@ -240,8 +250,8 @@ const borrowDisabledReasonInfo = computed((): DisabledReasonInfo | undefined => 
 })
 
 const multiplyDisabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
-  if (isMultiplyRestricted.value) return { message: 'Multiply is not available for this pair in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: getVaultGeoUnavailableReason(collateralAddress, borrowAddress) || 'This operation is not available in your region', variant: 'warning' }
+  if (isMultiplyRestricted.value) return { message: getVaultGeoUnavailableReason(collateralAddress, borrowAddress) || 'Multiply is not available for this pair in your region', variant: 'warning' }
   if (multiply.multiplyErrorText.value) return { message: multiply.multiplyErrorText.value, variant: 'error' }
   if (multiply.multiplyCapErrorText.value) return { message: multiply.multiplyCapErrorText.value, variant: 'error' }
   if (multiply.multiplySimulationError.value) return { message: multiply.multiplySimulationError.value, variant: 'error' }
@@ -503,20 +513,6 @@ watch(pair, async (val) => {
   if (!multiply.multiplySupplyVault.value || !isSupplyAllowed) {
     multiply.initMultiplySupplyVault(current.collateral as EVault)
   }
-  const { isVerifiedVault } = useVaultRegistry()
-  if (!isVerifiedVault(current.collateral.address) || !isVerifiedVault(current.borrow.address)) {
-    if (!unverifiedDisclaimerShown) {
-      unverifiedDisclaimerShown = true
-      modal.open(VaultUnverifiedDisclaimerModal, {
-        isNotClosable: true,
-        props: {
-          cancelAction: () => {
-            router.replace('/')
-          },
-        },
-      })
-    }
-  }
   await updateBalance()
 }, { immediate: true })
 
@@ -769,40 +765,33 @@ watch(
                   @input="borrow.onBorrowInput"
                 />
 
-                <UiAlert
+                <GeoBlockAlert
                   v-if="isGeoBlocked"
-                  title="Region restricted"
+                  :vault-addresses="[collateralAddress, borrowAddress]"
                   description="This operation is not available in your region. You can still repay existing debt."
-                  variant="warning"
-                  size="compact"
                 />
-                <UiAlert
-                  v-if="isPairFullyRestricted"
-                  title="Region restricted"
+                <GeoBlockAlert
+                  v-if="!isGeoBlocked && isPairFullyRestricted"
+                  :vault-addresses="[collateralAddress, borrowAddress]"
                   description="This pair is not available in your region."
-                  variant="warning"
-                  size="compact"
                 />
-                <UiAlert
+                <GeoBlockAlert
                   v-if="!isGeoBlocked && !isPairFullyRestricted && isBorrowRestricted"
+                  :vault-addresses="[collateralAddress, borrowAddress]"
                   title="Asset restricted"
                   description="Borrowing this asset is not available in your region."
-                  variant="warning"
-                  size="compact"
                 />
-                <UiAlert
+                <GeoBlockAlert
                   v-if="!isGeoBlocked && !isPairFullyRestricted && !isBorrowRestricted && borrow.isBorrowPayWithBlocked.value"
+                  :vault-addresses="[collateralAddress, borrowAddress]"
                   title="Asset restricted"
                   description="Paying with this asset is not available in your region. Pick a different token."
-                  variant="warning"
-                  size="compact"
                 />
-                <UiAlert
+                <GeoBlockAlert
                   v-if="!isGeoBlocked && !isPairFullyRestricted && !isBorrowRestricted && !borrow.isBorrowPayWithBlocked.value && borrow.isBorrowSwapRestricted.value"
+                  :vault-addresses="[collateralAddress, borrowAddress]"
                   title="Swap restricted"
                   description="Swapping into this collateral vault is not available in your region. You can provide the vault's underlying asset directly."
-                  variant="warning"
-                  size="compact"
                 />
                 <UiAlert
                   v-show="borrow.errorText.value"
@@ -819,7 +808,7 @@ watch(
                   size="compact"
                 />
 
-                <VaultWarningBanner :warnings="borrow.borrowFormWarnings.value" />
+                <VaultWarningBanner :warnings="[assessmentWarning, ...borrow.borrowFormWarnings.value]" />
 
                 <VaultFormInfoBlock
                   v-if="pair"
@@ -931,26 +920,21 @@ watch(
                       :readonly="true"
                     />
 
-                    <UiAlert
+                    <GeoBlockAlert
                       v-if="isGeoBlocked"
-                      title="Region restricted"
+                      :vault-addresses="[collateralAddress, borrowAddress]"
                       description="This operation is not available in your region. You can still repay existing debt."
-                      variant="warning"
-                      size="compact"
                     />
-                    <UiAlert
-                      v-if="isPairFullyRestricted"
-                      title="Region restricted"
+                    <GeoBlockAlert
+                      v-if="!isGeoBlocked && isPairFullyRestricted"
+                      :vault-addresses="[collateralAddress, borrowAddress]"
                       description="This pair is restricted in your region."
-                      variant="warning"
-                      size="compact"
                     />
-                    <UiAlert
+                    <GeoBlockAlert
                       v-if="!isGeoBlocked && !isPairFullyRestricted && isMultiplyRestricted"
+                      :vault-addresses="[collateralAddress, borrowAddress]"
                       title="Asset restricted"
                       description="Multiply is not available for this pair in your region."
-                      variant="warning"
-                      size="compact"
                     />
                     <UiAlert
                       v-show="multiply.multiplyErrorText.value"
@@ -975,7 +959,7 @@ watch(
                       size="compact"
                     />
 
-                    <VaultWarningBanner :warnings="multiply.multiplyFormWarnings.value" />
+                    <VaultWarningBanner :warnings="[assessmentWarning, ...multiply.multiplyFormWarnings.value]" />
                   </div>
 
                   <div class="flex flex-col gap-16 w-full">
@@ -1071,6 +1055,7 @@ watch(
             <template #buttons>
               <VaultFormInfoButton
                 :pair="(pair as BorrowVaultPair)"
+                reveal-oracle-link
                 :extra-vault="formTab === 'multiply' ? multiply.multiplySupplyVault.value : undefined"
                 class="laptop:!hidden"
               />

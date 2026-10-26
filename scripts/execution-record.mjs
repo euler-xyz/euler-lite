@@ -28,6 +28,7 @@ import {
 import { privateKeyToAccount } from 'viem/accounts'
 import { mainnet } from 'viem/chains'
 import { installSdkQueryRecorder } from '../tests/execution/sdk-query-recorder.mjs'
+import { assertExecutionEvidence } from '../tests/execution/transaction-evidence.mjs'
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DEFAULT_FIXTURE = path.join(ROOT_DIR, 'tests/execution/anvil-mainnet.fixture.json')
@@ -263,7 +264,20 @@ async function main() {
         }
       }
 
+      if (scenarioResult.status === 'passed') {
+        try {
+          scenarioResult.executionCalls = assertExecutionEvidence(run.walletRequests, {
+            ...scenarioResult, requiredCalls: scenario.requiredCalls, requireAtomicExecution: scenario.requireAtomicExecution,
+          })
+        }
+        catch (error) {
+          scenarioResult.status = 'failed'
+          scenarioResult.error = sanitizeForJson(error)
+        }
+      }
       run.scenarios.push(scenarioResult)
+      const checkpoint = await writeRecordArtifacts(outputDir, run)
+      await writeJson(path.join(outputDir, 'run.json'), checkpoint)
     }
     activeScenarioState.scenario = null
     activeScenarioState.successfulWalletTransactions = 0
@@ -506,6 +520,11 @@ async function setupFork(fixture, anvilRpcUrl) {
   }
   const wallet = getAddress(fixture.wallet.address)
   const ethBalance = fixture.wallet.ethBalance ?? '1000'
+  if (fixture.wallet.resetCode) {
+    const previousCode = await rpc(anvilRpcUrl, 'eth_getCode', [wallet, 'latest'])
+    await rpc(anvilRpcUrl, 'anvil_setCode', [wallet, '0x'])
+    setup.walletCodeReset = { address: wallet, previousCode }
+  }
   // Loading the complete vault inventory batches many read-only Lens calls.
   // Give that fork-only Multicall enough block gas without changing the fixed
   // gas limit applied to transactions submitted by the wallet stub.
@@ -1496,7 +1515,7 @@ function shouldCaptureUrl(rawUrl) {
       || pathName.startsWith('/api/internal/pyth')
       || pathName.startsWith('/api/internal/rpc')
       || pathName.startsWith('/api/internal/euler-chains')
-      || pathName.startsWith('/api/internal/labels')
+      || pathName.startsWith('/api/internal/public-labels')
       || pathName.startsWith('/api/internal/vaults')
       || pathName.startsWith('/api/internal/token-list')
       || url.hostname.includes('swap')
@@ -1525,6 +1544,7 @@ async function runScenario({ page, appUrl, defaults, scenario, outputDir, variab
     }
 
     for (const action of scenario.actions ?? []) {
+      if (!action.optional) console.log(`[execution-record]   ${action.label ?? action.type}`)
       const actionResult = await performAction(page, action, variables, defaults, fixture)
       result.actions.push(actionResult)
       if (action.captureTagsAfter) {
@@ -1701,6 +1721,14 @@ async function performAction(page, action, variables, defaults = {}, fixture) {
       await waitForOptional(locator, action, timeout)
       await locator.click({ timeout })
       await waitForSelectors(page, action.waitFor, timeout)
+      if (action.settleMs) await page.waitForTimeout(Number(action.settleMs))
+    }
+    else if (action.type === 'setSlippage') {
+      await page.locator('[data-id="data-point"][data-field="Slippage tolerance"] button').first().click({ timeout })
+      await page.getByRole('button', { name: /^(Set custom|Custom)/ }).click({ timeout })
+      await page.getByPlaceholder('Custom slippage').fill(String(action.value), { timeout })
+      await page.getByRole('button', { name: 'Save', exact: true }).click({ timeout })
+      await page.getByPlaceholder('Custom slippage').waitFor({ state: 'hidden', timeout })
       if (action.settleMs) await page.waitForTimeout(Number(action.settleMs))
     }
     else if (action.type === 'clickRangeStep') {

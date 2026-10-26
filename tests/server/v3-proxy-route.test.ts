@@ -83,6 +83,7 @@ const makeEvent = (method: string, url: string, body?: string): TestEvent => ({
 
 describe('/api/internal/v3 proxy route', () => {
   afterEach(() => {
+    vi.unstubAllEnvs()
     delete process.env.EULER_SDK_V3_API_KEY
     resetV3ProxyBackoffsForTest()
     vi.clearAllMocks()
@@ -94,6 +95,13 @@ describe('/api/internal/v3 proxy route', () => {
       windowMs: 60_000,
       label: 'v3-proxy',
     })
+  })
+  it('rejects V3 reads locally when the deployment opts out', async () => {
+    vi.stubEnv('DISABLE_V3', 'true')
+    const event = makeEvent('GET', 'https://app.example/api/internal/v3/tokens?chainId=1')
+    await expect(handler(event)).rejects.toMatchObject({ statusCode: 503, statusMessage: 'V3 is disabled for this deployment' })
+    expect(mocks.fetchWithTimeout).not.toHaveBeenCalled()
+    expect(event.context.responseHeaders?.['Cache-Control']).toBe('no-store')
   })
 
   it('rate limits and forwards allowed POST requests with fixed server headers', async () => {

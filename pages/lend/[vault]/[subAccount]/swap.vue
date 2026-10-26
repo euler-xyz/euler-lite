@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { getVaultGeoUnavailableReason } from '~/composables/useGeoBlock'
 import { captureSwapReview } from '~/utils/swapReview'
 import type { SecuritizeCollateralVault, EVault, SwapQuote, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { getSubAccountAddress, isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
@@ -59,7 +60,9 @@ const projectionToVault = computed(() => {
   const fallback = toVault.value
   return fallback ? getLayeredVault(fallback.address, fallback) : undefined
 })
-useOperationGuard(computed(() => [fromVault.value?.address, toVault.value?.address].filter(Boolean)))
+useOperationGuard(computed(() => [fromVault.value?.address, toVault.value?.address].filter(Boolean)), {
+  depositedVaultAddresses: computed(() => [toVault.value?.address].filter(Boolean)),
+})
 
 const fromVaultAsRegular = computed(() => fromVault.value as EVault | undefined)
 const { collateralOptions, collateralVaults } = useSwapCollateralOptions({ currentVault: fromVaultAsRegular })
@@ -407,7 +410,7 @@ const addToBatch = async () => {
 }
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: getVaultGeoUnavailableReason(fromVault.value?.address, toVault.value?.address) || 'This operation is not available in your region', variant: 'warning' }
   if (sameVaultError.value) return { message: sameVaultError.value, variant: 'error' }
   if (errorText.value) return { message: errorText.value, variant: 'error' }
   if (quoteError.value) return { message: quoteError.value, variant: 'warning' }
@@ -536,12 +539,10 @@ watch(
               No asset swap options available
             </div>
 
-            <UiAlert
+            <GeoBlockAlert
               v-if="isGeoBlocked"
-              title="Region restricted"
+              :vault-addresses="[fromVault?.address, toVault?.address]"
               description="This operation is not available in your region. You can still withdraw existing deposits."
-              variant="warning"
-              size="compact"
             />
             <UiAlert
               v-show="errorText"

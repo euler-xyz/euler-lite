@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import type {
   SecuritizeCollateralVault,
   EVault,
@@ -11,6 +12,8 @@ import { getOracleRouteStepKey, useOracleAdapterPrices } from '~/composables/use
 import { isOracleAdapterRouteStep } from '~/utils/oracle-route-steps'
 import { buildOracleAdapterViews, collectOracleRouteSteps, type OracleAdapterView } from '~/utils/oracle-adapter-views'
 import { OracleAdapterChecksModal } from '#components'
+import { oracleAdapterAnchor } from '~/utils/vault-assessment/presentation'
+import { registerOracleAdapterAnchors } from '~/composables/useOracleAdapterAnchors'
 
 const props = defineProps<{
   vault?: EVault
@@ -25,6 +28,7 @@ const {
   loadOracleAdapters,
 } = useEulerLabels()
 const { chainId } = useEulerAddresses()
+const { v3ImagesUrl } = useEnvConfig()
 const { buildKnownSymbols, resolveSymbol: resolveTokenSymbol, shortenAddress } = useTokenSymbolResolver()
 const { recognizedRouters, recognizedRoutersChainId, loadRecognizedRouters } = useEulerOracleRouters()
 
@@ -60,20 +64,25 @@ const knownSymbols = computed(() => {
   return map
 })
 
+const quoteSteps = computed(() =>
+  oracleAssessmentsStatus.value === 'available' || oracleAssessmentsStatus.value === 'unavailable'
+    ? routeSteps.value
+    : [],
+)
 const trustedRouteSteps = computed(() => oracleAssessmentsAvailable.value ? routeSteps.value : [])
-const adapterViews = computed(() => buildOracleAdapterViews(trustedRouteSteps.value, oracleAdapters))
+const adapterViews = computed(() => buildOracleAdapterViews(trustedRouteSteps.value, oracleAdapters, v3ImagesUrl))
 
 watch(
-  () => routeSteps.value,
-  async (stepList) => {
-    if (!chainId.value) return
+  [routeSteps, chainId],
+  async ([stepList, currentChainId]) => {
+    if (!currentChainId) return
 
     const adapterAddresses = [...new Set(
       stepList
         .filter(isOracleAdapterRouteStep)
         .map(step => step.oracle),
     )]
-    await loadOracleAdapters(chainId.value, adapterAddresses)
+    await loadOracleAdapters(currentChainId, adapterAddresses)
   },
   { immediate: true },
 )
@@ -98,6 +107,27 @@ const routerRecognition = computed(() => {
 })
 
 const resolveSymbol = (address: string) => resolveTokenSymbol(address, knownSymbols.value)
+registerOracleAdapterAnchors(computed(() => oracleAssessmentsStatus.value === 'available'
+  ? adapterViews.value.map(adapter => oracleAdapterAnchor(adapter.oracle))
+  : []))
+const route = useRoute()
+const section = ref<{ setOpen: (open: boolean) => void, $el: HTMLElement } | null>(null)
+const revealTargetAdapter = async () => {
+  if (!import.meta.client) return
+  const id = route.hash.replace(/^#/, '')
+  if (!id.startsWith('oracle-adapter-') || !adapterViews.value.some(adapter => oracleAdapterAnchor(adapter.oracle) === id)) return
+  section.value?.setOpen(true)
+  await nextTick()
+  const target = section.value?.$el.querySelector<HTMLElement>(`[id="${id}"]`)
+  if (target?.getClientRects().length) target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+}
+watch([() => route.hash, () => adapterViews.value.length], () => {
+  void revealTargetAdapter()
+})
+/** After in-app navigation the adapters are already loaded, so the section must exist before the first reveal. */
+onMounted(() => {
+  void revealTargetAdapter()
+})
 
 const { copyToClipboard } = useClipboardCopy()
 
@@ -108,7 +138,7 @@ const onCopyClick = (address: string) => {
 const getExplorerAddressLink = (address: string) => getExplorerLink(address, chainId.value, true)
 
 const { prices: adapterPrices, isLoading: isPriceLoading } = useOracleAdapterPrices(
-  trustedRouteSteps,
+  quoteSteps,
   sourceVaults,
   computed(() => props.collateralVaults ?? []),
 )
@@ -121,7 +151,7 @@ const isAdapterPriceFailed = (adapter: RouteStepKeyInput) => {
   return !info?.success
 }
 
-const formatAdapterPrice = (adapter: RouteStepKeyInput & { invertPrice: boolean }) => {
+const formatAdapterPrice = (adapter: RouteStepKeyInput & { invertPrice?: boolean }) => {
   const key = getOracleRouteStepKey(adapter)
   const info = adapterPrices.value.get(key)
   if (!info?.success) return '-'
@@ -161,7 +191,9 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
 
 <template>
   <VaultOverviewAccordionSection
+    ref="section"
     title="Oracles"
+    icon="section-oracles"
     :default-open="props.defaultOpen ?? true"
     content-class="flex flex-col gap-24"
   >
@@ -188,9 +220,78 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
     </template>
     <div
       v-if="oracleAssessmentsStatus === 'unavailable'"
-      class="text-p3 text-content-tertiary"
+      class="flex flex-col gap-16"
+      data-id="oracle-fallback"
     >
-      Oracle information not available
+      <p
+        class="text-p3 text-content-tertiary"
+        aria-live="polite"
+      >
+        Oracle verification unavailable
+      </p>
+      <p
+        v-if="!routeSteps.length"
+        class="text-p3 text-content-tertiary"
+      >
+        Route information not available
+      </p>
+      <div
+        v-for="step in routeSteps"
+        :key="getOracleRouteStepKey(step)"
+        class="grid grid-cols-1 sm:grid-cols-3 gap-16 rounded-xl bg-surface p-16 border border-line-subtle text-p3"
+        data-id="oracle-route-fallback"
+        :data-oracle-address="step.oracle"
+      >
+        <div class="flex min-w-0 flex-col gap-4">
+          <span class="text-content-tertiary">Route</span>
+          <span class="break-words text-content-primary">
+            {{ resolveSymbol(step.base) }}/{{ resolveSymbol(step.quote) }}
+          </span>
+        </div>
+        <div class="flex min-w-0 flex-col gap-4">
+          <span class="text-content-tertiary">{{ step.kind === 'vault' ? 'Vault address' : 'Adapter address' }}</span>
+          <div class="flex items-center gap-8">
+            <NuxtLink
+              :to="getExplorerAddressLink(step.oracle)"
+              :title="step.oracle"
+              class="text-accent-600 underline hover:text-accent-500"
+              target="_blank"
+            >
+              {{ shortenAddress(step.oracle) }}
+            </NuxtLink>
+            <button
+              :class="$style.copyBtn"
+              class="text-content-muted"
+              :aria-label="step.kind === 'vault' ? 'Copy vault address' : 'Copy adapter address'"
+              @click="onCopyClick(step.oracle)"
+            >
+              <SvgIcon
+                class="!w-18 !h-18"
+                name="copy"
+              />
+            </button>
+          </div>
+        </div>
+        <div class="flex min-w-0 flex-col gap-4">
+          <span class="text-content-tertiary">Returned price</span>
+          <span
+            v-if="isPriceLoading"
+            class="text-content-secondary animate-pulse"
+          >...</span>
+          <span
+            v-else-if="isAdapterPriceFailed(step)"
+            class="text-content-tertiary"
+          >
+            Quote unavailable
+          </span>
+          <span
+            v-else
+            class="break-words text-content-primary"
+          >
+            1 {{ resolveSymbol(step.base) }} = {{ formatAdapterPrice(step) }} {{ resolveSymbol(step.quote) }}
+          </span>
+        </div>
+      </div>
     </div>
     <div
       v-else-if="oracleAssessmentsStatus === 'available' && !adapterViews.length"
@@ -204,6 +305,7 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
     >
       <div
         v-for="adapter in adapterViews"
+        :id="oracleAdapterAnchor(adapter.oracle)"
         :key="getOracleRouteStepKey(adapter)"
         class="w-full rounded-xl bg-surface p-16 flex flex-col gap-12 border border-line-subtle"
       >
@@ -361,7 +463,7 @@ const getChecksModalData = (adapter: OracleAdapterView) => ({
                 'text-warning-500': check.outcome !== OracleAdapterCheckOutcome.Fail || check.severity !== OracleAdapterCheckSeverity.High,
               }"
             />
-            <div>
+            <div class="min-w-0 break-words">
               <span class="text-content-primary font-medium">{{ formatOracleCheckTitle(check.id) }}: </span>
               <span class="text-content-secondary">{{ check.message }}</span>
             </div>

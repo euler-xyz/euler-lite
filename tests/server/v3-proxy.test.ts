@@ -30,6 +30,40 @@ describe('v3 proxy utilities', () => {
     expect(target).toBe('https://v3.example/base/v3/evk/vaults/batch?chainId=1')
   })
 
+  describe('upstream refresh parameters', () => {
+    const target = (path: string) => buildV3ProxyTarget(
+      new URL(`https://app.example/api/internal/v3${path}`),
+      { V3_API_URL: 'https://v3.example/base/' },
+    )
+
+    it.each(['forceFresh', 'maxAge', 'minBlock'])('strips %s on every proxied path', (name) => {
+      expect(target(`/accounts/${ACCOUNT}/positions?chainId=1&${name}=true&offset=0&limit=100`))
+        .toBe(`https://v3.example/base/v3/accounts/${ACCOUNT}/positions?chainId=1&offset=0&limit=100`)
+      expect(target(`/evk/vaults/1/${VAULT}/totals?${name}=1&resolution=1d`))
+        .toBe(`https://v3.example/base/v3/evk/vaults/1/${VAULT}/totals?resolution=1d`)
+      expect(target(`/earn/vaults/1/${VAULT}/totals?resolution=1d&${name}=1`))
+        .toBe(`https://v3.example/base/v3/earn/vaults/1/${VAULT}/totals?resolution=1d`)
+      expect(target(`/evk/vaults/batch?${name}=1`))
+        .toBe('https://v3.example/base/v3/evk/vaults/batch')
+    })
+
+    it('strips every occurrence, including percent-encoded names', () => {
+      expect(target(`/accounts/${ACCOUNT}/positions?forceFresh=true&chainId=1&forceFresh=false&force%46resh=1&maxAge=0&max%41ge=0&minBlock=1&minBlock=2&limit=100`))
+        .toBe(`https://v3.example/base/v3/accounts/${ACCOUNT}/positions?chainId=1&limit=100`)
+    })
+
+    it('keeps other parameters byte for byte, in order, with repeated keys', () => {
+      const query = `chainId=1&assets=${ACCOUNT},${VAULT}&tag=a&tag=b&forcefresh=1&ForceFresh=1&MAXAGE=5&minblock=3&q=a%20b+c&flag&&forceFreshness=1`
+      expect(target(`/prices?${query}`)).toBe(`https://v3.example/base/v3/prices?${query}`)
+    })
+
+    it('forwards a URL without a query, or with only refresh parameters, without a query', () => {
+      expect(target('/prices')).toBe('https://v3.example/base/v3/prices')
+      expect(target(`/accounts/${ACCOUNT}/positions?forceFresh=true&maxAge=0&minBlock=1`))
+        .toBe(`https://v3.example/base/v3/accounts/${ACCOUNT}/positions`)
+    })
+  })
+
   it('allows only SDK-owned V3 path shapes', () => {
     expect(isV3ProxyPathAllowed(`/v3/accounts/${ACCOUNT}/positions`)).toBe(true)
     expect(isV3ProxyPathAllowed(`/v3/activity/accounts/${ACCOUNT}/events`)).toBe(true)
@@ -37,11 +71,13 @@ describe('v3 proxy utilities', () => {
     expect(isV3ProxyPathAllowed('/v3/apys/intrinsic')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/apys/rewards')).toBe(true)
     expect(isV3ProxyPathAllowed(`/v3/earn/vaults/1/${VAULT}`)).toBe(true)
+    expect(isV3ProxyPathAllowed(`/v3/earn/vaults/1/${VAULT}/assessment`)).toBe(true)
     expect(isV3ProxyPathAllowed(`/v3/earn/vaults/1/${VAULT}/totals`)).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/bad-debt')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/batch')).toBe(true)
     expect(isV3ProxyPathAllowed(`/v3/evk/vaults/1/${VAULT}/totals`)).toBe(true)
-    expect(isV3ProxyPathAllowed('/v3/evk/vaults/open-interest')).toBe(true)
+    expect(isV3ProxyPathAllowed(`/v3/evk/vaults/1/${VAULT}/assessment`)).toBe(true)
+    expect(isV3ProxyPathAllowed('/v3/evk/vaults/open-interest')).toBe(false)
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/open-interest/by-collateral')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/liquidations')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/oracles/adapter-assessments')).toBe(true)
@@ -70,6 +106,9 @@ describe('v3 proxy utilities', () => {
     expect(isV3ProxyPathAllowed(`/v3/activity/vaults/0/${VAULT}/events`)).toBe(false)
     expect(isV3ProxyPathAllowed(`/v3/activity/vaults/${'1'.repeat(17)}/${VAULT}/events`)).toBe(false)
     expect(isV3ProxyPathAllowed(`/v3/activity/vaults/1/not-an-address/events`)).toBe(false)
+    expect(isV3ProxyPathAllowed(`/v3/evk/vaults/1/not-an-address/assessment`)).toBe(false)
+    expect(isV3ProxyPathAllowed(`/v3/evk/vaults/1/${VAULT}/assessment/admin`)).toBe(false)
+    expect(isV3ProxyPathAllowed(`/v3/evk/vaults/0/${VAULT}/assessment`)).toBe(false)
   })
 
   it('rejects percent-encoded path bytes before attaching the upstream API key', () => {
@@ -96,7 +135,7 @@ describe('v3 proxy utilities', () => {
     expect(validateV3ProxyUrl(
       'GET',
       new URL(`https://app.example/api/internal/v3/evk/vaults/open-interest?chainId=1&vault=${VAULT}&limit=1`),
-    )).toEqual({ ok: true })
+    )).toEqual({ ok: false, statusCode: 404, statusMessage: 'V3 path not allowed' })
     expect(validateV3ProxyUrl(
       'GET',
       new URL(`https://app.example/api/internal/v3/evk/vaults/1/${VAULT}/totals?resolution=1d&from=1782380000&to=1782984800`),
@@ -167,15 +206,7 @@ describe('v3 proxy utilities', () => {
     })
   })
 
-  it('extracts public open-interest and bad-debt failure context', () => {
-    expect(buildV3ProxyLogFields(
-      new URL(`https://app.example/api/internal/v3/evk/vaults/open-interest?chainId=1&vault=${VAULT}&limit=10`),
-    )).toEqual({
-      v3ChainId: '1',
-      v3Limit: '10',
-      v3VaultAddress: VAULT,
-    })
-
+  it('extracts public bad-debt failure context', () => {
     expect(buildV3ProxyLogFields(
       new URL('https://app.example/api/internal/v3/evk/vaults/bad-debt?chainId=1&minBadDebtUsd=0&offset=100&limit=100'),
     )).toEqual({

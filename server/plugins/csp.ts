@@ -47,7 +47,7 @@ export function cspConnectOrigin(raw: string | undefined): string | null {
 /**
  * Extra connect-src origins (comma-separated).
  * Use CSP_EXTRA_CONNECT_SRC to allow additional origins per deployment
- * on top of the built-in and dev-only lists.
+ * in addition to the built-in and environment-derived origins.
  */
 export function parseExtraConnectSrc(): string[] {
   const raw = process.env.CSP_EXTRA_CONNECT_SRC?.trim()

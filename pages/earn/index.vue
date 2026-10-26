@@ -5,8 +5,8 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 
-import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
-import { getProductByVault, applyVaultOverrides, getEntitiesByEarnVault, isVaultRecentlyAdded, isVaultDeprecated, isEarnVaultNotExplorable } from '~/utils/eulerLabelsUtils'
+import { getAssetUsdValueForEstimate } from '~/utils/sdk-prices'
+import { getProductByVault, applyVaultOverrides, getEntitiesByEarnVault, isVaultRecentlyAdded, isVaultDeprecated, isEarnVaultNotExplorable, isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
@@ -28,7 +28,7 @@ const { getEarnVaults, isVerifiedVault } = useVaultRegistry()
 const { chainId } = useEulerAddresses()
 const showAllLabelEntries = useShowAllLabelEntries()
 const list = computed(() => getEarnVaults().filter(v =>
-  isVerifiedVault(v.address) && (showAllLabelEntries.value || !isEarnVaultNotExplorable(v.address)),
+  isVerifiedVault(v.address) && isVaultSelectedByTag(v.address) && (showAllLabelEntries.value || !isEarnVaultNotExplorable(v.address)),
 ))
 
 const { enableEntityBranding } = useDeployConfig()
@@ -86,11 +86,11 @@ const fetchEarnPrices = useDebounceFn(async () => {
     await Promise.all(
       vaults.map(async (vault) => {
         const [totalSupply, liquidity] = await Promise.all([
-          getAssetUsdValueOrZero(vault.totalAssets, vault, 'off-chain'),
-          getAssetUsdValueOrZero(vault.availableAssets, vault, 'off-chain'),
+          getAssetUsdValueForEstimate(vault.totalAssets, vault, 'off-chain'),
+          getAssetUsdValueForEstimate(vault.availableAssets, vault, 'off-chain'),
         ])
-        totalSupplyValues.set(vault.address, totalSupply)
-        liquidityValues.set(vault.address, liquidity)
+        if (totalSupply !== undefined) totalSupplyValues.set(vault.address, totalSupply)
+        if (liquidity !== undefined) liquidityValues.set(vault.address, liquidity)
       }),
     )
     if (loadId !== priceLoadId) return
@@ -133,8 +133,8 @@ const {
     { key: 'liquidity', label: 'Available liquidity', shortLabel: 'Avail. liquidity', unit: 'usd' },
   ],
   (vault, metric) => {
-    if (metric === 'totalSupply') return vaultTotalSupplyUsd.value.get(vault.address) ?? 0
-    if (metric === 'liquidity') return vaultLiquidityUsd.value.get(vault.address) ?? 0
+    if (metric === 'totalSupply') return vaultTotalSupplyUsd.value.get(vault.address)
+    if (metric === 'liquidity') return vaultLiquidityUsd.value.get(vault.address)
     return 0
   },
 )
@@ -164,7 +164,7 @@ const curatorOptions = computed(() => {
   return buildTvlSortedOptions(list.value.flatMap((vault) => {
     const tvl = vaultTotalSupplyUsd.value.get(vault.address) ?? 0
     return getEntitiesByEarnVault(vault).map(entity => ({
-      key: entity.name, label: entity.name, tvl, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined,
+      key: entity.name, label: entity.name, tvl, icon: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined,
     }))
   }))
 })
@@ -254,7 +254,7 @@ const clearEarnFilters = () => {
       title="Earn"
       description="One deposit, diversified yield. Curators allocate your capital across multiple lending strategies."
       class="mb-16"
-      arrow-right
+      icon="nav-earn"
     />
 
     <div class="mb-16 -mx-16">
@@ -271,9 +271,9 @@ const clearEarnFilters = () => {
           v-model="sortBy"
           v-model:dir="sortDir"
           :options="[
-            { label: 'Total Supply', icon: 'lend-outline' },
-            { label: 'Liquidity', icon: 'wallet' },
-            { label: 'Supply APY', icon: 'percent' },
+            { label: 'Total Supply', icon: 'sort-total-supply' },
+            { label: 'Liquidity', icon: 'sort-liquidity' },
+            { label: 'Supply APY', icon: 'sort-apy' },
           ]"
           title="Sorting type"
         />
@@ -285,7 +285,8 @@ const clearEarnFilters = () => {
           placeholder="Curator"
           title="Curator"
           modal-input-placeholder="Search curator"
-          icon="search-user"
+          icon="filter-curator"
+          active-icon="filter-curator-filled"
         />
         <UiSelect
           :key="`collateral-${chainId}`"
@@ -294,7 +295,8 @@ const clearEarnFilters = () => {
           placeholder="Asset"
           title="Asset"
           modal-input-placeholder="Search asset"
-          icon="wallet"
+          icon="filter-asset"
+          active-icon="filter-asset-filled"
         />
         <UiCustomFilterChips
           :filters="customFilters"
@@ -325,7 +327,7 @@ const clearEarnFilters = () => {
       <UiEmptyState
         v-else
         class="flex-1"
-        icon="earn-outline"
+        icon="nav-earn"
         :title="emptyStateTitle"
         :description="emptyStateDescription"
       >

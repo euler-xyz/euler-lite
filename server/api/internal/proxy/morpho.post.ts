@@ -21,17 +21,11 @@ import {
   forwardProxied,
 } from '~/server/utils/external-proxy'
 import { assertAllowedGraphqlRequest } from '~/server/utils/graphql-proxy-guard'
+import { MORPHO_ALLOWED_OPERATIONS } from '~/server/utils/migration-graphql-policy'
+import { GRAPHQL_RESPONSE_BUDGET } from '~/server/utils/fetch-text-with-budget'
 
 const MORPHO_GRAPHQL_URL = 'https://api.morpho.org/graphql'
 const BROWSER_CACHE_CONTROL = 'no-store'
-
-// The operations Lite's Morpho migration flow sends to this proxy:
-//  - EulerMigrationMorphoMarkets: target-market discovery (SDK connector)
-//  - LiteMorphoMigrationPositions: user position discovery (useExternalMigrationPositions)
-const MORPHO_ALLOWED_OPERATIONS = [
-  'EulerMigrationMorphoMarkets',
-  'LiteMorphoMigrationPositions',
-] as const
 
 const cache = createProxyCache(0)
 const inFlight = createProxyInFlight()
@@ -64,6 +58,7 @@ export default defineEventHandler(async (event) => {
       body,
       ctx: 'morpho-proxy',
       bypassCache: true,
+      responseBudget: GRAPHQL_RESPONSE_BUDGET,
     })
     setResponseStatus(event, res.status, res.statusText)
     setResponseHeaders(event, {

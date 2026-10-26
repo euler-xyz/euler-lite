@@ -29,12 +29,12 @@
  */
 import {
   buildEulerSDK,
-  ProviderService,
   type EulerSDK,
   type EulerSDKConfig,
 } from '@eulerxyz/euler-v2-sdk'
 import {
   readResolvedV3ApiUrl,
+  readDisableV3,
   readServerVaultCacheSource,
   readTurtleEarnApiKey,
   readV3ApiKey,
@@ -42,10 +42,12 @@ import {
   type VaultDataSource,
 } from '~/utils/api-url-env'
 import { parseChainIds } from '~/utils/parseChainIds'
+import { LiteEulerLabelsService } from '~/utils/sdk-labels'
+import { getPublicLabelsBundle } from './public-labels-source'
+import { serverAbiService } from './sdk-abi-service'
+import { createNoV3IntrinsicApyService, disableSdkV3Utilities } from '~/utils/sdk-no-v3'
 import { resolveRpcUrl } from './rpc'
-import { resolveLabelsBaseUrl } from './labels-base-url'
 import { TURTLE_EARN_API_URL } from './turtle-proxy'
-import { createServerProviderService } from './server-provider-service'
 
 const sdkByChain = new Map<number, Promise<EulerSDK>>()
 
@@ -107,14 +109,13 @@ const buildServerSdkConfig = (chainId: number): EulerSDKConfig & { rpcUrls: Reco
   return {
     rpcUrls: { [chainId]: rpcUrl },
     v3ApiUrl,
-    eulerLabelsBaseUrl: resolveLabelsBaseUrl(),
     tokenlistApiBaseUrl: v3ApiUrl,
     ...(v3ApiKey ? { v3ApiKey } : {}),
     ...resolveServerTurtleRewardsConfig(),
     ...adapterConfigForSource(source),
     // Fallback short-circuits to onchain when no V3 is configured —
     // otherwise the SDK keeps trying V3 and every refresh logs failures.
-    ...(source === 'fallback' && !hasV3 ? { disableV3: true } : {}),
+    disableV3: readDisableV3() || (source === 'fallback' && !hasV3),
   }
 }
 
@@ -122,10 +123,26 @@ export const getServerSdk = (chainId: number): Promise<EulerSDK> => {
   const existing = sdkByChain.get(chainId)
   if (existing) return existing
   const config = buildServerSdkConfig(chainId)
-  const providerService = createServerProviderService(config.rpcUrls, new ProviderService(config.rpcUrls))
+  const disableV3 = readDisableV3()
   const promise = buildEulerSDK({
     config,
-    servicesOverrides: { providerService },
+    // Let the SDK resolve registry viemNames before applying server-only tuning.
+    chains: {
+      146: {
+        transport: {
+          multicall: { batchSize: 128, wait: 10 },
+          http: { batch: { batchSize: 100, wait: 10 } },
+        },
+      },
+    },
+    servicesOverrides: {
+      abiService: serverAbiService,
+      eulerLabelsService: new LiteEulerLabelsService(getPublicLabelsBundle),
+      ...(disableV3 ? { intrinsicApyService: createNoV3IntrinsicApyService() } : {}),
+    },
+  }).then((sdk) => {
+    if (disableV3) disableSdkV3Utilities(sdk)
+    return sdk
   }).catch((err) => {
     if (sdkByChain.get(chainId) === promise) sdkByChain.delete(chainId)
     throw err

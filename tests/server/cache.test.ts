@@ -59,4 +59,20 @@ describe('createTtlCache staleness policy', () => {
     vi.advanceTimersByTime(MINUTE)
     expect(cache.getStale('k')).toBeUndefined()
   })
+
+  it('replaces data without extending the original TTL or stale ceiling', () => {
+    const cache = createTtlCache<string>({ ttlMs: MINUTE, maxStaleMs: MINUTE })
+    cache.set('k', 'old')
+    vi.advanceTimersByTime(45_000)
+    expect(cache.replace('k', 'new')).toBe(true)
+    expect(cache.get('k')).toBe('new')
+
+    vi.advanceTimersByTime(15_000)
+    expect(cache.get('k')).toBeUndefined()
+    expect(cache.getStale('k')).toBe('new')
+
+    vi.advanceTimersByTime(MINUTE + 1)
+    expect(cache.getStale('k')).toBeUndefined()
+    expect(cache.replace('missing', 'value')).toBe(false)
+  })
 })

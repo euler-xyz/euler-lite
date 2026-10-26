@@ -10,22 +10,29 @@ Data V3 assesses adapters. Lite only:
 
 1. Collects the live decoded EulerRouter route.
 2. Joins it to V3 assessments.
-3. Renders identity, health, and an EVC-simulated quote.
+3. Renders assessed identity and health when available, with an EVC-simulated quote.
+4. Shows route, address, and returned price details when assessments are unavailable.
 
 ```text
-decoded OracleRouteStep[]          V3 assessments (SDK → /api/internal/v3)
-        │                                    │
-        └──────────────┬─────────────────────┘
-                       ▼
-         collectOracleRouteSteps
-         buildOracleAdapterViews
-                       │
-         ┌─────────────┴─────────────┐
-         ▼                           ▼
-VaultOverviewBlockOracleAdapters   DiscoveryMarketMatrix (oracle metric)
-         │
-         ▼
-useOracleAdapterPrices  (EVC batchSimulation getQuote / convertToAssets)
+decoded OracleRouteStep[]
+             |
+   collectOracleRouteSteps
+             |
+      +------+------------------------+
+      |                               |
+      v                               v
+useOracleAdapterPrices      V3 assessments available?
+(EVC batchSimulation)           |                 |
+      |                       yes               no
+      v                        v                 v
+Returned price         buildOracleAdapterViews   Route + address only
+                               |                 |
+                               +--------+--------+
+                                        v
+                         VaultOverviewBlockOracleAdapters
+
+DiscoveryMarketMatrix uses assessed adapter views;
+its oracle grid is hidden when assessments are unavailable.
 ```
 
 There is no dedicated `/api/internal/oracle-adapters` route. Catalogue and per-address loads go through `sdk.oracleAdapterService`, which hits the V3 proxy allowlist.
@@ -80,7 +87,15 @@ Identity findings (`ORACLE_IDENTITY_CHECK_KEYS`): `adapter-exists`, `adapter-cla
 
 Rule keys become sentence-case titles in the client (`formatOracleCheckTitle`), so a new V3 rule renders without a Lite release.
 
-When the V3 backend itself is down, both surfaces show **Oracle information not available** (`oracleAssessmentsStatus === 'unavailable'`). That is a section-level status, not an adapter verdict. The Oracles block also hides route cards until status is `available`, so a failed trust source cannot look like a list of Unknown adapters.
+When V3 assessments are unavailable or disabled for the chain (`oracleAssessmentsStatus === 'unavailable'`):
+
+- The vault Oracles block shows **Oracle verification unavailable** with the decoded route, adapter address (or vault address for an ERC-4626 leg), and a **Returned price** quoted through RPC.
+- A returned price is expressed as `1 base = amount quote` in the decoded route direction. It does not use assessment labels or invert against retained assessment metadata.
+- Names, provider artwork, methodology, recognition warnings, and checks are withheld, including any retained V3 metadata. An unavailable trust source does not classify adapters as unrecognized.
+- Missing route steps show **Route information not available**. A failed or unscalable quote shows **Quote unavailable**, while the route and address remain visible.
+- The Explore oracle matrix shows **Oracle information not available** without an empty grid.
+
+These are availability states, not adapter verdicts. Initial assessment loading does not show the unavailable fallback.
 
 ## Catalogue vs per-address load
 
@@ -126,7 +141,11 @@ One EVC `batchSimulation`:
 
 `shouldInvertOraclePrice` compares the assessment config pair with the routed pair. Invert only when they are exact swaps of each other; a no-match pair is not flipped.
 
-Failed quotes render **Unknown**, not `0`.
+Failed quotes render **Unknown** in assessed cards and **Quote unavailable** in the fallback. Successful zero quotes remain zero.
+
+Token and share decimals come from the vault entities or successful RPC reads. Failed or malformed decimal reads leave the affected quote unavailable; only the explicitly known unit-of-account placeholders use fixed decimals.
+
+Quote requests capture the chain, EVC address, route, and decimals. Switching chains or routes clears displayed quotes, and obsolete or disposed requests cannot publish their results.
 
 ## Troubleshooting
 

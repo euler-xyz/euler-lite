@@ -11,7 +11,7 @@
  * directive is "no longer needed," stop and review the threat model in
  * docs/architecture.md (Clickjacking & Framing Defenses) first.
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { H3Event } from 'h3'
@@ -27,6 +27,22 @@ const collectTsFiles = (dir: string): string[] => readdirSync(dir).flatMap((entr
 
 describe('buildCsp', () => {
   const csp = buildCsp('test-nonce', [], { connect: [] }, [])
+
+  it('requires explicit configuration for development proxy origins', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'dev')
+
+    try {
+      vi.resetModules()
+      const { buildCsp: buildDevCsp } = await import('~/server/plugins/csp')
+      const proxyOrigin = 'https://golang-proxy-development.up.railway.app'
+
+      expect(buildDevCsp('test-nonce', [], { connect: [] }, [])).not.toContain(proxyOrigin)
+      expect(buildDevCsp('test-nonce', [proxyOrigin], { connect: [] }, [])).toContain(proxyOrigin)
+    }
+    finally {
+      vi.unstubAllEnvs()
+    }
+  })
 
   it('forbids all frame ancestors', () => {
     expect(csp).toContain('frame-ancestors \'none\'')

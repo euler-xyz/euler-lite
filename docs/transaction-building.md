@@ -181,6 +181,26 @@ Pyth updates are completely invisible in review. Preview fees, maximum fees, fee
 
 The rendered-output fixtures in `tests/reviewed-execution/inventory.test.ts` protect this contract. Changes to the visible review are separate product work and require explicit approval.
 
+### Planning requirement collection (`transferMin`)
+
+`collectPlanningRequirements` in `features/reviewed-execution/planning/requirements.ts` walks planner args for vault, asset, and account addresses the snapshot loader and policy must fetch.
+
+SDK swap quotes set `verify.type` to `skimMin`, `debtMax`, or `transferMin`. For `skimMin` / `debtMax`, `verify.vault` is an Euler vault that needs snapshot and policy checks. For `transferMin`, `verify.vault` is the **transfer recipient** (the owner, another wallet, or the swap verifier) — not a vault to load through the Euler registry.
+
+The collector therefore rewrites that one field to `receiver` so mixed carts (partial savings/collateral withdrawals, wallet swaps, Aave → EulerEarn migrations) do not fail looking up a wallet or MetaMorpho vault as an EVK. Zero-address `accountIn` / `vaultIn` sentinels on wallet-side swap legs are skipped for the same reason.
+
+Do not "simplify" the walk by treating every `verify.vault` as a vault. Coverage: `tests/reviewed-execution/planning-requirements.test.ts`, `tests/reviewed-execution/app-policy-vault-context.test.ts`, and the fork `execution:transfer-min` script documented in `tests/execution/README.md`.
+
+### Reward claim identity
+
+`rewardClaimId` in `features/reviewed-execution/domain/rewards.ts` is `chainId:provider:claimAddress:campaignId:streamId:token:unclaimed`, plus `epoch` **only** when `provider === 'brevis'`. Incentra/Brevis can have several claimable epochs for the same campaign, token, and amount; without the epoch those rows collide and sealing one claim can bind another.
+
+Merkl, Fuul, and Turtle keep identity independent of any `epoch` field that happens to be present. `hasRewardDrifted` still compares decimals separately because an unresolved token keeps the same claim id. Snapshot and drift rules: [SDK Integration → Reward token decimals](./sdk-integration.md#reward-token-decimals).
+
+### rEUL unlocks
+
+Early unlock is a reviewed-execution `reul-unlock` with an explicit `remainder-loss` bound. The UTC-day open-lock gate, chain-time `allowRemainderLoss`, and raw-burn warning (`amountToBeBurned > 0n`) are in [rEUL Unlocks](./reul-unlocks.md).
+
 ## Simulation Performance Tuning
 
 For fan-out flows (per-quote estimate sweeps, leverage explorers) and heavy single-shot flows, Lite threads two SDK helpers through `useEulerTx` and `useTransactionPlanSimulation` so the per-call RPC + plugin cost collapses to roughly "local plan assembly":
@@ -294,6 +314,9 @@ Lite still uses `utils/pyth.ts` for read-path lens simulations and visible vault
 | `composables/useExecutionReview.ts` | Single-operation review launcher; spy mode opens a read-only `OperationReviewModal` |
 | `composables/useCrossPositionRepayCollateralOptions.ts` | Advanced-mode exact-vault collateral from other sub-accounts; see [Cross-Position Repay](./cross-position-repay.md) |
 | `features/reviewed-execution/` | Intents, compiler, immutable reviewed execution, policy, simulation, coordinator, finalization, and transport adapters |
+| `features/reviewed-execution/planning/requirements.ts` | Address collection for snapshots/policy; `transferMin` `verify.vault` is a recipient |
+| `features/reviewed-execution/domain/rewards.ts` | `rewardClaimId` / snapshot / drift, including Brevis epochs |
+| `composables/useREULLocks.ts` | rEUL lock list and unlock planner; see [rEUL Unlocks](./reul-unlocks.md) |
 | `composables/useTransactionPlanSimulation.ts` | Simulation state and error formatting for forms |
 | `composables/useStateOverrideOptions.ts` | `SimulationStateOverrideOptions` builder + per-token slot-hint priming |
 | `composables/batchPrefetchState.ts` | Form → batch handoff for pre-overlay accounts and chain-scoped slot hints |

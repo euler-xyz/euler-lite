@@ -62,7 +62,7 @@ const classes = computed(() => {
       :autocomplete="autocomplete"
       :aria-invalid="error"
       :aria-disabled="disabled"
-      :class="['ui-input__field', icon && 'icon', showClear && 'has-clear']"
+      :class="['ui-input__field', icon && 'has-icon', showClear && 'has-clear']"
     >
     <div
       v-if="showClear"
@@ -109,7 +109,7 @@ const classes = computed(() => {
     outline: none;
     transition: all var(--trs-fast);
 
-    &.icon {
+    &.has-icon {
       padding: 12px 16px 12px 0px;
     }
 

@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_V3_API_URL, readMerklApiKey, readResolvedV3ApiUrl, readTurtleEarnApiKey, readV3ApiKey, readV3ApiUrl } from '~/utils/api-url-env'
+import { DEFAULT_V3_API_URL, readDisableV3, isV3BackendEnabled, readMerklApiKey, readResolvedV3ApiUrl, readTurtleEarnApiKey, readV3ApiKey, readV3ApiUrl } from '~/utils/api-url-env'
 
 describe('api-url-env', () => {
+  it('keeps V3 enabled by default and honours the explicit opt-out and SDK alias', () => {
+    expect(readDisableV3({})).toBe(false)
+    expect(isV3BackendEnabled({ V3_API_URL: DEFAULT_V3_API_URL })).toBe(true)
+    expect(isV3BackendEnabled({ V3_API_URL: DEFAULT_V3_API_URL, DISABLE_V3: 'true' })).toBe(false)
+    expect(readDisableV3({ EULER_SDK_DISABLE_V3: '1' })).toBe(true)
+    expect(readDisableV3({ DISABLE_V3: 'false', EULER_SDK_DISABLE_V3: 'true' })).toBe(false)
+    expect(readResolvedV3ApiUrl({ DISABLE_V3: 'true' })).toBe(DEFAULT_V3_API_URL)
+  })
   it('ignores non-V3 API URL variables', () => {
     const env = {
       OTHER_API_URL: 'https://example.test',

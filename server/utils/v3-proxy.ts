@@ -14,7 +14,6 @@ const GET_ONLY_PATHS = new Set([
   '/v3/earn/vaults',
   '/v3/evk/vaults',
   '/v3/evk/vaults/bad-debt',
-  '/v3/evk/vaults/open-interest',
   '/v3/evk/vaults/open-interest/by-collateral',
   '/v3/liquidations',
   '/v3/oracles/adapter-assessments',
@@ -25,6 +24,7 @@ const GET_ONLY_PATHS = new Set([
 ])
 
 const GET_ONLY_PATH_PATTERNS = [
+  /^\/v3\/(?:evk|earn)\/vaults\/[1-9][0-9]{0,15}\/0x[a-fA-F0-9]{40}\/assessment$/,
   /^\/v3\/accounts\/[^/]+\/positions$/,
   /^\/v3\/activity\/accounts\/0x[a-fA-F0-9]{40}\/events$/,
   /^\/v3\/activity\/vaults\/[1-9][0-9]{0,15}\/0x[a-fA-F0-9]{40}\/events$/,
@@ -38,6 +38,9 @@ const POST_ONLY_PATHS = new Set([
   '/v3/evk/vaults/batch',
   '/v3/resolve/vaults',
 ])
+
+// They spend this deployment's V3 refresh budget, and Lite never sends them.
+const UPSTREAM_REFRESH_PARAMS = new Set(['forceFresh', 'maxAge', 'minBlock'])
 
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/
 const INTEGER_RE = /^[0-9]{1,16}$/
@@ -115,12 +118,20 @@ export function validateV3ProxyUrl(method: string, requestUrl: URL): V3ProxyVali
   return { ok: true }
 }
 
+const isUpstreamRefreshParam = (pair: string) =>
+  [...new URLSearchParams(pair).keys()].some(name => UPSTREAM_REFRESH_PARAMS.has(name))
+
+const stripUpstreamRefreshParams = (search: string): string => {
+  const kept = search.slice(1).split('&').filter(pair => !isUpstreamRefreshParam(pair)).join('&')
+  return kept ? `?${kept}` : ''
+}
+
 export function buildV3ProxyTarget(requestUrl: URL, env: NodeJS.ProcessEnv = process.env): string {
   const upstream = new URL(readResolvedV3ApiUrl(env))
   const suffix = getV3ProxyPath(requestUrl)
 
   upstream.pathname = `${cleanBasePath(upstream.pathname)}${suffix.startsWith('/') ? suffix : `/${suffix}`}`
-  upstream.search = requestUrl.search
+  upstream.search = stripUpstreamRefreshParams(requestUrl.search)
   upstream.hash = ''
   return upstream.toString()
 }
@@ -182,17 +193,6 @@ export function buildV3ProxyLogFields(requestUrl: URL): Record<string, string> {
     fields.v3VaultKind = parts[1]
     fields.v3ChainId = parts[3]
     fields.v3VaultAddress = parts[4]
-  }
-
-  if (
-    parts.length === 4
-    && parts[0] === 'v3'
-    && parts[1] === 'evk'
-    && parts[2] === 'vaults'
-    && parts[3] === 'open-interest'
-  ) {
-    const vaultAddress = cleanParam(requestUrl.searchParams.get('vault'), ADDRESS_RE)
-    if (vaultAddress != null) fields.v3VaultAddress = vaultAddress
   }
 
   if (parts.length === 2 && parts[0] === 'v3' && parts[1] === 'liquidations') {

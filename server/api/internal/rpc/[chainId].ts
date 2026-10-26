@@ -123,13 +123,13 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  rateLimiter.consume(event)
+  const batchSize = isBatch ? body.length : 1
+  rateLimiter.consume(event, batchSize)
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS)
   const startedAt = Date.now()
   const methods = rpcMethods(body)
-  const batchSize = isBatch ? body.length : 1
   const upstreamHost = urlHost(rpcUrl)
 
   try {

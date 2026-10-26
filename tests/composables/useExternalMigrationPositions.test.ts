@@ -9,9 +9,24 @@ const eulerSdkMock = vi.hoisted(() => ({
   getEulerSdk: vi.fn(),
 }))
 
+const { CHAIN_ID, UNSUPPORTED_CHAIN_ID } = vi.hoisted(() => ({
+  CHAIN_ID: 424242,
+  UNSUPPORTED_CHAIN_ID: 434343,
+}))
+
 vi.mock('~/composables/useEulerSdk', () => ({
   getEulerSdk: eulerSdkMock.getEulerSdk,
 }))
+
+vi.mock('~/entities/migration/constants', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('~/entities/migration/constants')>()
+  return {
+    ...actual,
+    MORPHO_MIGRATION_SUPPORTED_CHAIN_IDS: new Set([...actual.MORPHO_MIGRATION_SUPPORTED_CHAIN_IDS, CHAIN_ID]),
+  }
+})
+
+const { MORPHO_MIGRATION_SUPPORTED_CHAIN_IDS } = await vi.importActual<typeof import('~/entities/migration/constants')>('~/entities/migration/constants')
 
 const OWNER = getAddress('0x8A54C278D117854486db0F6460D901a180Fff517')
 const MARKET_ID = '0x8793cf302b8ffd655ab97bd1c695dbd967807e8367a65cb2f4edaf1380ba1bda'
@@ -56,7 +71,7 @@ const aaveSupplyCandidate = (amountUsd: number | null): ExternalMigrationCandida
   connectorId: 'aave',
   protocol: 'Aave V3',
   id: `aave:${AAVE_POOL}:${WETH}:supply`,
-  chainId: 8453,
+  chainId: CHAIN_ID,
   owner: OWNER,
   ref: {
     collateralAsset: WETH,
@@ -86,7 +101,7 @@ const metamorphoCandidate = (amountUsd: number | null): MetamorphoMigrationCandi
   connectorId: 'metamorpho',
   protocol: 'Morpho Vaults',
   id: `metamorpho:${METAMORPHO_V1_VAULT}:supply`,
-  chainId: 8453,
+  chainId: CHAIN_ID,
   owner: OWNER,
   ref: {
     vault: METAMORPHO_V1_VAULT,
@@ -110,7 +125,7 @@ const morphoBorrowCandidate = (collateralUsd: number | null, debtUsd: number | n
   connectorId: 'morpho',
   protocol: 'Morpho',
   id: MARKET_ID,
-  chainId: 8453,
+  chainId: CHAIN_ID,
   owner: OWNER,
   ref: {
     loanToken: USDC,
@@ -161,7 +176,7 @@ describe('useExternalMigrationPositions', () => {
       return undefined
     })
     eulerSdkMock.getConnectorProtocolAddress.mockImplementation((connectorId: string, chainId: number) =>
-      connectorId === 'aave' && chainId === 8453 ? AAVE_POOL : undefined,
+      connectorId === 'aave' && chainId === CHAIN_ID ? AAVE_POOL : undefined,
     )
     eulerSdkMock.getEulerSdk.mockResolvedValue({
       priceService: {
@@ -217,7 +232,7 @@ describe('useExternalMigrationPositions', () => {
 
     vi.stubGlobal('useWagmi', () => ({ address: ref(OWNER) }))
     vi.stubGlobal('useSpyMode', () => ({ isSpyMode: ref(false), spyAddress: ref(null) }))
-    vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(8453) }))
+    vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(CHAIN_ID) }))
     vi.stubGlobal('useRpcClient', () => ({ client: ref({ multicall, readContract }) }))
     fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as { query?: string }
@@ -252,10 +267,7 @@ describe('useExternalMigrationPositions', () => {
   })
 
   it('skips Morpho discovery outside the supported migration chains', async () => {
-    // BNB Smart Chain (56) is outside Lite's end-to-end Morpho migration set,
-    // and no Aave pool is registered there either, so the scan resolves to an
-    // empty list without an unnecessary proxy request.
-    vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(56) }))
+    vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(UNSUPPORTED_CHAIN_ID) }))
 
     const result = useExternalMigrationPositions()
 
@@ -270,12 +282,7 @@ describe('useExternalMigrationPositions', () => {
     expect(result.error.value).toBe('')
   })
 
-  it.each([
-    { chainId: 130, name: 'Unichain' },
-    { chainId: 143, name: 'Monad' },
-    { chainId: 999, name: 'HyperEVM' },
-    { chainId: 42161, name: 'Arbitrum' },
-  ])('discovers Morpho positions on $name ($chainId)', async ({ chainId }) => {
+  it.each([...MORPHO_MIGRATION_SUPPORTED_CHAIN_IDS])('discovers Morpho positions on supported chain %i', async (chainId) => {
     vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(chainId) }))
 
     const result = useExternalMigrationPositions()
@@ -343,7 +350,6 @@ describe('useExternalMigrationPositions', () => {
   })
 
   it('does not let an older forced scan overwrite a newer result', async () => {
-    vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(130) }))
     const first = deferred<Response>()
     const second = deferred<Response>()
     fetchMock

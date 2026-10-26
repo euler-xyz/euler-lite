@@ -1,3 +1,4 @@
+import { MORPHO_USER_POSITIONS_QUERY } from '~/utils/migration-graphql'
 import { readonly, ref, type Ref } from 'vue'
 import { erc20Abi, getAddress, type Address } from 'viem'
 import { getEulerSdk } from '~/composables/useEulerSdk'
@@ -187,55 +188,6 @@ interface MorphoApiVaultPosition {
 interface MorphoApiVaultV2Position extends MorphoApiVaultAmounts {
   vault?: MorphoApiVault | null
 }
-
-const MORPHO_USER_POSITIONS_QUERY = `#graphql
-query LiteMorphoMigrationPositions($chainId: Int!, $address: String!) {
-  userByAddress(chainId: $chainId, address: $address) {
-    address
-    marketPositions {
-      market {
-        marketId
-        lltv
-        irmAddress
-        oracle { address }
-        loanAsset { address symbol decimals }
-        collateralAsset { address symbol decimals }
-        state { borrowApy }
-      }
-      state {
-        collateral
-        collateralUsd
-        borrowAssets
-        borrowAssetsUsd
-      }
-    }
-    vaultPositions {
-      vault {
-        address
-        name
-        symbol
-        asset { address symbol decimals }
-      }
-      state {
-        shares
-        assets
-        assetsUsd
-      }
-    }
-    vaultV2Positions {
-      vault {
-        address
-        name
-        symbol
-        asset { address symbol decimals }
-      }
-      shares
-      assets
-      assetsUsd
-    }
-  }
-}
-`
 
 const AAVE_POOL_DISCOVERY_ABI = [
   {

@@ -20,6 +20,7 @@ import { getPositionTag, getSourcePositionTag } from '~/utils/positionTag'
 const emits = defineEmits(['close', 'confirm'])
 
 interface REULUnlockInfo {
+  hasBurn: boolean
   unlockableAmount: number
   amountToBeBurned: number
   maturityDate: string
@@ -102,6 +103,7 @@ const { chainId: currentChainId } = useWagmi()
 const { getVault } = useVaultRegistry()
 const { isSafeWallet } = useSafeWallet()
 const { eulerCoreAddresses } = useEulerAddresses()
+const executionService = useReviewedExecution()
 const { isResolvingStateOverrideHints } = useStateOverrideResolution()
 const {
   isSimulating: isTenderlySimulating,
@@ -384,7 +386,7 @@ const btnLabel = computed(() => {
 })
 
 const reulUnlockDisclaimerText = computed(() => {
-  if (type !== 'reul-unlock' || !reulUnlockInfo) return
+  if (type !== 'reul-unlock' || !reulUnlockInfo?.hasBurn) return
 
   return `This action will unlock ${formatNumber(reulUnlockInfo.unlockableAmount, 6)} EUL, and ${formatNumber(reulUnlockInfo.amountToBeBurned, 6)} EUL will be permanently burned. To fully redeem your EUL rewards, you must wait for the 6-month vesting period to complete (${reulUnlockInfo.daysUntilMaturity} days remaining, maturity date: ${reulUnlockInfo.maturityDate}).`
 })
@@ -415,6 +417,8 @@ const isSwapQuoteStale = computed(() => {
     && nowMs.value - quoteFetchedAt > staleQuoteThresholdMs
 })
 
+const approvalReadIssues = computed(() => executionService.approvalReadIssues.value)
+const allowanceReadDisclaimerText = 'The current token allowances could not be read from the network, so an approval is included to be safe. If you approved this token before, this approval may be redundant.'
 const permit2DisclaimerText = 'You are granting the Permit2 contract an unlimited token allowance. Permit2 is a Uniswap contract used to authorize future transfers with signatures. Each future transfer still requires your explicit signature and can be limited by amount and duration.'
 const hasDisplayOnlyConfirmation = computed(() => allowConfirmWithoutPlan && (displaySteps.value.length > 0 || signatureSteps.value.length > 0))
 const isConfirmDisabled = computed(() => readOnly || isSpyMode.value || internalSubmitting.value || hasPendingDetachedExecution.value || isPreparingPlan.value || isResolvingStateOverrideHints.value || !!prepareError.value || (!reviewPlan.value?.length && !hasDisplayOnlyConfirmation.value))
@@ -599,7 +603,7 @@ const confirmLabel = computed(() => {
         size="compact"
       />
       <UiAlert
-        v-if="type === 'reul-unlock'"
+        v-if="reulUnlockDisclaimerText"
         title="Important"
         variant="warning"
         :description="reulUnlockDisclaimerText"
@@ -610,6 +614,13 @@ const confirmLabel = computed(() => {
         title="Infinite approval"
         variant="info"
         :description="permit2DisclaimerText"
+        size="compact"
+      />
+      <UiAlert
+        v-if="approvalReadIssues.length"
+        title="Allowances could not be read"
+        variant="warning"
+        :description="allowanceReadDisclaimerText"
         size="compact"
       />
 

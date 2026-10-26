@@ -14,6 +14,8 @@ export interface MarketGroup {
   curator?: EulerLabelEntity
   /** Curator entity key from labels */
   curatorKey?: string
+  /** Owner first, followed by display-only co-brand entities. */
+  brandEntities?: EulerLabelEntity[]
   /** Core member vaults */
   vaults: AnyVault[]
   /** Vaults referenced as collateral but not in this group */
@@ -30,6 +32,8 @@ export interface MarketGroup {
    */
   unknownCollateral: string[]
   metrics: MarketGroupMetrics
+  /** On-demand (direct-URL) and show-all groups keep members that have no live LTV edge and a hidden lend side. */
+  showsAllMembers?: boolean
 }
 
 export interface MarketGroupMetrics {

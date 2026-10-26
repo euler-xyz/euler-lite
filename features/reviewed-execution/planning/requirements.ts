@@ -37,12 +37,25 @@ const collectNamedAddresses = (
   if (Array.isArray(value)) value.forEach(entry => collectNamedAddresses(entry, key, target, collectVaults))
   else if (value && typeof value === 'object') {
     Object.entries(value).forEach(([childKey, entry]) => {
+      // transferMin uses verify.vault as the transfer recipient. skimMin and
+      // debtMax use it as a vault that requires snapshot and policy checks.
+      if (key === 'verify' && childKey === 'vault' && 'type' in value && value.type === 'transferMin') {
+        collectNamedAddresses(entry, 'receiver', target, collectVaults)
+        return
+      }
       // Migration positionRef values belong to external protocols, including
       // externalTarget.positionRef. Their assets still need policy checks,
       // but a MetaMorpho vault cannot be loaded through the Euler registry.
       collectNamedAddresses(entry, childKey, target, collectVaults && childKey !== 'positionRef')
     })
   }
+}
+
+/** Use the same planner address rules for form acknowledgements and final policy. */
+export const collectPlannerVaultAddresses = (args: unknown): Address[] => {
+  const collected = { accounts: new Set<Address>(), vaults: new Set<Address>(), assets: new Set<Address>() }
+  collectNamedAddresses(args, undefined, collected)
+  return [...collected.vaults].sort((left, right) => left.toLowerCase().localeCompare(right.toLowerCase()))
 }
 
 export const intentSetDigest = (intents: readonly OperationIntent[]): Hash =>
