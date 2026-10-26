@@ -7,7 +7,7 @@
  * Playwright's evaluate runs outside the page's CSP and cannot be used to probe it.
  *
  * Usage:
- *   node scripts/csp-page-probe.mjs --url https://dev-build-euler-lite-pr-909.up.railway.app/ [--wait 10000] [--channel chrome]
+ *   node scripts/csp-page-probe.mjs --url https://YOUR-PREVIEW/ [--wait 10000] [--channel chrome]
  */
 import { parseArgs } from 'node:util'
 import { chromium } from 'playwright'

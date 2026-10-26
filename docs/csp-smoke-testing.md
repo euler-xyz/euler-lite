@@ -45,9 +45,7 @@ only those explicit overrides:
 ```
 
 Verify the running deployment uses that command and emits both values in
-`window.__APP_CONFIG__`. A Railway redeploy can reuse the previous deployment's
-startup configuration; a deployment from source uses the current service
-configuration.
+`window.__APP_CONFIG__`.
 
 ```sh
 npm run csp:probe -- \
@@ -85,6 +83,6 @@ and exercise swap quotes, rewards, Pyth updates, error decoding and CoW reads.
 Distinguish endpoint/CSP reachability from full transaction or order execution.
 
 Repeat the app probe on the same commit behind the deployment's Cloudflare
-configuration. A direct Railway hostname does not exercise Cloudflare's script
+configuration. A direct origin hostname does not exercise Cloudflare's script
 injection, analytics, challenge paths or nonce propagation. Check each injected
 script and retain its network/console evidence.
