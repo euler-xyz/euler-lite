@@ -382,6 +382,8 @@ return HTTP 404; disabled, retired, malformed, unsupported-capability, or unavai
 catalog sources return HTTP 503 with a reason. Upstream and deployment-identity
 failures return HTTP 502. These failures are not successful empty discovery.
 
+Catalog records for existing deployments may omit `sourceCommit`, `startBlock` and `interfacesCommit` when build provenance is unverified. Supplied values must be valid. Endpoint, deployment ID, version and required capabilities remain mandatory; response identity checks apply to every selected catalog source. Lite's server resolver owns this parsing and supplies checked queries to its installed SDK, so omitted build provenance does not require an SDK bump in Lite.
+
 Catalog metadata is fresh for 60 seconds. A failed refresh can reuse the last
 successful snapshot for at most seven days from that success (`MANIFEST_MAX_STALE_MS`); retries are
 single-flight with a ten-second failure backoff. Failures never extend that age.

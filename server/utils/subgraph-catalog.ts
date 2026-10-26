@@ -45,9 +45,10 @@ export function parseSubgraphCatalog(input: unknown): Map<number, Row> {
       continue
     }
     if (entry.status !== 'active' || !validEndpoint(entry.endpoint)
-      || !nonempty(entry.deploymentId) || !nonempty(entry.sourceCommit) || !/^[a-fA-F0-9]{40}$/.test(entry.sourceCommit)
+      || !nonempty(entry.deploymentId)
+      || (entry.sourceCommit !== undefined && (!nonempty(entry.sourceCommit) || !/^[a-fA-F0-9]{40}$/.test(entry.sourceCommit)))
       || !nonempty(entry.version) || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:\.(0|[1-9]\d*))?$/.test(entry.version)
-      || !Number.isSafeInteger(entry.startBlock) || (entry.startBlock as number) < 0
+      || (entry.startBlock !== undefined && (!Number.isSafeInteger(entry.startBlock) || (entry.startBlock as number) < 0))
       || (entry.interfacesCommit !== undefined && (!nonempty(entry.interfacesCommit) || !/^[a-fA-F0-9]{40}$/.test(entry.interfacesCommit)))
       || !Array.isArray(entry.capabilities) || !entry.capabilities.every(nonempty)) {
       rows.set(chainId, 'invalid')

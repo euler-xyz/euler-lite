@@ -5,14 +5,19 @@ import { expect, it, vi } from 'vitest'
 import fixture from '../fixtures/subgraph/catalog.v1.json'
 import { GRAPHQL_RESPONSE_BUDGET } from '~/server/utils/fetch-text-with-budget'
 
-it('enforces response budgets, identity, and redirect policy through the real catalog proxy', async () => {
+it.each([false, true])('enforces real proxy budgets and identity for imported=%s', async (imported) => {
   const handler = (await import('~/server/api/internal/proxy/subgraph/[chainId].post')).default
   const app = createApp()
   let upstreamCalls = 0
   let redirectedCalls = 0
   let mode: 'valid' | 'oversized' | 'drift' | 'redirect' = 'valid'
+  const active = { ...fixture.deployments[0] }
+  if (imported) {
+    delete active.sourceCommit
+    delete active.startBlock
+  }
   app.use('/catalog', eventHandler(() => ({ ...fixture, deployments: [
-    { ...fixture.deployments[0], endpoint: 'https://subgraph-fixture.invalid/query' }, fixture.deployments[1],
+    { ...active, endpoint: 'https://subgraph-fixture.invalid/query' }, fixture.deployments[1],
   ] })))
   app.use('/upstream', eventHandler(async (event) => {
     const body = await readBody(event)

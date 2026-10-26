@@ -215,3 +215,18 @@ describe('subgraph catalog resolution', () => {
     await expect(resolve(1)).rejects.toMatchObject({ reason: 'retired' })
   })
 })
+
+describe('imported deployment metadata', () => {
+  it('resolves the same endpoint and deployment identity without build provenance', async () => {
+    const imported: Partial<ReturnType<typeof active>> = { ...active() }
+    delete imported.sourceCommit
+    delete imported.startBlock
+    const resolve = createSubgraphResolver({ env: { SUBGRAPH_CATALOG_URL: 'fixture' }, fetchCatalog: async () => catalog([imported]) })
+    const verified = createSubgraphResolver({ env: { SUBGRAPH_CATALOG_URL: 'fixture' }, fetchCatalog: async () => catalog() })
+    expect(await resolve(1)).toEqual(await verified(1))
+  })
+  it.each([{ sourceCommit: null }, { sourceCommit: '' }, { sourceCommit: 1 }, { startBlock: null }, { startBlock: '0' }, { startBlock: -1 }, { startBlock: Number.MAX_SAFE_INTEGER + 1 }])('rejects malformed supplied build metadata: %j', async (change) => {
+    const resolve = createSubgraphResolver({ env: { SUBGRAPH_CATALOG_URL: 'fixture' }, fetchCatalog: async () => catalog([{ ...active(), ...change }]) })
+    await expect(resolve(1)).rejects.toMatchObject({ reason: 'invalid' })
+  })
+})
