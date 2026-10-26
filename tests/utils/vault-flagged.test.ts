@@ -6,6 +6,7 @@ import {
   getFlaggedVaultLine,
   getFlaggedVerdict,
   getVaultOpeningNotice,
+  isDeprecationWarning,
 } from '~/utils/vault-assessment/flagged'
 
 const FLAGGED = '0x00000000000000000000000000000000000000a1'
@@ -87,5 +88,26 @@ describe('vault opening notice', () => {
   it('shows nothing for listed vaults', () => {
     expect(notice([LISTED])).toBeNull()
     expect(notice([])).toBeNull()
+  })
+})
+
+describe('isDeprecationWarning', () => {
+  const deprecated = { status: 'warning', decidedBy: 'deprecated', reason: null }
+
+  it('treats a deprecation verdict as the Deprecated badge when labels carry the deprecation', () => {
+    expect(isDeprecationWarning(deprecated, true)).toBe(true)
+  })
+
+  it('keeps the warning when labels do not show the vault as deprecated', () => {
+    expect(isDeprecationWarning(deprecated, false)).toBe(false)
+  })
+
+  it('keeps warnings decided by anything other than deprecation', () => {
+    expect(isDeprecationWarning({ status: 'warning', decidedBy: 'advisories', reason: null }, true)).toBe(false)
+  })
+
+  it('keeps hidden verdicts and missing verdicts out', () => {
+    expect(isDeprecationWarning({ status: 'hidden', decidedBy: 'deprecated', reason: null }, true)).toBe(false)
+    expect(isDeprecationWarning(undefined, true)).toBe(false)
   })
 })

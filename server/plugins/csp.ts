@@ -23,15 +23,10 @@ const chainById = new Map<number, AppKitNetwork>(
     .map((chain): [number, AppKitNetwork] => [Number((chain as AppKitNetwork).id), chain as AppKitNetwork]),
 )
 
-/** Origins only allowed in dev deployments. */
-const CONNECT_SRC_DEV = [
-  'https://golang-proxy-development.up.railway.app',
-]
-
 /**
  * Extra connect-src origins (comma-separated).
  * Use CSP_EXTRA_CONNECT_SRC to allow additional origins per deployment
- * on top of the built-in and dev-only lists.
+ * in addition to the built-in and environment-derived origins.
  */
 function parseExtraConnectSrc(): string[] {
   const raw = process.env.CSP_EXTRA_CONNECT_SRC?.trim()
@@ -170,7 +165,6 @@ export function buildCsp(
 ): string {
   const connectSrc = [
     ...CONNECT_SRC_BASE,
-    ...(isDev ? CONNECT_SRC_DEV : []),
     ...extraConnectSrc,
     ...envOrigins.connect,
     ...chainPublicOrigins,
