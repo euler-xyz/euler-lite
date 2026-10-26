@@ -6,7 +6,7 @@ import { maxUint256 } from 'viem'
 import type { AnyVault } from '~/composables/useVaultRegistry'
 
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
-import { getEntitiesByVault, isVaultCyclicalNote, isVaultDeprecated, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
+import { getEntitiesByVault, isVaultCyclicalNote, isVaultDeprecated, isVaultNotExplorable, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
 import { ltvToPercent } from '~/utils/crypto-utils'
 import { formatNumber, compactNumber, truncate } from '~/utils/string-utils'
 import { formatHookedOpsSummary, getHookedOperationMetas, getVaultHookedOperations, hasAnyHookedOperation, isVaultEffectivelyPaused } from '~/utils/vault-hooks'
@@ -193,11 +193,14 @@ export const getBorrowableVaults = (market: MarketGroup): EVault[] =>
 export const getNonBorrowableMemberVaults = (market: MarketGroup): EVault[] =>
   market.vaults.filter(isEVault).filter(v => !hasBorrowableLTV(v))
 
-const hasLiveDiscoveryColumn = (vault: EVault): boolean =>
-  vault.collaterals.some(ltv => isLiveCollateralEdge(ltv))
+// Hidden vaults can be collateral endpoints, but only listed vaults supply
+// loan-side relationships unless the market explicitly shows all members.
+const hasLiveDiscoveryColumn = (market: MarketGroup, vault: EVault): boolean =>
+  (market.showsAllMembers || !isVaultNotExplorable(vault.address))
+  && vault.collaterals.some(ltv => isLiveCollateralEdge(ltv))
 
 const getDiscoveryColumnVaults = (market: MarketGroup): EVault[] =>
-  market.vaults.filter(isEVault).filter(hasLiveDiscoveryColumn)
+  market.vaults.filter(isEVault).filter(v => hasLiveDiscoveryColumn(market, v))
 
 // Product members define the graph boundary. External collateral is resolved
 // one hop from those members; once resolved, include its relationships only
@@ -207,10 +210,10 @@ const getDiscoveryColumnVaults = (market: MarketGroup): EVault[] =>
 const getBoundedRelationshipVaults = (market: MarketGroup): EVault[] =>
   [...market.vaults, ...market.externalCollateral]
     .filter(isEVault)
-    .filter(hasLiveDiscoveryColumn)
+    .filter(v => hasLiveDiscoveryColumn(market, v))
 
 const getDiscoveryRowOnlyVaults = (market: MarketGroup): EVault[] =>
-  market.vaults.filter(isEVault).filter(v => !hasLiveDiscoveryColumn(v))
+  market.vaults.filter(isEVault).filter(v => !hasLiveDiscoveryColumn(market, v))
 
 const getLiveEdgeAddresses = (market: MarketGroup): Set<string> => {
   const reachable = new Set([
