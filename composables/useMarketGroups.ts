@@ -113,6 +113,7 @@ export const buildProductGroups = (
       externalCollateral: [],
       unknownCollateral: [],
       metrics: computeMetricsSync(memberVaults),
+      ...(listNonMarketGroups && { showsAllMembers: true }),
     })
   }
 
@@ -595,6 +596,7 @@ export const useMarketGroups = () => {
       externalCollateral: [],
       unknownCollateral: [],
       metrics: computeMetricsSync(memberVaults),
+      showsAllMembers: true,
     }
 
     // The direct market page waits for labels and the unresolved-collateral

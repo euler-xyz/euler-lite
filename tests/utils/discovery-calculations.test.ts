@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   CONFIG_ROWS,
   STATS_ROWS,
@@ -8,6 +8,7 @@ import {
   getActiveExternalCollateral,
   getAttributeMatrixColumns,
   getCollateralMatrix,
+  getDisplayedMembers,
   getMiniDiagram,
   getMarketEntities,
   isNodeRampingDown,
@@ -24,6 +25,8 @@ vi.mock('~/entities/euler/labels', () => ({
   getEulerLabelEntityLogo: (logo: string) => logo,
 }))
 
+const listing = vi.hoisted(() => ({ lendHidden: new Set<string>() }))
+
 vi.mock('~/utils/eulerLabelsUtils', () => ({
   getEntitiesByVault: (vault: { address?: string }) => {
     if (vault.address === '0xBorrow') return [{ name: 'KPK', logo: 'https://token-images.euler.finance/labels/kpk' }]
@@ -32,6 +35,7 @@ vi.mock('~/utils/eulerLabelsUtils', () => ({
   },
   isVaultCyclicalNote: () => false,
   isVaultDeprecated: () => false,
+  isVaultNotExplorableLend: (address: string) => listing.lendHidden.has(address.toLowerCase()),
 }))
 
 vi.stubGlobal('useVaultRegistry', () => ({
@@ -257,6 +261,114 @@ describe('getMiniDiagram', () => {
     expect(edge('0xmstr', '0xcoin')).toMatchObject({ mutual: false })
     expect(diagram.pairCount).toBe(4)
     expect(diagram.nodes.map(node => node.address)).not.toContain('0xunrelated')
+  })
+
+  it('keeps each connected group together on the ring and puts isolated vaults last', () => {
+    const l1 = makeVault('0xL1', [makeLtv({ address: '0xA', borrowLTV: 0.7 })])
+    const l2 = makeVault('0xL2', [makeLtv({ address: '0xB', borrowLTV: 0.7 })])
+    const l3 = makeVault('0xL3', [makeLtv({ address: '0xA', borrowLTV: 0.7 })])
+    const market = makeMarket([
+      makeVault('0xIso', []),
+      l1,
+      l2,
+      l3,
+      makeVault('0xA', []),
+      makeVault('0xB', []),
+    ])
+
+    const diagram = getMiniDiagram(market)
+
+    expect(diagram.nodes.map(node => node.address)).toEqual([
+      '0xa',
+      '0xl1',
+      '0xl3',
+      '0xl2',
+      '0xb',
+      '0xiso',
+    ])
+  })
+})
+
+describe('members without a live LTV edge', () => {
+  afterEach(() => listing.lendHidden.clear())
+
+  const marketWithIdleMember = (showsAllMembers?: boolean): MarketGroup => ({
+    ...makeMarket([
+      makeVault('0xBorrow', [makeLtv({ address: '0xCollateral', borrowLTV: 0.7 })]),
+      makeVault('0xCollateral', []),
+      makeVault('0xIdle', []),
+    ]),
+    showsAllMembers,
+  })
+  const graphNodes = (market: MarketGroup) => getMiniDiagram(market).nodes.map(node => node.address)
+  const matrixRows = (market: MarketGroup) => getCollateralMatrix(market)!.rows.map(row => row.address)
+  const attributeColumns = (market: MarketGroup) => getAttributeMatrixColumns(market).map(column => column.address)
+
+  it('drops a member whose lend side is hidden from the graph and both matrices', () => {
+    listing.lendHidden.add('0xidle')
+    const market = marketWithIdleMember()
+
+    expect(graphNodes(market)).not.toContain('0xidle')
+    expect(matrixRows(market)).not.toContain('0xidle')
+    expect(attributeColumns(market)).not.toContain('0xidle')
+  })
+
+  it('keeps a lend-hidden member whose only live edge is to an unknown collateral', () => {
+    listing.lendHidden.add('0xidle')
+    const market: MarketGroup = {
+      ...makeMarket([makeVault('0xIdle', [makeLtv({ address: '0xMissing', borrowLTV: 0.5 })])]),
+      unknownCollateral: ['0xmissing'],
+    }
+
+    expect(graphNodes(market)).toContain('0xidle')
+    expect(attributeColumns(market)).toContain('0xidle')
+  })
+
+  it('keeps a lend-hidden member that only an external vault accepts as collateral', () => {
+    listing.lendHidden.add('0xidle')
+    const market = makeMarket(
+      [makeVault('0xIdle', [])],
+      [makeVault('0xExternal', [makeLtv({ address: '0xIdle', borrowLTV: 0.5 })])],
+    )
+
+    expect(graphNodes(market)).toContain('0xidle')
+    expect(matrixRows(market)).toContain('0xidle')
+    expect(attributeColumns(market)).toContain('0xidle')
+  })
+
+  it('keeps a member whose lend side is listed', () => {
+    const market = marketWithIdleMember()
+
+    expect(graphNodes(market)).toContain('0xidle')
+    expect(matrixRows(market)).toContain('0xidle')
+    expect(attributeColumns(market)).toContain('0xidle')
+  })
+
+  it('keeps a lend-hidden member while it has a live LTV edge', () => {
+    listing.lendHidden.add('0xcollateral')
+    const market = marketWithIdleMember()
+
+    expect(graphNodes(market)).toContain('0xcollateral')
+    expect(matrixRows(market)).toContain('0xcollateral')
+    expect(attributeColumns(market)).toContain('0xcollateral')
+  })
+
+  it('lists the same members in the no-relationship fallback', () => {
+    listing.lendHidden.add('0xidle')
+
+    expect(getDisplayedMembers(marketWithIdleMember()).map(vault => (vault as EVault).address))
+      .toEqual(['0xBorrow', '0xCollateral'])
+    expect(getDisplayedMembers(marketWithIdleMember(true)).map(vault => (vault as EVault).address))
+      .toEqual(['0xBorrow', '0xCollateral', '0xIdle'])
+  })
+
+  it('keeps every member of a market that shows all members', () => {
+    listing.lendHidden.add('0xidle')
+    const market = marketWithIdleMember(true)
+
+    expect(graphNodes(market)).toContain('0xidle')
+    expect(matrixRows(market)).toContain('0xidle')
+    expect(attributeColumns(market)).toContain('0xidle')
   })
 })
 

@@ -12,6 +12,7 @@ import {
 import { useBestMaxROE } from '~/composables/useBestMaxROE'
 import { getUniqueEntitiesByVaults, getVaultDeprecation } from '~/utils/eulerLabelsUtils'
 import { useDiscoveryVaultWarningDetails } from '~/composables/useDiscoveryVaultWarningDetails'
+import { isDeprecationWarning } from '~/utils/vault-assessment/flagged'
 import { VaultMaxRoeModal, UiModalPreviewTrigger } from '#components'
 
 const props = defineProps<{
@@ -39,7 +40,7 @@ const warningCandidates = computed(() => {
     seen.add(address)
     const verdict = visibility.value?.[address]
     if (verdict?.status !== 'warning') return []
-    if (verdict.decidedBy === 'deprecated' && getVaultDeprecation(address).deprecated) return []
+    if (isDeprecationWarning(verdict, getVaultDeprecation(address).deprecated)) return []
     return [{ vault, reason: verdict.reason, decidedBy: verdict.decidedBy }]
   })
 })

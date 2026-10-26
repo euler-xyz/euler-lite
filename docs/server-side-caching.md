@@ -80,7 +80,7 @@ Turtle is the only provider whose credential is required: Turtle rejects unauthe
 
 ### Goldsky subgraph
 
-`/api/internal/proxy/subgraph/{chainId}` (`[chainId].post.ts`) is not built with the factory: its upstream is selected per chain from the router param (`SUBGRAPH_URL_<chainId>`, then `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`), an unconfigured chain is a 404 rather than a 503, and an empty body is a 400. It still forwards through `external-proxy.ts` (POST only) with `bypassCache: true` and a `no-store` browser hint; the proxy coalesces concurrent identical queries without caching completed responses. It carries its own rate limiter. Optional catalog metadata refreshes after 60 seconds and retains the last successful snapshot for up to seven days during outages. The SDK separately caches checked query results according to its browsing/form/server policies; see [Subgraph catalog resolution](./sdk-integration.md#subgraph-catalog-resolution).
+`/api/internal/proxy/subgraph/{chainId}` (`[chainId].post.ts`) is not built with the factory: its upstream is selected per chain from `SUBGRAPH_URL_<chainId>`, then `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`, then the optional `SUBGRAPH_CATALOG_URL`. `SUBGRAPH_DISABLED_<chainId>` takes priority over every source; `SUBGRAPH_CATALOG_DISABLED` disables catalog resolution. A chain with no selected source is a 404; a per-chain disable or an invalid, retired or unavailable selected catalog source is a 503. An empty body is a 400. It still forwards through `external-proxy.ts` (POST only) with `bypassCache: true` and a `no-store` browser hint; the proxy coalesces concurrent identical queries without caching completed responses. It carries its own rate limiter. Optional catalog metadata refreshes after 60 seconds and retains the last successful snapshot for up to seven days during outages. The SDK separately caches checked query results according to its browsing/form/server policies; see [Subgraph catalog resolution](./sdk-integration.md#subgraph-catalog-resolution).
 
 The response budget is 8 MiB of decoded body bytes and 10 seconds total for fetching headers and consuming the full body, including upstream error responses. Oversized or slow responses return 502, allowing the SDK to use its onchain secondary. The total deadline intentionally includes body consumption. The proxy retains the SDK's dynamic GraphQL query surface; these limits bound buffering and waiting, not upstream query computation.
 
@@ -102,13 +102,30 @@ The response budget is 8 MiB of decoded body bytes and 10 seconds total for fetc
 
 ### Liquidation bot coverage
 
-`/api/internal/liquidation-coverage?chainId=N` answers which vaults the default liquidation bot (`LIQUIDATION_BOT_API_URL`) leaves out on that chain. `server/utils/liquidation-coverage-source.ts` fetches `{base}/vault-filter` with one 5 s deadline covering the headers and the body, follows no redirects, keeps the mode and the listed addresses and drops the bot's reasons. An answer is fresh for 5 minutes; after that it is still served at once while a background refresh runs, until 30 minutes after it was fetched. Past that, or when the bot has not answered since the server started, the chain is `no-bot` and the browser badges every borrowable vault on it. A failing chain is retried at most once a minute. The browser asks again after a minute for a `no-bot` answer and before an answer reaches 30 minutes. With the variable unset the route answers `{ enabled: false }` and nothing is fetched.
+`/api/internal/liquidation-coverage?chainId=N` answers which vaults the default liquidation bot leaves out on that chain. `LIQUIDATION_BOT_API_URL` is a URL template that must contain `{chainId}` (replaced per request), use HTTPS except loopback HTTP, and carry no credentials, query, or fragment. An invalid template is logged once and treated as off. With the variable unset the route answers `{ enabled: false }` and nothing is fetched.
 
-The browser removes expired answers when checking for a refresh, including the visible-tab poll and focus/visibility handlers, and when a request settles. If the Lite endpoint cannot be reached, expired coverage becomes unknown and renders no badge. The browser uses `no-bot` only when the server returns that state.
+`server/utils/liquidation-coverage-source.ts` fetches `{base}/vault-filter` with one 5 s deadline covering the headers and the body, follows no redirects, and parses with `parseVaultFilter`. The bot's reasons are dropped. More than 2,000 items, a malformed address, a non-string reason, or an unknown mode is not a filter. Mode names are the bot's PascalCase strings mapped through a `Map` (`None`, `Blacklist`, `Whitelist`); lowercase `blacklist` is not accepted.
+
+| Mode | Meaning for the vault an account **borrows from** |
+|------|---------------------------------------------------|
+| `none` | Every vault is covered |
+| `blacklist` | Listed addresses are not covered |
+| `whitelist` | Only listed addresses are covered |
+
+An answer is fresh for 5 minutes; after that it is still served at once while a background refresh runs, until 30 minutes after it was fetched. Past that, or when the bot has not answered since the server started, the chain is `no-bot`. A failing chain is retried at most once a minute. The browser asks again after a minute for a `no-bot` answer and before an answer reaches 30 minutes.
+
+The badge is borrow-side only (`hasBorrowSide`: an EVK that is open to new borrows or still has residual `totalBorrowed`). Earn, Securitize, and collateral-only EVKs never badge. Unknown coverage — feature off, or the Lite endpoint failed and the last answer expired — renders nothing. `no-bot` badges every borrowable vault on that chain. The browser uses `no-bot` only when the server returns that state; a failed `$fetch` never synthesizes it.
+
+Copy differs by surface (`getLiquidationCoverageWarning`):
+
+- **Lend** (list + EVK overview, default): other liquidators may not act, so losses from unhealthy positions can reach lenders.
+- **Borrow** (borrow list, borrow-pair overview, portfolio borrow): other liquidators may still liquidate the position.
+
+The list chip is `LiquidationCoverageBadge` (`data-id="liquidation-coverage"`). The overview uses `LiquidationCoverageNotice`. Both call `isNotCoveredByDefaultBot`. Visible-tab poll and focus/visibility handlers expire answered coverage after 30 minutes, including while a refresh is in flight.
 
 ### V3 proxy
 
-`/api/internal/v3/{...path}` is a deliberately narrow same-origin proxy for browser-side SDK V3 calls and a few Lite-owned chart endpoints. It normalizes browser paths to `/v3/...`, validates the exact path/method allowlist, consumes a local rate-limit budget, injects the server-side V3 API key when configured, and forwards only JSON-safe headers to the upstream V3 API. Query strings and POST bodies are forwarded unchanged after the route/method check; V3 remains responsible for domain-level validation.
+`/api/internal/v3/{...path}` is a deliberately narrow same-origin proxy for browser-side SDK V3 calls and a few Lite-owned chart endpoints. It normalizes browser paths to `/v3/...`, validates the exact path/method allowlist, consumes a local rate-limit budget, injects the server-side V3 API key when configured, and forwards only JSON-safe headers to the upstream V3 API. Query strings and POST bodies are forwarded unchanged after the route/method check, except that the V3 refresh parameters `forceFresh`, `maxAge` and `minBlock` are removed from every query string, because they would spend this deployment's V3 refresh budget; V3 remains responsible for domain-level validation.
 
 Request flow:
 

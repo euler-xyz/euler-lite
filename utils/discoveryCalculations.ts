@@ -6,7 +6,7 @@ import { maxUint256 } from 'viem'
 import type { AnyVault } from '~/composables/useVaultRegistry'
 
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
-import { getEntitiesByVault, isVaultCyclicalNote, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
+import { getEntitiesByVault, isVaultCyclicalNote, isVaultDeprecated, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
 import { ltvToPercent } from '~/utils/crypto-utils'
 import { formatNumber, compactNumber, truncate } from '~/utils/string-utils'
 import { formatHookedOpsSummary, getHookedOperationMetas, getVaultHookedOperations, hasAnyHookedOperation, isVaultEffectivelyPaused } from '~/utils/vault-hooks'
@@ -16,6 +16,7 @@ import { computeSupplyApy, computeBorrowApy, type ApyVisibilitySettings } from '
 import { getMaxLiquidationDiscountDisplayPercent } from '~/utils/vault/liquidation'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import { formatBadDebtHint, formatBadDebtUsd, type VaultBadDebtCacheEntry } from '~/utils/vault-bad-debt'
+import { getRingBlocks, getRingSlots, type RingLink, type RingSlots } from '~/utils/discovery-graph-layout'
 
 // ============================================================
 // Types & Constants
@@ -211,6 +212,32 @@ const getBoundedRelationshipVaults = (market: MarketGroup): EVault[] =>
 const getDiscoveryRowOnlyVaults = (market: MarketGroup): EVault[] =>
   market.vaults.filter(isEVault).filter(v => !hasLiveDiscoveryColumn(v))
 
+const getLiveEdgeAddresses = (market: MarketGroup): Set<string> => {
+  const reachable = new Set([
+    ...[...market.vaults, ...market.externalCollateral].map(v => getVaultAddress(v).toLowerCase()),
+    ...market.unknownCollateral.map(address => address.toLowerCase()),
+  ])
+  return new Set(getBoundedRelationshipVaults(market).flatMap(vault => vault.collaterals
+    .filter(ltv => reachable.has(ltv.address.toLowerCase()) && isLiveCollateralEdge(ltv))
+    .flatMap(ltv => [ltv.address.toLowerCase(), vault.address.toLowerCase()])))
+}
+
+const isDroppedWithoutEdges = (market: MarketGroup, address: string): boolean =>
+  !market.showsAllMembers && isVaultNotExplorableLend(address)
+
+const getDroppedMembers = (market: MarketGroup): Set<string> => {
+  if (market.showsAllMembers) return new Set()
+  const connected = getLiveEdgeAddresses(market)
+  return new Set(market.vaults
+    .map(v => getVaultAddress(v).toLowerCase())
+    .filter(address => address && !connected.has(address) && isDroppedWithoutEdges(market, address)))
+}
+
+export const getDisplayedMembers = (market: MarketGroup): AnyVault[] => {
+  const droppedMembers = getDroppedMembers(market)
+  return market.vaults.filter(v => !droppedMembers.has(getVaultAddress(v).toLowerCase()))
+}
+
 export const isExternalCollateral = (market: MarketGroup, address: string): boolean => {
   const normalized = address.toLowerCase()
   return market.externalCollateral.some(v => getVaultAddress(v).toLowerCase() === normalized)
@@ -242,6 +269,11 @@ export const findVault = (market: MarketGroup, address: string): EVault | Securi
 // ============================================================
 // Mini Relationship Graph
 // ============================================================
+
+const toRingLink = (edgeKey: string): RingLink => {
+  const [from, to] = edgeKey.split(':')
+  return { from, to }
+}
 
 export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
   const vaultByAddr = new Map<string, AnyVault>()
@@ -284,15 +316,13 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
   const disconnectedVaults: Array<{ address: string, vault: AnyVault }> = []
   for (const v of market.vaults) {
     const addr = getVaultAddress(v).toLowerCase()
-    if (addr && !connectedAddresses.has(addr)) {
+    if (addr && !connectedAddresses.has(addr) && !isDroppedWithoutEdges(market, addr)) {
       disconnectedVaults.push({ address: addr, vault: v })
     }
   }
 
   if (connectedAddresses.size === 0 && connectedUnknownAddresses.size === 0 && disconnectedVaults.length === 0) {
-    const assetSymbols = new Set<string>()
-    for (const v of market.vaults) assetSymbols.add(getVaultAssetSymbol(v))
-    return { nodes: [], edges: [], pairCount: 0, assetCount: assetSymbols.size, viewWidth: 0 }
+    return { nodes: [], edges: [], pairCount: 0, assetCount: 0, viewWidth: 0 }
   }
 
   const allNodeEntries = [
@@ -310,7 +340,11 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
     // tracked in unknownCollateral (the curator's label is an attestation).
     ...disconnectedVaults.map(d => ({ ...d, isUnknown: false })),
   ]
-  const count = allNodeEntries.length
+  const entryByAddress = new Map(allNodeEntries.map(entry => [entry.address, entry]))
+  const ringEntries = getRingBlocks([...entryByAddress.keys()], [...displayEdges].map(toRingLink))
+    .flat()
+    .map(address => entryByAddress.get(address)!)
+  const count = ringEntries.length
   const baseR = Math.min(24, 10 + count * 2)
   const stretch = count > 6 ? 1.6 : count > 3 ? 1.3 : 1.0
   const rx = baseR * stretch
@@ -319,7 +353,7 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
   const cy = 30
   const assetSymbols = new Set<string>()
 
-  const nodes: MiniNode[] = allNodeEntries.map(({ address, vault, isUnknown }, i) => {
+  const nodes: MiniNode[] = ringEntries.map(({ address, vault, isUnknown }, i) => {
     const angle = (Math.PI * 2 * i) / Math.max(count, 1) - Math.PI / 2
     // Placeholder nodes have no asset metadata. Use the truncated vault
     // address as the label so the curator can identify the missing entry,
@@ -476,12 +510,15 @@ export const getCollateralMatrix = (market: MarketGroup): CollateralMatrixData |
   // Non-liability rows render after relationship rows. External relationship
   // rows stay aligned with their liability columns, while category metadata
   // keeps every external label visually distinct.
-  const sortedNonBorrowable = [...nonBorrowable]
+  const droppedMembers = getDroppedMembers(market)
+  const sortedNonBorrowable = nonBorrowable
+    .filter(v => !droppedMembers.has(v.address.toLowerCase()))
     .sort((a, b) => rowAvgLTV(b.address.toLowerCase()) - rowAvgLTV(a.address.toLowerCase()))
   for (const v of sortedNonBorrowable) addRow(v.address.toLowerCase(), v.asset.symbol, v.asset.address, 'escrow')
 
   const securitizeMembers = market.vaults
     .filter(isSecuritizeVault)
+    .filter(v => !droppedMembers.has(v.address.toLowerCase()))
     .sort((a, b) => rowAvgLTV(b.address.toLowerCase()) - rowAvgLTV(a.address.toLowerCase()))
   for (const v of securitizeMembers) addRow(v.address.toLowerCase(), v.asset.symbol, v.asset.address, 'external')
 
@@ -530,14 +567,33 @@ export const formatMetricValue = (value: number, metric: DotMetric): string => {
 
 export const estimateLabelWidth = (symbol: string): number => symbol.length * 7
 
+const ENLARGED_NODE_RADIUS = 12
+const MIN_GAPPED_NODE_SPACING = ENLARGED_NODE_RADIUS * 3
+
+const getEnlargedRadii = (slotCount: number) => {
+  const baseR = Math.min(120, 40 + slotCount * 12)
+  const stretch = slotCount > 6 ? 1.6 : slotCount > 3 ? 1.3 : 1.0
+  return { rx: baseR * stretch, ry: baseR }
+}
+
+// Neighbouring slots sit closest at the left and right ends of the ellipse,
+// where they are 2 * ry * sin(π / slots) apart.
+const gapsKeepNodesApart = (slotCount: number): boolean =>
+  2 * getEnlargedRadii(slotCount).ry * Math.sin(Math.PI / slotCount) >= MIN_GAPPED_NODE_SPACING
+
+const getEnlargedRingSlots = ({ nodes, edges }: MiniDiagramData): RingSlots => {
+  const blocks = getRingBlocks(
+    nodes.map(node => node.address),
+    edges.map(edge => ({ from: edge.from.address, to: edge.to.address })),
+  )
+  const gapped = getRingSlots(blocks, true)
+  return gapsKeepNodesApart(gapped.slotCount) ? gapped : getRingSlots(blocks, false)
+}
+
 export const getEnlargedDiagram = (diagram: MiniDiagramData) => {
   const { nodes, edges } = diagram
-  const count = nodes.length
-  const baseR = Math.min(120, 40 + count * 12)
-
-  const stretch = count > 6 ? 1.6 : count > 3 ? 1.3 : 1.0
-  const rx = baseR * stretch
-  const ry = baseR
+  const { slotByAddress, slotCount } = getEnlargedRingSlots(diagram)
+  const { rx, ry } = getEnlargedRadii(slotCount)
 
   const labelOffset = 20
   const maxLabelWidth = Math.max(...nodes.map(n => estimateLabelWidth(n.assetSymbol)), 0)
@@ -548,10 +604,10 @@ export const getEnlargedDiagram = (diagram: MiniDiagramData) => {
   const cy = marginY
   const viewWidth = marginX * 2
   const viewHeight = marginY * 2
-  const nodeRadius = 12
+  const nodeRadius = ENLARGED_NODE_RADIUS
 
-  const enlargedNodes = nodes.map((node, i) => {
-    const angle = (Math.PI * 2 * i) / Math.max(count, 1) - Math.PI / 2
+  const enlargedNodes = nodes.map((node) => {
+    const angle = (Math.PI * 2 * (slotByAddress.get(node.address) ?? 0)) / Math.max(slotCount, 1) - Math.PI / 2
     return {
       ...node,
       x: cx + rx * Math.cos(angle),
@@ -567,7 +623,7 @@ export const getEnlargedDiagram = (diagram: MiniDiagramData) => {
     to: nodeMap.get(edge.to.address)!,
   }))
 
-  return { nodes: enlargedNodes, edges: enlargedEdges, viewWidth, viewHeight, cx, cy, nodeRadius }
+  return { nodes: enlargedNodes, edges: enlargedEdges, viewWidth, viewHeight, cx, cy, nodeRadius, slotCount }
 }
 
 export const ARROW_SIZE = 6
@@ -753,7 +809,7 @@ const compareSymbolAsc = (a: EVault | SecuritizeCollateralVault, b: EVault | Sec
 export const getAttributeMatrixColumns = (market: MarketGroup): AttributeMatrixColumn[] => {
   const memberEVaults: EVault[] = []
   const memberSecuritize: SecuritizeCollateralVault[] = []
-  for (const v of market.vaults) {
+  for (const v of getDisplayedMembers(market)) {
     if (isEVault(v)) memberEVaults.push(v)
     else if (isSecuritizeVault(v)) memberSecuritize.push(v)
   }

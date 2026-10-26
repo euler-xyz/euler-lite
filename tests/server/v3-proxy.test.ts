@@ -30,6 +30,40 @@ describe('v3 proxy utilities', () => {
     expect(target).toBe('https://v3.example/base/v3/evk/vaults/batch?chainId=1')
   })
 
+  describe('upstream refresh parameters', () => {
+    const target = (path: string) => buildV3ProxyTarget(
+      new URL(`https://app.example/api/internal/v3${path}`),
+      { V3_API_URL: 'https://v3.example/base/' },
+    )
+
+    it.each(['forceFresh', 'maxAge', 'minBlock'])('strips %s on every proxied path', (name) => {
+      expect(target(`/accounts/${ACCOUNT}/positions?chainId=1&${name}=true&offset=0&limit=100`))
+        .toBe(`https://v3.example/base/v3/accounts/${ACCOUNT}/positions?chainId=1&offset=0&limit=100`)
+      expect(target(`/evk/vaults/1/${VAULT}/totals?${name}=1&resolution=1d`))
+        .toBe(`https://v3.example/base/v3/evk/vaults/1/${VAULT}/totals?resolution=1d`)
+      expect(target(`/earn/vaults/1/${VAULT}/totals?resolution=1d&${name}=1`))
+        .toBe(`https://v3.example/base/v3/earn/vaults/1/${VAULT}/totals?resolution=1d`)
+      expect(target(`/evk/vaults/batch?${name}=1`))
+        .toBe('https://v3.example/base/v3/evk/vaults/batch')
+    })
+
+    it('strips every occurrence, including percent-encoded names', () => {
+      expect(target(`/accounts/${ACCOUNT}/positions?forceFresh=true&chainId=1&forceFresh=false&force%46resh=1&maxAge=0&max%41ge=0&minBlock=1&minBlock=2&limit=100`))
+        .toBe(`https://v3.example/base/v3/accounts/${ACCOUNT}/positions?chainId=1&limit=100`)
+    })
+
+    it('keeps other parameters byte for byte, in order, with repeated keys', () => {
+      const query = `chainId=1&assets=${ACCOUNT},${VAULT}&tag=a&tag=b&forcefresh=1&ForceFresh=1&MAXAGE=5&minblock=3&q=a%20b+c&flag&&forceFreshness=1`
+      expect(target(`/prices?${query}`)).toBe(`https://v3.example/base/v3/prices?${query}`)
+    })
+
+    it('forwards a URL without a query, or with only refresh parameters, without a query', () => {
+      expect(target('/prices')).toBe('https://v3.example/base/v3/prices')
+      expect(target(`/accounts/${ACCOUNT}/positions?forceFresh=true&maxAge=0&minBlock=1`))
+        .toBe(`https://v3.example/base/v3/accounts/${ACCOUNT}/positions`)
+    })
+  })
+
   it('allows only SDK-owned V3 path shapes', () => {
     expect(isV3ProxyPathAllowed(`/v3/accounts/${ACCOUNT}/positions`)).toBe(true)
     expect(isV3ProxyPathAllowed(`/v3/activity/accounts/${ACCOUNT}/events`)).toBe(true)

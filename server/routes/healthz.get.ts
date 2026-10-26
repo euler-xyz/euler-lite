@@ -1,7 +1,7 @@
 import { forceNoStoreCacheHeaders } from '~/server/utils/cache-headers'
 
 /**
- * Container/platform liveness probe (Docker HEALTHCHECK, Railway).
+ * Container/platform liveness probe used by Docker HEALTHCHECK.
  *
  * Deliberately lives OUTSIDE /api/ so it is exempt from the geo-gate, rate
  * limiting, and internal-request authentication: a liveness probe must not

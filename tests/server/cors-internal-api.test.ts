@@ -107,6 +107,27 @@ describe('cors internal API boundary', () => {
     expect(event.headers['Access-Control-Allow-Origin']).toBe('https://preview.example')
   })
 
+  it('requires explicit CORS configuration for a hosting-provider domain', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+    vi.stubEnv('RAILWAY_PUBLIC_DOMAIN', 'preview.example')
+    const handler = await loadHandler()
+
+    try {
+      handler(makeEvent('/api/internal/vaults', { origin: 'https://preview.example' }))
+      throw new Error('Expected an unconfigured hosting-provider origin to be rejected')
+    }
+    catch (err) {
+      expect(err).toMatchObject({ statusCode: 403, statusMessage: 'Origin not allowed' })
+    }
+
+    vi.stubEnv('CORS_ALLOWED_ORIGINS', 'https://preview.example')
+    const explicitlyConfiguredHandler = await loadHandler()
+    const event = makeEvent('/api/internal/vaults', { origin: 'https://preview.example' })
+
+    expect(explicitlyConfiguredHandler(event)).toBeUndefined()
+    expect(event.headers['Access-Control-Allow-Origin']).toBe('https://preview.example')
+  })
+
   it('rejects the screening route for lookalike and non-https origins', async () => {
     vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
     const handler = await loadHandler()

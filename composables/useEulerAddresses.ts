@@ -151,7 +151,6 @@ export const useEulerAddresses = () => {
       eulerEarnFactoryPerspective: peripheryAddrs.eulerEarnFactoryPerspective,
       evkFactoryPerspective: peripheryAddrs.evkFactoryPerspective,
       feeFlowController: peripheryAddrs.feeFlowController,
-      governorAccessControlEmergencyFactory: peripheryAddrs.governorAccessControlEmergencyFactory,
       kinkIRMFactory: peripheryAddrs.kinkIRMFactory,
       kinkyIRMFactory: peripheryAddrs.kinkyIRMFactory,
       oracleRouterFactory: peripheryAddrs.oracleRouterFactory,

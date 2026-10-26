@@ -72,6 +72,9 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Earn refresh re-derives `verified` from current `earn-vaults.json` (unlisted/delisted vaults are not promoted)
 - SDK 2.0 governance hydration guard (`hasResolvedGovernorAdmin`)
 - Oracle provider logos from the public images base the server reads from its V3 (`GET /v3/images`)
+- Curator / campaign logos use a separate allowlist (`https://v3.euler.finance/v3/images/labels/{slug}`); `token-images.euler.finance` is rejected
+- Vault checks pop-up: one row per subject vault; Earn collateral is the strategies'
+- Default liquidation-bot coverage badge is borrow-side only; unknown coverage renders nothing
 - `cyclical note` is the UI gate for the cyclical IRM overview (on-chain IRM type alone is not enough)
 - Shared Oracles-block / Explore-matrix adapter display is covered in [Oracle Adapter Display](./oracle-adapter-display.md)
 
@@ -143,6 +146,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - V3 proxy allowlist, rate limits, failure backoff, and troubleshooting
 - V3-conditional warm-cache cadence (1-min vaults timer with V3, 5-min without)
 - First per-chain warms wait for the EulerChains manifest read (10 s cap) so `deprecated` status is applied
+- Liquidation-bot `/vault-filter` modes (`None` / `Blacklist` / `Whitelist`) and borrow-side-only UI
 - Server provider overrides: Sonic Multicall byte cap vs SDK `fetchVaults` chunking
 - Bigint wire codec and adversary-safe wrapper tag
 

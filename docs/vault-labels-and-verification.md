@@ -44,7 +44,7 @@ Entity rows provide profile text, hosted logos, website/social links, and option
 
 Verified EVK, Earn, Securitize and borrow-pair overviews show the managing entity's published profile in "Curator details": description, legal name, risk methodology, security information, terms, licenses, disclaimers and links when supplied. Explore market cards expose the curator description on hover and summarize V3 warning verdicts with their reasons. Missing profile fields are omitted.
 
-Vault campaigns have a `name`, hosted `logo`, and `type` of `deposit` or `borrow`. Deposit campaigns render beside supply APY and borrow campaigns render beside borrow APY. Campaign badges are informational and do not change reward APR calculations.
+Vault campaigns have a `name`, hosted `logo`, and `type` of `deposit` or `borrow`. Deposit campaigns render beside supply APY and borrow campaigns render beside borrow APY. Campaign badges are informational and do not change reward APR calculations. Campaign and entity logos use the allowlist in [Label logos](#label-logos), not the chain/oracle `v3ImagesUrl` host.
 
 Classification markers use vault `tags`. Current UI-recognized tags include `keyring`, `access control`, `governance limited`, `recently added`, `suppress high utilisation warning`, and `cyclical note`.
 
@@ -94,6 +94,27 @@ Lookup rules:
 
 ---
 
+## Label logos
+
+Entity, product, and campaign logos are a different system from chain and oracle-provider logos. Chain / oracle artwork uses `window.__APP_CONFIG__.v3ImagesUrl` from V3 `GET /v3/images`. Curator artwork uses `resolveLabelLogo` (`utils/label-logo.ts`) and is never rewritten onto that public images base.
+
+A hosted URL is kept only when it matches one of:
+
+| Source | Accepted shape |
+|--------|----------------|
+| Euler V3 | `https://v3.euler.finance/v3/images/labels/{slug}` — slug `[A-Za-z0-9_-]+`, HTTPS, no credentials, no query, no hash, no extra path segments |
+| Custom V3 | Origin of a non-default `V3_API_URL` (any path on that origin) |
+| Extra CDN | Origins listed in `LABELS_IMAGE_ORIGINS` (comma-separated HTTP(S) origins, no path) |
+| Static files | Filename `{name}.{svg\|png\|jpg\|jpeg\|webp\|gif}` resolved to `{STATIC_LABELS_BASE_URL}/logo/{filename}`, or an absolute URL on that same origin |
+
+`https://token-images.euler.finance/...` is rejected by default. Credentials and unapproved origins (including lookalike hosts) are rejected for every source. The built-in Euler V3 rule also rejects HTTP, query strings, fragments, and paths outside `/v3/images/labels/{slug}`. Custom V3/CDN origins and absolute URLs on the static source's origin may include query strings or fragments. A rejected URL becomes `''` and the avatar shows initials.
+
+The server publishes `logoOrigins` as the intersection of those configured origins with origins already present in **approved** logos in the bundle. Unused private V3 origins never reach the browser. `getEulerLabelEntityLogo` / `getEulerLabelPointLogo` re-run the same allowlist with that published list. Static bundles do not publish `logoOrigins`; `LABELS_IMAGE_ORIGINS` does not extend static image rules. Euler's V3 label image URLs still pass in static mode.
+
+`/api/public/metadata` uses the same resolver for `entities[].logo`. Fork setup for extra CDNs is in [Fork setup → Images](./fork-setup.md#images).
+
+---
+
 ## Vault Verification
 
 ### Building the Verified Set
@@ -101,6 +122,24 @@ Lookup rules:
 For V3-assessed chains, `useEulerLabels` builds verified membership from visible or warning vaults with a managing entity. The client and `/api/public/is-known` use that membership as the verification verdict. Hidden and pending-review vaults can retain display metadata without becoming verified. Independent on-chain escrow-perspective membership also counts as verified.
 
 Vault configuration checks and listing are separate V3 results. A vault can have passed checks and still be unlisted because it has no published vault label. The Vault checks UI says "Checks passed" for that assessment.
+
+### Vault checks UI
+
+The overview **Vault checks** accordion is hosted-V3 only (`source === 'v3'` and `isVaultAssessmentAvailableForChain`). Chains in `ONCHAIN_SDK_CHAINS` hide it. It is not a risk rating:
+
+> Vault checks test this vault's configuration against fixed rules. They are not a risk rating or a recommendation by Euler.
+
+Lend and Earn overviews render one card for the page vault. A borrow pair renders the liability vault and the EVK collateral; a Securitize collateral wrapper is omitted so only the borrow vault is checked. Each card shows a Status line (`getVaultChecksStatusLine`) and a Checks cell (`getVaultChecksCell`) that opens the findings pop-up.
+
+The pop-up (`VaultAssessmentChecksModal` + `groupVaultCheckRows`) is one row per subject vault, not one row per rule:
+
+- Strategy findings stay on that strategy's row; collateral findings stay on that collateral.
+- A subject with a single check stays on one line, named after the vault.
+- On Earn, the collateral group title is **Collateral in strategies** once; individual rows do not repeat that the Earn vault's checked collateral is its strategies'.
+- `not_applicable` findings without `cause.summary` are omitted (data-only evidence such as `evidence.multisig` or `collateral.<address>.ramp`). A not-applicable finding that carries a cause, such as `governance.curator-registered` when the owner holds the curator role, still shows with an N/A tag.
+- Failures that do not change listing show **Doesn't affect listing**.
+
+Default liquidation-bot coverage is a separate badge; see [Server-Side Caching → Liquidation bot coverage](./server-side-caching.md#liquidation-bot-coverage).
 
 ### Unknown and flagged vaults
 
@@ -255,23 +294,31 @@ Both Main and Base can use `LABELS_V3_SET=public`; Base additionally sets `LABEL
 
 The filter applies to Explore group members and metrics, Lend/Borrow/Earn lists, both sides of borrow pairs, and new-target suggestions in swap/migration forms. The `showAll` query does not bypass it. Existing visibility, verification, listing and geo rules still apply. Label refreshes update the selection while preserving loaded vaults used by open forms.
 
-On Lend, Borrow and Earn, `?showAll` includes verified vaults that the labels mark as not explorable for that page. It does not include hidden or pending-review vaults, override the deployment tag, or change geo restrictions. On Portfolio, the same query opens the existing "Show all positions" view for the user's positions; it does not change vault verification. Explore has no `showAll` mode. The "Recently added" badge and sort order follow the published `recently added` tag, so publication controls that designation rather than a client-side age cutoff.
+On Lend, Borrow and Earn, `?showAll` includes verified vaults that the labels mark as not explorable for that page. It does not include hidden or pending-review vaults, override the deployment tag, or change geo restrictions. On Portfolio, the same query opens the existing "Show all positions" view for the user's positions; it does not change vault verification. On Explore, `?showAll` also lists products without an explorable market side and keeps every member in their graphs. The "Recently added" badge and sort order follow the published `recently added` tag, so publication controls that designation rather than a client-side age cutoff.
 
 Full labels and vault snapshots remain available for positions, direct URLs, collateral relationships and Earn strategy details. Tag selection does not change verification, geo policies, `/api/public/is-known` or `/api/public/metadata`; it is a discovery setting, not an access restriction.
 
 Labels control which vaults appear on each discovery page:
 
-| Flag | Lend | Borrow | Explore |
+| Flag | Lend | Borrow | Explore market graph |
 |------|------|--------|---------|
-| Product `notExplorable: true` | Hidden | Hidden | Hidden |
-| Override `notExplorableLend: true` | Hidden | Visible | Visible* |
-| Override `notExplorableBorrow: true` | Visible | Hidden (both sides) | Visible* |
-| `deprecatedVaults` | Hidden | Hidden | Visible (dimmed) |
+| Vault `notExplorableLend: true` | Hidden | Visible | Member; dropped while it has no live LTV edge |
+| Vault `notExplorableBorrow: true` | Visible‡ | Hidden, as the loan and as the collateral | Member* |
+| Hidden on both sides, or product `notExplorable: true` | Hidden | Hidden | Only as accepted collateral, "Unlisted" badge† |
+| Deprecated (V3) | Hidden | Hidden | Only as accepted collateral, "Deprecated" badge† |
 | `recently added` tag | Sorted to top | Sorted to top | Sorted to top |
 
-*Explore lists a product only while it has an explorable market side: at least one member vault that is open on the lend side, or borrowable (including residual debt) and open on the borrow side. A collateral-only product — every member flagged `notExplorableLend` and not borrowable, e.g. issuer-governed Securitize collateral wrappers — gets no Explore card. Its vaults still render as external collateral in other markets' graphs, and its direct market URL still resolves on demand (members are satisfied from the vault registry first, so non-EVault members load correctly).
+Each flag is a table: the lend flag controls the Lend and Earn lists, the borrow flag every Borrow pair the vault takes part in. On V3, deprecation hides both sides unless a side is re-listed where V3 allows it; a re-listed side behaves as listed. Static and metadata-only labels do not hide deprecated vaults: they stay product members with a "Deprecated" badge. An explicit per-vault flag overrides the product setting for that side; a missing flag inherits it.
 
-Product-level `notExplorable` always takes precedence over per-vault overrides. Vaults hidden from discovery are still accessible via direct URL and remain visible in the user's portfolio.
+‡A lending vault is listed while it is open for deposits and has a pair with borrow LTV > 0 against a collateral whose borrow side is listed (`utils/vault/borrow-table.ts`). The vault's own borrow flag and borrow pauses do not affect this. On V3, hiding or deprecating its only such collateral removes the lending vault from Lend.
+
+*A member with no live LTV edge stays in the graph and matrices only while its lend side is listed. A live edge has borrow LTV > 0 or a current liquidation LTV above zero (`isLiveCollateralEdge`).
+
+†A vault hidden on both sides appears in a market only while a member accepts it as collateral with a live LTV. When it is only the loan side of live LTVs, it is not drawn.
+
+Explore lists a product only while it has an explorable market side: at least one member vault that is open on the lend side, or borrowable (including residual debt) and open on the borrow side. A collateral-only product — every member flagged `notExplorableLend` and not borrowable, e.g. issuer-governed Securitize collateral wrappers — gets no Explore card. Its vaults still render as external collateral in other markets' graphs, and its direct market URL still resolves on demand (members are satisfied from the vault registry first, so non-EVault members load correctly). Such on-demand markets, and every market under `?showAll`, keep all of their members; a listed market opened by direct URL follows the rules above.
+
+Vaults hidden from discovery are still accessible via direct URL and remain visible in the user's portfolio.
 
 ## Unknown Vault Resolution
 
@@ -329,6 +376,8 @@ These labels appear in address fields across all vault overview types (EVK, Earn
 |------|---------|
 | `entities/euler/labels.ts` | TypeScript type definitions for all label types |
 | `utils/public-labels.ts` | Public V3 pagination, normalization, and effective-visibility composition |
+| `utils/label-logo.ts` | Allowlist for entity / product / campaign logo URLs |
+| `utils/vault-assessment/presentation.ts` | Vault-checks copy, grouping, and listing-impact tags |
 | `utils/eulerLabelsUtils.ts` | Lookup and helper functions backed by the normalized label snapshot |
 | `server/utils/public-labels-source.ts` | Shared V3 aggregate cache used by browser, public APIs, and vault snapshots |
 | `server/utils/static-labels-source.ts` | Atomic authoring-file source and durable checkpoint for forks |

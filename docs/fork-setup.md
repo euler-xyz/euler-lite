@@ -124,7 +124,7 @@ Use the backend root URL, without a trailing `/v3`: the SDK and proxies append A
 
 `LABELS_SOURCE` and `STATIC_LABELS_BASE_URL` select the labels source; static labels already support logos hosted alongside their files. `LABELS_IMAGE_ORIGINS` is an optional allowlist for hosted V3 label images on an additional CDN. It does not replace those source settings or apply to static images.
 
-Return public HTTP(S) URLs in V3 label metadata. The UI and public vault metadata automatically accept Euler's V3 label image URLs and the origin of your configured custom V3. **Leave `LABELS_IMAGE_ORIGINS` unset or blank for those URLs, or when using static labels with logos on the static source's origin.** Only configure it when hosted label images use a separate CDN outside those accepted hosts:
+Return public HTTP(S) URLs in V3 label metadata. The UI and public vault metadata automatically accept Euler's V3 label image URLs (`https://v3.euler.finance/v3/images/labels/{slug}`) and the origin of your configured custom V3. The retired `token-images.euler.finance` host is rejected and those avatars show initials. **Leave `LABELS_IMAGE_ORIGINS` unset or blank for those URLs, or when using static labels with logos on the static source's origin.** Only configure it when hosted label images use a separate CDN outside those accepted hosts:
 
 ```dotenv
 # Optional: needed only for hosted V3 label images on these additional origins.

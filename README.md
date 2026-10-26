@@ -77,7 +77,7 @@ Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for 
 | Variable | Description |
 | -------- | ----------- |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated allowlist for `/api/*`; falls back to `NUXT_PUBLIC_APP_URL`. |
-| `FIRST_PARTY_COOKIE_SECRET` | Optional server-only secret that keeps the internal API marker cookie stable across replicas and deploys. Defaults to a value derived from `NUXT_PUBLIC_APP_URL` or `RAILWAY_PUBLIC_DOMAIN`. |
+| `FIRST_PARTY_COOKIE_SECRET` | Optional server-only secret that keeps the internal API marker cookie stable across replicas and deploys. Defaults to a value derived from `NUXT_PUBLIC_APP_URL` when configured, otherwise a random value per process. |
 | `CSP_EXTRA_CONNECT_SRC` | Extra `connect-src` origins for development or staging endpoints. |
 | `DEV_GEO_COUNTRY` | Local/preview country fallback when the edge provides no country. Production (`DOPPLER_ENVIRONMENT=prd`) refuses to boot with it set. |
 | `ADDRESS_SCREENING_URI` / `ADDRESS_SCREENING_API_KEY` | Server-side data-v3 compliance endpoint + restricted API key, proxied by `/api/internal/screen-address` (also serves first-party `*.euler.finance` SPAs). Both unset ⇒ screening disabled (all addresses pass) — except in production (`DOPPLER_ENVIRONMENT=prd`), where missing configuration fails closed; only one set ⇒ fails closed everywhere. URI must be https (localhost http allowed for dev). |
@@ -310,8 +310,6 @@ docker build \
 ```
 
 When `EULER_SDK_BRANCH` is set, the builder clones `euler-xyz/euler-sdks`, builds `packages/euler-v2-sdk`, packs it, and installs that tarball with `--no-save` before running the Lite build. The committed Lite package files still point at the installed npm version.
-
-Railway PR builds use the same Dockerfile. Set `EULER_SDK_BRANCH` for previews that should consume a branch from `https://github.com/euler-xyz/euler-sdks.git`; leave it unset for previews that should use the npm version in `package-lock.json`.
 
 The SDK preview build installs `pnpm@10` by default. Set `EULER_SDK_PNPM_VERSION` if the SDK branch requires another pnpm version.
 

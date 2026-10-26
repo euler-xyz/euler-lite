@@ -19,7 +19,6 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { isOpDisabled, OP_DEPOSIT, OP_WITHDRAW } from '~/utils/vault-hooks'
 import { getHookDisabledWarning } from '~/composables/useVaultWarnings'
-import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
 import { type Address, formatUnits, zeroAddress } from 'viem'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
@@ -28,7 +27,7 @@ import type { ComputedRef } from 'vue'
 import { logWarn } from '~/utils/errorHandling'
 import { createRaceGuard } from '~/utils/race-guard'
 import { FixedPoint } from '~/utils/fixed-point'
-import { getTotalCollateralValue } from '~/utils/position-estimates'
+import { estimateCollateralLiquidityChange } from '~/utils/position-collateral-estimate'
 import { getTxErrorMessage } from '~/utils/tx-errors'
 import type { CollateralApySnapshot } from '~/composables/usePositionCollateralApy'
 import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
@@ -66,10 +65,7 @@ export interface UseCollateralFormOptions {
   validateEstimate: (ctx: {
     amountFixed: FixedPoint
     suppliedFixed: FixedPoint
-    borrowedFixed: FixedPoint
-    priceFixed: FixedPoint
-    collateralValue: FixedPoint
-    userLtvFixed: FixedPoint
+    hasLiquidationLiquidity?: boolean
     needsSwap: boolean
   }) => void
 
@@ -169,8 +165,8 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const preparedPlan = shallowRef<TransactionPlanPrepared | null>(null)
   const estimateNetAPY = ref<number | null>(null)
   const projectedYieldDetails = shallowRef<ProjectedYieldDetails | null>(null)
-  const estimateUserLTV = ref(0n)
-  const estimateHealth = ref(0n)
+  const estimateUserLTV = ref<bigint | null>(null)
+  const estimateHealth = ref<bigint | null>(null)
   const estimatesError = ref('')
   const selectedCollateral = ref<EVault | SecuritizeCollateralVault | null>(null)
   const selectedCollateralAssets = ref(0n)
@@ -235,7 +231,20 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     (selectedCollateral.value || (position.value ? position.value.collateralVault : undefined)) as EVault | SecuritizeCollateralVault | undefined,
   )
   const borrowVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
-  const collateralAssets = computed(() => selectedCollateralAssets.value)
+  const accountSnapshot = computed(() => {
+    const account = planAccount.value
+    const subAccount = position.value?.subAccount as Address | undefined
+    if (!account || !subAccount || !account.getSubAccount(subAccount)) return undefined
+    return {
+      collateral: collateralVault.value ? account.getPosition(subAccount, collateralVault.value.address) : undefined,
+      liquidity: borrowVault.value ? account.getPosition(subAccount, borrowVault.value.address)?.liquidity : undefined,
+      isCollateralEnabled: collateralVault.value ? account.isCollateralEnabled(subAccount, collateralVault.value.address) : undefined,
+    }
+  })
+  const controllerLiquidity = computed(() => accountSnapshot.value?.liquidity)
+  const collateralAssets = computed(() => accountSnapshot.value
+    ? accountSnapshot.value.collateral?.assets ?? 0n
+    : selectedCollateralAssets.value)
   const asset = computed(() => collateralVault.value?.asset)
 
   const priceInvert = usePriceInvert(
@@ -483,6 +492,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     return options.computeLiquidationPrice(position.value, borrowVault.value, collateralVault.value)
   })
   const estimateLiquidationPrice = computed(() => {
+    if (estimateHealth.value === null) return undefined
     const health = nanoToValue(estimateHealth.value, 18)
     if (!health || health < 1 || health > 1e15) return undefined
     const price = priceFixed.value.toUnsafeFloat()
@@ -744,63 +754,38 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     if (!collateralVault.value) return
 
     try {
-      // Derive total collateral value from position's on-chain LTV (multi-collateral aware),
-      // then adjust for the collateral delta using the single collateral's price.
-      const totalValue = getTotalCollateralValue(position.value!)
-      const borrowed18 = borrowedFixed.value.round(18)
-      const amount18 = amountFixed.value.round(18)
-      const supplied18 = suppliedFixed.value.round(18)
-      const priceFl = priceFixed.value.toUnsafeFloat()
-      const amountFl = amount18.toUnsafeFloat()
-
-      // Only apply delta if this collateral is accepted by the controller (BLTV > 0)
-      const affectsLtv = borrowVault.value?.collaterals.some(
-        ltv => ltv.address.toLowerCase() === collateralVault.value!.address.toLowerCase() && ltv.borrowLTV > 0,
-      ) ?? false
-
-      const collateralValueFl = totalValue !== null && priceFl > 0
-        ? (options.mode === 'supply'
-            ? totalValue + (affectsLtv ? amountFl * priceFl : 0)
-            : totalValue - (affectsLtv ? amountFl * priceFl : 0))
-        : (options.mode === 'supply'
-            ? supplied18.add(amount18).mul(priceFixed.value).toUnsafeFloat()
-            : supplied18.sub(amount18).mul(priceFixed.value).toUnsafeFloat())
-
-      const collateralValue = FixedPoint.fromValue(
-        BigInt(Math.round(collateralValueFl * 1e18)),
-        18,
-      )
-
-      const userLtvFixed = collateralValue.isZero()
-        ? FixedPoint.fromValue(0n, 18)
-        : borrowed18
-            .div(collateralValue)
-            .mul(FixedPoint.fromValue(100n, 0))
-
+      const snapshot = accountSnapshot.value
+      const hasCollateralAmount = options.mode !== 'supply' || !options.needsSwap.value || (swapCollateralDeltaNano.value ?? 0n) > 0n
+      const liquidityEstimate = hasCollateralAmount
+        ? estimateCollateralLiquidityChange({
+            liquidity: controllerLiquidity.value,
+            borrowVault: borrowVault.value,
+            collateralVault: collateralVault.value,
+            collateralAssets: snapshot ? collateralAssets.value : undefined,
+            collateralShares: snapshot ? snapshot.collateral?.shares ?? 0n : undefined,
+            assetsDelta: options.mode === 'supply' ? amountFixed.value.value : -amountFixed.value.value,
+            isCollateralEnabled: snapshot?.isCollateralEnabled,
+            // Direct deposits retain enablement; the swap-deposit planner enables its output vault.
+            enableCollateral: options.mode === 'supply' && options.needsSwap.value,
+            // The direct withdrawal planner redeems all shares at the form's full balance.
+            redeemAll: options.mode === 'withdraw' && !options.needsSwap.value
+              && collateralAssets.value > 0n && amountFixed.value.value >= collateralAssets.value,
+          })
+        : null
       options.validateEstimate({
         amountFixed: amountFixed.value,
         suppliedFixed: suppliedFixed.value,
-        borrowedFixed: borrowedFixed.value,
-        priceFixed: priceFixed.value,
-        collateralValue,
-        userLtvFixed,
+        hasLiquidationLiquidity: liquidityEstimate?.hasLiquidationLiquidity,
         needsSwap: options.needsSwap.value,
       })
-
-      estimateUserLTV.value = userLtvFixed.value
-      // liquidationLTV is in basis points (e.g. 8600 = 86%). Convert to 18-decimal
-      // percentage (8600 * 10^16 = 86 * 10^18) to match userLtvFixed's 18 decimals.
-      const effectiveLiquidationLtv = getBorrowPositionEffectiveLiquidationLTV(position.value!)
-      if (effectiveLiquidationLtv === undefined) throw new Error('Liquidation LTV unavailable')
-      const liquidationLtvBps = decimalLtvToBps(effectiveLiquidationLtv)
-      estimateHealth.value = (userLtvFixed.isZero() || userLtvFixed.isNegative())
-        ? 0n
-        : FixedPoint.fromValue(liquidationLtvBps * (10n ** 16n), 18).div(userLtvFixed).value
+      // Supply can improve a position even when its risk preview is unavailable.
+      estimateUserLTV.value = liquidityEstimate?.userLTV != null ? liquidityEstimate.userLTV * 100n : null
+      estimateHealth.value = liquidityEstimate?.healthFactor ?? null
     }
     catch (e: unknown) {
       logWarn('collateral/syncEstimates', e)
-      estimateUserLTV.value = (position.value!.userLTV ?? position.value!.currentLTV ?? 0n) * 100n
-      estimateHealth.value = position.value!.healthFactor ?? 0n
+      estimateUserLTV.value = null
+      estimateHealth.value = null
       estimatesError.value = (e as { message: string }).message
     }
   }
@@ -959,8 +944,9 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       await loadSelectedCollateral()
       await options.onAfterLoad?.()
       estimateNetAPY.value = netAPY.value
-      estimateUserLTV.value = (position.value!.userLTV ?? position.value!.currentLTV ?? 0n) * 100n
-      estimateHealth.value = position.value!.healthFactor ?? 0n
+      const currentLtv = position.value?.userLTV ?? position.value?.currentLTV
+      estimateUserLTV.value = currentLtv != null ? currentLtv * 100n : null
+      estimateHealth.value = position.value!.healthFactor ?? null
     }
     catch (e) {
       showError('Unable to load Vault')
@@ -1189,8 +1175,14 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     await loadSelectedCollateral()
     await options.onAfterLoad?.()
     estimateNetAPY.value = netAPY.value
-    estimateUserLTV.value = position.value ? (position.value.userLTV ?? position.value.currentLTV ?? 0n) * 100n : 0n
-    estimateHealth.value = position.value ? position.value.healthFactor ?? 0n : 0n
+    const currentLtv = position.value?.userLTV ?? position.value?.currentLTV
+    estimateUserLTV.value = currentLtv != null ? currentLtv * 100n : null
+    estimateHealth.value = position.value?.healthFactor ?? null
+  })
+
+  // Fresh and simulated account snapshots can arrive independently of amount changes.
+  watch([planAccount, borrowVault, collateralVault], () => {
+    if (+amount.value > 0) updateSyncEstimates()
   })
 
   watch(amount, async () => {
@@ -1271,6 +1263,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
     collateralVault,
     borrowVault,
     collateralAssets,
+    controllerLiquidity,
     asset,
     priceInvert,
 
