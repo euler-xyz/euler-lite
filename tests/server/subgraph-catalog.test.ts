@@ -191,12 +191,10 @@ describe('subgraph catalog resolution', () => {
     expect(fetch).toHaveBeenCalledTimes(3)
   })
 
-  it('bounds a stalled body and ignores its eventual completion', async () => {
+  it('cancels a stalled body, releases its reader, and recovers after backoff', async () => {
     vi.useFakeTimers()
-    let bodyController!: ReadableStreamDefaultController<Uint8Array>
-    const body = new ReadableStream<Uint8Array>({
-      start(controller) { bodyController = controller },
-    })
+    const cancel = vi.fn(() => new Promise<void>(() => {}))
+    const body = new ReadableStream<Uint8Array>({ cancel })
     const fetch = vi.fn().mockResolvedValue(new Response(body))
     vi.stubGlobal('fetch', fetch)
     const resolve = createSubgraphResolver({ env: { SUBGRAPH_CATALOG_URL: 'https://fixture' } })
@@ -205,9 +203,8 @@ describe('subgraph catalog resolution', () => {
     await vi.advanceTimersByTimeAsync(5_000)
     await rejected
     expect(fetch.mock.calls[0][1].signal.aborted).toBe(true)
-    bodyController.enqueue(new TextEncoder().encode(JSON.stringify(catalog())))
-    bodyController.close()
-    await Promise.resolve()
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(body.locked).toBe(false)
     await expect(resolve(1)).rejects.toMatchObject({ reason: 'catalog-unavailable' })
     expect(fetch).toHaveBeenCalledOnce()
     await vi.advanceTimersByTimeAsync(10_000)
