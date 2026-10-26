@@ -3,9 +3,13 @@ import { SUBGRAPH_TIMEOUT_MS } from '~/entities/tuning-constants'
 
 export type { SubgraphQuerySource as CheckedSubgraphSource } from '@eulerxyz/euler-v2-sdk'
 
+// Browsing and form builders share this proxy policy with different cache lifetimes.
+const subgraphQueryCacheScope = {}
+
 /** Lite supplies proxy policy; the SDK owns discovery, pagination and source checks. */
 export const withCheckedSubgraphQueries = (buildQuery: BuildQueryFn, sources: SubgraphQuerySources): BuildQueryFn =>
   withSubgraphQueries(buildQuery, sources, {
+    cacheScope: subgraphQueryCacheScope,
     includeMeta: true,
     fetch: (url, init) => fetch(url, {
       ...init,
