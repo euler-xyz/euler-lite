@@ -382,7 +382,7 @@ return HTTP 404; disabled, retired, malformed, unsupported-capability, or unavai
 catalog sources return HTTP 503 with a reason. Upstream and deployment-identity
 failures return HTTP 502. These failures are not successful empty discovery.
 
-Catalog records for existing deployments may omit `sourceCommit`, `startBlock` and `interfacesCommit` when build provenance is unverified. Supplied values must be valid. Endpoint, deployment ID, version and required capabilities remain mandatory; response identity checks apply to every selected catalog source. Lite's server resolver owns this parsing and supplies checked queries to its installed SDK, so omitted build provenance does not require an SDK bump in Lite.
+Catalog records for existing deployments may omit `sourceCommit`, `startBlock` and `interfacesCommit` when build provenance is unverified. Supplied values must be valid. Endpoint, deployment ID, version and required capabilities remain mandatory; response identity checks apply to every selected catalog source. The SDK owns catalog parsing, metadata caching and discovery queries. Lite configures `createSubgraphCatalogResolver` and `withSubgraphQueries` with its environment priority, proxy transport and cache policy. Its installed SDK must support these APIs and optional build provenance.
 
 Catalog metadata is fresh for 60 seconds. A failed refresh can reuse the last
 successful snapshot for at most seven days from that success (`MANIFEST_MAX_STALE_MS`); retries are
@@ -399,8 +399,8 @@ retain the published SDK's bundled defaults; `SUBGRAPH_CATALOG_DISABLED=true` or
 `SUBGRAPH_DISABLED_<chainId>=true` prevents this compatibility fallback. An opted-in catalog's missing/retired/invalid records never
 fall back. The browser proxy retains its missing-URL 404 behavior. V3 remains the configured primary where applicable. Both
 paths validate HTTP/GraphQL payloads and the actual response's `_meta.deployment`
-against a catalog deployment ID. Lite provides these checks at its `buildQuery` boundary for the two subgraph leaf
-queries (`queryAccountVaults`, `queryVaultFactories`). Other queries retain their
+against a catalog deployment ID. Lite configures the SDK’s `withSubgraphQueries` at its `buildQuery` boundary for the two subgraph leaf
+queries (`queryAccountVaults`, `queryVaultFactories`). The SDK owns GraphQL construction, pagination, response validation and source consistency; Lite supplies only transport and opaque proxy identity hooks. Other queries retain their
 existing caching policy. Checked leaf queries use the supplied cache builder: the
 browser shares 5-minute browsing windows, a 1-minute account form window, and
 transaction invalidation/generation handling. Server SDK leaf results use the

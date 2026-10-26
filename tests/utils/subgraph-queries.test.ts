@@ -34,9 +34,9 @@ describe('checked published-SDK subgraph queries', () => {
       .mockResolvedValueOnce(Response.json({ data: { trackingActiveAccounts: [] } }))
     vi.stubGlobal('fetch', fetch)
     const query = makeQuery('/fixture/empty')
-    await expect(query({ chainId: 1, account: address })).rejects.toThrow('Invalid subgraph response')
+    await expect(query({ chainId: 1, account: address })).rejects.toThrow('Account vaults subgraph returned GraphQL errors.')
     vi.setSystemTime(start + 5_000)
-    await expect(query({ chainId: 1, account: address })).rejects.toThrow('Invalid subgraph accounts')
+    await expect(query({ chainId: 1, account: address })).rejects.toThrow('Account vaults subgraph returned malformed account data.')
     vi.setSystemTime(start + 10_000)
     await expect(query({ chainId: 1, account: address })).resolves.toEqual({ data: { trackingActiveAccount: null } })
   })
@@ -69,7 +69,7 @@ describe('checked published-SDK subgraph queries', () => {
     const query = withCheckedSubgraphQueries(sdkBuildQuery, async () => ({
       endpoint: '/fixture/pinned', deploymentId: 'selected-deployment',
     }))('queryAccountVaults', async (_key: { chainId: number, account: typeof address }) => null, {})
-    await expect(query({ chainId: 1, account: address })).rejects.toThrow('Subgraph deployment identity mismatch')
+    await expect(query({ chainId: 1, account: address })).rejects.toMatchObject({ reason: 'source-changed' })
   })
   it('isolates a failed chain while coalescing same-chain callers', async () => {
     const fetch = vi.fn(async (url: string) => url.endsWith('/2')
@@ -91,7 +91,7 @@ describe('checked published-SDK subgraph queries', () => {
     vi.stubGlobal('fetch', fetch)
     const adapter = new VaultTypeSubgraphAdapter({ subgraphURLs: { 1: '/fixture/pages' } }, withCheckedSubgraphQueries(sdkBuildQuery, { 1: '/fixture/pages' }))
     const addresses = Array.from({ length: 1001 }, (_, i) => `0x${i.toString(16).padStart(40, '0')}` as `0x${string}`)
-    await expect(adapter.fetchVaultFactories(1, addresses)).rejects.toThrow('Subgraph source changed during lookup')
+    await expect(adapter.fetchVaultFactories(1, addresses)).rejects.toMatchObject({ reason: 'source-changed' })
     expect(fetch).toHaveBeenCalledTimes(2)
   })
 
@@ -170,7 +170,7 @@ describe('checked account pagination through the published SDK adapter', () => {
       ? async () => ({ endpoint: '/fixture/account-pages', identity: page === 0 ? 'A' : 'B', deploymentId: 'A' })
       : undefined)
     const results = await Promise.allSettled(owners(1001).map(account => adapter.fetchAccountVaults(1, account)))
-    expect(results.every(result => result.status === 'rejected' && result.reason.message === 'Subgraph source changed during lookup')).toBe(true)
+    expect(results.every(result => result.status === 'rejected' && result.reason.reason === 'source-changed')).toBe(true)
     expect(fetch).toHaveBeenCalledTimes(kind === 'resolver' ? 1 : 2)
   })
 
@@ -189,7 +189,7 @@ describe('checked account pagination through the published SDK adapter', () => {
       ...accounts.map(account => adapter.fetchAccountVaults(1, account)),
       adapter.fetchAccountVaults(2, accounts[0]),
     ])
-    expect(results.slice(0, -1).every(result => result.status === 'rejected' && result.reason.message === 'Invalid subgraph account')).toBe(true)
+    expect(results.slice(0, -1).every(result => result.status === 'rejected' && result.reason.message === 'Account vaults subgraph returned malformed account data.')).toBe(true)
     expect(results.at(-1)).toEqual({ status: 'fulfilled', value: { [accounts[0]]: { deposits: [address], borrows: [] } } })
     expect(fetch).toHaveBeenCalledTimes(3)
   })

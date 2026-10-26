@@ -6,7 +6,7 @@ import {
   setResponseHeaders,
   setResponseStatus,
 } from 'h3'
-import { resolveSubgraphSource, SubgraphUnavailableError, type SubgraphSource } from '~/server/utils/subgraph-catalog'
+import { resolveSubgraphSource, LiteSubgraphUnavailableError as SubgraphUnavailableError, type SubgraphSource } from '~/server/utils/subgraph-catalog'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { logger } from '~/server/utils/logger'
 import { GRAPHQL_RESPONSE_BUDGET } from '~/server/utils/fetch-text-with-budget'

@@ -1,5 +1,5 @@
 import { withCheckedSubgraphQueries } from '~/utils/subgraph-queries'
-import { resolveSubgraphSource, SubgraphUnavailableError } from './subgraph-catalog'
+import { resolveSubgraphSource, LiteSubgraphUnavailableError as SubgraphUnavailableError } from './subgraph-catalog'
 /**
  * Lazy per-chain server-side `EulerSDK` builder.
  *
