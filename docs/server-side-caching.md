@@ -102,9 +102,26 @@ The response budget is 8 MiB of decoded body bytes and 10 seconds total for fetc
 
 ### Liquidation bot coverage
 
-`/api/internal/liquidation-coverage?chainId=N` answers which vaults the default liquidation bot (`LIQUIDATION_BOT_API_URL`) leaves out on that chain. `server/utils/liquidation-coverage-source.ts` fetches `{base}/vault-filter` with one 5 s deadline covering the headers and the body, follows no redirects, keeps the mode and the listed addresses and drops the bot's reasons. An answer is fresh for 5 minutes; after that it is still served at once while a background refresh runs, until 30 minutes after it was fetched. Past that, or when the bot has not answered since the server started, the chain is `no-bot` and the browser badges every borrowable vault on it. A failing chain is retried at most once a minute. The browser asks again after a minute for a `no-bot` answer and before an answer reaches 30 minutes. With the variable unset the route answers `{ enabled: false }` and nothing is fetched.
+`/api/internal/liquidation-coverage?chainId=N` answers which vaults the default liquidation bot leaves out on that chain. `LIQUIDATION_BOT_API_URL` is a URL template that must contain `{chainId}` (replaced per request), use HTTPS except loopback HTTP, and carry no credentials, query, or fragment. An invalid template is logged once and treated as off. With the variable unset the route answers `{ enabled: false }` and nothing is fetched.
 
-The browser removes expired answers when checking for a refresh, including the visible-tab poll and focus/visibility handlers, and when a request settles. If the Lite endpoint cannot be reached, expired coverage becomes unknown and renders no badge. The browser uses `no-bot` only when the server returns that state.
+`server/utils/liquidation-coverage-source.ts` fetches `{base}/vault-filter` with one 5 s deadline covering the headers and the body, follows no redirects, and parses with `parseVaultFilter`. The bot's reasons are dropped. More than 2,000 items, a malformed address, a non-string reason, or an unknown mode is not a filter. Mode names are the bot's PascalCase strings mapped through a `Map` (`None`, `Blacklist`, `Whitelist`); lowercase `blacklist` is not accepted.
+
+| Mode | Meaning for the vault an account **borrows from** |
+|------|---------------------------------------------------|
+| `none` | Every vault is covered |
+| `blacklist` | Listed addresses are not covered |
+| `whitelist` | Only listed addresses are covered |
+
+An answer is fresh for 5 minutes; after that it is still served at once while a background refresh runs, until 30 minutes after it was fetched. Past that, or when the bot has not answered since the server started, the chain is `no-bot`. A failing chain is retried at most once a minute. The browser asks again after a minute for a `no-bot` answer and before an answer reaches 30 minutes.
+
+The badge is borrow-side only (`hasBorrowSide`: an EVK that is open to new borrows or still has residual `totalBorrowed`). Earn, Securitize, and collateral-only EVKs never badge. Unknown coverage — feature off, or the Lite endpoint failed and the last answer expired — renders nothing. `no-bot` badges every borrowable vault on that chain. The browser uses `no-bot` only when the server returns that state; a failed `$fetch` never synthesizes it.
+
+Copy differs by surface (`getLiquidationCoverageWarning`):
+
+- **Lend** (list + EVK overview, default): other liquidators may not act, so losses from unhealthy positions can reach lenders.
+- **Borrow** (borrow list, borrow-pair overview, portfolio borrow): other liquidators may still liquidate the position.
+
+The list chip is `LiquidationCoverageBadge` (`data-id="liquidation-coverage"`). The overview uses `LiquidationCoverageNotice`. Both call `isNotCoveredByDefaultBot`. Visible-tab poll and focus/visibility handlers expire answered coverage after 30 minutes, including while a refresh is in flight.
 
 ### V3 proxy
 

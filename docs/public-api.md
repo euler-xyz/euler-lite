@@ -170,7 +170,7 @@ interface VaultMetadata {
   } | null
   entities: Array<{
     name: string
-    logo: string                             // hosted URL from the Public Labels entity profile
+    logo: string                             // allowlisted hosted URL, or '' when the profile URL fails resolveLabelLogo
     description: string | null
     url: string | null                       // entity website; only set when http(s) URL
   }>                                         // V3 manager on assessed chains, matching on-chain authority on fallback sources; empty for escrow or unverified vaults
