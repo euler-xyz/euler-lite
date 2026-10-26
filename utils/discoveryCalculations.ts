@@ -6,7 +6,7 @@ import { maxUint256 } from 'viem'
 import type { AnyVault } from '~/composables/useVaultRegistry'
 
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
-import { getEntitiesByVault, isVaultCyclicalNote, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
+import { getEntitiesByVault, isVaultCyclicalNote, isVaultDeprecated, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
 import { ltvToPercent } from '~/utils/crypto-utils'
 import { formatNumber, compactNumber, truncate } from '~/utils/string-utils'
 import { formatHookedOpsSummary, getHookedOperationMetas, getVaultHookedOperations, hasAnyHookedOperation, isVaultEffectivelyPaused } from '~/utils/vault-hooks'
@@ -212,6 +212,32 @@ const getBoundedRelationshipVaults = (market: MarketGroup): EVault[] =>
 const getDiscoveryRowOnlyVaults = (market: MarketGroup): EVault[] =>
   market.vaults.filter(isEVault).filter(v => !hasLiveDiscoveryColumn(v))
 
+const getLiveEdgeAddresses = (market: MarketGroup): Set<string> => {
+  const reachable = new Set([
+    ...[...market.vaults, ...market.externalCollateral].map(v => getVaultAddress(v).toLowerCase()),
+    ...market.unknownCollateral.map(address => address.toLowerCase()),
+  ])
+  return new Set(getBoundedRelationshipVaults(market).flatMap(vault => vault.collaterals
+    .filter(ltv => reachable.has(ltv.address.toLowerCase()) && isLiveCollateralEdge(ltv))
+    .flatMap(ltv => [ltv.address.toLowerCase(), vault.address.toLowerCase()])))
+}
+
+const isDroppedWithoutEdges = (market: MarketGroup, address: string): boolean =>
+  !market.showsAllMembers && isVaultNotExplorableLend(address)
+
+const getDroppedMembers = (market: MarketGroup): Set<string> => {
+  if (market.showsAllMembers) return new Set()
+  const connected = getLiveEdgeAddresses(market)
+  return new Set(market.vaults
+    .map(v => getVaultAddress(v).toLowerCase())
+    .filter(address => address && !connected.has(address) && isDroppedWithoutEdges(market, address)))
+}
+
+export const getDisplayedMembers = (market: MarketGroup): AnyVault[] => {
+  const droppedMembers = getDroppedMembers(market)
+  return market.vaults.filter(v => !droppedMembers.has(getVaultAddress(v).toLowerCase()))
+}
+
 export const isExternalCollateral = (market: MarketGroup, address: string): boolean => {
   const normalized = address.toLowerCase()
   return market.externalCollateral.some(v => getVaultAddress(v).toLowerCase() === normalized)
@@ -290,15 +316,13 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
   const disconnectedVaults: Array<{ address: string, vault: AnyVault }> = []
   for (const v of market.vaults) {
     const addr = getVaultAddress(v).toLowerCase()
-    if (addr && !connectedAddresses.has(addr)) {
+    if (addr && !connectedAddresses.has(addr) && !isDroppedWithoutEdges(market, addr)) {
       disconnectedVaults.push({ address: addr, vault: v })
     }
   }
 
   if (connectedAddresses.size === 0 && connectedUnknownAddresses.size === 0 && disconnectedVaults.length === 0) {
-    const assetSymbols = new Set<string>()
-    for (const v of market.vaults) assetSymbols.add(getVaultAssetSymbol(v))
-    return { nodes: [], edges: [], pairCount: 0, assetCount: assetSymbols.size, viewWidth: 0 }
+    return { nodes: [], edges: [], pairCount: 0, assetCount: 0, viewWidth: 0 }
   }
 
   const allNodeEntries = [
@@ -486,12 +510,15 @@ export const getCollateralMatrix = (market: MarketGroup): CollateralMatrixData |
   // Non-liability rows render after relationship rows. External relationship
   // rows stay aligned with their liability columns, while category metadata
   // keeps every external label visually distinct.
-  const sortedNonBorrowable = [...nonBorrowable]
+  const droppedMembers = getDroppedMembers(market)
+  const sortedNonBorrowable = nonBorrowable
+    .filter(v => !droppedMembers.has(v.address.toLowerCase()))
     .sort((a, b) => rowAvgLTV(b.address.toLowerCase()) - rowAvgLTV(a.address.toLowerCase()))
   for (const v of sortedNonBorrowable) addRow(v.address.toLowerCase(), v.asset.symbol, v.asset.address, 'escrow')
 
   const securitizeMembers = market.vaults
     .filter(isSecuritizeVault)
+    .filter(v => !droppedMembers.has(v.address.toLowerCase()))
     .sort((a, b) => rowAvgLTV(b.address.toLowerCase()) - rowAvgLTV(a.address.toLowerCase()))
   for (const v of securitizeMembers) addRow(v.address.toLowerCase(), v.asset.symbol, v.asset.address, 'external')
 
@@ -782,7 +809,7 @@ const compareSymbolAsc = (a: EVault | SecuritizeCollateralVault, b: EVault | Sec
 export const getAttributeMatrixColumns = (market: MarketGroup): AttributeMatrixColumn[] => {
   const memberEVaults: EVault[] = []
   const memberSecuritize: SecuritizeCollateralVault[] = []
-  for (const v of market.vaults) {
+  for (const v of getDisplayedMembers(market)) {
     if (isEVault(v)) memberEVaults.push(v)
     else if (isSecuritizeVault(v)) memberSecuritize.push(v)
   }

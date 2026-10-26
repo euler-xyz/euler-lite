@@ -32,6 +32,8 @@ export interface MarketGroup {
    */
   unknownCollateral: string[]
   metrics: MarketGroupMetrics
+  /** On-demand (direct-URL) and show-all groups keep members that have no live LTV edge and a hidden lend side. */
+  showsAllMembers?: boolean
 }
 
 export interface MarketGroupMetrics {

@@ -9,6 +9,7 @@ import { isOpDisabled, OP_BORROW, OP_DEPOSIT, OP_TRANSFER } from '~/utils/vault-
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
 import { isSecuritizeBorrowPair } from '~/types/borrow-pair'
+import { isBorrowTableCollateral } from '~/utils/vault/borrow-table'
 import { useVaults } from '~/composables/useVaults'
 import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
@@ -128,7 +129,7 @@ const showAllLabelEntries = useShowAllLabelEntries()
 const activeBorrowList = computed(() =>
   borrowList.value.filter((pair) => {
     if (!showAllLabelEntries.value && isVaultNotExplorableBorrow(pair.borrow.address)) return false
-    if (!showAllLabelEntries.value && isVaultNotExplorableBorrow(pair.collateral.address)) return false
+    if (!isBorrowTableCollateral(pair.collateral.address, showAllLabelEntries.value)) return false
     if (isOpDisabled(pair.borrow, OP_BORROW)) return false
     // Securitize collateral has no EVault hook flags — only check EVault collateral.
     // Fresh-deposit needs OP_DEPOSIT, savings-sourced needs OP_TRANSFER.
