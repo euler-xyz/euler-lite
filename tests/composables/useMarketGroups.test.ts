@@ -90,6 +90,14 @@ describe('buildProductGroups', () => {
 
     expect(groups.map(group => group.id)).toEqual(['kpk-securitize', 'securitize'])
   })
+
+  it('keeps members without live LTV edges only when show-all-label-entries is on', () => {
+    const build = (listNonMarketGroups: boolean) =>
+      buildProductGroups([makeEVault(LEND_VAULT), makeWrapper(WRAPPER)], products, {}, listNonMarketGroups).groups
+
+    expect(build(false).every(group => !group.showsAllMembers)).toBe(true)
+    expect(build(true).every(group => group.showsAllMembers)).toBe(true)
+  })
 })
 
 describe('deployment tag market groups', () => {
@@ -128,6 +136,7 @@ describe('deployment tag market groups', () => {
       await vi.waitFor(() => expect(groups.marketGroups.value[0]?.metrics.totalTVL).toBe(200))
       const direct = await groups.fetchMarketGroupOnDemand('market')
       expect(direct?.vaults).toHaveLength(2)
+      expect(direct?.showsAllMembers).toBe(true)
       expect(direct?.metrics.totalTVL).toBe(300)
       expect(fullRegistry).toHaveLength(2)
     }

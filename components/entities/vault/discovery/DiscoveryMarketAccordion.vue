@@ -6,6 +6,7 @@ import { formatAssetValue } from '~/utils/sdk-prices'
 import { logWarn } from '~/utils/errorHandling'
 import {
   getVaultAddress,
+  getDisplayedMembers,
   getMiniDiagram,
   getCollateralMatrix,
   findVault,
@@ -513,7 +514,7 @@ onMounted(() => {
                 Vaults
               </h4>
               <template
-                v-for="vault in market.vaults"
+                v-for="vault in getDisplayedMembers(market)"
                 :key="getVaultAddress(vault)"
               >
                 <VaultItem

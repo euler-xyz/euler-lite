@@ -255,23 +255,31 @@ Both Main and Base can use `LABELS_V3_SET=public`; Base additionally sets `LABEL
 
 The filter applies to Explore group members and metrics, Lend/Borrow/Earn lists, both sides of borrow pairs, and new-target suggestions in swap/migration forms. The `showAll` query does not bypass it. Existing visibility, verification, listing and geo rules still apply. Label refreshes update the selection while preserving loaded vaults used by open forms.
 
-On Lend, Borrow and Earn, `?showAll` includes verified vaults that the labels mark as not explorable for that page. It does not include hidden or pending-review vaults, override the deployment tag, or change geo restrictions. On Portfolio, the same query opens the existing "Show all positions" view for the user's positions; it does not change vault verification. Explore has no `showAll` mode. The "Recently added" badge and sort order follow the published `recently added` tag, so publication controls that designation rather than a client-side age cutoff.
+On Lend, Borrow and Earn, `?showAll` includes verified vaults that the labels mark as not explorable for that page. It does not include hidden or pending-review vaults, override the deployment tag, or change geo restrictions. On Portfolio, the same query opens the existing "Show all positions" view for the user's positions; it does not change vault verification. On Explore, `?showAll` also lists products without an explorable market side and keeps every member in their graphs. The "Recently added" badge and sort order follow the published `recently added` tag, so publication controls that designation rather than a client-side age cutoff.
 
 Full labels and vault snapshots remain available for positions, direct URLs, collateral relationships and Earn strategy details. Tag selection does not change verification, geo policies, `/api/public/is-known` or `/api/public/metadata`; it is a discovery setting, not an access restriction.
 
 Labels control which vaults appear on each discovery page:
 
-| Flag | Lend | Borrow | Explore |
+| Flag | Lend | Borrow | Explore market graph |
 |------|------|--------|---------|
-| Product `notExplorable: true` | Hidden | Hidden | Hidden |
-| Override `notExplorableLend: true` | Hidden | Visible | Visible* |
-| Override `notExplorableBorrow: true` | Visible | Hidden (both sides) | Visible* |
-| `deprecatedVaults` | Hidden | Hidden | Visible (dimmed) |
+| Vault `notExplorableLend: true` | Hidden | Visible | Member; dropped while it has no live LTV edge |
+| Vault `notExplorableBorrow: true` | Visible‡ | Hidden, as the loan and as the collateral | Member* |
+| Hidden on both sides, or product `notExplorable: true` | Hidden | Hidden | Only as accepted collateral, "Unlisted" badge† |
+| Deprecated (V3) | Hidden | Hidden | Only as accepted collateral, "Deprecated" badge† |
 | `recently added` tag | Sorted to top | Sorted to top | Sorted to top |
 
-*Explore lists a product only while it has an explorable market side: at least one member vault that is open on the lend side, or borrowable (including residual debt) and open on the borrow side. A collateral-only product — every member flagged `notExplorableLend` and not borrowable, e.g. issuer-governed Securitize collateral wrappers — gets no Explore card. Its vaults still render as external collateral in other markets' graphs, and its direct market URL still resolves on demand (members are satisfied from the vault registry first, so non-EVault members load correctly).
+Each flag is a table: the lend flag controls the Lend and Earn lists, the borrow flag every Borrow pair the vault takes part in. On V3, deprecation hides both sides unless a side is re-listed where V3 allows it; a re-listed side behaves as listed. Static and metadata-only labels do not hide deprecated vaults: they stay product members with a "Deprecated" badge. An explicit per-vault flag overrides the product setting for that side; a missing flag inherits it.
 
-Product-level `notExplorable` always takes precedence over per-vault overrides. Vaults hidden from discovery are still accessible via direct URL and remain visible in the user's portfolio.
+‡A lending vault is listed while it is open for deposits and has a pair with borrow LTV > 0 against a collateral whose borrow side is listed (`utils/vault/borrow-table.ts`). The vault's own borrow flag and borrow pauses do not affect this. On V3, hiding or deprecating its only such collateral removes the lending vault from Lend.
+
+*A member with no live LTV edge stays in the graph and matrices only while its lend side is listed. A live edge has borrow LTV > 0 or a current liquidation LTV above zero (`isLiveCollateralEdge`).
+
+†A vault hidden on both sides appears in a market only while a member accepts it as collateral with a live LTV. When it is only the loan side of live LTVs, it is not drawn.
+
+Explore lists a product only while it has an explorable market side: at least one member vault that is open on the lend side, or borrowable (including residual debt) and open on the borrow side. A collateral-only product — every member flagged `notExplorableLend` and not borrowable, e.g. issuer-governed Securitize collateral wrappers — gets no Explore card. Its vaults still render as external collateral in other markets' graphs, and its direct market URL still resolves on demand (members are satisfied from the vault registry first, so non-EVault members load correctly). Such on-demand markets, and every market under `?showAll`, keep all of their members; a listed market opened by direct URL follows the rules above.
+
+Vaults hidden from discovery are still accessible via direct URL and remain visible in the user's portfolio.
 
 ## Unknown Vault Resolution
 

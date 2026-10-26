@@ -51,6 +51,7 @@ import { createRaceGuard } from '~/utils/race-guard'
 import { ltvToPercent, nanoToValue } from '~/utils/crypto-utils'
 import { getVaultProductName, isEarnVaultNotExplorable, isVaultNotExplorableLend, isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
 import { buildCollateralOption, computeBorrowApy, computeSupplyApy } from '~/utils/collateralOptions'
+import { hasBorrowTablePair, isBorrowTableCollateral } from '~/utils/vault/borrow-table'
 import { getVaultGeoUnavailableReason, isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 import type { DisplayStep } from '~/utils/stepDecoding'
@@ -569,12 +570,9 @@ const prioritizeVaultsByAsset = <TVault extends EVault | EulerEarn | SecuritizeC
 
 const externalSupplyOnlyTargetVaults = computed<SupplyTargetVault[]>(() => {
   if (!externalIsSupplyOnly.value) return []
-  const borrowableAddresses = new Set(
-    borrowList.value.map(pair => normalizeVaultAddress(pair.borrow.address)),
-  )
   const lendVaults = getVerifiedEVaults(showAllLabelEntries.value).filter(vault =>
     (showAllLabelEntries.value || !isVaultNotExplorableLend(vault.address))
-    && borrowableAddresses.has(normalizeVaultAddress(vault.address))
+    && hasBorrowTablePair(vault.address, borrowList.value, address => isBorrowTableCollateral(address, showAllLabelEntries.value))
     && !isOpDisabled(vault, OP_DEPOSIT),
   )
   // Earn vaults have no hook-based op gating; geo/deprecation restrictions are

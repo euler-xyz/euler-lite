@@ -6,12 +6,13 @@ import type { VaultVerdictLike } from '~/utils/vault-assessment/flagged'
 import DiscoveryMarketGraph from '~/components/entities/vault/discovery/DiscoveryMarketGraph.vue'
 
 const address = '0x00000000000000000000000000000000000000aa'
-const labels = vi.hoisted(() => ({ deprecated: true }))
+const labels = vi.hoisted(() => ({ deprecated: true, unlisted: false }))
 const warnings = vi.hoisted(() => ({ text: '', acceptedOnly: false }))
 
 vi.mock('~/utils/eulerLabelsUtils', async importOriginal => ({
   ...(await importOriginal<typeof import('~/utils/eulerLabelsUtils')>()),
   isVaultDeprecated: () => labels.deprecated,
+  isVaultNotExplorable: () => labels.unlisted,
   getVaultDeprecation: () => labels.deprecated
     ? { deprecated: true, reason: 'Migrate to the new sUSDe vault.' }
     : { deprecated: false, reason: '' },
@@ -64,7 +65,34 @@ const renderGraph = (
   return renderToString(app)
 }
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  labels.unlisted = false
+  vi.unstubAllGlobals()
+})
+
+describe('graph node badge for unlisted vaults', () => {
+  it('marks a vault hidden from both tables as Unlisted', async () => {
+    labels.unlisted = true
+    const html = await renderGraph({ status: 'visible', decidedBy: 'verified', reason: null }, false)
+    expect(html).toContain('data-title="Unlisted"')
+    expect(html).toContain('data-text="Hidden from the lend and borrow tables."')
+  })
+
+  it('prefers the Deprecated badge and effective reason for an unlisted deprecated vault', async () => {
+    labels.unlisted = true
+    const html = await renderGraph({ status: 'warning', decidedBy: 'deprecated', reason: 'Euler has decommissioned this vault.' }, true)
+    expect(html.match(/data-title="Deprecated"/g)).toHaveLength(1)
+    expect(html).toContain('data-text="Euler has decommissioned this vault."')
+    expect(html).not.toContain('Migrate to the new sUSDe vault.')
+    expect(html).not.toContain('data-title="Unlisted"')
+    expect(html).not.toContain('data-title="Vault checks"')
+  })
+
+  it('shows no listing badge for a listed vault', async () => {
+    const html = await renderGraph({ status: 'visible', decidedBy: 'verified', reason: null }, false)
+    expect(html).not.toContain('data-title="Unlisted"')
+  })
+})
 
 describe('graph node badge for deprecated vaults', () => {
   it('uses the effective platform deprecation reason in one Deprecated badge', async () => {
