@@ -145,8 +145,8 @@ The server-side snapshot builder has its own independent `SERVER_VAULT_CACHE_SOU
 | `rewardsBrevisApiUrl` | `/api/internal/proxy/incentra/sdk/v1/eulerCampaigns` | Incentra/Brevis proxy |
 | `rewardsBrevisProofsApiUrl` | `/api/internal/proxy/incentra/v1/getMerkleProofsBatch` | Incentra/Brevis proxy |
 | `rewardsTurtleApiUrl` | `/api/internal/proxy/turtle` | Turtle Earn proxy; only reward proofs pass its allowlist, so the browser fetches proofs here while stream discovery runs in the server-side SDK (see below) |
-| `accountVaultsSubgraphUrls[chainId]` | `/api/internal/proxy/subgraph/{chainId}` | Goldsky subgraph proxy |
-| `vaultTypeSubgraphUrls[chainId]` | `/api/internal/proxy/subgraph/{chainId}` | Goldsky subgraph proxy |
+| `accountVaultsSubgraphUrls[chainId]` | `/api/internal/proxy/subgraph/{chainId}` | Configured subgraph proxy |
+| `vaultTypeSubgraphUrls[chainId]` | `/api/internal/proxy/subgraph/{chainId}` | Configured subgraph proxy |
 | `rpcUrls[chainId]` | `/api/internal/rpc/{chainId}` | JSON-RPC proxy |
 | Adapter block | `fallbackAdapterConfig` / `onchainAdapterConfig` / `v3AdapterConfig` per `browserVaultSource` (default browsing), `onchainAdapterConfig` (`ONCHAIN_SDK_CHAINS` browsing and plan-time) | — |
 | `disableV3` | Explicit `DISABLE_V3`, or a resolved `fallback` source with `!enableV3Backend` | — |
@@ -362,7 +362,9 @@ Direct per-chain URLs work without a catalog. For copyable fork configurations, 
 `SUBGRAPH_CATALOG_URL` opts into a server-only v1 catalog. Leave it empty for
 URL-only proxy configuration. Euler's official catalog is published at
 `https://raw.githubusercontent.com/euler-xyz/euler-subgraph/catalog/v1/catalog.json`.
-Set `SUBGRAPH_CATALOG_URL` to this URL to opt in.
+`.env.example` explicitly sets `SUBGRAPH_CATALOG_URL` to this URL and leaves
+per-chain URLs unset. The runtime has no implicit catalog URL. Forks can replace
+it with their own catalog or use the direct-only configuration linked above.
 
 Resolution is per chain: `SUBGRAPH_DISABLED_<chainId>=true` disables subgraph
 reads; otherwise `SUBGRAPH_URL_<chainId>`, then `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`,

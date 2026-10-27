@@ -104,8 +104,13 @@ SWAP_API_URL=https://swap.euler.finance
 
 # Chain RPC endpoints (one per chain you want to enable)
 RPC_URL_1=https://your-ethereum-rpc.com
-SUBGRAPH_URL_1=https://your-subgraph.com
+
+# Subgraph source: .env.example selects Euler's published catalog.
+SUBGRAPH_CATALOG_URL=https://raw.githubusercontent.com/euler-xyz/euler-subgraph/catalog/v1/catalog.json
+SUBGRAPH_CATALOG_DISABLED=false
 ```
+
+Each enabled chain needs an active entry in the selected catalog or an explicit compatible subgraph URL. `SUBGRAPH_URL_<chainId>` and its compatibility alias `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` override the catalog. Forks can use their own catalog or direct URLs with bundled Euler fallback disabled; see [Your own subgraphs](./fork-setup.md#your-own-subgraphs).
 
 ## Key External Services
 
@@ -156,7 +161,7 @@ SUBGRAPH_URL_1=https://your-subgraph.com
 ### Blockchain Connection Issues
 
 - Verify `RPC_URL_<chainId>` env vars are set correctly
-- Ensure matching `SUBGRAPH_URL_<chainId>` or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` exists for each chain
+- For subgraph discovery, verify an active catalog entry with `SUBGRAPH_CATALOG_URL` set, or an explicit `SUBGRAPH_URL_<chainId>` / `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`. Leave both URL aliases unset when using the catalog entry.
 - Ensure RPC endpoints are accessible
 
 ### Wallet Connection Problems

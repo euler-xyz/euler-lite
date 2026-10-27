@@ -25,7 +25,8 @@ Euler Lite is the only service. Standard commands live in `README.md` ("Availabl
   setup by copying `.env.example` and setting `NUXT_PUBLIC_APP_URL=http://localhost:3000` plus a
   public RPC: `RPC_URL_1=https://ethereum-rpc.publicnode.com`. If `.env` is missing, recreate it
   the same way — **at least one `RPC_URL_<chainId>` is required** or the chain selector shows no
-  chains. Subgraph URLs for many chains are already present in `.env.example`.
+  chains. `.env.example` selects Euler's published subgraph catalog via `SUBGRAPH_CATALOG_URL`.
+  Forks can select a custom catalog or direct endpoints; see `docs/fork-setup.md`.
 - `NUXT_PUBLIC_APP_KIT_PROJECT_ID` (Reown/WalletConnect) is left empty; browsing/read flows work
   without it, but live wallet connection needs a real project ID.
 - Enabled chains are derived from `RPC_URL_<chainId>` vars at server startup, so **restart

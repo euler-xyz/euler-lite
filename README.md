@@ -42,7 +42,7 @@ cp .env.example .env
 | `APPKIT_PROJECT_ID` or `NUXT_PUBLIC_APP_KIT_PROJECT_ID` | Reown (WalletConnect) project ID                |
 | `NUXT_PUBLIC_APP_URL`                | Your app's public URL                                       |
 | `RPC_URL_<chainId>`                  | RPC endpoint per chain (e.g. `RPC_URL_1` for Ethereum)      |
-| `SUBGRAPH_URL_<chainId>` or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` | Subgraph URI per chain. `SUBGRAPH_URL_*` is server-only and preferred; `NUXT_PUBLIC_SUBGRAPH_URI_*` remains supported for existing deployments. |
+| `SUBGRAPH_CATALOG_URL` or `SUBGRAPH_URL_<chainId>` | Subgraph source for each enabled chain: an active entry in the selected catalog, or an explicit URL. `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` is also supported. Explicit URLs take priority; all settings stay server-side. |
 
 #### API URLs
 
@@ -139,19 +139,22 @@ At server startup, short `CONFIG_ANNOUNCEMENT_*` names take precedence over the 
 
 #### Chain Configuration
 
-Chains are configured dynamically at runtime. Each chain requires two env vars:
+Chains are configured dynamically at runtime. Set one RPC URL per chain and select a subgraph source. `.env.example` selects Euler's published catalog, which supplies endpoints for its active chain entries:
 
-```bash
+```dotenv
+SUBGRAPH_CATALOG_URL=https://raw.githubusercontent.com/euler-xyz/euler-subgraph/catalog/v1/catalog.json
+SUBGRAPH_CATALOG_DISABLED=false
+
 # Ethereum Mainnet
 RPC_URL_1=https://your-rpc-endpoint.com
-SUBGRAPH_URL_1=https://api.goldsky.com/.../euler-simple-mainnet/latest/gn
 
 # Arbitrum
 RPC_URL_42161=https://your-arbitrum-rpc.com
-SUBGRAPH_URL_42161=https://api.goldsky.com/.../euler-simple-arbitrum/latest/gn
 ```
 
-The app scans for `RPC_URL_<chainId>` env vars at server startup and automatically enables those chains. The SDK subgraph adapters call the same-origin `/api/internal/proxy/subgraph/<chainId>` route, which resolves `SUBGRAPH_URL_<chainId>` first and `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` second.
+The app scans `RPC_URL_<chainId>` variables at server startup; catalog membership does not enable a chain. Browser SDK subgraph reads use `/api/internal/proxy/subgraph/<chainId>`. Per-chain disabling takes priority, followed by `SUBGRAPH_URL_<chainId>`, its compatibility alias `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`, then the selected catalog. Leave both URL aliases unset for chains managed by the catalog.
+
+Forks can replace the catalog URL or use only their own direct endpoints. For direct-only operation, clear `SUBGRAPH_CATALOG_URL`, set `SUBGRAPH_CATALOG_DISABLED=true` to prevent bundled server SDK fallback, and configure the intended per-chain URLs. Clear or replace any existing Euler URL overrides as well. See [Your own subgraphs](./docs/fork-setup.md#your-own-subgraphs) for copyable examples and disable behaviour.
 
 A chain also needs an entry in euler-interfaces `EulerChains.json`, and both the pinned `@eulerxyz/euler-v2-sdk` and `@reown/appkit/networks` must support it. When they already do, adding a chain needs no code change; otherwise it needs a dependency bump and a release. See [Adding a Chain](./docs/adding-a-chain.md) for the full checklist.
 
@@ -161,12 +164,13 @@ The chain's `status` in `EulerChains.json` decides whether an enabled chain is s
 
 Euler Lite remains a normal multichain web app, but it supports opening inside the Base App in-app browser. The wallet flow prefers the injected Base App provider when it is available, then falls back to the standard Reown AppKit modal for all other browsers and wallets.
 
-To make Base mainnet available in that environment, configure the same runtime chain variables used by every other chain:
+With the catalog configured above and an active Base entry, add Base mainnet's RPC:
 
-```bash
+```dotenv
 RPC_URL_8453=https://your-base-rpc.com
-SUBGRAPH_URL_8453=https://api.goldsky.com/.../euler-simple-base/latest/gn
 ```
+
+Use `SUBGRAPH_URL_8453` only to pin an explicit compatible endpoint instead of the catalog entry.
 
 ### 3. Customize Your Instance
 
@@ -322,7 +326,7 @@ docker run -p 3000:3000 \
   -e SWAP_API_URL=https://swap.euler.finance \
   -e APPKIT_PROJECT_ID=your-project-id \
   -e RPC_URL_1=https://your-rpc.com \
-  -e SUBGRAPH_URL_1=https://your-subgraph.com \
+  -e SUBGRAPH_CATALOG_URL=https://raw.githubusercontent.com/euler-xyz/euler-subgraph/catalog/v1/catalog.json \
   euler-lite node .output/server/index.mjs
 ```
 
@@ -383,7 +387,7 @@ Before deploying:
 - [ ] Set `APPKIT_PROJECT_ID` and `NUXT_PUBLIC_APP_URL`
 - [ ] Set `V3_API_URL`, optional `EULER_SDK_V3_API_KEY`, and `SWAP_API_URL`
 - [ ] Set `TURTLE_EARN_API_KEY` if Turtle rewards stay enabled (`NUXT_PUBLIC_CONFIG_ENABLE_TURTLE`), otherwise Turtle reward proofs return 503 and the server SDK skips Turtle stream discovery
-- [ ] Added at least one `RPC_URL_<chainId>` with matching `SUBGRAPH_URL_<chainId>` or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`
+- [ ] Added at least one `RPC_URL_<chainId>` and verified an active catalog entry with `SUBGRAPH_CATALOG_URL` set, or configured an explicit `SUBGRAPH_URL_<chainId>` / `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`
 - [ ] Configured branding via `NUXT_PUBLIC_CONFIG_*` env vars (title, description, logo, social links, social share image)
 - [ ] Customized theme colors in `assets/styles/variables.scss` (THEME CONFIGURATION section)
 - [ ] Replaced favicon files in `public/favicons/`
@@ -417,7 +421,7 @@ Before deploying:
 ### No Chains Available
 
 - Ensure at least one `RPC_URL_<chainId>` env var is set
-- Each chain needs a matching `SUBGRAPH_URL_<chainId>` or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`
+- For subgraph discovery, verify an active entry in the catalog selected by `SUBGRAPH_CATALOG_URL`, or an explicit `SUBGRAPH_URL_<chainId>` / `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`. Subgraph configuration does not enable chains.
 - Check the chain's `status` in `EulerChains.json`: `unlisted` chains are always hidden, and `staging` chains are hidden when `DOPPLER_ENVIRONMENT=prd`
 
 ## Additional Resources

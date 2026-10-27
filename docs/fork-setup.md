@@ -2,7 +2,7 @@
 
 Lite supports an operator-owned V3 backend, operator-owned static labels, or static labels with V3 disabled. Label policy, quantitative data and subgraph discovery are separate choices. Direct subgraph URLs work without a catalog; a custom catalog is optional.
 
-**The current Euler deployment needs no environment changes.** Keep its existing V3, labels and chain settings. `DISABLE_V3` defaults to `false`, and `LABELS_IMAGE_ORIGINS` can remain unset or blank. Neither setting needs to be added to the current deployment.
+V3, labels and chain settings can stay unchanged when selecting a different subgraph source. `DISABLE_V3` defaults to `false`, and `LABELS_IMAGE_ORIGINS` can remain unset or blank for Euler's V3 and the image origins described below.
 
 ## Required versus optional settings
 
@@ -10,7 +10,7 @@ Starting from `.env.example` and the common app/RPC setup below, apply the sourc
 
 | Setup | Required source settings | Vault data | Labels, discovery and country rules |
 |---|---|---|---|
-| Current Euler setup | No changes to the existing environment | Euler's V3 and configured RPCs | Euler's V3 |
+| Euler's V3 and hosted labels | Keep `V3_API_URL=https://v3.euler.finance` and `LABELS_SOURCE=v3` from `.env.example` | Euler's V3 and configured RPCs | Euler's V3 |
 | Your own V3 | Set `V3_API_URL` to your backend | Your V3, with RPC fallback by default | Your V3's published labels and live policies |
 | Static labels with V3 | Set `LABELS_SOURCE=static` and `STATIC_LABELS_BASE_URL`; keep a configured `V3_API_URL` for quantitative reads | Your V3 or Euler's V3 | Your authored JSON files |
 | Static labels without V3 | Set `LABELS_SOURCE=static`, `STATIC_LABELS_BASE_URL` and `DISABLE_V3=true` | RPC and configured subgraphs | Your authored JSON files |
@@ -52,6 +52,8 @@ Run `npm run dev` for local development. For a deployment, run `npm run build`, 
 
 Lite's browser reads use `/api/internal/proxy/subgraph/{chainId}`. Server SDK reads use the same source resolver directly. Both support explicit per-chain URLs; a catalog is optional metadata for discovering those URLs, not a requirement for running your fork.
 
+`.env.example` explicitly selects Euler's published catalog with `SUBGRAPH_CATALOG_URL` and supplies no active per-chain URL overrides. For a fork, replace that catalog URL or apply the direct-only configuration below. Review both your `.env` and deployment environment for existing endpoint assignments.
+
 Resolution follows this order for each chain:
 
 1. `SUBGRAPH_DISABLED_<chainId>=true` disables subgraph reads, including explicitly configured URLs.
@@ -64,7 +66,7 @@ Resolution follows this order for each chain:
 
 ### Direct URLs without Euler subgraph fallback
 
-In your copied `.env` and any deployment environment, first remove **all** copied `SUBGRAPH_URL_*` and `NUXT_PUBLIC_SUBGRAPH_URI_*` assignments pointing to Euler. The shipped `.env.example` contains explicit Euler URLs, and disabling the catalog does not disable those explicit URLs. Add only your intended endpoints:
+In your `.env` and deployment environment, remove or replace **all** existing `SUBGRAPH_URL_*` and `NUXT_PUBLIC_SUBGRAPH_URI_*` assignments pointing to Euler; explicit URLs remain authoritative even when the catalog is disabled. Clear the sample's catalog URL, disable catalog and bundled server SDK fallback, and add only your intended endpoints:
 
 ```dotenv
 # Direct-only subgraph resolution; no catalog or bundled server SDK fallback.
@@ -81,7 +83,7 @@ Replace the placeholder URL with your compatible subgraph. An unconfigured chain
 
 ### Custom catalog instead of per-chain URLs
 
-Remove the copied Euler URL assignments as described above, then select your catalog:
+Replace the sample's Euler catalog URL with your own. Remove both direct URL aliases for every chain whose endpoint should come from your catalog, including any values injected by your deployment environment:
 
 ```dotenv
 SUBGRAPH_CATALOG_URL=https://config.operator.example/subgraphs/catalog.json
@@ -92,7 +94,7 @@ NUXT_PUBLIC_SUBGRAPH_URI_1=
 SUBGRAPH_DISABLED_1=false
 ```
 
-The catalog must follow [the v1 contract and validation rules](./sdk-integration.md#subgraph-catalog-resolution), contain your intended endpoints, and advertise both `account-vault-discovery` and `vault-factory-lookup`. Merely hosting a catalog yourself does not make its listed endpoints operator-owned. Public catalog entries use HTTPS without URL credentials, query strings or fragments; explicit operator URL overrides follow the separate trusted configuration path. No official catalog is fetched implicitly.
+The catalog must follow [the v1 contract and validation rules](./sdk-integration.md#subgraph-catalog-resolution), contain your intended endpoints, and advertise both `account-vault-discovery` and `vault-factory-lookup`. Merely hosting a catalog yourself does not make its listed endpoints operator-owned. Public catalog entries use HTTPS without URL credentials, query strings or fragments; explicit operator URL overrides follow the separate trusted configuration path. Lite only fetches the catalog URL you configure; `.env.example` explicitly configures Euler's URL, so replace it when selecting your own catalog.
 
 To pin one chain while using the catalog for others, set its `SUBGRAPH_URL_<chainId>` to your endpoint. That pin wins even if the catalog retires the corresponding entry. Use the per-chain disable when you need to suppress a pin as well. A successful retirement of a catalog-selected chain stops that source without resurrecting a bundled endpoint.
 
