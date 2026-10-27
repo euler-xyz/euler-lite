@@ -360,10 +360,9 @@ How fresh that snapshot actually is depends on the path taken:
 Direct per-chain URLs work without a catalog. For copyable fork configurations, see [Your own subgraphs](./fork-setup.md#your-own-subgraphs), including direct-only resolution without bundled Euler subgraph fallback and an optional custom catalog.
 
 `SUBGRAPH_CATALOG_URL` opts into a server-only v1 catalog. Leave it empty for
-URL-only proxy configuration. The future official publication target is
-`https://raw.githubusercontent.com/euler-xyz/euler-subgraph/catalog/v1/catalog.json`;
-configure it only after an operator publishes it. The repository fixture is not
-a live endpoint or an assertion of service health.
+URL-only proxy configuration. Euler's official catalog is published at
+`https://raw.githubusercontent.com/euler-xyz/euler-subgraph/catalog/v1/catalog.json`.
+Set `SUBGRAPH_CATALOG_URL` to this URL to opt in.
 
 Resolution is per chain: `SUBGRAPH_DISABLED_<chainId>=true` disables subgraph
 reads; otherwise `SUBGRAPH_URL_<chainId>`, then `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`,
