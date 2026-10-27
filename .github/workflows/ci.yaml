@@ -24,7 +24,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      - run: npm install -g npm@11.10.0
+      - run: npm install -g npm@11.20.0
 
       - run: npm ci
 
@@ -43,7 +43,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      - run: npm install -g npm@11.10.0
+      - run: npm install -g npm@11.20.0
 
       - run: npm ci
 
@@ -62,7 +62,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      - run: npm install -g npm@11.10.0
+      - run: npm install -g npm@11.20.0
 
       - run: npm ci
 

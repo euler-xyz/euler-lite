@@ -72,7 +72,8 @@ const importUseEulerSdk = async (
   disableV3 = false,
 ) => {
   vi.resetModules()
-  vi.doMock('@eulerxyz/euler-v2-sdk', () => ({
+  vi.doMock('@eulerxyz/euler-v2-sdk', async importOriginal => ({
+    ...await importOriginal<typeof import('@eulerxyz/euler-v2-sdk')>(),
     buildEulerSDK,
     DeploymentService: { build: buildDeployments },
     serializeQueryArgs: (args: readonly unknown[]) => JSON.stringify(args),

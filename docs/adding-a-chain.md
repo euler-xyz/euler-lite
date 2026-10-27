@@ -20,12 +20,17 @@ Not needed in code: the chain logo comes from V3 (`/v3/images/chains/<id>`), wit
 
 To release: merge the change into `development`, merge `development` into `master`, then push a `v*` tag on `master`. A `v*` tag (without `-rc` or `-beta`) deploys prod and base; a `v*-rc*` or `v*-beta*` tag deploys stage. The dispatcher workflows are in `.github/workflows/build-push-deploy-*.yaml`. The dev environment is deployed by hand from any branch, so you can test an unreleased change there first.
 
-## 3. `RPC_URL_<id>` and `SUBGRAPH_URL_<id>` in Doppler
+## 3. RPC and subgraph source in Doppler
 
-Add both variables to each Doppler config, in this order: dev → stage → prod **and** base. A `v*` tag deploys prod and base as separate services, each with its own Doppler config, so a chain meant for both needs the variables in both.
+Apply the configuration to dev first, then stage, then prod **and** base. A `v*` tag deploys prod and base as separate services, each with its own Doppler config.
 
-- `RPC_URL_<id>`: a valid HTTP(S) RPC URL. Server-side only; the browser reaches it through `/api/internal/rpc/<id>`.
-- `SUBGRAPH_URL_<id>`: the chain's Euler subgraph. Server-side only; the browser reaches it through `/api/internal/proxy/subgraph/<id>`.
+- Set `RPC_URL_<id>` to a valid HTTP(S) RPC URL in each environment serving the chain. It stays server-side; the browser uses `/api/internal/rpc/<id>`.
+- If `SUBGRAPH_CATALOG_URL` is configured and `SUBGRAPH_CATALOG_DISABLED` is unset or `false`, verify that the selected catalog publishes an active, stable `euler-simple` entry for the chain with both `account-vault-discovery` and `vault-factory-lookup`. With that entry available, **only the new `RPC_URL_<id>` variable is needed**. Leave `SUBGRAPH_URL_<id>` and `NUXT_PUBLIC_SUBGRAPH_URI_<id>` unset so the catalog selects the endpoint.
+- Set `SUBGRAPH_URL_<id>` only when deliberately pinning a compatible endpoint or using direct URLs without a catalog. It takes priority over `NUXT_PUBLIC_SUBGRAPH_URI_<id>` and the catalog. The browser uses `/api/internal/proxy/subgraph/<id>`; configured upstream URLs stay server-side.
+
+Euler's published catalog is `https://raw.githubusercontent.com/euler-xyz/euler-subgraph/catalog/v1/catalog.json`; `.env.example` selects it. Forks can select their own catalog or direct endpoints; see [Your own subgraphs](./fork-setup.md#your-own-subgraphs) for override priority and how to prevent bundled Euler fallback. Ensure `SUBGRAPH_DISABLED_<id>` is unset or `false` for a chain that needs discovery.
+
+Catalog publication is separate from adding a chain to `EulerChains.json`. Verify the entry is published and queryable before enabling catalog-backed discovery. Catalog membership does not configure RPCs, change chain lifecycle, or replace `ONCHAIN_SDK_CHAINS` entries required for deprecated chains using hosted labels.
 
 ## 4. ECS redeploy
 

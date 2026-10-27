@@ -27,8 +27,10 @@ RUN set -eux; \
 # ── Build stage ──
 FROM node:24.22.1 AS builder
 
+RUN npm install --global npm@11.20.0
+
 WORKDIR /usr/src/app
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json .npmrc ./
 RUN npm ci
 
 # Preview SDK branches are mutable. Including the Lite source snapshot in this

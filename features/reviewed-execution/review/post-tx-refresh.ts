@@ -16,7 +16,8 @@ const triggerRefresh = (triggerPortfolioRefresh: () => void, forceFresh = false)
 /**
  * Refresh immediately after a terminal submission outcome. When a confirmed
  * block is available, refresh discovery data again once the subgraph serving
- * account-vault membership has indexed that block.
+ * account-vault membership has indexed that block. This bounded catch-up wait
+ * schedules an additional refresh; it does not gate discovery or planning.
  */
 export const refreshPortfolioAfterReviewedSubmission = async ({
   chainId,
