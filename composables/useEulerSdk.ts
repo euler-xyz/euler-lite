@@ -224,6 +224,9 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
     // directly.
     accountVaultsSubgraphUrls: subgraphUrls,
     vaultTypeSubgraphUrls: subgraphUrls,
+    // The shared query cache already holds these reads; a second SDK cache would add its own 5 minutes.
+    vaultAssessmentV3CacheMs: 0,
+    oracleAdapterV3CacheMs: 0,
     ...adapterConfigForFastSource(fastSource),
     // Fallback chains short-circuit to the secondary (onchain/direct/subgraph)
     // when no upstream V3 is configured. Other sources have their adapters

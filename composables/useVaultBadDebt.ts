@@ -1,4 +1,6 @@
 import { V3_API_PROXY_URL } from '~/utils/api-url-env'
+import { logWarn } from '~/utils/errorHandling'
+import { isV3AggregateRereadDue, readV3RefreshedAt, type V3AggregateCopy } from '~/utils/v3-aggregate-freshness'
 import {
   buildBadDebtCache,
   parseBadDebtResponse,
@@ -10,6 +12,7 @@ const badDebtByChain = shallowRef<Map<number, Map<string, VaultBadDebtCacheEntry
 const loadingChains = shallowRef<Set<number>>(new Set())
 const errorByChain = shallowRef<Map<number, Error>>(new Map())
 const inFlight = new Map<number, Promise<void>>()
+const copyByChain = new Map<number, V3AggregateCopy>()
 
 const setChainLoading = (chainId: number, loading: boolean) => {
   const next = new Set(loadingChains.value)
@@ -43,9 +46,10 @@ const buildBadDebtUrl = (baseUrl: string, chainId: number, offset: number, limit
 const fetchBadDebtRows = async (
   baseUrl: string,
   chainId: number,
-): Promise<V3VaultBadDebtRow[]> => {
+): Promise<{ rows: V3VaultBadDebtRow[], refreshedAt: string | null }> => {
   const limit = 100
   let offset = 0
+  let refreshedAt: string | null = null
   const rows: V3VaultBadDebtRow[] = []
 
   while (true) {
@@ -58,8 +62,9 @@ const fetchBadDebtRows = async (
 
     const body = await response.json()
     const page = parseBadDebtResponse(body)
+    refreshedAt ??= readV3RefreshedAt(body)
     rows.push(...page)
-    if (page.length < limit) return rows
+    if (page.length < limit) return { rows, refreshedAt }
     offset += limit
   }
 }
@@ -70,9 +75,10 @@ export const useVaultBadDebt = () => {
   const { isV3EnabledForChain } = useV3ChainGate()
   const isBadDebtEnabled = computed(() => isV3EnabledForChain(chainId.value))
 
+  /** A silent load keeps the loaded values and shows no loading or error state. */
   const loadBadDebtForChain = async (
     targetChainId = chainId.value,
-    { force = false }: { force?: boolean } = {},
+    { force = false, silent = false }: { force?: boolean, silent?: boolean } = {},
   ) => {
     if (!isV3EnabledForChain(targetChainId)) {
       setChainLoading(targetChainId, false)
@@ -84,23 +90,35 @@ export const useVaultBadDebt = () => {
     if (existing) return existing
 
     const promise = (async () => {
-      setChainLoading(targetChainId, true)
-      setChainError(targetChainId, null)
+      if (!silent) {
+        setChainLoading(targetChainId, true)
+        setChainError(targetChainId, null)
+      }
       try {
-        const rows = await fetchBadDebtRows(envConfig.v3ApiUrl, targetChainId)
+        const readAt = Date.now()
+        const { rows, refreshedAt } = await fetchBadDebtRows(envConfig.v3ApiUrl, targetChainId)
         setChainCache(targetChainId, buildBadDebtCache(rows))
+        copyByChain.set(targetChainId, { refreshedAt, readAt })
       }
       catch (err) {
-        setChainError(targetChainId, err instanceof Error ? err : new Error(String(err)))
+        if (silent) logWarn('useVaultBadDebt/refresh', err)
+        else setChainError(targetChainId, err instanceof Error ? err : new Error(String(err)))
       }
       finally {
-        setChainLoading(targetChainId, false)
+        if (!silent) setChainLoading(targetChainId, false)
         inFlight.delete(targetChainId)
       }
     })()
 
     inFlight.set(targetChainId, promise)
     return promise
+  }
+
+  const refreshBadDebtIfStale = async (targetChainId = chainId.value) => {
+    const copy = copyByChain.get(targetChainId)
+    if (!copy || !badDebtByChain.value.has(targetChainId) || errorByChain.value.has(targetChainId)) return
+    if (!isV3AggregateRereadDue(copy)) return
+    return loadBadDebtForChain(targetChainId, { force: true, silent: true })
   }
 
   const getVaultBadDebt = (
@@ -123,5 +141,6 @@ export const useVaultBadDebt = () => {
     isBadDebtLoaded,
     isBadDebtLoading,
     loadBadDebtForChain,
+    refreshBadDebtIfStale,
   }
 }

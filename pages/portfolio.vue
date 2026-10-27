@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { isExternalMigrationDustPosition } from '~/composables/useExternalMigrationPositions'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
-import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 
 defineOptions({
   name: 'PortfolioPage',
@@ -43,7 +42,6 @@ const showActivityTab = computed(() => shouldShowPortfolioActivityTab(
   activityRuntimeSupport.isRuntimeUnsupported.value,
 ))
 
-const interval: Ref<NodeJS.Timeout | null> = ref(null)
 const hasShownMigrationTab = ref(false)
 type PortfolioTab = {
   label: string
@@ -206,18 +204,13 @@ const updatePositions = async (
   })
 }
 
+const positionsRefresh = useVisibleTicker([() => updatePositions()])
 onActivated(async () => {
+  positionsRefresh.start()
   await updateBalances()
   updatePositions()
-  if (interval.value) clearInterval(interval.value)
-  interval.value = setInterval(updatePositions, POLL_INTERVAL_60S_MS)
 })
-onDeactivated(() => {
-  if (interval.value) {
-    clearInterval(interval.value)
-    interval.value = null
-  }
-})
+onDeactivated(positionsRefresh.stop)
 
 watch(portfolioRefreshCounter, () => {
   updatePositions({ portfolioSource: 'fresh', preemptPortfolio: true })

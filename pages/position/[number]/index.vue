@@ -18,6 +18,7 @@ import { VaultOverviewModal, VaultApyModal, VaultNetApyModal, PortfolioRoeModal,
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
+import { usePositionAutoRefresh } from '~/composables/position/usePositionAutoRefresh'
 import { getAddress, type Address } from 'viem'
 import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe'
 import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
@@ -642,7 +643,8 @@ const isDisableCollateralError = (vault: EVault | SecuritizeCollateralVault) => 
   }
 }
 
-const loadCollaterals = async (sequence: number) => {
+// A silent load keeps the shown collaterals and no loading state until the new list is ready.
+const loadCollaterals = async (sequence: number, { silent = false }: { silent?: boolean } = {}) => {
   if (!position.value) {
     collateralItems.value = []
     return
@@ -665,7 +667,7 @@ const loadCollaterals = async (sequence: number) => {
   const orderedAddresses = [primaryAddress, ...unique.filter(address => address !== primaryAddress)]
   const primarySupplied = position.value.supplied
 
-  isCollateralsLoading.value = true
+  if (!silent) isCollateralsLoading.value = true
 
   try {
     await until(isVaultsReady).toBe(true)
@@ -699,7 +701,7 @@ const loadCollaterals = async (sequence: number) => {
     console.warn('[Position] failed to load collaterals', e)
   }
   finally {
-    if (sequence === loadSequence) {
+    if (sequence === loadSequence && !silent) {
       isCollateralsLoading.value = false
     }
   }
@@ -769,7 +771,7 @@ const disableCollateral = async (vault: EVault) => {
     isPreparing.value = false
   }
 }
-const load = async () => {
+const load = async ({ silent = false }: { silent?: boolean } = {}) => {
   const sequence = ++loadSequence
   if (!isConnected.value && !isSpyMode.value) {
     router.replace('/portfolio')
@@ -782,15 +784,18 @@ const load = async () => {
     position.value = getPositionBySubAccountIndex(+getCurrentRoutePositionIndex())
     if (position.value) {
       const initialCollateralVault = collateralVault.value
-      collateralItems.value = initialCollateralVault
-        ? [{
-            vault: initialCollateralVault,
-            assets: position.value.supplied,
-          }]
-        : []
       // Load collaterals: always for multi-collateral, or when oracle failed (to get actual assets)
-      if (positionCollateralAddresses.value.length > 1 || hasQueryFailure.value) {
-        await loadCollaterals(sequence)
+      const needsCollaterals = positionCollateralAddresses.value.length > 1 || hasQueryFailure.value
+      if (!silent || !needsCollaterals) {
+        collateralItems.value = initialCollateralVault
+          ? [{
+              vault: initialCollateralVault,
+              assets: position.value.supplied,
+            }]
+          : []
+      }
+      if (needsCollaterals) {
+        await loadCollaterals(sequence, { silent })
       }
     }
     else {
@@ -799,7 +804,7 @@ const load = async () => {
   }
   catch (e) {
     if (sequence !== loadSequence) return
-    showError('Unable to load Position')
+    if (!silent) showError('Unable to load Position')
     console.warn(e)
   }
 }
@@ -886,6 +891,12 @@ const openRampDownModal = () => {
 watch([isConnected, isSpyMode, address, activeLayerData, () => _route.params.number], () => {
   load()
 }, { immediate: true })
+
+const positionRefresh = usePositionAutoRefresh({
+  isBusy: () => isPreparing.value || isSubmitting.value || isCollateralsLoading.value || isPositionsLoading.value,
+  reread: () => load({ silent: true }),
+})
+onMounted(positionRefresh.start)
 </script>
 
 <template>

@@ -52,8 +52,10 @@ import type { EulerSDKQueryName } from '@eulerxyz/euler-v2-sdk'
  * Stale-time classes (organising the rows below):
  *
  *   - **Default / low-volatility reads** (deployments, oracle adapter
- *     lists, verified-vault arrays, reward campaign metadata, V3 list pages):
- *     5 min.
+ *     lists, verified-vault arrays, reward campaign metadata): 5 min.
+ *   - **V3 display reads** (V3 vault and Earn detail, V3 list and APY
+ *     pages, vault assessments and oracle adapter checks): 50 s. V3 refreshes these on events and on its own cycles, so
+ *     this cache only joins the reads of one refresh.
  *   - **Plan-critical chain reads** (vault info, account info, vault
  *     factory/type lookups): 5 min on the browsing SDK + 1 min on the plan-time
  *     SDK + invalidate-after-tx. The bumped 5-min stale lets quote plugins
@@ -81,6 +83,9 @@ export const ACTIVITY_QUERY_STALE_TIME_MS = MINUTE
 
 export const DEFAULT_STALE_TIME_MS = 5 * MINUTE
 
+/** Just under the app's 60 s visible-tab refresh, so each refresh reads V3 rather than this cache. */
+export const V3_DISPLAY_STALE_TIME_MS = 50 * SECOND
+
 export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyEntry>> = {
   // === Catalogue / metadata: nearly static ===
   queryDeployments: { staleTimeMs: 5 * MINUTE },
@@ -91,9 +96,6 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
   // Public Labels V3 includes live visibility; retain the SDK's short cache window.
   // Lite's injected labels service owns its snapshot freshness separately.
   queryPublicLabels: { staleTimeMs: 5 * SECOND },
-  queryV3OracleAdapterAssessment: { staleTimeMs: 5 * MINUTE },
-  queryV3VaultAssessment: { staleTimeMs: 5 * MINUTE },
-  queryV3OracleAdapterAssessmentsPage: { staleTimeMs: 5 * MINUTE },
   queryV3OracleRoutersPage: { staleTimeMs: 5 * MINUTE },
   queryV3VaultResolve: { staleTimeMs: 5 * MINUTE },
 
@@ -117,19 +119,24 @@ export const SDK_QUERY_POLICY: Partial<Record<EulerSDKQueryName, SdkQueryPolicyE
   querySwapProviders: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   queryTurtleMerkleProofs: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   queryTurtleStreams: { staleTimeMs: DEFAULT_STALE_TIME_MS },
-  queryV3EVaultList: { staleTimeMs: DEFAULT_STALE_TIME_MS },
-  queryV3EulerEarnList: { staleTimeMs: DEFAULT_STALE_TIME_MS },
-  queryV3IntrinsicApysPage: { staleTimeMs: DEFAULT_STALE_TIME_MS },
-  queryV3RewardsApyPage: { staleTimeMs: DEFAULT_STALE_TIME_MS },
   queryVaultInfoERC4626: { staleTimeMs: DEFAULT_STALE_TIME_MS },
+
+  // === V3 display reads: V3 bounds their freshness ===
+  queryV3EVaultDetail: { staleTimeMs: V3_DISPLAY_STALE_TIME_MS, invalidateAfterTx: true },
+  queryV3EulerEarnDetail: { staleTimeMs: V3_DISPLAY_STALE_TIME_MS, invalidateAfterTx: true },
+  queryV3EVaultList: { staleTimeMs: V3_DISPLAY_STALE_TIME_MS },
+  queryV3EulerEarnList: { staleTimeMs: V3_DISPLAY_STALE_TIME_MS },
+  queryV3IntrinsicApysPage: { staleTimeMs: V3_DISPLAY_STALE_TIME_MS },
+  queryV3RewardsApyPage: { staleTimeMs: V3_DISPLAY_STALE_TIME_MS },
+  queryV3VaultAssessment: { staleTimeMs: V3_DISPLAY_STALE_TIME_MS },
+  queryV3OracleAdapterAssessment: { staleTimeMs: V3_DISPLAY_STALE_TIME_MS },
+  queryV3OracleAdapterAssessmentsPage: { staleTimeMs: V3_DISPLAY_STALE_TIME_MS },
 
   // === Plan-critical chain reads ===
   queryAccountVaults: { staleTimeMs: DEFAULT_STALE_TIME_MS, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
   queryEVaultInfoFull: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
   queryEulerEarnVaultInfoFull: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
   queryV3AccountPositions: { staleTimeMs: DEFAULT_STALE_TIME_MS, invalidateAfterTx: true },
-  queryV3EVaultDetail: { staleTimeMs: 5 * MINUTE, invalidateAfterTx: true },
-  queryV3EulerEarnDetail: { staleTimeMs: 5 * MINUTE, invalidateAfterTx: true },
   queryEVCAccountInfo: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
   queryVaultAccountInfo: { staleTimeMs: 5 * MINUTE, formStaleTimeMs: MINUTE, invalidateAfterTx: true },
   queryVaultFactories: { staleTimeMs: 5 * MINUTE, invalidateAfterTx: true },

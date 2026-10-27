@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 import { AnnouncementModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 
@@ -12,10 +11,9 @@ const modal = useModal()
 let isAnnouncementOpen = false
 
 const { loadEulerConfig, chainId } = useEulerAddresses()
-const { loadVaults, isReady: isVaultsReady, resetVaultsState, refreshVaults, setShowAllLabelEntries } = useVaults()
+const { loadVaults, isReady: isVaultsReady, resetVaultsState, setShowAllLabelEntries } = useVaults()
 const { loadTokenList, isLoaded: isTokenListLoaded } = useTokenList()
-const { loadLabels, refreshLabelsIfStale, retryLabels, isReady: isLabelsReady, isLoading: isLabelsLoading, loadError: labelsLoadError } = useEulerLabels()
-const { refreshLiquidationCoverageIfStale } = useLiquidationCoverage()
+const { loadLabels, retryLabels, isReady: isLabelsReady, isLoading: isLabelsLoading, loadError: labelsLoadError } = useEulerLabels()
 const { loadCountry } = useGeoBlock()
 const { updateBalances, resetBalances } = useWallets()
 const { isConnected, address } = useWagmi()
@@ -73,7 +71,6 @@ useHead({
 
 const isMenuVisible = ref(true)
 const isHeaderVisible = ref(true)
-let interval: NodeJS.Timeout | null = null
 
 const checkOnboarding = () => {
   if (!isOnboardingCompleted.value) {
@@ -163,24 +160,8 @@ watch([chainId, showAllLabelEntries], () => {
   })
 }, { immediate: true })
 
-// Refresh live label verdicts and liquidation bot coverage for an open tab and
-// after returning from a suspended/background tab. Each store owns its freshness.
-let labelsRefreshInterval: ReturnType<typeof setInterval> | undefined
-const refreshVisibleData = () => {
-  if (document.visibilityState !== 'visible') return
-  void refreshLabelsIfStale()
-  refreshLiquidationCoverageIfStale()
-}
-onMounted(() => {
-  labelsRefreshInterval = setInterval(refreshVisibleData, POLL_INTERVAL_60S_MS)
-  window.addEventListener('focus', refreshVisibleData)
-  document.addEventListener('visibilitychange', refreshVisibleData)
-})
-onUnmounted(() => {
-  clearInterval(labelsRefreshInterval)
-  window.removeEventListener('focus', refreshVisibleData)
-  document.removeEventListener('visibilitychange', refreshVisibleData)
-})
+const appRefresh = useAppRefresh()
+onMounted(appRefresh.start)
 
 // Refresh balances when token list finishes loading (includes new DefiLlama tokens)
 watch(isTokenListLoaded, (loaded) => {
@@ -189,20 +170,8 @@ watch(isTokenListLoaded, (loaded) => {
   }
 })
 
-watch([isConnected, isVaultsReady], ([val]) => {
-  // Clear existing interval before setting a new one
-  if (interval) {
-    clearInterval(interval)
-    interval = null
-  }
-
-  if (val && isVaultsReady.value) {
-    updateBalances()
-    interval = setInterval(async () => {
-      await updateBalances()
-      refreshVaults()
-    }, POLL_INTERVAL_60S_MS)
-  }
+watch([isConnected, isVaultsReady], ([connected, vaultsReady]) => {
+  if (connected && vaultsReady) updateBalances()
 }, { immediate: true })
 
 watch(address, () => {
@@ -215,12 +184,6 @@ watch(address, () => {
 const { portfolioRefreshCounter } = usePortfolioRefresh()
 watch(portfolioRefreshCounter, () => {
   updateBalances()
-})
-
-onUnmounted(() => {
-  if (interval) {
-    clearInterval(interval)
-  }
 })
 </script>
 

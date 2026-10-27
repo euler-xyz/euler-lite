@@ -134,6 +134,20 @@ describe('/api/internal/v3 proxy route', () => {
     expect(headers.get('x-api-key')).toBe('server-key')
   })
 
+  it('keeps browsers from caching V3 replies', async () => {
+    mocks.fetchWithTimeout.mockResolvedValueOnce(new Response('{"data":[]}', {
+      status: 200,
+      headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=60' },
+    }))
+    const event = makeEvent('GET', `https://app.example/api/internal/v3/earn/vaults/1/${VAULT}`)
+
+    await expect(handler(event)).resolves.toBe('{"data":[]}')
+
+    expect(event.context.responseHeaders?.['Cache-Control']).toBe('no-store')
+    expect(event.context.responseHeaders?.['cache-control']).toBeUndefined()
+    expect(event.context.responseHeaders?.['content-type']).toBe('application/json')
+  })
+
   it('rejects disallowed paths before consuming rate-limit budget', async () => {
     const event = makeEvent(
       'GET',

@@ -113,6 +113,7 @@ export default defineEventHandler(async (event) => {
 
   setResponseStatus(event, upstream.status, upstream.statusText)
   setResponseHeaders(event, readForwardedV3ResponseHeaders(upstream.headers))
+  setResponseHeader(event, 'Cache-Control', 'no-store')
 
   if (upstream.status === 204 || upstream.status === 304) {
     return undefined

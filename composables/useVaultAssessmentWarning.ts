@@ -1,5 +1,6 @@
 import type { VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
 import { toValue, type MaybeRefOrGetter } from 'vue'
+import { useVisibleTicker } from '~/composables/useVisibleTicker'
 import { getCriticalAssessmentWarning } from '~/utils/vault-assessment/presentation'
 
 export const useVaultAssessmentWarning = (
@@ -35,6 +36,14 @@ export const useVaultAssessmentWarning = (
     },
     { immediate: true },
   )
+
+  const refresh = useVisibleTicker([() => {
+    const vaultAddress = toValue(address)
+    if (enabled.value && chainId.value && vaultAddress) {
+      return loadVaultAssessment(chainId.value, vaultAddress, family, { background: true })
+    }
+  }])
+  onMounted(refresh.start)
 
   return { warning, entry }
 }

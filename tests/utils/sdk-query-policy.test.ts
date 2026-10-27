@@ -18,6 +18,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildEulerSDK, createKeyringPlugin, createPythPlugin } from '@eulerxyz/euler-v2-sdk'
 import type { BuildQueryFn } from '@eulerxyz/euler-v2-sdk'
+import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 import {
   FORM_STALE_TIMES,
   INVALIDATE_AFTER_TX,
@@ -82,6 +83,24 @@ describe('SDK_QUERY_POLICY derived lists', () => {
       const browse = STALE_TIMES[name as keyof typeof STALE_TIMES] ?? Infinity
       expect(form, `${name}: form-time stale must be <= browsing stale`).toBeLessThanOrEqual(browse)
     }
+  })
+})
+
+describe('SDK_QUERY_POLICY V3 display rows', () => {
+  // The app's visible-tab refresh runs every 60 s and V3 bounds these rows' freshness, so each
+  // must go stale before the next run or the refresh reads the cache instead of V3.
+  it.each([
+    'queryV3EVaultDetail',
+    'queryV3EulerEarnDetail',
+    'queryV3EVaultList',
+    'queryV3EulerEarnList',
+    'queryV3IntrinsicApysPage',
+    'queryV3RewardsApyPage',
+    'queryV3VaultAssessment',
+    'queryV3OracleAdapterAssessment',
+    'queryV3OracleAdapterAssessmentsPage',
+  ] as const)('%s goes stale before the next visible-tab refresh', (name) => {
+    expect(SDK_QUERY_POLICY[name]?.staleTimeMs).toBeLessThan(POLL_INTERVAL_60S_MS)
   })
 })
 

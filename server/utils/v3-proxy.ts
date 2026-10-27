@@ -1,7 +1,7 @@
 import { V3_API_PROXY_URL, readResolvedV3ApiUrl, readV3ApiKey } from '~/utils/api-url-env'
 
+// V3's cache-control stays out: a browser copy would hide V3's refreshes from the app's poll.
 const FORWARDED_RESPONSE_HEADERS = [
-  'cache-control',
   'cf-ray',
   'content-type',
   'etag',

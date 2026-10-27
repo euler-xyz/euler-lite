@@ -48,6 +48,20 @@ describe('useEulerVaultAssessments', () => {
     expect(fetchVaultAssessment).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps the shown assessment when a background re-read fails', async () => {
+    fetchVaultAssessment
+      .mockResolvedValueOnce({ assessed: true })
+      .mockRejectedValueOnce(new Error('upstream unavailable'))
+    const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
+    const service = useEulerVaultAssessments()
+    await service.loadVaultAssessment(1, ADDRESS, 'evk')
+
+    await service.loadVaultAssessment(1, ADDRESS, 'evk', { background: true })
+
+    expect(fetchVaultAssessment).toHaveBeenCalledTimes(2)
+    expect(service.getEntry(1, ADDRESS, 'evk')).toEqual({ status: 'available', assessment: { assessed: true } })
+  })
+
   it('does not load a locally gated chain', async () => {
     isV3EnabledForChain.mockReturnValue(false)
     const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
