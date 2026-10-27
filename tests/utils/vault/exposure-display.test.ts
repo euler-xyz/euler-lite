@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { getAddress } from 'viem'
 import {
   buildAllocatedVaultExposureDisplayItems,
   buildFallbackVaultExposureDisplay,
@@ -406,9 +407,36 @@ describe('getVaultBackingLead', () => {
     })?.label).toBe('Backed by wstETH, WBTC')
   })
 
-  it('has no lead for a vault without borrows, or while open interest loads', () => {
+  it('names accepted collateral for a vault without borrows', () => {
     expect(getVaultBackingLead({
       ...live,
+      getCollateralGroups: () => [group('WBTC', 0), group('wstETH', 0)],
+      utilization: 0,
+      acceptedCollateralCount: 2,
+    })?.label).toBe('Accepts WBTC, wstETH')
+    expect(getVaultBackingLead({
+      openInterestEnabled: false,
+      openInterestLoaded: false,
+      hasOpenInterestError: false,
+      getCollateralGroups: () => [group('WBTC', 0)],
+      utilization: 0,
+      acceptedCollateralCount: 1,
+    })?.label).toBe('Accepts WBTC')
+  })
+
+  it('has no lead for a vault without borrows or live collateral', () => {
+    expect(getVaultBackingLead({
+      ...live,
+      getCollateralGroups: () => [],
+      utilization: 0,
+      acceptedCollateralCount: 1,
+    })).toBeNull()
+  })
+
+  it('has no lead while open interest loads', () => {
+    expect(getVaultBackingLead({
+      ...live,
+      openInterestLoaded: false,
       getCollateralGroups: () => [group('WBTC', 0)],
       utilization: 0,
       acceptedCollateralCount: 1,
@@ -426,6 +454,12 @@ describe('getVaultBackingLead', () => {
     expect(getVaultBackingLead({
       ...live,
       hasOpenInterestError: true,
+      getCollateralGroups: () => [group('WBTC', 0), group('wstETH', 0)],
+      utilization: 40,
+      acceptedCollateralCount: 2,
+    })?.label).toBe('Accepts WBTC, wstETH')
+    expect(getVaultBackingLead({
+      ...live,
       getCollateralGroups: () => [group('WBTC', 0), group('wstETH', 0)],
       utilization: 40,
       acceptedCollateralCount: 2,
@@ -452,5 +486,32 @@ describe('getVaultHeaderAssets', () => {
 
   it('falls back to the vault\'s asset when nothing backs it', () => {
     expect(getVaultHeaderAssets({ utilization: 0, collaterals: [], asset: usdc }, live, () => [])).toEqual({ assets: [usdc] })
+  })
+
+  describe('a strategy without borrows', () => {
+    const usdt = { address: '0x55d398326f99059fF775485246999027B3197955' as const, decimals: 18, name: 'Tether USD', symbol: 'USDT' }
+    const mub = { address: '0x1111111111111111111111111111111111111111', decimals: 18, name: 'MUB', symbol: 'MUB' }
+    const nvdab = { address: '0x2222222222222222222222222222222222222222', decimals: 18, name: 'NVDAB', symbol: 'NVDAB' }
+    const strategyGroup = (asset: typeof mub, openInterestUsd: number) => ({ ...group(asset.symbol, openInterestUsd), asset })
+
+    it('names the collateral it accepts', () => {
+      const header = getVaultHeaderAssets({ utilization: 0, collaterals: [{}], asset: usdt }, live, () => [strategyGroup(mub, 0)])
+      expect(header.label).toBe('Accepts MUB')
+      expect(header.assets).toEqual([{ ...mub, address: getAddress(mub.address) }])
+    })
+
+    it('keeps "Backed by" once anything is borrowed', () => {
+      const header = getVaultHeaderAssets({ utilization: 0.01, collaterals: [{}], asset: usdt }, live, () => [strategyGroup(nvdab, 12)])
+      expect(header.label).toBe('Backed by NVDAB')
+    })
+
+    it('falls back to its asset when no accepted collateral is live', () => {
+      expect(getVaultHeaderAssets({ utilization: 0, collaterals: [{}], asset: usdt }, live, () => [])).toEqual({ assets: [usdt] })
+    })
+
+    it('falls back to its asset while open interest loads', () => {
+      expect(getVaultHeaderAssets({ utilization: 0, collaterals: [{}], asset: usdt }, { ...live, loaded: false }, () => [strategyGroup(mub, 0)]))
+        .toEqual({ assets: [usdt] })
+    })
   })
 })
