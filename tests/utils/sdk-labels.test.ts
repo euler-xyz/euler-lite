@@ -1,9 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { buildEulerSDK, type BuildQueryFn } from '@eulerxyz/euler-v2-sdk'
 import files from '~/tests/fixtures/static-labels.json'
 import { KPK_VAULT, publicLabelsFixture } from '~/tests/fixtures/public-labels-v20260804151305236'
 import { LiteEulerLabelsService } from '~/utils/sdk-labels'
 
 const fetchMock = vi.fn()
+
+afterEach(() => vi.unstubAllGlobals())
 
 describe('SDK labels source in Lite', () => {
   beforeEach(() => {
@@ -59,6 +62,38 @@ describe('SDK labels source in Lite', () => {
     const labels = await new LiteEulerLabelsService(loadBundle).fetchEulerLabelsData(1)
     expect(loadBundle).toHaveBeenCalledWith(1)
     expect(labels.products.fork?.name).toBe('Fork product')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { source: 'v3', disableV3: false },
+    { source: 'static', disableV3: false },
+    { source: 'static', disableV3: true },
+  ] as const)('keeps $source labels authoritative in the real SDK with disableV3=$disableV3', async ({ source, disableV3 }) => {
+    const upstreamFetch = vi.fn(async () => {
+      throw new Error('Unexpected SDK HTTP request')
+    })
+    vi.stubGlobal('fetch', upstreamFetch)
+    const loadBundle = vi.fn().mockResolvedValue(source === 'v3'
+      ? { source, version: 'published', publicLabels: publicLabelsFixture, sourceFetchedAt: Date.now() }
+      : { source, version: 'fork', files, logoBaseUrl: 'https://fork.test/labels', fetchedAt: Date.now() })
+    const service = new LiteEulerLabelsService(loadBundle)
+    const buildQuery = ((name, fn) => name === 'queryDeployments' ? async () => [] : fn) as BuildQueryFn
+    const sdk = await buildEulerSDK({
+      config: { rpcUrls: {}, disableV3 },
+      buildQuery,
+      servicesOverrides: { eulerLabelsService: service },
+    })
+
+    expect(sdk.eulerLabelsService).toBe(service)
+    const labels = await sdk.eulerLabelsService.fetchEulerLabelsData(1)
+    if (source === 'v3') expect(labels.verifiedVaultAddresses).toContain(KPK_VAULT)
+    else expect(labels.products.fork?.name).toBe('Fork product')
+    expect(loadBundle).toHaveBeenCalledWith(1)
+
+    loadBundle.mockRejectedValueOnce(new Error('Configured labels source unavailable'))
+    await expect(sdk.eulerLabelsService.fetchEulerLabelsData(1)).rejects.toThrow('Configured labels source unavailable')
+    expect(upstreamFetch).not.toHaveBeenCalled()
     expect(fetchMock).not.toHaveBeenCalled()
   })
 

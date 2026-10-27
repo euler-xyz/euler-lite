@@ -23,7 +23,8 @@ vi.mock('~/server/utils/public-labels-source', () => ({
   getPublicLabelsBundle: mocks.getPublicLabelsBundle,
 }))
 
-vi.mock('~/server/utils/fetchWithTimeout', () => ({
+vi.mock('~/server/utils/fetchWithTimeout', async importOriginal => ({
+  ...await importOriginal<typeof import('~/server/utils/fetchWithTimeout')>(),
   fetchWithTimeout: mocks.fetchWithTimeout,
 }))
 
@@ -73,6 +74,69 @@ describe('getServerSdk', () => {
     process.env.DEPRECATED_CHAINS = '1'
     process.env.ONCHAIN_SDK_CHAINS = '8453'
     delete process.env.TURTLE_EARN_API_KEY
+  })
+
+  it('uses checked catalog/override resolution for real server SDK factory reads', async () => {
+    vi.stubEnv('SERVER_VAULT_CACHE_SOURCE', 'onchain')
+    vi.stubEnv('SUBGRAPH_URL_1', 'http://private.example/query?key=secret')
+    vi.stubEnv('SUBGRAPH_CATALOG_URL', 'https://catalog.example/fixture')
+    const address = '0x0000000000000000000000000000000000000001' as Address
+    const fetch = vi.fn(async (url: string) => url.startsWith('https://v3.example')
+      ? new Response('V3 unavailable', { status: 503 })
+      : Response.json({ data: { _meta: { deployment: 'cid' }, vaults: [{ id: address, factory: address }] } }))
+    vi.stubGlobal('fetch', fetch)
+    const { getServerSdk } = await import('~/server/utils/sdk-server')
+    const sdk = await getServerSdk(1)
+    await sdk.vaultMetaService.fetchVaultTypes(1, [address])
+    expect(fetch).toHaveBeenCalledWith('http://private.example/query?key=secret', expect.objectContaining({ method: 'POST' }))
+    vi.stubEnv('SUBGRAPH_URL_1', '')
+    fetch.mockResolvedValueOnce(Response.json({ schemaVersion: 1, revision: 'r', publishedAt: '2026-10-19T00:00:00Z', deployments: [
+      { chainId: 1, family: 'euler-simple', channel: 'stable', status: 'active', version: '1.0.0', endpoint: 'https://catalog-index.example/query', deploymentId: 'cid', sourceCommit: 'a'.repeat(40), startBlock: 0, capabilities: ['account-vault-discovery', 'vault-factory-lookup'] },
+    ] }))
+    await sdk.vaultMetaService.fetchVaultTypes(1, [address])
+    expect(fetch).toHaveBeenLastCalledWith('https://catalog-index.example/query', expect.anything())
+    vi.stubEnv('SUBGRAPH_DISABLED_1', 'true')
+    fetch.mockClear()
+    await expect(sdk.vaultMetaService.fetchVaultTypes(1, [address])).rejects.toThrow('disabled')
+    expect(fetch.mock.calls.every(([url]) => url.startsWith('https://v3.example'))).toBe(true)
+  })
+
+  it('rejects 503 discovery JSON through the published account adapter rather than returning empty positions', async () => {
+    vi.stubEnv('SERVER_VAULT_CACHE_SOURCE', 'onchain')
+    vi.stubEnv('SUBGRAPH_URL_1', 'https://account-fixture.example/query')
+    const fetch = vi.fn(async () => Response.json({ statusCode: 503, statusMessage: 'retired' }, { status: 503 }))
+    vi.stubGlobal('fetch', fetch)
+    const { getServerSdk } = await import('~/server/utils/sdk-server')
+    const sdk = await getServerSdk(1)
+    await expect(sdk.accountService.fetchAccount(1, '0x0000000000000000000000000000000000000001')).rejects.toThrow('503')
+    expect(fetch).toHaveBeenCalledWith('https://account-fixture.example/query', expect.objectContaining({
+      body: expect.stringContaining('trackingActiveAccounts'),
+    }))
+  })
+
+  it('preserves server bundled defaults only before catalog opt-in and without explicit disable', async () => {
+    vi.stubEnv('SERVER_VAULT_CACHE_SOURCE', 'onchain')
+    vi.stubEnv('SUBGRAPH_URL_1', '')
+    vi.stubEnv('NUXT_PUBLIC_SUBGRAPH_URI_1', '')
+    vi.stubEnv('SUBGRAPH_CATALOG_URL', '')
+    vi.stubEnv('SUBGRAPH_CATALOG_DISABLED', '')
+    const fetch = vi.fn(async () => Response.json({ data: { trackingActiveAccounts: [] } }))
+    vi.stubGlobal('fetch', fetch)
+    const { getServerSdk } = await import('~/server/utils/sdk-server')
+    const { defaultVaultTypeSubgraphAdapterConfig } = await import('@eulerxyz/euler-v2-sdk')
+    const sdk = await getServerSdk(1)
+    await sdk.accountService.fetchAccount(1, '0x0000000000000000000000000000000000000001')
+    expect(fetch).toHaveBeenCalledWith(defaultVaultTypeSubgraphAdapterConfig.subgraphURLs[1], expect.anything())
+    vi.stubEnv('SUBGRAPH_CATALOG_DISABLED', 'true')
+    fetch.mockClear()
+    await expect(sdk.accountService.fetchAccount(1, '0x0000000000000000000000000000000000000001')).rejects.toThrow('missing')
+    expect(fetch).not.toHaveBeenCalled()
+    vi.stubEnv('SUBGRAPH_CATALOG_DISABLED', '')
+    vi.stubEnv('SUBGRAPH_CATALOG_URL', 'https://catalog.example/empty')
+    fetch.mockResolvedValueOnce(Response.json({ schemaVersion: 1, revision: 'r', publishedAt: '2026-10-19T00:00:00Z', deployments: [] }))
+    await expect(sdk.accountService.fetchAccount(1, '0x0000000000000000000000000000000000000001')).rejects.toThrow('missing')
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(fetch).toHaveBeenCalledWith('https://catalog.example/empty', expect.anything())
   })
 
   afterEach(() => {

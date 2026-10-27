@@ -14,6 +14,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 ### [Fork Setup](./fork-setup.md)
 
 - Operator-owned V3 and static labels, with complete environment examples
+- Direct subgraph URLs or an optional custom catalog, with explicit controls to prevent bundled subgraph fallback
 - Explicit V3 opt-out, custom image hosts, SDK/Lite settings and remaining external services
 - Configuration diagnostics and verification steps
 
@@ -139,7 +140,8 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 
 ### 🗄️ [Server-Side Caching](./server-side-caching.md)
 
-- Per-host external proxies (Merkl, Fuul, Incentra, Goldsky subgraph) with TTL + in-flight dedup
+- Rewards-provider proxies (Merkl, Fuul, Incentra) with TTL caching and in-flight dedup
+- Subgraph proxy with `no-store` responses and in-flight dedup; catalog metadata and SDK results use separate caches
 - Lite intrinsic-APY overlay (`/api/internal/proxy/intrinsic-apy-overrides`) with chain-keyed 5-min cache
 - Vault snapshot pipeline (`/api/internal/vaults`) with two-pass client hydration
 - V3 proxy allowlist, rate limits, failure backoff, and troubleshooting

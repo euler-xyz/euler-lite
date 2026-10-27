@@ -1,30 +1,3 @@
-/**
- * Server-side proxy for the per-chain Goldsky subgraph.
- *
- * The SDK's vaultTypeSubgraphAdapter and accountVaultsSubgraphAdapter POST
- * GraphQL queries directly to per-chain URLs. With this proxy in place we
- * point both adapters at `/api/internal/proxy/subgraph/{chainId}`, the handler
- * resolves the real upstream from env and forwards the GraphQL payload.
- *
- * No server-side TTL cache: the subgraph serves freshness-critical
- * wallet-specific data (account positions read right after a deposit/borrow),
- * and caching it caused just-confirmed positions to stay hidden for up to a
- * minute. Vault catalogue freshness is handled separately by the dedicated
- * vault snapshot cache (`server/utils/vaults-cache.ts`) and the SDK's own
- * client-side query cache. In-flight dedup is kept so concurrent identical
- * requests still coalesce into one upstream round-trip without persisting.
- *
- * Upstream resolution order (first non-empty wins):
- *   1. `SUBGRAPH_URL_<chainId>` (preferred, server-only)
- *   2. `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` (legacy). The `NUXT_PUBLIC_` prefix
- *      is now vestigial: the URL is resolved here server-side only and is no
- *      longer exposed to the client (all subgraph traffic is proxied), so this
- *      var can be renamed to `SUBGRAPH_URL_<chainId>` at the deploy's
- *      convenience.
- *
- * If no upstream is configured for the chain, returns 404 so the caller
- * falls through to the SDK's onchain secondary.
- */
 import {
   createError,
   getMethod,
@@ -33,6 +6,7 @@ import {
   setResponseHeaders,
   setResponseStatus,
 } from 'h3'
+import { resolveSubgraphSource, LiteSubgraphUnavailableError as SubgraphUnavailableError, type SubgraphSource } from '~/server/utils/subgraph-catalog'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { logger } from '~/server/utils/logger'
 import { GRAPHQL_RESPONSE_BUDGET } from '~/server/utils/fetch-text-with-budget'
@@ -57,17 +31,6 @@ const rateLimiter = createRateLimiter({
   label: 'subgraph-proxy',
 })
 
-const resolveSubgraphUrl = (chainId: number): string | undefined => {
-  const candidates = [
-    process.env[`SUBGRAPH_URL_${chainId}`],
-    process.env[`NUXT_PUBLIC_SUBGRAPH_URI_${chainId}`],
-  ]
-  for (const v of candidates) {
-    if (v && v.trim()) return v.trim()
-  }
-  return undefined
-}
-
 export default defineEventHandler(async (event) => {
   const method = getMethod(event).toUpperCase()
   if (method !== 'POST') {
@@ -78,16 +41,21 @@ export default defineEventHandler(async (event) => {
 
   const chainIdRaw = getRouterParam(event, 'chainId')
   const chainId = Number(chainIdRaw)
-  if (!Number.isInteger(chainId) || chainId <= 0) {
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) {
     logger.warn({ ctx: 'subgraph-proxy', chainIdRaw, reason: 'invalid-chain-id' }, 'request rejected')
     throw createError({ statusCode: 400, statusMessage: 'Invalid chainId' })
   }
 
-  const target = resolveSubgraphUrl(chainId)
-  if (!target) {
-    logger.warn({ ctx: 'subgraph-proxy', chainId, reason: 'not-configured' }, 'request rejected')
-    throw createError({ statusCode: 404, statusMessage: `No subgraph configured for chain ${chainId}` })
+  setResponseHeaders(event, { 'cache-control': BROWSER_CACHE_CONTROL })
+  let source: SubgraphSource
+  try {
+    source = await resolveSubgraphSource(chainId)
   }
+  catch (error) {
+    const reason = error instanceof SubgraphUnavailableError ? error.reason : 'catalog-unavailable'
+    throw createError({ statusCode: reason === 'missing' ? 404 : 503, statusMessage: `Subgraph unavailable: ${reason}` })
+  }
+  const target = source.endpoint
 
   const body = (await readRawBody(event))?.toString() ?? ''
   if (!body) {
@@ -105,13 +73,23 @@ export default defineEventHandler(async (event) => {
       body,
       ctx: 'subgraph-proxy',
       bypassCache: true,
+      redirect: 'error',
       responseBudget: GRAPHQL_RESPONSE_BUDGET,
     })
+    // Checked clients include _meta in the actual data query, so alias drift is
+    // detected on the response that supplies account membership/factory data.
+    if (source.deploymentId) {
+      const payload = JSON.parse(res.body)
+      if (payload?.data?._meta?.deployment !== source.deploymentId) {
+        throw new Error('Subgraph deployment identity mismatch')
+      }
+    }
     setResponseStatus(event, res.status, res.statusText)
     setResponseHeaders(event, {
       'content-type': res.contentType,
       'cache-control': BROWSER_CACHE_CONTROL,
       'x-cache': res.cacheState,
+      'x-subgraph-source': source.identity,
     })
     return res.body
   }

@@ -1,3 +1,5 @@
+import { withCheckedSubgraphQueries } from '~/utils/subgraph-queries'
+import { resolveSubgraphSource, LiteSubgraphUnavailableError as SubgraphUnavailableError } from './subgraph-catalog'
 /**
  * Lazy per-chain server-side `EulerSDK` builder.
  *
@@ -29,6 +31,8 @@
  */
 import {
   buildEulerSDK,
+  createQueryCacheBuildQuery,
+  defaultVaultTypeSubgraphAdapterConfig,
   type EulerSDK,
   type EulerSDKConfig,
 } from '@eulerxyz/euler-v2-sdk'
@@ -48,6 +52,23 @@ import { serverAbiService } from './sdk-abi-service'
 import { createNoV3IntrinsicApyService, disableSdkV3Utilities } from '~/utils/sdk-no-v3'
 import { resolveRpcUrl } from './rpc'
 import { TURTLE_EARN_API_URL } from './turtle-proxy'
+
+const resolveServerSubgraphSource = async (chainId: number) => {
+  try {
+    return await resolveSubgraphSource(chainId)
+  }
+  catch (error) {
+    // Preserve the server SDK's bundled compatibility mode only before opt-in.
+    const endpoint = defaultVaultTypeSubgraphAdapterConfig.subgraphURLs[chainId]
+    if (error instanceof SubgraphUnavailableError && error.reason === 'missing' && endpoint
+      && !process.env.SUBGRAPH_CATALOG_URL?.trim()
+      && process.env.SUBGRAPH_CATALOG_DISABLED?.trim() !== 'true'
+      && process.env[`SUBGRAPH_DISABLED_${chainId}`]?.trim() !== 'true') {
+      return { endpoint, identity: `bundled:${chainId}` }
+    }
+    throw error
+  }
+}
 
 const sdkByChain = new Map<number, Promise<EulerSDK>>()
 
@@ -126,6 +147,7 @@ export const getServerSdk = (chainId: number): Promise<EulerSDK> => {
   const disableV3 = readDisableV3()
   const promise = buildEulerSDK({
     config,
+    buildQuery: withCheckedSubgraphQueries(createQueryCacheBuildQuery(), resolveServerSubgraphSource),
     // Let the SDK resolve registry viemNames before applying server-only tuning.
     chains: {
       146: {

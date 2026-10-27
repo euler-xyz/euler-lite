@@ -5,11 +5,12 @@ This guide covers the concrete steps and scripts needed to work on this reposito
 ## Prerequisites
 
 - Node.js 24.22.1 (see `.nvmrc`)
-- npm
+- npm 11.20.0
 
 ## Install and run
 
 ```bash
+npm install --global npm@11.20.0
 npm ci
 npm run dev
 ```
@@ -43,7 +44,7 @@ npm run typecheck     # Type-check the project
 
 ## Continuous Integration
 
-Pull requests are gated by the `CI` workflow (`.github/workflows/ci.yaml`), which runs on Node 24.22.1 from `.nvmrc` (matching the Dockerfile) with npm caching:
+Pull requests are gated by the `CI` workflow (`.github/workflows/ci.yaml`), which runs on Node 24.22.1 from `.nvmrc` and npm 11.20.0 (matching the Docker build) with npm caching:
 
 - **typecheck** – `npm run typecheck` (blocking)
 - **test** – `npm run build` then `npm run test:run` (blocking). The build runs first because `tests/utils/logger-bundle.test.ts` inspects the production client bundle (`.output/public/_nuxt`) and hard-fails under CI when it is absent.
@@ -96,7 +97,7 @@ External metadata (contract addresses, labels, and Data V3 oracle assessments) i
 | `GET /api/internal/token-list?chainId=X` | Euler V3 + Uniswap + DefiLlama + Merkl reward-tokens | 5 min | `V3_API_URL`, `EULER_SDK_V3_API_URL`, `NUXT_PUBLIC_V3_API_URL`, `EULER_SDK_V3_API_KEY`, `NUXT_PUBLIC_CONFIG_UNISWAP_TOKEN_LIST_URL`, `NUXT_PUBLIC_CONFIG_DEFILLAMA_TOKEN_LIST_URL` |
 | `GET /api/internal/vaults?chainId=X` | Pre-computed chain vault snapshot built by the server-side SDK | 2 min (V3 configured) / 5 min (no V3) | `V3_API_URL`, `EULER_SDK_V3_API_URL`, `NUXT_PUBLIC_V3_API_URL` (presence selects cadence); `TURTLE_EARN_API_KEY` (server SDK sends it to Turtle for stream discovery; direct Turtle discovery disabled without it; V3-sourced campaigns can remain) |
 | `/api/internal/proxy/{merkl,fuul,incentra,turtle}/:path` | Rewards providers, one `createProviderProxy` config each — methods, allowlists, TTLs and credentials are tabulated in [Server-Side Caching → Per-Host Proxies](./server-side-caching.md#per-host-proxies) | 60 s (Turtle: not cached, `no-store`) | `FUUL_API_URL`, `INCENTRA_API_URL` (+ `NUXT_PUBLIC_` variants); `MERKL_API_KEY` (optional), `TURTLE_EARN_API_KEY` (required, server-only) |
-| `POST /api/internal/proxy/subgraph/:chainId` | Per-chain Goldsky subgraph | not cached (`bypassCache`), `no-store` | `SUBGRAPH_URL_<chainId>` (server-only) or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` |
+| `POST /api/internal/proxy/subgraph/:chainId` | Per-chain subgraph selected from an explicit URL or the optional catalog | Queries are not cached (`bypassCache`), `no-store`; catalog metadata has a 60 s TTL | `SUBGRAPH_URL_<chainId>`, `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`, `SUBGRAPH_CATALOG_URL`; disable controls and priority in [SDK integration](./sdk-integration.md#subgraph-catalog-resolution) |
 | `GET\|HEAD /api/internal/proxy/intrinsic-apy-overrides?chainId=` | Lite HyperEVM / Monad intrinsic-APY overlay (fixed origin URLs in the handler) | 5 min, keyed by `chainId` only | — |
 | `GET\|POST /api/internal/v3/...path` | Exact SDK-owned V3 endpoint allowlist (`tokens`, `prices`, APYs, rewards, oracle assessments/router state, account positions, activity/liquidations, vault reads, vault batch/resolve) | none — forwards upstream; `503` during failure backoff | `V3_API_URL`, `EULER_SDK_V3_API_URL`, `NUXT_PUBLIC_V3_API_URL`, `EULER_SDK_V3_API_KEY` |
 | `POST /api/internal/screen-address` | data-v3 `POST /v3/compliance/address-screening` (connect-time wallet screen; first-party CORS exception) | no-store | `ADDRESS_SCREENING_URI`, `ADDRESS_SCREENING_API_KEY` |
@@ -152,7 +153,7 @@ The `/api/internal/pyth/updates` endpoint proxies Pyth Hermes price update reque
 ## Troubleshooting
 
 - If the app fails to start, select Node 24.22.1 with `nvm use` from `.nvmrc` and reinstall deps. `package.json` declares the supported range as `>=24.22.1 <25`; npm treats `engines` as advisory unless `engine-strict` is enabled.
-- If blockchain calls fail, verify `RPC_URL_<chainId>` env vars and check that matching `SUBGRAPH_URL_<chainId>` or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` is set.
+- If blockchain calls fail, verify `RPC_URL_<chainId>` env vars. For indexer-backed discovery, configure a matching direct subgraph URL or an active entry in your selected catalog; see [Your own subgraphs](./fork-setup.md#your-own-subgraphs).
 - If Sonic (chain `146`) vault snapshots or server-side label reads fail with oversized Multicall / RPC batch errors, do not raise `EVAULT_FETCH_CHUNK_CHAINS` as the first fix. Server Sonic reads use SDK `chains` transport options in `server/utils/sdk-server.ts`, which shrink Multicall3 aggregates independently of the SDK `fetchVaults` chunk list. A changed override needs a process restart. See [Server-Side Caching → Server provider overrides](./server-side-caching.md#server-provider-overrides).
 - If token logos don't load, verify `V3_API_URL` (or `EULER_SDK_V3_API_URL` / `NUXT_PUBLIC_V3_API_URL`) and, when required by the upstream, `EULER_SDK_V3_API_KEY`. Token data is fetched server-side via `/api/internal/token-list` which aggregates Euler V3, Uniswap, DefiLlama, and Merkl sources with fallback.
 - Chain and oracle-provider logo URLs start from V3's public images base. At boot the server reads `GET /v3/images` (`{ data: { publicBaseUrl } }`) from its own `V3_API_URL` and passes the value to the browser as `window.__APP_CONFIG__.v3ImagesUrl` (`server/utils/v3-images-base.ts`). Only a plain https URL is accepted. The server refreshes it hourly, or every 5 minutes while it has none. A failed refresh keeps the last good value; an invalid answer clears it. With no base, chain logos use the bundled files and oracle-provider logos are not shown. There is no setting for this host. Curator, product, and campaign logos are a separate allowlist (`resolveLabelLogo`); they do not use `v3ImagesUrl`. See [Vault Labels → Label logos](./vault-labels-and-verification.md#label-logos).
