@@ -424,6 +424,21 @@ describe('getVaultBackingLead', () => {
     })?.label).toBe('Accepts WBTC')
   })
 
+  it('leaves out collateral that cannot back a new borrow for a vault without borrows', () => {
+    expect(getVaultBackingLead({
+      ...live,
+      getCollateralGroups: () => [group('WBTC', 0, 0), group('wstETH', 0), group('cbBTC', 0), group('tBTC', 0)],
+      utilization: 0,
+      acceptedCollateralCount: 4,
+    })?.label).toBe('Accepts cbBTC, tBTC, wstETH')
+    expect(getVaultBackingLead({
+      ...live,
+      getCollateralGroups: () => [group('WBTC', 0, 0)],
+      utilization: 0,
+      acceptedCollateralCount: 1,
+    })).toBeNull()
+  })
+
   it('has no lead for a vault without borrows or live collateral', () => {
     expect(getVaultBackingLead({
       ...live,

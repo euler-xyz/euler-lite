@@ -333,14 +333,16 @@ export const getExposureLead = (
 
 /**
  * The split is built on a nominal supply of one, so only its order and labels are read, never its amounts.
- * With nothing borrowed the split is empty, so the lead names the accepted collaterals instead.
+ * With nothing borrowed the split is empty, so the lead names the collaterals a new borrow can use instead.
  */
 export const getVaultBackingLead = (
   input: Omit<Parameters<typeof resolveVaultExposureDisplay>[0], 'totalExposureUsd' | 'totalSupplyState'>,
 ): ReturnType<typeof getExposureLead> => {
   const display = resolveVaultExposureDisplay({ ...input, totalExposureUsd: 1, totalSupplyState: 'ready' })
   const hasNoBorrows = display.valueState === 'ready' && clampPercentFraction(input.utilization) <= 0
-  return getExposureLead(hasNoBorrows ? buildQualitativeExposureDisplay(input.getCollateralGroups()) : display)
+  if (!hasNoBorrows) return getExposureLead(display)
+  const borrowableGroups = input.getCollateralGroups().filter(group => group.maxBorrowLTV > 0)
+  return getExposureLead(buildQualitativeExposureDisplay(borrowableGroups))
 }
 
 export interface VaultHeaderAssets {
