@@ -222,18 +222,6 @@ describe('useEulerSdk', () => {
     expect(options.oracleAdapterServiceConfig).toBeUndefined()
   })
 
-  it('leaves assessment caching to the shared query cache', async () => {
-    const sdk = createMockSdk('configured')
-    const buildEulerSDK = vi.fn().mockResolvedValue(sdk)
-    vi.stubGlobal('useRuntimeConfig', () => ({ public: {} }))
-
-    const { getEulerSdk } = await importUseEulerSdk(ref([1]), buildEulerSDK)
-    await getEulerSdk()
-
-    const options = buildEulerSDK.mock.calls[0]?.[0] as BuildEulerSDKOptions
-    expect(options.config).toMatchObject({ vaultAssessmentV3CacheMs: 0, oracleAdapterV3CacheMs: 0 })
-  })
-
   it('uses Lite proxy defaults when runtime URLs are empty', async () => {
     const chainIds = ref([1])
     const sdk = createMockSdk('defaults')

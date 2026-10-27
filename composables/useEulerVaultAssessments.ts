@@ -63,11 +63,9 @@ const loadVaultAssessment = async (
       if (isVaultAssessmentUnavailableError(error, 'chain-not-supported')) {
         unsupportedChainIds.value = new Set([...unsupportedChainIds.value, chainId])
       }
-      logWarn('useEulerVaultAssessments', `Failed to load assessment ${normalized} on chain ${chainId}: ${error instanceof Error ? error.message : String(error)}`)
-      // A failed background re-read keeps the assessment already shown.
-      if (options.background && previous?.status === 'available') return previous
       const entry: VaultAssessmentEntry = { status: 'unavailable' }
       setEntry(chainId, key, entry)
+      logWarn('useEulerVaultAssessments', `Failed to load assessment ${normalized} on chain ${chainId}: ${error instanceof Error ? error.message : String(error)}`)
       return entry
     }
   })()

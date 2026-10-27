@@ -296,6 +296,7 @@ describe('v3 proxy utilities', () => {
     })
 
     expect(readForwardedV3ResponseHeaders(headers)).toEqual({
+      'cache-control': 'public, max-age=30',
       'cf-ray': 'example-ray',
       'content-type': 'application/json',
     })

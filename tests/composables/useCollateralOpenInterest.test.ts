@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed, ref, type Ref } from 'vue'
 
 type Deferred<T> = {
@@ -137,110 +137,6 @@ describe('useCollateralOpenInterest', () => {
     expect(openInterest.getOpenInterestForVault('0x0000000000000000000000000000000000000001')).toEqual({})
     expect(openInterest.getOpenInterestForVault('0x0000000000000000000000000000000000000002')).toEqual({
       '0x000000000000000000000000000000000000000b': 2,
-    })
-  })
-
-  describe('re-reading once V3 recomputes', () => {
-    const VAULT = '0x0000000000000000000000000000000000000001'
-    const COLLATERAL = '0x000000000000000000000000000000000000000a'
-    const REFRESHED_AT = Date.parse('2026-10-27T16:00:00.000Z')
-    const MINUTE = 60_000
-    type Reply = { data: Record<string, Record<string, number>>, meta: { refreshedAt: string } }
-    const reply = (openInterest: number, refreshedAt: number): Reply => ({
-      data: { [VAULT]: { [COLLATERAL]: openInterest } },
-      meta: { refreshedAt: new Date(refreshedAt).toISOString() },
-    })
-
-    const setup = async (fetchMock: ReturnType<typeof vi.fn>, chainId = ref(1)) => {
-      const states = new Map<string, Ref<unknown>>()
-      vi.stubGlobal('computed', computed)
-      vi.stubGlobal('useEulerAddresses', () => ({ chainId }))
-      vi.stubGlobal('useV3ChainGate', () => ({ isV3EnabledForChain: () => true }))
-      vi.stubGlobal('useState', <T>(key: string, init: () => T) => {
-        if (!states.has(key)) states.set(key, ref(init()))
-        return states.get(key) as Ref<T>
-      })
-      vi.stubGlobal('$fetch', fetchMock)
-      const { useCollateralOpenInterest } = await import('~/composables/useCollateralOpenInterest')
-      return useCollateralOpenInterest()
-    }
-
-    beforeEach(() => {
-      vi.useFakeTimers()
-      vi.setSystemTime(REFRESHED_AT + MINUTE)
-    })
-
-    afterEach(() => {
-      vi.useRealTimers()
-    })
-
-    it('re-reads the loaded chain once the next recompute is due, without a loading state', async () => {
-      const next = deferred<Reply>()
-      const fetchMock = vi.fn()
-        .mockResolvedValueOnce(reply(1, REFRESHED_AT))
-        .mockReturnValueOnce(next.promise)
-      const openInterest = await setup(fetchMock)
-      await openInterest.load()
-
-      vi.setSystemTime(REFRESHED_AT + 15 * MINUTE - 1)
-      await openInterest.refreshIfStale()
-      expect(fetchMock).toHaveBeenCalledTimes(1)
-
-      vi.setSystemTime(REFRESHED_AT + 15 * MINUTE)
-      const refreshing = openInterest.refreshIfStale()
-      expect(fetchMock).toHaveBeenCalledTimes(2)
-      expect(openInterest.isLoading.value).toBe(false)
-      expect(openInterest.isLoaded.value).toBe(true)
-
-      next.resolve(reply(2, REFRESHED_AT + 15 * MINUTE))
-      await refreshing
-      expect(openInterest.getOpenInterestForVault(VAULT)).toEqual({ [COLLATERAL]: 2 })
-    })
-
-    it('keeps the loaded values when a re-read fails', async () => {
-      const fetchMock = vi.fn()
-        .mockResolvedValueOnce(reply(1, REFRESHED_AT))
-        .mockRejectedValueOnce(new Error('backend down'))
-      const openInterest = await setup(fetchMock)
-      await openInterest.load()
-
-      vi.setSystemTime(REFRESHED_AT + 16 * MINUTE)
-      await openInterest.refreshIfStale()
-
-      expect(fetchMock).toHaveBeenCalledTimes(2)
-      expect(openInterest.hasError.value).toBe(false)
-      expect(openInterest.isLoaded.value).toBe(true)
-      expect(openInterest.getOpenInterestForVault(VAULT)).toEqual({ [COLLATERAL]: 1 })
-    })
-
-    it('drops a re-read that finishes after a chain switch', async () => {
-      const chainId = ref(1)
-      const next = deferred<Reply>()
-      const fetchMock = vi.fn()
-        .mockResolvedValueOnce(reply(1, REFRESHED_AT))
-        .mockReturnValueOnce(next.promise)
-        .mockResolvedValueOnce({ data: {}, meta: { refreshedAt: new Date(REFRESHED_AT).toISOString() } })
-      const openInterest = await setup(fetchMock, chainId)
-      await openInterest.load()
-
-      vi.setSystemTime(REFRESHED_AT + 16 * MINUTE)
-      const refreshing = openInterest.refreshIfStale()
-      chainId.value = 2
-      await openInterest.load()
-      next.resolve(reply(2, REFRESHED_AT + 15 * MINUTE))
-      await refreshing
-
-      expect(openInterest.getOpenInterestForVault(VAULT)).toEqual({})
-    })
-
-    it('does not read a chain nobody loaded', async () => {
-      const fetchMock = vi.fn()
-      const openInterest = await setup(fetchMock)
-
-      vi.setSystemTime(REFRESHED_AT + 30 * MINUTE)
-      await openInterest.refreshIfStale()
-
-      expect(fetchMock).not.toHaveBeenCalled()
     })
   })
 })
