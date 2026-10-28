@@ -17,6 +17,7 @@ import { getEnabledChainIds } from '~/utils/chain-env'
 
 const CACHE_TTL_MS = 300_000
 const DECIMALS_READ_DEADLINE_MS = 5_000
+const DECIMALS_READ_CONCURRENCY = 128
 const DEFILLAMA_DEFAULT_URL = 'https://d3g10bzo9rdluh.cloudfront.net'
 
 interface TokenEntry {
@@ -348,6 +349,7 @@ const mergeSources = (
 
 // Read once per token per server process. null: no contract or no decimals(), so the token is dropped.
 const onchainDecimals = new Map<string, number | null>()
+const decimalsInFlight = createInFlightDedup<number, undefined>()
 
 const decimalsKey = (chainId: number, address: string) => `${chainId}:${address.toLowerCase()}`
 
@@ -360,31 +362,41 @@ const isMissingDecimals = (err: unknown): boolean => {
   return false
 }
 
-async function readMissingDecimals(chainId: number, tokens: TokenEntry[]): Promise<void> {
-  const missing = tokens.filter(t => t.address !== zeroAddress && !onchainDecimals.has(decimalsKey(chainId, t.address)))
-  if (!missing.length) return
-  try {
-    const { tokenlistService } = await getServerSdk(chainId)
-    const resolveDecimals = tokenlistService.resolveTokenDecimals?.bind(tokenlistService)
-    if (!resolveDecimals) throw new Error('SDK token decimals resolver unavailable')
-    await Promise.all(missing.map(async (token) => {
-      const key = decimalsKey(chainId, token.address)
-      try {
-        onchainDecimals.set(key, await resolveDecimals(chainId, token.address as Address))
+function readMissingDecimals(chainId: number, tokens: TokenEntry[]): Promise<void> {
+  return decimalsInFlight.run(chainId, async () => {
+    const missing = tokens.filter(t => t.address !== zeroAddress && !onchainDecimals.has(decimalsKey(chainId, t.address)))
+    if (!missing.length) return
+    const deadline = Date.now() + DECIMALS_READ_DEADLINE_MS
+    try {
+      const { tokenlistService } = await getServerSdk(chainId)
+      const resolveDecimals = tokenlistService.resolveTokenDecimals?.bind(tokenlistService)
+      if (!resolveDecimals) throw new Error('SDK token decimals resolver unavailable')
+      let next = 0
+      // Limit token-list RPC batches and their per-token error payloads. Late reads
+      // still fill the memo, but no further reads start after the response deadline.
+      const worker = async () => {
+        while (next < missing.length && Date.now() < deadline) {
+          const token = missing[next++]
+          const key = decimalsKey(chainId, token.address)
+          try {
+            onchainDecimals.set(key, await resolveDecimals(chainId, token.address as Address))
+          }
+          catch (err: unknown) {
+            if (isMissingDecimals(err)) onchainDecimals.set(key, null)
+          }
+        }
       }
-      catch (err: unknown) {
-        if (isMissingDecimals(err)) onchainDecimals.set(key, null)
-      }
-    }))
-    const unread = missing.filter(t => !onchainDecimals.has(decimalsKey(chainId, t.address))).length
-    reportStatus('token-list', `decimals:${chainId}`, unread ? 'unread' : 'ok',
-      unread ? `${unread} token decimals unread for chain ${chainId}, retrying on the next build` : undefined)
-  }
-  catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err)
-    reportStatus('token-list', `decimals:${chainId}`, `failed:${msg}`,
-      `Token decimals read failed for chain ${chainId}: ${msg}`)
-  }
+      await Promise.all(Array.from({ length: Math.min(DECIMALS_READ_CONCURRENCY, missing.length) }, worker))
+      const unread = missing.filter(t => !onchainDecimals.has(decimalsKey(chainId, t.address))).length
+      reportStatus('token-list', `decimals:${chainId}`, unread ? 'unread' : 'ok',
+        unread ? `${unread} token decimals unread for chain ${chainId}, retrying on the next build` : undefined)
+    }
+    catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      reportStatus('token-list', `decimals:${chainId}`, `failed:${msg}`,
+        `Token decimals read failed for chain ${chainId}: ${msg}`)
+    }
+  })
 }
 
 async function applyOnchainDecimals(chainId: number, tokens: TokenEntry[]): Promise<TokenEntry[]> {
