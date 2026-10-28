@@ -1,8 +1,11 @@
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
+import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { isVaultNotExplorableBorrow } from '~/utils/eulerLabelsUtils'
 
+/** An Unknown collateral (no published label verifies it) stays on the market graph but out of the Borrow table. */
 export const isBorrowTableCollateral = (collateralAddress: string, showAllLabelEntries: boolean): boolean =>
-  showAllLabelEntries || !isVaultNotExplorableBorrow(collateralAddress)
+  showAllLabelEntries
+  || (useVaultRegistry().isVerifiedVault(collateralAddress) && !isVaultNotExplorableBorrow(collateralAddress))
 
 /** Lend-table eligibility: a borrowLTV > 0 pair of this vault whose collateral passes `isCollateralListed`. */
 export const hasBorrowTablePair = (
