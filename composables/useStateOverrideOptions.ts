@@ -22,16 +22,19 @@ export const useStateOverrideResolution = () => ({
  *  - **`wallet.balances`** — the form already knows what the user holds via
  *    `useWallets`. Feed that map through and the SDK skips per-call `balanceOf`
  *    when the snapshot already proves the user holds enough.
- *  - **`noBalanceOverride: true`** — skips the balance branch for simulations
- *    gated on sufficient wallet funds. Quote previews that accept amounts
- *    above the wallet balance must keep balance overrides enabled.
+ *  - **`noBalanceOverride: true`** — skips the balance branch. Use it for
+ *    Review-time simulations: a real wallet shortfall should fail the
+ *    simulation, not be faked away (and plans that pull no wallet tokens have
+ *    nothing to fake). Quote estimates ignore it — `useSwapQuotesParallel`
+ *    keeps balance overrides on, because quotes run for amounts the wallet
+ *    may not hold.
  *  - **`slotHints`** — pre-fetched ERC20 storage-slot indices, owner-
  *    -agnostic, computed cryptographically. Lets the SDK bypass
  *    `eth_createAccessList` discovery for the common case. We fire this once
  *    per token and reuse forever (slot indices are immutable).
  *
  * The composable exposes:
- *  - `buildStateOverrideOptions({ tokens, noBalanceOverride })` — assembles the
+ *  - `buildStateOverrideOptions({ noBalanceOverride, noAllowanceOverride })` — assembles the
  *    options object for the next call.
  *  - `primeSlotHintsFor(tokens, { background })` — fires the slot probes as soon
  *    as the form knows which assets matter. Probes are deduped inside the SDK,
@@ -134,8 +137,8 @@ export const useStateOverrideOptions = () => {
 
   /**
    * Assemble `SimulationStateOverrideOptions` for the next simulate/estimate
-   * call. Pass `noBalanceOverride: true` only when this simulation is gated
-   * on sufficient wallet funds or does not consume wallet tokens.
+   * call. Pass `noBalanceOverride: true` for Review-time simulations (see the
+   * module comment); quote estimates ignore it.
    */
   const buildStateOverrideOptions = (opts?: {
     noBalanceOverride?: boolean

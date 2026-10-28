@@ -119,9 +119,11 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
   const { finalizeExecutionUi } = useTxFinalization()
   // Form validates "Not enough balance" up front (see `errorText` / `isSubmitDisabled`),
-  // so the simulator never needs to forge wallet balances — `noBalanceOverride: true`
-  // skips per-call balanceOf + slot probing. Slot hints + wallet snapshot are still
-  // passed so allowance overrides take the same fast path.
+  // so the Review-time simulation never needs to forge wallet balances —
+  // `noBalanceOverride: true` skips per-call balanceOf + slot probing. Quote
+  // estimates turn balance overrides back on (see `useSwapQuotesParallel`).
+  // Slot hints + wallet snapshot are still passed so allowance overrides take
+  // the same fast path.
   const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
   const buildBorrowStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
 

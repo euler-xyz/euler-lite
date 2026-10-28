@@ -91,8 +91,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const { capture: captureReviewState } = useExecutionReview()
   const { capture: captureIntentFactory, create: createIntent } = useOperationIntentFactory()
   const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
-  // Reuse wallet balances and slot hints. Review validates the supply balance
-  // before simulation; quote previews also support amounts above that balance.
+  // State-override knobs: pass the current wallet snapshot and pre-prime slot
+  // hints when the relevant assets resolve. Skip balance probing at Review
+  // (form validates "Not enough balance"); quote estimates turn balance
+  // overrides back on (see `useSwapQuotesParallel`).
   const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
   const buildMultiplyStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
   const { depositPositions } = useEulerAccount()
@@ -186,7 +188,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         quote,
       })]
     },
-    getStateOverrideOptions: () => buildStateOverrideOptions(),
+    getStateOverrideOptions: () => buildMultiplyStateOverrideOptions(),
     // First quote in each sweep computes plugin prefetch (Pyth Hermes updates
     // + keyring vault gating) from its plan; the rest of the sweep reuses it.
     getPlanAccount: () => planAccount.value,

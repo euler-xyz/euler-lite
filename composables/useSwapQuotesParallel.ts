@@ -50,9 +50,10 @@ type SwapQuotesParallelOptions = {
   /** Optionally wrap the quote plan before gas estimation. Batch flows use this
    *  to estimate the real atomic transaction: existing batch + candidate quote. */
   buildGasEstimatePlan?: (candidatePlan: TransactionPlan) => Promise<TransactionPlan> | TransactionPlan
-  /** Forwarded to `sdk.executionService.estimateGasForTransactionPlan` so the
-   *  per-quote estimate can skip balance overrides, reuse the wallet snapshot
-   *  the form already holds, and take precomputed storage-slot hints. */
+  /** Forwarded to `sdk.executionService.estimateGasForPreparedTransactionPlan`
+   *  so the per-quote estimate can reuse the wallet snapshot the form already
+   *  holds and take precomputed storage-slot hints. `noBalanceOverride` is
+   *  ignored here: see `estimateTxPlanGas`. */
   getStateOverrideOptions?: () => SimulationStateOverrideOptions | undefined
   /** Resolve the form-level plugin prefetch payload from a representative
    *  plan. Called at most once per sweep against the first arriving quote's
@@ -292,12 +293,17 @@ export const useSwapQuotesParallel = (options: SwapQuotesParallelOptions) => {
   // allowances and approvals from the plan so estimation works for accounts
   // that haven't pre-approved (every spy-mode account, every fresh wallet
   // building a plan against a new sub-account).
+  // Balance overrides always stay on here. Quotes run for any amount the user
+  // types, including more than the wallet holds, and forms share one override
+  // builder between quotes and Review, where `noBalanceOverride: true` is
+  // right. The SDK only fakes tokens the plan pulls from the wallet, so flows
+  // that pull none pay nothing for this.
   const estimateTxPlanGas = async (prepared: TransactionPlanPrepared): Promise<bigint> => {
     const sdk = await getEulerSdkFresh()
     return profAsync('quote', 'estimateGasForPreparedTransactionPlan', () =>
       sdk.executionService.estimateGasForPreparedTransactionPlan(prepared, {
         stateOverrides: true,
-        stateOverrideOptions: options.getStateOverrideOptions?.(),
+        stateOverrideOptions: { ...options.getStateOverrideOptions?.(), noBalanceOverride: false },
       }),
     )
   }

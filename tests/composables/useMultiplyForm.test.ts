@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Account, EVault, IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
 import { useMultiplyForm } from '~/composables/borrow/useMultiplyForm'
 import type { RewardCampaign } from '~/entities/reward-campaign'
-import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 
 const { USER, makeVault, planAccount, mocks } = vi.hoisted(() => {
   const USER = '0x0000000000000000000000000000000000000001'
@@ -99,7 +98,7 @@ vi.mock('~/composables/useStateOverrideOptions', () => ({
 }))
 
 vi.mock('~/composables/useSwapQuotesParallel', () => ({
-  useSwapQuotesParallel: vi.fn(() => ({
+  useSwapQuotesParallel: () => ({
     sortedQuoteCards: ref([]),
     selectedProvider: ref(null),
     selectedQuote: ref(null),
@@ -114,7 +113,7 @@ vi.mock('~/composables/useSwapQuotesParallel', () => ({
     reset: vi.fn(),
     requestQuotes: vi.fn(),
     selectProvider: vi.fn(),
-  })),
+  }),
 }))
 
 vi.mock('~/composables/useMultiplyCollateralOptions', () => ({
@@ -333,7 +332,7 @@ describe('useMultiplyForm', () => {
     vi.restoreAllMocks()
   })
 
-  it.each([false, true])('allows quote balance overrides while blocking insufficient supply (spy mode: %s)', (isSpyMode) => {
+  it.each([false, true])('blocks a supply amount above the wallet balance (spy mode: %s)', (isSpyMode) => {
     vi.stubGlobal('useEffectiveAddress', () => ({
       isConnected: ref(!isSpyMode),
       isSpyMode: ref(isSpyMode),
@@ -347,10 +346,8 @@ describe('useMultiplyForm', () => {
     form.multiplyInputAmount.value = '1000'
     form.multiplier.value = 3.5
 
-    const quoteOptions = vi.mocked(useSwapQuotesParallel).mock.calls.at(-1)![0]
-    // Quote previews must be estimable with 0.13 USDC, even though the
-    // requested 1,000 USDC deposit cannot be submitted by this wallet.
-    expect(quoteOptions.getStateOverrideOptions?.()?.noBalanceOverride).not.toBe(true)
+    // Review simulates without faking balances, so this gate has to catch the
+    // shortfall first: 0.13 USDC cannot cover a 1,000 USDC deposit.
     expect(form.multiplyErrorText.value).toBe('Not enough balance')
     expect(form.isMultiplySubmitDisabled.value).toBe(true)
   })

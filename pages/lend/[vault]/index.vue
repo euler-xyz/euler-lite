@@ -82,8 +82,9 @@ const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
 // Page validates "Not enough balance" up front (see `errorText` / `isSubmitDisabled`),
-// so the simulator never needs to forge wallet balances — `noBalanceOverride: true`
-// skips per-call balanceOf + slot probing.
+// so the Review-time simulation never needs to forge wallet balances —
+// `noBalanceOverride: true` skips per-call balanceOf + slot probing. Quote
+// estimates turn balance overrides back on (see `useSwapQuotesParallel`).
 const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
 const buildLendStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
 const lendPluginPrefetch: PluginPrefetchData = { pyth: { entries: [] } }
