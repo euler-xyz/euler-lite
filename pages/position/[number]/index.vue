@@ -8,16 +8,17 @@ import { getBorrowPositionEffectiveLiquidationLTV, getBorrowPositionTimeToLiquid
 import { maxUint256 } from 'viem'
 import { formatTtl, ltvToPercent, nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { formatNumber, formatHealthScore, formatUsdValue, formatCompactUsdValue, formatExactAmount } from '~/utils/string-utils'
-import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
-import { getVaultNotice } from '~/utils/eulerLabelsUtils'
+import { getVaultGeoUnavailableReason, isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
+import { getVaultDeprecation, getVaultNotice } from '~/utils/eulerLabelsUtils'
+import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
 import { getPositionCollateralEdge, getPositionRampStatus, getPositionRampTargetTimestamp } from '~/entities/account'
+import { getBorrowLtvWithdrawNotice, isAtBorrowLtvLimit } from '~/utils/vault/withdraw'
 import { DateTime } from 'luxon'
-import { VaultOverviewModal, OperationReviewModal, VaultApyModal, VaultNetApyModal, PortfolioRoeModal, VaultRampDownModal } from '#components'
+import { VaultOverviewModal, VaultApyModal, VaultNetApyModal, PortfolioRoeModal, VaultRampDownModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
-import { getAddress, type Address, type Abi } from 'viem'
-import { eulerAccountLensABI } from '~/entities/euler/abis'
+import { getAddress, type Address } from 'viem'
 import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe'
 import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 
@@ -34,7 +35,9 @@ const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const enableExternalMigrations = computed(() => settings.value.enableAdvancedMode)
 const { getSupplyRewardApy, getBorrowRewardApy, hasSupplyRewards, hasBorrowRewards, getSupplyRewardCampaigns, getBorrowRewardCampaigns } = useRewardsApy()
 const { getTokenCategoryTags } = useTokenList()
-const { planTransfer, executePlan } = useEulerTx()
+const { planTransfer } = useEulerTx()
+const { create: createIntent } = useOperationIntentFactory()
+const { capture: captureReviewState } = useExecutionReview()
 const { account: planAccount } = usePlanAccount()
 const {
   runSimulation: runDisableCollateralSimulation,
@@ -74,13 +77,42 @@ let loadSequence = 0
 
 const { isReady: isVaultsReady } = useVaults()
 const { getOrFetch } = useVaultRegistry()
-const { eulerLensAddresses, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
-const { client: rpcClient } = useRpcClient()
 
 const borrowVault = computed<EVault | undefined>(() => position.value ? position.value.borrowVault as EVault | undefined : undefined)
 const collateralVault = computed<EVault | SecuritizeCollateralVault | undefined>(() => position.value ? position.value.collateralVault as EVault | SecuritizeCollateralVault | undefined : undefined)
 const positionCollateralAddresses = computed(() => position.value ? position.value.collateralVaults : [])
 const primaryCollateralAddress = computed(() => collateralVault.value ? getAddress(collateralVault.value.address) : '')
+const deprecatedPosition = computed(() => {
+  getEulerLabelsVersion()
+  const borrow = borrowVault.value ? getVaultDeprecation(borrowVault.value.address) : null
+  const collaterals = positionCollateralAddresses.value
+    .map(address => ({ address, ...getVaultDeprecation(address) }))
+    .filter(item => item.deprecated)
+  const reasons = [...new Set([
+    ...(borrow?.deprecated ? [borrow.reason] : []),
+    ...collaterals.map(item => item.reason),
+  ].filter(Boolean))]
+  return { borrow: borrow?.deprecated ?? false, collaterals, reasons }
+})
+const deprecatedPositionAction = computed(() => {
+  const network = _route.query.network
+  const query: Record<string, string> = {}
+  if (typeof network === 'string') query.network = network
+  if (deprecatedPosition.value.borrow && !hasNoBorrow.value) {
+    return { text: 'Repay debt', to: { path: `/position/${positionIndex}/repay`, query } }
+  }
+  const collateral = deprecatedPosition.value.collaterals[0]
+  if (!collateral) return null
+  if (isEligibleForLiquidation.value || hasQueryFailure.value || isPositionGeoBlocked.value || isPairFullyRestricted.value) {
+    return !hasNoBorrow.value
+      ? { text: 'Repay debt', to: { path: `/position/${positionIndex}/repay`, query } }
+      : null
+  }
+  return {
+    text: 'Withdraw collateral',
+    to: { path: `/position/${positionIndex}/withdraw`, query: { ...query, collateral: collateral.address } },
+  }
+})
 const buildMigrationRoute = computed(() => {
   const query: Record<string, string> = {}
   const network = _route.query.network
@@ -119,7 +151,15 @@ const isBorrowSimulatedModified = computed(() =>
 const isCollateralSimulatedModified = (vault: EVault | SecuritizeCollateralVault) =>
   modifiedBalanceKeys.value.has(batchPositionKey(vault.address))
 const hasNoBorrow = computed(() => (position.value?.borrowed ?? 0n) === 0n)
-const hasQueryFailure = computed(() => !borrowVault.value || !collateralVault.value)
+const positionLTVPercent = computed(() => {
+  if (!position.value) return null
+  return getBorrowPositionUserLTVPercent(position.value) ?? null
+})
+const hasQueryFailure = computed(() =>
+  !borrowVault.value
+  || !collateralVault.value
+  || (!hasNoBorrow.value && positionLTVPercent.value === null),
+)
 const isEligibleForLiquidation = computed(() => position.value?.liquidatable ?? false)
 const effectiveLiquidationLTVPercent = computed(() => {
   if (!position.value) return null
@@ -129,10 +169,6 @@ const effectiveLiquidationLTVPercent = computed(() => {
 const effectiveLiquidationLTVDisplay = computed(() =>
   effectiveLiquidationLTVPercent.value === null ? '-' : `${effectiveLiquidationLTVPercent.value}%`,
 )
-const positionLTVPercent = computed(() => {
-  if (!position.value) return null
-  return getBorrowPositionUserLTVPercent(position.value) ?? null
-})
 const positionLTVDisplay = computed(() => {
   if (positionLTVPercent.value === null) return ''
   return Number.isFinite(positionLTVPercent.value) ? formatNumber(positionLTVPercent.value, 2) : '∞'
@@ -156,11 +192,23 @@ const isPositionGeoBlocked = computed(() => {
 
 const isOverBorrowLTV = computed(() => {
   if (!position.value || hasNoBorrow.value) return false
+  const isAtLimit = isAtBorrowLtvLimit(position.value.borrow.liquidity)
+  if (isAtLimit !== undefined) return isAtLimit
   const userLtv = positionLTVPercent.value
   if (userLtv === null) return false
   if (position.value.borrowLTV === undefined) return false
   const borrowLtv = ltvToPercent(position.value.borrowLTV)
   return borrowLtv > 0 && userLtv >= borrowLtv
+})
+
+const zeroBorrowLtvNotice = computed(() => {
+  if (!position.value || !collateralVault.value || position.value.borrowLTV !== 0) return null
+  return getBorrowLtvWithdrawNotice({
+    liquidity: position.value.borrow.liquidity,
+    collateralAddress: collateralVault.value.address,
+    collateralBorrowLTV: position.value.borrowLTV,
+    symbol: collateralVault.value.asset.symbol,
+  })
 })
 
 const isBorrowRestricted = computed(() =>
@@ -173,7 +221,6 @@ const isMultiplyRestricted = computed(() => {
       || isVaultRestrictedByCountry(collateralVault.value.address))
 })
 
-// Both vaults restricted = pair effectively blocked (no borrow, no multiply, no useful swaps)
 const isPairFullyRestricted = computed(() => {
   if (!position.value) return false
   return !!borrowVault.value && !!collateralVault.value
@@ -183,7 +230,7 @@ const isPairFullyRestricted = computed(() => {
 const migrationDisabledReason = computed(() => {
   if (!enableExternalMigrations.value) return 'Enable advanced mode in settings'
   if (hasNoBorrow.value) return 'This position has no debt to migrate out'
-  if (isPositionGeoBlocked.value || isPairFullyRestricted.value) return 'This position is not available in your region'
+  if (isPositionGeoBlocked.value || isPairFullyRestricted.value) return getVaultGeoUnavailableReason(borrowVault.value?.address, ...positionCollateralAddresses.value) || 'This position is not available in your region'
   if (hasQueryFailure.value) return 'Position data is incomplete'
   if (!collateralVault.value || isSecuritizeCollateralVault(collateralVault.value)) return 'Migration requires standard Euler collateral'
   // buildMigrationRoute only carries the primary collateral, so a multi-collateral
@@ -288,7 +335,6 @@ const rampWarning = computed<VaultWarning | null>(() => {
   }
 })
 
-// Warnings for borrow vault
 const positionWarnings = computed(() => {
   if (!borrowVault.value) return []
   return [
@@ -298,7 +344,6 @@ const positionWarnings = computed(() => {
   ]
 })
 
-// Pre-computed collateral row data (USD values computed asynchronously)
 const collateralRowsData = ref<{
   value: UsdAmount
   unitPriceUsd: number
@@ -323,7 +368,6 @@ const collateralRows = computed(() => {
   })
 })
 
-// Update collateral rows data when collateral items change
 watchEffect(async () => {
   if (!position.value || !borrowVault.value || !collateralItems.value.length) {
     collateralRowsData.value = []
@@ -369,7 +413,6 @@ watchEffect(async () => {
   collateralRowsData.value = results
 })
 
-// Pre-computed collateral USD value (async)
 const collateralValue = ref<UsdAmount>({ usd: 0, hasPrice: false })
 
 watchEffect(async () => {
@@ -401,7 +444,6 @@ watchEffect(async () => {
   }
 })
 
-// Pre-computed borrow market value in USD (async)
 const borrowMarketValue = ref<UsdAmount>({ usd: 0, hasPrice: false })
 
 watchEffect(async () => {
@@ -552,7 +594,6 @@ const isPrimaryCollateral = (vault: EVault | SecuritizeCollateralVault) => {
   return getAddress(vault.address) === primaryCollateralAddress.value
 }
 
-// Pre-computed borrow oracle price for display (always on-chain)
 const borrowOraclePrice = ref(0)
 const hasBorrowPrice = ref(false)
 
@@ -575,7 +616,6 @@ watchEffect(async () => {
   }
 })
 
-// Pre-computed borrow unit price (1 unit in USD) for display
 const borrowUnitPrice = ref<UsdAmount>({ usd: 0, hasPrice: false })
 
 watchEffect(async () => {
@@ -623,53 +663,24 @@ const loadCollaterals = async (sequence: number) => {
   const primaryAddress = primaryCollateralAddress.value
   const unique = Array.from(new Set(normalized))
   const orderedAddresses = [primaryAddress, ...unique.filter(address => address !== primaryAddress)]
-  const subAccount = position.value.subAccount as Address
   const primarySupplied = position.value.supplied
 
   isCollateralsLoading.value = true
 
   try {
-    if (!isEulerAddressesReady.value) {
-      await loadEulerConfig()
-    }
-
     await until(isVaultsReady).toBe(true)
-
-    const lensAddress = eulerLensAddresses.value?.accountLens
-    if (!lensAddress) {
-      throw new Error('Account lens address is not available')
-    }
-
-    const client = rpcClient.value!
 
     const items = await Promise.all(
       orderedAddresses.map(async (address) => {
         try {
-          const vault = await getOrFetch(address) as unknown as EVault | SecuritizeCollateralVault | undefined
-          let assets: bigint | undefined
-
-          try {
-            const res = await client.readContract({
-              address: lensAddress as Address,
-              abi: eulerAccountLensABI as Abi,
-              functionName: 'getAccountInfo',
-              args: [subAccount, address],
-              authorizationList: undefined,
-            }) as Record<string, Record<string, unknown>>
-            assets = res.vaultAccountInfo.assets as bigint
-          }
-          catch {
-            if (address === primaryAddress) {
-              assets = primarySupplied
-            }
-            else {
-              const matchedCollateral = position.value!.collaterals?.find((collateral) => {
-                const collateralAddress = collateral.vaultAddress || collateral.vault?.address
-                return collateralAddress ? getAddress(collateralAddress) === address : false
-              })
-              assets = matchedCollateral?.assets
-            }
-          }
+          const matchedCollateral = position.value!.collaterals.find((collateral) => {
+            const collateralAddress = collateral.vaultAddress || collateral.vault?.address
+            return collateralAddress ? getAddress(collateralAddress) === address : false
+          })
+          const vault = matchedCollateral?.vault
+            ?? await getOrFetch(address) as unknown as EVault | SecuritizeCollateralVault | undefined
+          const assets = matchedCollateral?.assets
+            ?? (address === primaryAddress ? primarySupplied : undefined)
 
           return vault && assets !== undefined ? { vault, assets } : null
         }
@@ -704,77 +715,62 @@ const disableCollateral = async (vault: EVault) => {
     try {
       const subAccount = position.value!.subAccount as Address
       const owner = address.value as Address
-      plan = await planTransfer({
+      const plannerArgs = {
         vaultAddress: vault.address as Address,
         from: subAccount,
         to: owner,
         amount: maxUint256,
         disableCollateralFrom: true,
-        account: planAccount.value,
+      }
+      const intent = createIntent({
+        kind: 'collateral',
+        planner: 'transfer',
+        args: plannerArgs,
+        source: 'pages/position/[number]/index.vue',
+        subAccounts: [subAccount, owner],
       })
+      const reviewLaunch = captureReviewState([intent], {
+        presentationKind: 'disableCollateral',
+        review: {
+          type: 'disableCollateral',
+          asset: borrowVault.value!.asset,
+          amount: '0',
+          subAccount,
+          hasBorrows: (position.value?.borrowed || 0n) > 0n,
+          submittingLabel: 'Submitting...',
+        },
+        onSucceeded: () => {
+          setTimeout(() => {
+            router.replace({ path: '/portfolio', query: { network: _route.query.network } })
+          }, 400)
+        },
+        onFailed: (cause) => {
+          error('Transaction failed')
+          console.warn(cause)
+        },
+      })
+      plan = await planTransfer({ ...plannerArgs, account: planAccount.value })
+
+      if (plan) {
+        const ok = await runDisableCollateralSimulation(plan)
+        if (!ok) {
+          disableCollateralErrorVault.value = getAddress(vault.address)
+          return
+        }
+      }
+
+      await reviewLaunch.open()
     }
     catch (e) {
       console.warn('[OperationReviewModal] failed to build plan', e)
     }
-
-    if (plan) {
-      const ok = await runDisableCollateralSimulation(plan)
-      if (!ok) {
-        disableCollateralErrorVault.value = getAddress(vault.address)
-        return
-      }
-    }
-
-    modal.open(OperationReviewModal, {
-      props: {
-        type: 'disableCollateral',
-        asset: borrowVault.value!.asset,
-        amount: '0',
-        plan: plan || undefined,
-        subAccount: position.value?.subAccount,
-        hasBorrows: (position.value?.borrowed || 0n) > 0n,
-        submittingLabel: 'Submitting...',
-        onConfirm: async () => {
-          await send(vault.address)
-        },
-      },
-    })
   }
   finally {
     isPreparing.value = false
   }
 }
-const send = async (collateralAddress: string) => {
-  try {
-    isSubmitting.value = true
-    const subAccount = position.value!.subAccount as Address
-    const owner = address.value as Address
-    const txPlan = await planTransfer({
-      vaultAddress: collateralAddress as Address,
-      from: subAccount,
-      to: owner,
-      amount: maxUint256,
-      disableCollateralFrom: true,
-      account: planAccount.value,
-    })
-    await executePlan(txPlan)
-
-    modal.close()
-    setTimeout(() => {
-      router.replace({ path: '/portfolio', query: { network: _route.query.network } })
-    }, 400)
-  }
-  catch (e) {
-    error('Transaction failed')
-    console.warn(e)
-  }
-  finally {
-    isSubmitting.value = false
-  }
-}
 const load = async () => {
   const sequence = ++loadSequence
-  // Redirect to portfolio if not connected and not in spy mode
   if (!isConnected.value && !isSpyMode.value) {
     router.replace('/portfolio')
     return
@@ -935,6 +931,16 @@ watch([isConnected, isSpyMode, address, activeLayerData, () => _route.params.num
           </span>
         </template>
       </VaultLabelsAndAssets>
+
+      <UiAlert
+        v-if="deprecatedPosition.borrow || deprecatedPosition.collaterals.length"
+        title="Deprecated position"
+        :description="`${deprecatedPosition.reasons.join(' ')} Review whether to withdraw or migrate your collateral and repay or refinance any debt.`"
+        :action-text="deprecatedPositionAction?.text"
+        variant="warning"
+        size="compact"
+        @action="deprecatedPositionAction && router.push(deprecatedPositionAction.to)"
+      />
 
       <UiAlert
         v-if="hasQueryFailure"
@@ -1279,26 +1285,23 @@ watch([isConnected, isSpyMode, address, activeLayerData, () => _route.params.num
             <UiAlert
               v-if="isOverBorrowLTV && !isEligibleForLiquidation"
               class="my-12"
-              title="LTV limit reached"
-              description="Your current LTV exceeds the borrow limit. Repay debt or supply more collateral to borrow again."
+              :title="zeroBorrowLtvNotice?.title ?? 'LTV limit reached'"
+              :description="zeroBorrowLtvNotice?.message ?? 'Your current LTV exceeds the borrow limit. Repay debt or supply more collateral to borrow again.'"
               variant="warning"
               size="compact"
             />
-            <UiAlert
+            <GeoBlockAlert
               v-if="isPositionGeoBlocked || isPairFullyRestricted"
+              :vault-addresses="[borrowVault?.address, ...positionCollateralAddresses]"
               class="my-12"
-              title="Region restricted"
               description="This pair is not available in your region. You can still repay existing debt."
-              variant="warning"
-              size="compact"
             />
-            <UiAlert
+            <GeoBlockAlert
               v-if="!isPositionGeoBlocked && !isPairFullyRestricted && (isBorrowRestricted || isMultiplyRestricted)"
+              :vault-addresses="[borrowVault?.address, ...positionCollateralAddresses]"
               class="my-12"
               title="Asset restricted"
               description="Some operations on this pair are restricted in your region. Supply, withdraw, and repay remain available."
-              variant="warning"
-              size="compact"
             />
             <div
               class="flex justify-between gap-8 mt-4"

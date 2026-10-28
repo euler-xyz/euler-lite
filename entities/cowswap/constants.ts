@@ -12,6 +12,7 @@ export {
 } from '@eulerxyz/euler-v2-sdk'
 
 export const COWSWAP_PROVIDER_NAME = 'cow'
+export const COWSWAP_BATCH_UNSUPPORTED_REASON = 'CoW swaps are not supported in batch mode.'
 
 export const COWSWAP_PROVIDER_EXTRA_DATA = {
   openPosition: { type: 'openPosition' } as SwapProviderExtraData,

@@ -4,6 +4,7 @@ import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { VaultApyModal, UiModalPreviewTrigger } from '#components'
 import { getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
+import { createRaceGuard, runGuarded } from '~/utils/race-guard'
 
 const { vault, defaultOpen = true } = defineProps<{ vault: EulerEarn, defaultOpen?: boolean }>()
 
@@ -31,6 +32,21 @@ watchEffect(async () => {
   availableLiquidityDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
 })
 
+const uncoveredLossesDisplay = ref('-')
+const uncoveredLossesGuard = createRaceGuard()
+
+// EulerEarn service adapters expose `lostAssets` as the uncovered shortfall
+// after subtracting the value of shares held by the coverage address.
+watchEffect(async () => {
+  await runGuarded(
+    uncoveredLossesGuard,
+    () => formatAssetValue(vault.lostAssets, vault, 'off-chain'),
+    (price) => {
+      uncoveredLossesDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
+    },
+  )
+})
+
 const supplyApyModalData = computed(() => ({
   props: {
     mode: 'supply',
@@ -47,6 +63,7 @@ const supplyApyModalData = computed(() => ({
 <template>
   <VaultOverviewAccordionSection
     title="Statistics"
+    icon="section-statistics"
     :default-open="defaultOpen"
     content-class="flex flex-col items-start gap-24"
   >
@@ -60,6 +77,23 @@ const supplyApyModalData = computed(() => ({
       :value="availableLiquidityDisplay"
       orientation="horizontal"
     />
+    <VaultOverviewLabelValue
+      :value="uncoveredLossesDisplay"
+      orientation="horizontal"
+      data-field="Uncovered losses"
+      :data-value="vault.lostAssets.toString()"
+    >
+      <template #label>
+        <span class="flex items-center gap-4">
+          Uncovered losses
+          <UiHoverPreviewTooltip
+            title="Uncovered Losses"
+            text="Assets the vault is missing after realised bad debt in a strategy or a forced strategy removal, less any part of the shortfall someone has already covered. The full loss stays counted in total supply so the share price does not drop instantly, so whatever is shown here is the portion of total supply that is currently unbacked."
+            icon-class="text-content-muted hover:text-content-secondary"
+          />
+        </span>
+      </template>
+    </VaultOverviewLabelValue>
     <VaultOverviewLabelValue
       label="Total strategies"
       :value="String(vault.strategies.length)"

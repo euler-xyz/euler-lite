@@ -14,18 +14,24 @@ const GET_ONLY_PATHS = new Set([
   '/v3/earn/vaults',
   '/v3/evk/vaults',
   '/v3/evk/vaults/bad-debt',
-  '/v3/evk/vaults/open-interest',
   '/v3/evk/vaults/open-interest/by-collateral',
+  '/v3/liquidations',
+  '/v3/oracles/adapter-assessments',
+  '/v3/oracles/routers',
   '/v3/prices',
   '/v3/rewards/breakdown',
   '/v3/tokens',
 ])
 
 const GET_ONLY_PATH_PATTERNS = [
+  /^\/v3\/(?:evk|earn)\/vaults\/[1-9][0-9]{0,15}\/0x[a-fA-F0-9]{40}\/assessment$/,
   /^\/v3\/accounts\/[^/]+\/positions$/,
+  /^\/v3\/activity\/accounts\/0x[a-fA-F0-9]{40}\/events$/,
+  /^\/v3\/activity\/vaults\/[1-9][0-9]{0,15}\/0x[a-fA-F0-9]{40}\/events$/,
   /^\/v3\/earn\/vaults\/[^/]+\/[^/]+$/,
   /^\/v3\/earn\/vaults\/[^/]+\/[^/]+\/totals$/,
   /^\/v3\/evk\/vaults\/[^/]+\/[^/]+\/totals$/,
+  /^\/v3\/oracles\/adapter-assessments\/0x[a-fA-F0-9]{40}$/,
 ]
 
 const POST_ONLY_PATHS = new Set([
@@ -33,9 +39,14 @@ const POST_ONLY_PATHS = new Set([
   '/v3/resolve/vaults',
 ])
 
+// They spend this deployment's V3 refresh budget, and Lite never sends them.
+const UPSTREAM_REFRESH_PARAMS = new Set(['forceFresh', 'maxAge', 'minBlock'])
+
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/
-const INTEGER_RE = /^[0-9]+$/
+const INTEGER_RE = /^[0-9]{1,16}$/
+const CHAIN_ID_LIST_RE = /^(?=.{1,256}$)[1-9][0-9]{0,15}(?:,[1-9][0-9]{0,15})*$/
 const DECIMAL_RE = /^[0-9]+(?:\.[0-9]+)?$/
+const ACTIVITY_FILTER_RE = /^(?=.{1,256}$)[a-z][a-z0-9_]*(?:,[a-z][a-z0-9_]*)*$/
 const SAFE_QUERY_FIELDS = {
   from: INTEGER_RE,
   limit: INTEGER_RE,
@@ -50,6 +61,7 @@ type V3ProxyValidationResult
     | { ok: false, statusCode: number, statusMessage: string }
 
 const cleanBasePath = (pathname: string) => pathname.replace(/\/+$/, '')
+const ENCODED_PATH_BYTE_RE = /%[0-9a-f]{2}/i
 const normalizeV3ProxyPath = (pathname: string) => pathname.startsWith('/v3/')
   ? pathname
   : `/v3${pathname.startsWith('/') ? pathname : `/${pathname}`}`
@@ -63,6 +75,10 @@ export function getV3ProxyPath(requestUrl: URL): string {
 }
 
 export function isV3ProxyPathAllowed(pathname: string): boolean {
+  // None of the allowlisted path segments require percent-encoding. Reject it
+  // so an upstream cannot decode `%2F`, `%5C`, `%2E`, or `%00` differently
+  // after this proxy has already approved the apparent path shape.
+  if (ENCODED_PATH_BYTE_RE.test(pathname)) return false
   return (
     GET_ONLY_PATHS.has(pathname)
     || POST_ONLY_PATHS.has(pathname)
@@ -79,6 +95,10 @@ const invalid = (statusCode: number, statusMessage: string): V3ProxyValidationRe
 export function validateV3ProxyUrl(method: string, requestUrl: URL): V3ProxyValidationResult {
   const normalizedMethod = method.toUpperCase()
   const pathname = getV3ProxyPath(requestUrl)
+
+  if (ENCODED_PATH_BYTE_RE.test(pathname)) {
+    return invalid(400, 'Encoded V3 path bytes are not allowed')
+  }
 
   if (!isV3ProxyPathAllowed(pathname)) {
     return invalid(404, 'V3 path not allowed')
@@ -98,12 +118,20 @@ export function validateV3ProxyUrl(method: string, requestUrl: URL): V3ProxyVali
   return { ok: true }
 }
 
+const isUpstreamRefreshParam = (pair: string) =>
+  [...new URLSearchParams(pair).keys()].some(name => UPSTREAM_REFRESH_PARAMS.has(name))
+
+const stripUpstreamRefreshParams = (search: string): string => {
+  const kept = search.slice(1).split('&').filter(pair => !isUpstreamRefreshParam(pair)).join('&')
+  return kept ? `?${kept}` : ''
+}
+
 export function buildV3ProxyTarget(requestUrl: URL, env: NodeJS.ProcessEnv = process.env): string {
   const upstream = new URL(readResolvedV3ApiUrl(env))
   const suffix = getV3ProxyPath(requestUrl)
 
   upstream.pathname = `${cleanBasePath(upstream.pathname)}${suffix.startsWith('/') ? suffix : `/${suffix}`}`
-  upstream.search = requestUrl.search
+  upstream.search = stripUpstreamRefreshParams(requestUrl.search)
   upstream.hash = ''
   return upstream.toString()
 }
@@ -167,16 +195,50 @@ export function buildV3ProxyLogFields(requestUrl: URL): Record<string, string> {
     fields.v3VaultAddress = parts[4]
   }
 
-  if (
-    parts.length === 4
-    && parts[0] === 'v3'
-    && parts[1] === 'evk'
-    && parts[2] === 'vaults'
-    && parts[3] === 'open-interest'
-  ) {
+  if (parts.length === 2 && parts[0] === 'v3' && parts[1] === 'liquidations') {
+    fields.v3ActivityScope = 'liquidations'
+    // Violator and liquidator filters identify wallets and are intentionally
+    // omitted; the vault filter is enough to diagnose upstream failures.
     const vaultAddress = cleanParam(requestUrl.searchParams.get('vault'), ADDRESS_RE)
     if (vaultAddress != null) fields.v3VaultAddress = vaultAddress
   }
+
+  if (
+    parts.length === 5
+    && parts[0] === 'v3'
+    && parts[1] === 'activity'
+    && parts[2] === 'accounts'
+    && ADDRESS_RE.test(parts[3])
+    && parts[4] === 'events'
+  ) {
+    fields.v3ActivityScope = 'account'
+    delete fields.v3ChainId
+    // Account addresses are intentionally omitted. They identify the wallet
+    // being viewed and are not needed to diagnose upstream activity failures.
+    const activityChainIds = cleanParam(requestUrl.searchParams.get('chainId'), CHAIN_ID_LIST_RE)
+    if (activityChainIds != null) fields.v3ChainIds = activityChainIds
+  }
+
+  if (
+    parts.length === 6
+    && parts[0] === 'v3'
+    && parts[1] === 'activity'
+    && parts[2] === 'vaults'
+    && INTEGER_RE.test(parts[3])
+    && ADDRESS_RE.test(parts[4])
+    && parts[5] === 'events'
+  ) {
+    fields.v3ActivityScope = 'vault'
+    fields.v3ChainId = parts[3]
+    fields.v3VaultAddress = parts[4]
+    const vaultType = cleanParam(requestUrl.searchParams.get('vaultType'), /^(?:evk|earn|securitize)$/)
+    if (vaultType != null) fields.v3VaultKind = vaultType
+  }
+
+  const activityCategories = cleanParam(requestUrl.searchParams.get('category'), ACTIVITY_FILTER_RE)
+  if (activityCategories != null && fields.v3ActivityScope) fields.v3ActivityCategories = activityCategories
+  const activityEventTypes = cleanParam(requestUrl.searchParams.get('eventType'), ACTIVITY_FILTER_RE)
+  if (activityEventTypes != null && fields.v3ActivityScope) fields.v3ActivityEventTypes = activityEventTypes
 
   return {
     ...fields,

@@ -14,6 +14,8 @@ export interface MarketGroup {
   curator?: EulerLabelEntity
   /** Curator entity key from labels */
   curatorKey?: string
+  /** Owner first, followed by display-only co-brand entities. */
+  brandEntities?: EulerLabelEntity[]
   /** Core member vaults */
   vaults: AnyVault[]
   /** Vaults referenced as collateral but not in this group */
@@ -23,13 +25,15 @@ export interface MarketGroup {
    * should flag with a red indicator. Two cases qualify:
    *  1. The vault is in the registry but its governor isn't part of any
    *     declared product entity — same signal as the per-pair "Unknown"
-   *     risk-manager pill (see `useVaults.isVaultGovernorVerified`).
+   *     curator pill (see `useVaults.isVaultGovernorVerified`).
    *  2. The vault isn't loaded into the registry at all (truly missing).
    * Group-member vaults are never included — the curator's product label
    * is an explicit attestation that those are theirs.
    */
   unknownCollateral: string[]
   metrics: MarketGroupMetrics
+  /** On-demand (direct-URL) and show-all groups keep members that have no live LTV edge and a hidden lend side. */
+  showsAllMembers?: boolean
 }
 
 export interface MarketGroupMetrics {

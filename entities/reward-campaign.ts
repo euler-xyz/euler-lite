@@ -1,18 +1,23 @@
 import { DateTime } from 'luxon'
-import type { Address } from 'viem'
+import { formatUnits, type Address } from 'viem'
 import type {
   RewardAction,
   RewardCampaign as SdkRewardCampaign,
   RewardSource as SdkRewardSource,
   UserReward as SdkUserReward,
 } from '@eulerxyz/euler-v2-sdk'
+import { safeExternalHttpUrl } from '~/utils/external-url'
 
 export type { RewardAction }
 
 export type RewardSource = SdkRewardSource | 'turtle'
 
-export type RewardCampaign = Omit<SdkRewardCampaign, 'source'> & {
+export type RewardEligibilityRequirementsStatus = 'none' | 'complete' | 'incomplete'
+
+export type RewardCampaign = Omit<SdkRewardCampaign, 'source' | 'eligibilityRequirements' | 'eligibilityRequirementsStatus'> & {
   source: RewardSource
+  eligibilityRequirements?: unknown[]
+  eligibilityRequirementsStatus?: RewardEligibilityRequirementsStatus
 }
 
 export type UserReward = Omit<SdkUserReward, 'provider'> & {
@@ -22,6 +27,30 @@ export type UserReward = Omit<SdkUserReward, 'provider'> & {
   // Matches the SDK's `UserReward.timestamp` (ISO string or Unix seconds), so
   // SDK `userRewards` are assignable without narrowing.
   timestamp?: string | number
+}
+
+/**
+ * Scale a raw reward amount to whole tokens.
+ *
+ * The SDK omits `token.decimals` when no upstream source resolved them, which
+ * is distinct from a token that genuinely has 0 decimals. Returns `undefined`
+ * in the unresolved case so callers surface "unknown" rather than a number
+ * scaled by a guessed value — a 6-decimal token read as 18 is off by 1e12.
+ */
+export const rewardTokenAmount = (reward: UserReward, raw: string): number | undefined => {
+  const { decimals } = reward.token
+  if (decimals === undefined) return undefined
+  return Number(formatUnits(BigInt(raw), decimals))
+}
+
+/** Unclaimed reward in whole tokens, or `undefined` when decimals are unresolved. */
+export const rewardUnclaimedAmount = (reward: UserReward): number | undefined =>
+  rewardTokenAmount(reward, reward.unclaimed)
+
+/** Unclaimed reward in USD, or `undefined` when decimals are unresolved. */
+export const rewardUnclaimedUsdValue = (reward: UserReward): number | undefined => {
+  const amount = rewardUnclaimedAmount(reward)
+  return amount === undefined ? undefined : amount * reward.tokenPrice
 }
 
 export interface RewardCampaignDisplay {
@@ -35,6 +64,7 @@ export interface RewardCampaignDisplay {
   }
   source: RewardCampaign['source']
   sourceUrl?: string
+  eligibilityLabel?: string
   isCollateralSpecific: boolean
   minMultiplier?: number
   maxMultiplier?: number
@@ -57,7 +87,6 @@ export const PROVIDER_LOGOS: Record<string, string> = {
 const TURTLE_DASHBOARD_ORGANIZATION_ID = '52974bc3-2c43-4576-ac18-107d92b6e0c7'
 
 export const PROVIDER_SOURCE_URLS: Partial<Record<RewardCampaign['source'], string>> = {
-  merkl: 'https://app.merkl.xyz/?protocol=euler',
   brevis: 'https://incentra.brevis.network/',
   fuul: 'https://www.fuul.xyz/',
 }
@@ -104,10 +133,27 @@ export const rewardCampaignToken = (campaign: RewardCampaign): RewardCampaignDis
   icon: campaign.rewardTokenIcon || '',
 })
 
-export const rewardCampaignSourceUrl = (campaign: RewardCampaign): string | undefined =>
-  campaign.sourceUrl || (campaign.source === 'turtle'
+export const rewardCampaignSourceUrl = (campaign: RewardCampaign): string | undefined => {
+  // V3/provider data reaches multiple `href` bindings through this chokepoint.
+  if (campaign.sourceUrl) return safeExternalHttpUrl(campaign.sourceUrl)
+  if (campaign.source === 'merkl') return undefined
+  return campaign.source === 'turtle'
     ? `https://dashboard.turtle.xyz/organizations/${TURTLE_DASHBOARD_ORGANIZATION_ID}/incentives/streams/${campaign.campaignId}`
-    : PROVIDER_SOURCE_URLS[campaign.source])
+    : PROVIDER_SOURCE_URLS[campaign.source]
+}
+
+export const rewardCampaignEligibilityLabel = (
+  campaign: Pick<RewardCampaign, 'source' | 'eligibilityRequirements' | 'eligibilityRequirementsStatus'>,
+): string | undefined => {
+  if (campaign.eligibilityRequirementsStatus === 'none') return undefined
+  if (campaign.eligibilityRequirementsStatus === 'incomplete') {
+    return 'eligibility information may be incomplete; additional requirements may apply'
+  }
+  if (campaign.eligibilityRequirementsStatus === 'complete' || campaign.eligibilityRequirements?.length) {
+    return 'eligibility requirements apply'
+  }
+  return undefined
+}
 
 export const rewardCampaignKey = (campaign: RewardCampaign, prefix?: string): string => {
   const parts = [
@@ -138,6 +184,7 @@ export const rewardCampaignDisplay = (
 ): RewardCampaignDisplay => {
   const endTimestamp = normalizeRewardEndTimestamp(campaign.endTimestamp)
   const sourceUrl = rewardCampaignSourceUrl(campaign)
+  const eligibilityLabel = rewardCampaignEligibilityLabel(campaign)
   return {
     id: rewardCampaignKey(campaign, prefix),
     parityKey: rewardCampaignParityKey(campaign, vaultAddress),
@@ -147,6 +194,7 @@ export const rewardCampaignDisplay = (
     source: campaign.source,
     isCollateralSpecific: campaign.action === 'BORROW_COLLATERAL',
     ...(sourceUrl ? { sourceUrl } : {}),
+    ...(eligibilityLabel ? { eligibilityLabel } : {}),
     ...(campaign.minMultiplier !== undefined ? { minMultiplier: campaign.minMultiplier } : {}),
     ...(campaign.maxMultiplier !== undefined ? { maxMultiplier: campaign.maxMultiplier } : {}),
   }

@@ -2,13 +2,18 @@
 import { getSubAccountId as getSubAccountIndex } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
 
-const { isConnected, address } = useWagmi()
+const { isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { borrowPositions, removedBorrowPositions, isPositionsLoaded, portfolioAddress } = useEulerAccount()
 const { isReady } = useVaults()
+const { isReady: labelsReady, loadError: labelsError } = useEulerLabels()
+const labelsUnavailable = computed(() => !labelsReady.value && Boolean(labelsError.value))
 
 const hasActiveSession = computed(() => isConnected.value || isSpyMode.value)
-const ownerAddress = computed(() => portfolioAddress.value || address.value || '')
+// portfolioAddress is already the spy-safe acting address; a wallet
+// fallback here would compute wrong position indices while a spy
+// candidate is still verifying.
+const ownerAddress = computed(() => portfolioAddress.value)
 
 const sortedBorrowPositions = computed(() => {
   const positions = [...removedBorrowPositions.value, ...borrowPositions.value]
@@ -36,7 +41,15 @@ usePortfolioBatchScrollTarget(computed(() =>
 </script>
 
 <template>
-  <div class="mx-16">
+  <LabelsUnavailableState
+    v-if="labelsUnavailable"
+    title="Positions unavailable"
+    description="Vault verification could not be loaded, so positions cannot be shown reliably. Try again to load your positions."
+  />
+  <div
+    v-else
+    class="mx-16"
+  >
     <div class="flex justify-between items-center mb-8">
       <h3 class="text-h3 font-normal text-neutral-800">
         Borrow positions

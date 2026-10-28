@@ -13,6 +13,7 @@ import { getVaultAddress, getVaultAssetSymbol, getVaultAssetAddress } from '~/ut
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import type { FilterOptionEntry } from '~/utils/buildTvlSortedOptions'
 import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
+import { marketUsdMetricValue } from '~/utils/market-usd-metric'
 
 defineOptions({
   name: 'ExplorePage',
@@ -23,7 +24,8 @@ const { getBestMaxROE } = useBestMaxROE(marketGroups)
 const { isEVaultUpdating, isEarnUpdating, isSecuritizeUpdating, isEscrowUpdating } = useVaults()
 const { chainId } = useEulerAddresses()
 const { isLoading: isTokenListLoading } = useTokenList()
-const { entities } = useEulerLabels()
+const { entities, isReady: labelsReady, loadError: labelsError } = useEulerLabels()
+const labelsUnavailable = computed(() => !labelsReady.value && Boolean(labelsError.value))
 const { enableEntityBranding } = useDeployConfig()
 
 const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<MarketGroup>(group => [
@@ -46,7 +48,7 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<MarketGroup>(
 
 const selectedMarkets = ref<string[]>([])
 const selectedAssets = ref<string[]>([])
-const selectedRiskManagers = ref<string[]>([])
+const selectedCurators = ref<string[]>([])
 const sortBy = ref<string>('Active')
 const sortDir = ref<'desc' | 'asc'>('desc')
 
@@ -56,7 +58,7 @@ useUrlQuerySync([
   { ref: sortDir, default: 'desc', queryKey: 'dir' },
   { ref: selectedMarkets, default: [], queryKey: 'market' },
   { ref: selectedAssets, default: [], queryKey: 'asset' },
-  { ref: selectedRiskManagers, default: [], queryKey: 'riskManager' },
+  { ref: selectedCurators, default: [], queryKey: 'curator', legacyKeys: ['riskManager'] },
 ])
 
 const {
@@ -77,8 +79,7 @@ const {
       const best = getBestMaxROE(group.id)
       return best.metric === 'max-roe' ? best.value : Number.NaN
     }
-    const val = group.metrics[metric as keyof typeof group.metrics]
-    return typeof val === 'number' ? val : 0
+    return marketUsdMetricValue(group.metrics, metric)
   },
 )
 
@@ -93,7 +94,7 @@ watch(chainId, (newChainId, oldChainId) => {
     clearSearch()
     selectedMarkets.value = []
     selectedAssets.value = []
-    selectedRiskManagers.value = []
+    selectedCurators.value = []
     clearCustomFilters()
   }
 })
@@ -111,7 +112,7 @@ const marketOptions = computed(() => {
       seenInGroup.add(market.name)
       const entityName = Array.isArray(market?.entity) ? market?.entity[0] : market?.entity
       const entityObj = entityName ? entities[entityName] : null
-      entries.push({ key: market.name, label: market.name, tvl: group.metrics.totalTVL, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined })
+      entries.push({ key: market.name, label: market.name, tvl: group.metrics.totalTVL, icon: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined })
     }
   }
   return buildTvlSortedOptions(entries)
@@ -136,12 +137,12 @@ const assetOptions = computed(() => {
   return result
 })
 
-const riskManagerOptions = computed(() => {
+const curatorOptions = computed(() => {
   const entries: FilterOptionEntry[] = []
   for (const group of marketGroups.value) {
     if (group.source !== 'product') continue
     for (const entity of getUniqueEntitiesByVaults(group.vaults)) {
-      entries.push({ key: entity.name, label: entity.name, tvl: group.metrics.totalTVL, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined })
+      entries.push({ key: entity.name, label: entity.name, tvl: group.metrics.totalTVL, icon: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined })
     }
   }
   return buildTvlSortedOptions(entries)
@@ -163,9 +164,9 @@ const matchesAssetFilter = (group: MarketGroup): boolean => {
   )
 }
 
-const matchesRiskManagerFilter = (group: MarketGroup): boolean => {
-  if (!selectedRiskManagers.value.length) return true
-  return getUniqueEntitiesByVaults(group.vaults).some(e => selectedRiskManagers.value.includes(e.name))
+const matchesCuratorFilter = (group: MarketGroup): boolean => {
+  if (!selectedCurators.value.length) return true
+  return getUniqueEntitiesByVaults(group.vaults).some(e => selectedCurators.value.includes(e.name))
 }
 
 const filteredMarkets = computed(() => {
@@ -174,7 +175,7 @@ const filteredMarkets = computed(() => {
     .filter(matchesSearch)
     .filter(matchesMarketFilter)
     .filter(matchesAssetFilter)
-    .filter(matchesRiskManagerFilter)
+    .filter(matchesCuratorFilter)
     .filter(matchesCustomFilters)
 })
 
@@ -294,7 +295,7 @@ const hasActiveFilters = computed(() =>
   searchQuery.value.trim().length > 0
   || selectedMarkets.value.length > 0
   || selectedAssets.value.length > 0
-  || selectedRiskManagers.value.length > 0
+  || selectedCurators.value.length > 0
   || customFilters.value.length > 0,
 )
 const hasExploreMarkets = computed(() => marketGroups.value.some(group => group.source === 'product'))
@@ -310,7 +311,7 @@ const clearExploreFilters = () => {
   clearSearch()
   selectedMarkets.value = []
   selectedAssets.value = []
-  selectedRiskManagers.value = []
+  selectedCurators.value = []
   clearCustomFilters()
 }
 </script>
@@ -319,12 +320,15 @@ const clearExploreFilters = () => {
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
     <BasePageHeader
       title="Explore"
-      description="Discover lending markets across Euler. Filter by asset, risk manager, or market type."
+      description="Discover lending markets across Euler. Filter by asset, curator, or market type."
       class="mb-16"
-      icon="nodes"
+      icon="nav-explore"
     />
 
-    <div class="mb-16 -mx-16">
+    <div
+      v-if="!labelsUnavailable"
+      class="mb-16 -mx-16"
+    >
       <div class="flex items-center flex-wrap gap-8 px-16">
         <UiInput
           v-model="searchQuery"
@@ -339,23 +343,24 @@ const clearExploreFilters = () => {
           v-model:dir="sortDir"
           :options="[
             { label: 'Active', icon: 'sparks' },
-            { label: 'Max ROE', icon: 'percent' },
-            { label: 'Total Supply', icon: 'lend-outline' },
-            { label: 'Total Borrowed', icon: 'borrow-outline' },
-            { label: 'Available Liquidity', icon: 'wallet' },
+            { label: 'Max ROE', icon: 'sort-roe' },
+            { label: 'Total Supply', icon: 'sort-total-supply' },
+            { label: 'Total Borrowed', icon: 'sort-total-borrowed' },
+            { label: 'Available Liquidity', icon: 'sort-liquidity' },
           ]"
           :disable-dir="sortBy === 'Active'"
           title="Sorting type"
         />
         <UiSelect
           v-if="enableEntityBranding"
-          :key="`risk-managers-${chainId}`"
-          v-model="selectedRiskManagers"
-          :options="riskManagerOptions"
-          placeholder="Risk manager"
-          title="Risk manager"
-          modal-input-placeholder="Search risk manager"
-          icon="shield"
+          :key="`curators-${chainId}`"
+          v-model="selectedCurators"
+          :options="curatorOptions"
+          placeholder="Curator"
+          title="Curator"
+          modal-input-placeholder="Search curator"
+          icon="filter-curator"
+          active-icon="filter-curator-filled"
         />
         <UiSelect
           v-if="enableEntityBranding"
@@ -365,7 +370,8 @@ const clearExploreFilters = () => {
           placeholder="Market"
           title="Market"
           modal-input-placeholder="Search market"
-          icon="bank"
+          icon="market"
+          active-icon="market-filled"
         />
         <UiSelect
           :key="`assets-${chainId}`"
@@ -374,7 +380,8 @@ const clearExploreFilters = () => {
           placeholder="Asset"
           title="Asset"
           modal-input-placeholder="Search asset"
-          icon="wallet"
+          icon="filter-asset"
+          active-icon="filter-asset-filled"
         />
         <UiCustomFilterChips
           :filters="customFilters"
@@ -385,8 +392,14 @@ const clearExploreFilters = () => {
     </div>
 
     <div class="flex flex-col flex-1">
+      <LabelsUnavailableState
+        v-if="labelsUnavailable"
+        class="flex-1"
+        title="Markets unavailable"
+        description="Published vault verification could not be loaded. Market listings are unavailable until it returns."
+      />
       <div
-        v-if="isLoading"
+        v-else-if="isLoading"
         class="flex flex-col flex-1 items-center justify-center gap-12"
       >
         <UiLoader />
@@ -404,7 +417,7 @@ const clearExploreFilters = () => {
       <UiEmptyState
         v-else
         class="flex-1"
-        icon="nodes"
+        icon="nav-explore"
         :title="emptyStateTitle"
         :description="emptyStateDescription"
       >

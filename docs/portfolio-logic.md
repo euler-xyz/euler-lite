@@ -218,7 +218,7 @@ totalBorrowedValue = sum of:
   - SDK totalBorrowedValueUsd
 ```
 
-Both are computed reactively and update when position data changes.
+Both are computed reactively and update when position data changes. Those SDK totals sum **priced** positions only. `portfolioPricingGaps` flags unpriced savings, collateral, and debt so Portfolio can show Partial pricing instead of treating a partial subtotal as complete. See [Pricing System → Unpriced and partial USD](./pricing-system.md#unpriced-and-partial-usd).
 
 ## Pyth Oracle Handling
 
@@ -270,8 +270,8 @@ This is a `staticCall` - no transaction is sent, no gas is spent, and the state 
 3. Replace vault data with simulation result.
 
 **Borrow position loading** (`composables/useEulerAccount.ts`):
-1. Call `sdk.portfolioService.fetchPortfolio(..., { populateAll: true })`.
-2. Read portfolio positions from SDK `Portfolio` and keep SDK diagnostics beside the portfolio for UI warnings.
+1. Fetch the account with the required portfolio hydration options, excluding SDK label population; Lite gets labels from its shared V3 or static snapshot.
+2. Build the SDK `Portfolio` from that account and keep SDK diagnostics beside it for UI warnings.
 3. Transaction paths use SDK `TransactionPlan` processing for Pyth updates before execution.
 
 **Transaction building** (`useEulerTx.ts` + SDK Pyth plugins):
@@ -341,7 +341,7 @@ The poll interval awaits `updateBalances()` before `refreshVaults()` to ensure w
 
 After each fetch, `updateBalances()` schedules a follow-up run if its inputs (chain, address, registry readiness) changed mid-flight. Two safeguards keep this from looping:
 
-- Address identity is compared **case-insensitively**. Connector-reported addresses are not guaranteed to be EIP-55 checksummed (WalletConnect wallets commonly report lowercase, injected wallets checksum), while the last-fetched address is stored checksummed. A cased compare here once kept the follow-up condition true forever, refetching in an unbounded loop that hung the tab.
+- Address identity is compared **case-insensitively**. Connector-reported addresses are not guaranteed to be EIP-55 checksummed (WalletConnect wallets commonly report lowercase, injected wallets checksum), while the last-fetched address is stored checksummed. A cased compare here once kept the follow-up condition true forever, refetching in an unbounded loop that hung the tab. `useWagmi().address` now normalizes the connector value to checksummed form at the source, so consumers always see canonical casing — the case-insensitive compare stays as defense-in-depth.
 - Consecutive follow-up runs are capped (`MAX_CONSECUTIVE_AUTO_REFETCHES`); hitting the cap logs a warning instead of spinning, since legitimate mid-flight changes settle within a couple of rounds.
 
 ## Related Documentation
@@ -349,6 +349,10 @@ After each fetch, `updateBalances()` schedules a follow-up run if its inputs (ch
 - [Pricing System](./pricing-system.md) — Full pricing architecture details
 - [Pyth Oracle Handling](./pyth-oracle-handling.md) — How Pyth oracles affect position loading
 - [Vault Labels & Verification](./vault-labels-and-verification.md) — How vault verification affects position visibility
+- [Activity Feed](./activity-feed.md) — Portfolio and vault activity history (V3-backed)
+- [External Migration Discovery](./external-migration.md) — Aave / Morpho position scanning for Migrate
+- [Cross-Position Repay](./cross-position-repay.md) — Exact-vault collateral from another sub-account
+- [Safe Wallet Compatibility](./safe-wallets.md) — Multisig detection, bundling, and detached execution
 
 ### Reactive Update Triggers
 

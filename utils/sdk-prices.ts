@@ -216,6 +216,21 @@ export const getAssetUsdValue = async (
   return tokenAmountToUsdValue(amount, vault.asset.decimals, await getAssetUsdPrice(vault, source))
 }
 
+/**
+ * Keep projected metrics unavailable when a nonzero amount has no usable USD
+ * price, while allowing a genuinely empty leg to contribute $0.
+ */
+export const getAssetUsdValueForEstimate = async (
+  amount: number | bigint,
+  vault: AnyVault | null | undefined,
+  source: PriceSource = 'off-chain',
+): Promise<number | undefined> => {
+  if (!vault) return undefined
+  if (amount === 0 || amount === 0n) return 0
+  const value = await getAssetUsdValue(amount, vault, source)
+  return value !== undefined && Number.isFinite(value) && value > 0 ? value : undefined
+}
+
 export const getAssetUsdValueOrZero = async (
   ...args: Parameters<typeof getAssetUsdValue>
 ): Promise<number> => {

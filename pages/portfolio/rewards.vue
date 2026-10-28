@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { formatUnits } from 'viem'
 import type { UserReward } from '~/entities/reward-campaign'
+import { rewardUnclaimedUsdValue } from '~/entities/reward-campaign'
 
 const { isConnected } = useWagmi()
 const { isSpyMode } = useSpyMode()
@@ -8,11 +8,16 @@ const { enableMerkl, enableIncentra, enableFuul, enableTurtle } = useDeployConfi
 const { rewards, isRewardsLoading } = useSdkRewards()
 const { locks, isLocksLoading } = useREULLocks()
 
-const getRewardUsdValue = (reward: UserReward) =>
-  Number(formatUnits(BigInt(reward.unclaimed), reward.token.decimals)) * reward.tokenPrice
-
+// Rewards whose token decimals never resolved have no comparable USD value, so
+// they sort last rather than being treated as worth zero or NaN.
 const sortRewardsByUsd = (items: UserReward[]) =>
-  [...items].sort((a, b) => getRewardUsdValue(b) - getRewardUsdValue(a))
+  [...items].sort((a, b) => {
+    const left = rewardUnclaimedUsdValue(a)
+    const right = rewardUnclaimedUsdValue(b)
+    if (left === undefined) return right === undefined ? 0 : 1
+    if (right === undefined) return -1
+    return right - left
+  })
 
 const sortedMerklRewards = computed(() => sortRewardsByUsd(rewards.value.filter(reward => reward.provider === 'merkl')))
 const sortedBrevisRewards = computed(() => sortRewardsByUsd(rewards.value.filter(reward => reward.provider === 'brevis')))

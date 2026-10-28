@@ -11,7 +11,7 @@ const { vault, layout = 'inline', size = 'small', nudge = false, summaryOnly = f
 }>()
 
 const vaultRef = computed(() => vault)
-const { badges, governanceType, summaryBadges, summaryGovernanceType } = useVaultTypeBadges(vaultRef)
+const { badges, governanceType, summaryBadges, summaryGovernanceType, verificationVault } = useVaultTypeBadges(vaultRef)
 
 const isStacked = computed(() => layout === 'stacked')
 const tagElement = computed(() => isStacked.value ? 'button' : 'span')
@@ -30,7 +30,7 @@ const hasAnyBadge = computed(() => visibleBadges.value.length > 0)
   >
     <VaultTypeChip
       v-if="showGovernanceType"
-      :vault="vault"
+      :vault="verificationVault"
       :type="visibleGovernanceType"
       :size="size"
       :block="isStacked"
@@ -39,7 +39,7 @@ const hasAnyBadge = computed(() => visibleBadges.value.length > 0)
     />
     <VaultTypeChip
       v-if="hasVisibleBadge('securitize')"
-      :vault="vault"
+      :vault="verificationVault"
       type="securitize"
       :size="size"
       :block="isStacked"

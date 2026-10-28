@@ -100,14 +100,17 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     const quote = options.multiplySelectedQuote.value
     if (!quote) return
 
-    // CoW pre-flight: orders can't be simulated, so the multiply form's
-    // existing errorText already screens most failure modes — but it doesn't
-    // see the post-swap collateral amount that we're about to push into the
-    // long vault. Guard against exceeding the supply cap on the long side.
+    const swapOutputAmount = trimTrailingZeros(formatUnits(BigInt(quote.amountOut || '0'), Number(longVault.asset.decimals)))
+    const supplyAmount = options.multiplyInputAmount.value
+    const supplyAmountNano = valueToNano(supplyAmount || '0', supplyVault.asset.decimals)
+
+    // The multiply form requires the collateral and long vault to match.
+    // Count both the initial deposit and swap output against its supply cap
+    // before preparing a CoW order, which skips transaction simulation.
     const longCap = longVault.caps?.supplyCap
     if (typeof longCap === 'bigint' && longCap > 0n && longCap < maxUint256) {
       const buyAmount = BigInt(quote.amountOut || '0')
-      if (longVault.totalAssets + buyAmount > longCap) {
+      if (longVault.totalAssets + supplyAmountNano + buyAmount > longCap) {
         error('Long vault supply cap would be exceeded')
         return
       }
@@ -152,7 +155,6 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
       return
     }
 
-    const supplyAmountNano = valueToNano(options.multiplyInputAmount.value || '0', supplyVault.asset.decimals)
     const validTo = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
 
     // For the review modal we still want to show CoW order amounts (sell/buy)
@@ -224,7 +226,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
       currentAllowance: collateralAllowance,
       requiredAmount: supplyAmountNano,
       label: 'Approve for deposit',
-      assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: options.multiplyInputAmount.value },
+      assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: supplyAmount },
       startIndex: idx,
     })
     signSteps.push(...collateralApproval.steps)
@@ -251,9 +253,9 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     const wrapperSteps: DisplayStep[] = [
       { index: wIdx++, label: 'Enable collateral', labelSuffix: collateralVaultName, isSeparateTx: false, assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address } },
       { index: wIdx++, label: 'Enable controller', labelSuffix: borrowVaultName, isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address } },
-      { index: wIdx++, label: 'Supply', isSeparateTx: false, assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: options.multiplyInputAmount.value } },
+      { index: wIdx++, label: 'Supply', isSeparateTx: false, assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: supplyAmount } },
       { index: wIdx++, label: 'Borrow', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: borrowAmountStr } },
-      { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: borrowAmountStr }, toAssetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: options.multiplyLongAmount.value } },
+      { index: wIdx++, label: 'Swap', isSeparateTx: false, assetInfo: { symbol: borrowAsset.symbol, address: borrowAsset.address, amount: borrowAmountStr }, toAssetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: swapOutputAmount } },
       { index: wIdx, label: 'Verify min received', isSeparateTx: false, assetInfo: { symbol: collateralAsset.symbol, address: collateralAsset.address, amount: swapOutMinAmount } },
     ]
 

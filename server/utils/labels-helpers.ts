@@ -1,5 +1,4 @@
 import { getAddress, type Address } from 'viem'
-import { INTERNAL_FETCH_HEADERS } from './internal-headers'
 
 export interface EntityEntry {
   addresses?: unknown
@@ -38,14 +37,4 @@ export function buildEntityAddressSets(
     map.set(key, addresses)
   }
   return map
-}
-
-export async function fetchLabels<T>(
-  chainId: number,
-  file: 'products.json' | 'entities.json' | 'earn-vaults.json',
-): Promise<T> {
-  return await $fetch<T>(`/api/internal/labels/${file}`, {
-    query: { chainId },
-    headers: INTERNAL_FETCH_HEADERS,
-  }) as unknown as T
 }

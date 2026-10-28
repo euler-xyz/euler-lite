@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { isSpyMode, spyShortAddress, spyAddress, clearSpyMode } = useSpyMode()
+const { isSpyMode, isSpyResolving, spyShortAddress, spyAddress, clearSpyMode } = useSpyMode()
 </script>
 
 <template>
@@ -12,7 +12,17 @@ const { isSpyMode, spyShortAddress, spyAddress, clearSpyMode } = useSpyMode()
         name="search-user"
         class="!w-16 !h-16"
       />
-      <span class="text-p3">
+      <!-- The candidate address is never displayed until its owner resolves. -->
+      <span
+        v-if="isSpyResolving"
+        class="text-p3"
+      >
+        Verifying address…
+      </span>
+      <span
+        v-else
+        class="text-p3"
+      >
         Viewing as
         <UiHoverPreviewTooltip
           title="Spy address"

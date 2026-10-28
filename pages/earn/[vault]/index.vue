@@ -3,30 +3,31 @@ import type { VaultAsset } from '~/types/asset'
 import { computeSupplyApyBreakdown, type TransactionPlan, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
-import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
+import { getVaultGeoUnavailableReason, isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import VaultFormInfoBlock from '~/components/entities/vault/form/VaultFormInfoBlock.vue'
 import VaultFormSubmit from '~/components/entities/vault/form/VaultFormSubmit.vue'
 import { formatNumber } from '~/utils/string-utils'
+import { isNativeCurrencyAddress } from '~/utils/native-currency'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import type { Address } from 'viem'
-import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultApyModal } from '#components'
+import { VaultApyModal } from '#components'
 
 const router = useRouter()
 const route = useRoute()
-const modal = useModal()
 const { error } = useToast()
-const { planDeposit, executePlan } = useEulerTx()
+const { planDeposit } = useEulerTx()
+const { create: createIntent } = useOperationIntentFactory()
+const { capture: captureReviewState } = useExecutionReview()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
 const { getEarnVault, updateEarnVault } = useVaults()
-const { isReady: isLabelsReady } = useEulerLabels()
 const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
 const { chainId } = useEulerAddresses()
+const { primeSlotHintsFor } = useStateOverrideOptions()
 const shareLinkQuery = computed(() => {
   const network = route.query.network
 
@@ -37,7 +38,8 @@ const shareLinkQuery = computed(() => {
 const { getBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const vaultAddress = route.params.vault as string
-useOperationGuard([vaultAddress])
+const { warning: assessmentWarning } = useVaultAssessmentWarning(vaultAddress, 'earn')
+useOperationGuard([vaultAddress], { depositedVaultAddresses: [vaultAddress] })
 const { name } = useEulerProductOfVault(vaultAddress)
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -51,6 +53,7 @@ const isEstimatesLoading = ref(false)
 const amount = ref('')
 const plan = ref<TransactionPlan | null>(null)
 const vault: Ref<EulerEarn | undefined> = ref(undefined)
+useVaultOpeningNotice(() => vault.value ? [vaultAddress] : [])
 const asset: Ref<VaultAsset | undefined> = ref(undefined)
 const estimateSupplyAPY = ref(0)
 const earnVaultMarketLabel = computed(() => unref(name) || vault.value?.shares.name || '')
@@ -62,6 +65,18 @@ const hasRewards = computed(() => settings.value.enableRewardsApy && hasSupplyRe
 const supplyApyBreakdown = computed(() => vault.value ? computeSupplyApyBreakdown(vault.value, viewer.value) : undefined)
 const visibleApyBreakdown = computed(() => visibleBreakdown(supplyApyBreakdown.value))
 const supplyApyTotal = computed(() => visibleTotal(supplyApyBreakdown.value) ?? 0)
+
+// Pre-prime ERC20 slot hints for the vault asset. One probe per token,
+// owner-/spender-agnostic; later estimate/sim calls skip access-list discovery.
+// Speculative, so it must not gate the submit button (`background: true`).
+watch(
+  () => asset.value?.address,
+  (assetAddress) => {
+    if (!assetAddress || isNativeCurrencyAddress(assetAddress)) return
+    void primeSlotHintsFor([assetAddress as Address], { background: true })
+  },
+  { immediate: true },
+)
 
 const applyLoadedVault = (loadedVault: EulerEarn) => {
   vault.value = loadedVault
@@ -82,24 +97,7 @@ const refreshEarnVault = async (address: string, silent = false) => {
 // Non-blocking to avoid Suspense + pageTransition crash on direct navigation
 ;(async () => {
   try {
-    // Wait for labels so `verified` is set correctly on direct navigation.
-    // Otherwise getEarnVault falls through to a direct fetch with empty
-    // earnVaultAddresses and returns verified: false.
-    if (!isLabelsReady.value) {
-      await until(isLabelsReady).toBe(true)
-    }
     applyLoadedVault(await getEarnVault(vaultAddress))
-
-    if (!useVaultRegistry().isVerifiedVault(vault.value.address)) {
-      modal.open(VaultUnverifiedDisclaimerModal, {
-        isNotClosable: true,
-        props: {
-          cancelAction: () => {
-            router.replace('/')
-          },
-        },
-      })
-    }
 
     void refreshEarnVault(vault.value.address, true)
   }
@@ -123,7 +121,7 @@ const isSubmitDisabled = computed(() => {
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vaultAddress))
 const reviewSupplyDisabled = computed(() => isGeoBlocked.value || isSubmitDisabled.value)
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: getVaultGeoUnavailableReason(vaultAddress) || 'This operation is not available in your region', variant: 'warning' }
   if (errorText.value) return { message: errorText.value, variant: 'error' }
   return undefined
 })
@@ -143,13 +141,41 @@ const submit = async () => {
       return
     }
 
+    const capturedAmount = amount.value
+    const capturedAsset = asset.value
+    const plannerArgs = {
+      vaultAddress: vaultAddress as Address,
+      assetAddress: asset.value.address as Address,
+      amount: valueToNano(capturedAmount || '0', asset.value.decimals),
+    }
+    const intent = createIntent({
+      kind: 'deposit',
+      planner: 'deposit',
+      args: plannerArgs,
+      source: 'pages/earn/[vault]/index.vue',
+    })
+    const reviewLaunch = captureReviewState([intent], {
+      presentationKind: 'supply',
+      review: {
+        type: 'supply',
+        asset: capturedAsset,
+        amount: capturedAmount,
+        submittingLabel: 'Submitting...',
+      },
+      onSucceeded: async () => {
+        await updateEstimates()
+        setTimeout(() => {
+          router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
+        }, 400)
+      },
+      onFailed: (cause) => {
+        error('Transaction failed')
+        console.warn(cause)
+      },
+    })
+
     try {
-      plan.value = await planDeposit({
-        vaultAddress: vaultAddress as Address,
-        assetAddress: asset.value.address as Address,
-        amount: valueToNano(amount.value || '0', asset.value.decimals),
-        account: planAccount.value,
-      })
+      plan.value = await planDeposit({ ...plannerArgs, account: planAccount.value })
     }
     catch (e) {
       console.warn('[OperationReviewModal] failed to build plan', e)
@@ -163,18 +189,7 @@ const submit = async () => {
       }
     }
 
-    modal.open(OperationReviewModal, {
-      props: {
-        type: 'supply',
-        asset: asset.value,
-        amount: amount.value,
-        plan: plan.value || undefined,
-        submittingLabel: 'Submitting...',
-        onConfirm: async () => {
-          await send()
-        },
-      },
-    })
+    await reviewLaunch.open()
   }
   finally {
     isPreparing.value = false
@@ -186,43 +201,21 @@ const addToBatch = async () => {
   const assetAddr = asset.value.address as Address
   const amt = valueToNano(amount.value, asset.value.decimals)
   const label = `Earn deposit ${amount.value} ${asset.value.symbol}`
+  const intent = createIntent({
+    kind: 'deposit',
+    planner: 'deposit',
+    args: { vaultAddress: vaultAddress as Address, assetAddress: assetAddr, amount: amt },
+    source: 'pages/earn/[vault]/index.vue#batch',
+  })
   await addBatchEntry({
+    intent,
     label,
-    buildPlan: account => planDeposit({ vaultAddress: vaultAddress as Address, assetAddress: assetAddr, amount: amt, account }),
     review: { type: 'supply', asset: asset.value, amount: amount.value, marketLabel: earnVaultMarketLabel.value },
   })
   amount.value = ''
   redirectAfterAdd('/portfolio/saving', { subAccount: address.value, vault: vaultAddress })
 }
 
-const send = async () => {
-  try {
-    isSubmitting.value = true
-    if (!asset.value?.address) {
-      return
-    }
-    const txPlan = plan.value ?? await planDeposit({
-      vaultAddress: vaultAddress as Address,
-      assetAddress: asset.value.address as Address,
-      amount: valueToNano(amount.value || '0', asset.value.decimals),
-      account: planAccount.value,
-    })
-    await executePlan(txPlan)
-
-    modal.close()
-    await updateEstimates()
-    setTimeout(() => {
-      router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
-    }, 400)
-  }
-  catch (e) {
-    error('Transaction failed')
-    console.warn(e)
-  }
-  finally {
-    isSubmitting.value = false
-  }
-}
 const updateEstimates = async () => {
   if (!vault.value) return
   try {
@@ -351,12 +344,10 @@ watch(amount, () => {
               maxable
             />
 
-            <UiAlert
+            <GeoBlockAlert
               v-if="isGeoBlocked"
-              title="Region restricted"
+              :vault-addresses="[vaultAddress]"
               description="This operation is not available in your region. You can still withdraw existing deposits."
-              variant="warning"
-              size="compact"
             />
             <UiAlert
               v-show="errorText"
@@ -372,6 +363,8 @@ watch(amount, () => {
               :description="simulationError"
               size="compact"
             />
+
+            <VaultWarningBanner :warnings="[assessmentWarning]" />
 
             <VaultFormInfoBlock
               v-if="vault && asset"

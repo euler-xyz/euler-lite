@@ -1,19 +1,26 @@
 import { isEVault, type EVault } from '@eulerxyz/euler-v2-sdk'
+import { getEulerLabelProductBrandEntities } from '@eulerxyz/euler-v2-sdk/public-labels'
 import { getAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import type { EulerLabelEntity, EulerLabelProduct } from '~/entities/euler/labels'
 import type { MarketGroup, MarketGroupMetrics, CuratorGroup } from '~/entities/lend-discovery'
 import type { AnyVault } from '~/composables/useVaultRegistry'
-import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
-import { isVaultNotExplorable, isVaultRecentlyAdded, isVaultDeprecated, getProductKeyByVault } from '~/utils/eulerLabelsUtils'
+import { getAssetUsdValueForEstimate, getAssetUsdValueOrZero } from '~/utils/sdk-prices'
+import { isVaultNotExplorable, isVaultRecentlyAdded, isVaultDeprecated, getProductKeyByVault, isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
 import { isLiveCollateralEdge } from '~/utils/vault/ltv'
 import { isVaultBorrowable } from '~/utils/vault/classification'
+import { hasResolvedGovernorAdmin } from '~/utils/vault/governor-verification'
+import { groupHasExplorableMarket } from '~/utils/vault/market-group-visibility'
 import { liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
+import { resolveEulerRouterGovernors } from '~/utils/vault/euler-router-governance'
+import { governableGovernorAbi } from '~/abis/oracle'
+import { getEulerLabelsSourceData } from '~/composables/useEulerLabels'
+import { getPublishedVaultCandidates } from '~/utils/public-labels'
 
 // -- Helpers --
 
 const hasGovernorAdmin = (vault: AnyVault): vault is EVault =>
-  isEVault(vault) && 'governorAdmin' in vault
+  hasResolvedGovernorAdmin(vault)
 
 const isBorrowableVault = (vault: AnyVault): boolean =>
   isEVault(vault) && isVaultBorrowable(vault)
@@ -53,10 +60,12 @@ const getBorrowAPY = (vault: AnyVault): number => {
 
 // -- Step 1: Product-Label Groups --
 
-const buildProductGroups = (
+/** Exported for tests; production callers go through useMarketGroups. */
+export const buildProductGroups = (
   allVaults: AnyVault[],
   products: Record<string, EulerLabelProduct>,
   entities: Record<string, EulerLabelEntity>,
+  listNonMarketGroups: boolean,
 ): { groups: MarketGroup[], assignedAddresses: Set<string> } => {
   const vaultMap = new Map<string, AnyVault>()
   for (const vault of allVaults) {
@@ -68,6 +77,7 @@ const buildProductGroups = (
   const groups: MarketGroup[] = []
 
   for (const [productKey, product] of Object.entries(products)) {
+    if (product.isStandalone) continue
     const memberVaults: AnyVault[] = []
     const allProductAddresses = [...product.vaults, ...(product.deprecatedVaults || [])]
     for (const vaultAddr of allProductAddresses) {
@@ -80,6 +90,13 @@ const buildProductGroups = (
 
     if (memberVaults.length === 0) continue
 
+    // Collateral-only products (every member hidden on both the lend and
+    // borrow side) get no discovery card. Their addresses stay assigned so
+    // the members don't fall into orphan clustering, they still resolve as
+    // externalCollateral in other groups' graphs, and a direct market URL
+    // still loads via fetchMarketGroupOnDemand.
+    if (!listNonMarketGroups && !groupHasExplorableMarket(memberVaults)) continue
+
     // Resolve curator entity
     const entityKeys = Array.isArray(product.entity) ? product.entity : [product.entity]
     const curatorKey = entityKeys[0] || undefined
@@ -91,10 +108,12 @@ const buildProductGroups = (
       source: 'product',
       curator,
       curatorKey,
+      brandEntities: getEulerLabelProductBrandEntities(product, entities),
       vaults: memberVaults,
       externalCollateral: [],
       unknownCollateral: [],
       metrics: computeMetricsSync(memberVaults),
+      ...(listNonMarketGroups && { showsAllMembers: true }),
     })
   }
 
@@ -134,7 +153,7 @@ const augmentWithCollateralGraph = (
         if (externalVault) {
           externalCollateral.push(externalVault)
           seenExternal.add(normalized)
-          // Mirror the per-pair "Unknown" risk-manager pill (see
+          // Mirror the per-pair "Unknown" curator pill (see
           // VaultBorrowItem). An external collateral whose governor isn't part
           // of any declared product entity is the curator wiring in a vault
           // they don't actually run — surface it in the market graph too so
@@ -310,7 +329,7 @@ const computeMetricsSync = (vaults: AnyVault[]): MarketGroupMetrics => {
 
 // -- Async TVL Resolution --
 
-const resolveGroupTVL = async (group: MarketGroup): Promise<MarketGroup> => {
+export const resolveGroupTVL = async (group: MarketGroup): Promise<MarketGroup> => {
   let totalTVL = 0
   let pricedCount = 0
   let allPriced = true
@@ -320,7 +339,8 @@ const resolveGroupTVL = async (group: MarketGroup): Promise<MarketGroup> => {
   const results = await Promise.all(
     group.vaults.map(async (vault: AnyVault) => {
       const totalAssets = 'totalAssets' in vault ? vault.totalAssets as bigint : 0n
-      const usdValue = await getAssetUsdValueOrZero(totalAssets, vault, 'off-chain')
+      const pricedValue = await getAssetUsdValueForEstimate(totalAssets, vault, 'off-chain')
+      const usdValue = pricedValue ?? 0
       const borrowable = isBorrowableVault(vault)
       let liquidity = 0
       let borrowUsd = 0
@@ -328,7 +348,7 @@ const resolveGroupTVL = async (group: MarketGroup): Promise<MarketGroup> => {
         borrowUsd = await getAssetUsdValueOrZero(vault.totalBorrowed, vault, 'off-chain')
         liquidity = usdValue - borrowUsd
       }
-      return { priced: usdValue > 0, value: usdValue, liquidity, borrowUsd, borrowable }
+      return { priced: pricedValue !== undefined, value: usdValue, liquidity, borrowUsd, borrowable }
     }),
   )
 
@@ -362,7 +382,7 @@ const resolveGroupTVL = async (group: MarketGroup): Promise<MarketGroup> => {
 // -- Main Composable --
 
 export const useMarketGroups = () => {
-  const { getAll } = useVaultRegistry()
+  const { getAll, isKnownEscrowAddress } = useVaultRegistry()
   const { products, entities, isReady: labelsReady } = useEulerLabels()
   const { isVaultGovernorVerified, isCollateralResolved, isMarketDataResolved, isReady: vaultsReady } = useVaults()
   const showAllLabelEntries = useShowAllLabelEntries()
@@ -373,9 +393,18 @@ export const useMarketGroups = () => {
 
   /** All vaults available for grouping */
   const allVaults = computed((): AnyVault[] => {
-    return registryVaults.value.filter((vault) => {
+    const labels = getEulerLabelsSourceData()
+    const candidates = getPublishedVaultCandidates(labels)
+    const published = labels.source === 'v3' || labels.source === 'v3-metadata'
+      ? new Set([...candidates.vaults, ...candidates.earn].map(address => address.toLowerCase()))
+      : null
+    return getAll().filter(entry => !entry.portfolioOnly).map(entry => entry.vault).filter((vault) => {
       const address = getVaultAddress(vault)
-      return address ? showAllLabelEntries.value || !isVaultNotExplorable(address) : true
+      if (!address) return false
+      // Escrow perspective membership is an independent discovery source.
+      return (!published || published.has(address.toLowerCase()) || isKnownEscrowAddress(address))
+        && isVaultSelectedByTag(address)
+        && (showAllLabelEntries.value || !isVaultNotExplorable(address))
     })
   })
 
@@ -396,7 +425,7 @@ export const useMarketGroups = () => {
     if (vaults.length === 0) return []
 
     // Step 1: Product-label groups
-    const { groups: productGroups, assignedAddresses } = buildProductGroups(vaults, products, entities)
+    const { groups: productGroups, assignedAddresses } = buildProductGroups(vaults, products, entities, showAllLabelEntries.value)
 
     // Step 2: Augment with collateral graph — pass the full registry so active
     // LTVs targeting non-explorable vaults still resolve as externalCollateral
@@ -498,30 +527,56 @@ export const useMarketGroups = () => {
   /** Fetch a market group on demand for non-explorable products accessed via direct URL */
   const fetchMarketGroupOnDemand = async (productKey: string): Promise<MarketGroup | null> => {
     const product = products[productKey]
-    if (!product) return null
+    if (!product || product.isStandalone) return null
 
     const allAddresses = [...product.vaults, ...(product.deprecatedVaults || [])]
     if (allAddresses.length === 0) return null
 
-    const memberVaults: EVault[] = []
-
-    try {
-      const { chainId } = useEulerAddresses()
-      const { getEulerSdkForChain } = useEulerSdk()
-      // Capture the chain id once so the SDK backend selection and the fetch
-      // can't diverge if the user switches chains mid-await.
-      const targetChainId = chainId.value
-      const sdk = await getEulerSdkForChain(targetChainId)
-      const result = await sdk.eVaultService.fetchVaults(
-        targetChainId,
-        allAddresses.map(addr => getAddress(addr) as Address),
-        liteVaultFetchOptions,
-      )
-      result.errors.forEach(issue => logWarn('useMarketGroups/fetchMarketGroupOnDemand', issue))
-      memberVaults.push(...(result.result.filter(Boolean) as EVault[]))
+    // Satisfy members from the registry first: non-EVault members (e.g.
+    // Securitize collateral wrappers) are hydrated there at startup and must
+    // never be routed through the EVault lens below. Only the remainder —
+    // typically EVaults of product-level notExplorable products, which are
+    // excluded from the startup load — needs an on-demand fetch.
+    const registryByAddress = new Map(
+      registryVaults.value.map(vault => [getVaultAddress(vault).toLowerCase(), vault]),
+    )
+    const memberVaults: AnyVault[] = []
+    const missingAddresses: string[] = []
+    for (const address of allAddresses) {
+      const known = registryByAddress.get(address.toLowerCase())
+      if (known) memberVaults.push(known)
+      else missingAddresses.push(address)
     }
-    catch (e) {
-      logWarn('useMarketGroups/fetchMarketGroupOnDemand', e)
+
+    if (missingAddresses.length > 0) {
+      try {
+        const { chainId } = useEulerAddresses()
+        const { getEulerSdkForChain } = useEulerSdk()
+        // Capture the chain id once so the SDK backend selection and the fetch
+        // can't diverge if the user switches chains mid-await.
+        const targetChainId = chainId.value
+        const sdk = await getEulerSdkForChain(targetChainId)
+        const result = await sdk.eVaultService.fetchVaults(
+          targetChainId,
+          missingAddresses.map(addr => getAddress(addr) as Address),
+          liteVaultFetchOptions,
+        )
+        result.errors.forEach(issue => logWarn('useMarketGroups/fetchMarketGroupOnDemand', issue))
+        const fetchedVaults = result.result.filter(Boolean) as EVault[]
+        await resolveEulerRouterGovernors(fetchedVaults, (router) => {
+          const provider = sdk.providerService.getProvider(targetChainId)
+          return provider.readContract({
+            address: router,
+            abi: governableGovernorAbi,
+            functionName: 'governor',
+            authorizationList: undefined,
+          })
+        })
+        memberVaults.push(...fetchedVaults)
+      }
+      catch (e) {
+        logWarn('useMarketGroups/fetchMarketGroupOnDemand', e)
+      }
     }
 
     if (memberVaults.length === 0) return null
@@ -536,10 +591,12 @@ export const useMarketGroups = () => {
       source: 'product',
       curator,
       curatorKey,
+      brandEntities: getEulerLabelProductBrandEntities(product, entities),
       vaults: memberVaults,
       externalCollateral: [],
       unknownCollateral: [],
       metrics: computeMetricsSync(memberVaults),
+      showsAllMembers: true,
     }
 
     // The direct market page waits for labels and the unresolved-collateral

@@ -3,21 +3,21 @@ import type { EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault, useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
-import { isVaultGovernanceLimited, isVaultRecentlyAdded, isVaultKeyring, isVaultCyclicalNote } from '~/utils/eulerLabelsUtils'
+import { isVaultGovernanceLimited, isVaultRecentlyAdded, isVaultKeyring, isVaultCyclicalNote, getVaultDeprecation } from '~/utils/eulerLabelsUtils'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
-import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { VaultApyModal, UiModalPreviewTrigger } from '#components'
 import { isVaultBorrowable } from '~/utils/vault/classification'
-import { getAddress } from 'viem'
 import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
 import { resolveVaultExposureDisplay, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
+import { getCriticalAssessmentWarning, getUnknownVaultCause } from '~/utils/vault-assessment/presentation'
+import { zeroAddress } from 'viem'
 
 const { isConnected } = useWagmi()
-const { vault, type = 'lend' } = defineProps<{ vault: EVault, type?: 'lend' | 'borrow' }>()
+const { vault, type = 'lend', assessmentUi = 'badge' } = defineProps<{ vault: EVault, type?: 'lend' | 'borrow', assessmentUi?: 'badge' | 'field' | 'none' }>()
 const vaultAddress = computed(() => vault.address)
 const product = useEulerProductOfVault(vaultAddress)
 const { enableEntityBranding } = useDeployConfig()
@@ -33,16 +33,13 @@ const {
 } = useCollateralOpenInterest()
 const isUnverified = computed(() => !isVerifiedVault(vault.address))
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault))
+const isUngoverned = computed(() => vault.governorAdmin?.toLowerCase() === zeroAddress)
 const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
 const entityName = computed(() => {
   if (!isGovernorVerified.value || entities.length === 0) return ''
   if (entities.length === 1) return entities[0].name
   if (entities.length === 2) return `${entities[0].name} & ${entities[1].name}`
   return `${entities[0].name} & others`
-})
-const entityLogos = computed(() => {
-  if (!entityName.value || entities.length === 0) return []
-  return entities.map(e => getEulerLabelEntityLogo(e.logo))
 })
 const isEscrow = computed(() => getVaultCategory(vault.address) === 'escrow')
 const isBorrowable = computed(() => isVaultBorrowable(vault))
@@ -108,6 +105,12 @@ const isKeyring = computed(() => isVaultKeyring(vault.address))
 const isCyclicalNote = computed(() => isVaultCyclicalNote(vault.address))
 const utilisationWarning = computed(() => getUtilisationWarning(vault, 'lend'))
 const supplyCapWarning = computed(() => getSupplyCapWarning(vault))
+const { vaultAssessments, getVaultAssessmentEntry, loadVaultAssessment, visibility, source, isReady, isVaultAssessmentAvailableForChain } = useEulerLabels()
+const showChecksColumn = computed(() => assessmentUi === 'field' && source.value === 'v3' && isReady.value && isVaultAssessmentAvailableForChain(vault.chainId))
+const unknownCause = computed(() => {
+  if (!isUnverified.value) return null
+  return getUnknownVaultCause(visibility.value?.[vault.address.toLowerCase()])
+})
 const statsGridCols = computed(() => {
   const cols: string[] = []
   if (enableEntityBranding) cols.push('1fr')
@@ -117,21 +120,23 @@ const statsGridCols = computed(() => {
     cols.push('1fr') // Utilization
     cols.push('1fr') // Current exposure
   }
+  if (showChecksColumn.value) cols.push('1fr')
   if (isConnected.value) cols.push('1fr') // In wallet
   return cols.join(' ')
 })
-const isDeprecated = computed(() => {
-  try {
-    const addr = getAddress(vault.address)
-    return product.deprecatedVaults?.includes(addr) ?? false
-  }
-  catch {
-    return product.deprecatedVaults?.includes(vault.address) ?? false
+const isDeprecated = computed(() => getVaultDeprecation(vault.address).deprecated)
+watchEffect(() => {
+  if (source.value === 'v3' && isReady.value
+    && visibility.value?.[vault.address.toLowerCase()]?.status === 'warning') {
+    void loadVaultAssessment(vault.chainId, vault.address, 'evk')
   }
 })
-const deprecationReason = computed(() =>
-  isDeprecated.value ? product.deprecationReason : '',
-)
+const criticalAssessmentWarning = computed(() => {
+  void vaultAssessments.value
+  if (source.value !== 'v3' || !isReady.value) return null
+  const entry = getVaultAssessmentEntry(vault.chainId, vault.address, 'evk')
+  return entry.status === 'available' ? getCriticalAssessmentWarning(entry.assessment) : null
+})
 
 const supplyApyModalData = computed(() => ({
   props: {
@@ -199,6 +204,7 @@ watchEffect(async () => {
           <VaultDisplayName
             :name="displayName"
             :is-unverified="isUnverified"
+            :addresses="[vault.address]"
           />
           <RecentlyAddedBadge
             v-if="isRecentlyAdded"
@@ -206,21 +212,19 @@ watchEffect(async () => {
           <KeyringBadge v-if="isKeyring && isGovernorVerified" />
           <GovernanceLimitedBadge v-if="isGovernanceLimited" />
           <CyclicalNoteBadge v-if="isCyclicalNote && isGovernorVerified" />
-          <RestrictedBadge v-if="isGeoBlocked" />
-          <UiHoverPreviewTooltip
-            v-if="isDeprecated"
-            title="Deprecated"
-            :text="deprecationReason || 'This vault has been deprecated.'"
-            placement="top-start"
-          >
-            <span class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5">
-              <SvgIcon
-                name="warning"
-                class="!w-14 !h-14"
-              />
-              Deprecated
-            </span>
-          </UiHoverPreviewTooltip>
+          <RestrictedBadge
+            v-if="isGeoBlocked"
+            :vault-addresses="[vault.address]"
+            :chain-id="vault.chainId"
+          />
+          <VaultDeprecatedBadge :addresses="[vault.address]" />
+          <LiquidationCoverageBadge :vault="vault" />
+          <VaultAssessmentWarning
+            :address="vault.address"
+            :hide-deprecated="isDeprecated"
+            :hide-checks="assessmentUi !== 'badge'"
+          />
+          <VaultWarningIcon :warning="criticalAssessmentWarning" />
         </div>
         <div
           class="text-h5 text-content-primary"
@@ -283,9 +287,18 @@ watchEffect(async () => {
         v-if="enableEntityBranding"
         class="flex-1 mobile:!hidden"
       >
-        <div class="text-content-tertiary text-p3 mb-4">Risk manager</div>
+        <div class="text-content-tertiary text-p3 mb-4">Curator</div>
         <div
-          v-if="!isGovernorVerified"
+          v-if="isUngoverned"
+          class="text-p2 text-content-primary"
+          data-id="data-point"
+          :data-key="vault.address.toLowerCase()"
+          data-field="curator"
+        >
+          Ungoverned
+        </div>
+        <div
+          v-else-if="!isGovernorVerified"
           class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
         >
           <SvgIcon
@@ -299,18 +312,16 @@ watchEffect(async () => {
           class="flex items-center gap-6"
           :class="{ 'opacity-20': isGovernanceLimited }"
         >
-          <BaseAvatar
-            class="icon--20"
-            :label="entityName"
-            :src="entityLogos"
-          />
-          <span
-            class="text-p2 text-content-primary truncate"
-            data-id="data-point"
-            :data-key="vault.address.toLowerCase()"
-            data-field="risk-manager"
-            :data-value="entityName"
-          >{{ entityName }}</span>
+          <VaultEntityDisclosureTooltip :entities="entities">
+            <CuratorEntityLink
+              :entities="entities"
+              :label="entityName"
+              span-link
+              text-class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors truncate"
+              :data-key="vault.address.toLowerCase()"
+              data-field="curator"
+            />
+          </VaultEntityDisclosureTooltip>
         </div>
         <div
           v-else
@@ -323,6 +334,10 @@ watchEffect(async () => {
           <VaultWarningIcon
             :warning="supplyCapWarning"
             tooltip-placement="top-start"
+          />
+          <VaultNoUsdPriceHint
+            v-if="priceValues.totalSupplyState === 'unavailable'"
+            placement="top-start"
           />
         </div>
         <div
@@ -402,6 +417,13 @@ watchEffect(async () => {
           />
         </div>
       </div>
+      <VaultAssessmentChecksField
+        v-if="showChecksColumn"
+        class="flex-1 items-end text-right mobile:!hidden"
+        :address="vault.address"
+        :chain-id="vault.chainId"
+        :error-tone="isUnverified"
+      />
       <div
         v-if="isConnected"
         class="flex flex-col flex-1 items-end text-right mobile:!hidden"
@@ -417,17 +439,27 @@ watchEffect(async () => {
         </BaseLoadableContent>
       </div>
     </div>
+    <VaultAssessmentWarningLines
+      v-if="showChecksColumn"
+      :vaults="[{ address: vault.address, chainId: vault.chainId, unverified: isUnverified, cause: unknownCause }]"
+    />
     <div class="hidden mobile:flex mobile:flex-col gap-12 py-12 px-16 pb-16">
       <div
         v-if="enableEntityBranding"
         class="flex w-full justify-between"
       >
         <div class="flex-1">
-          <div class="text-content-tertiary text-p3">Risk manager</div>
+          <div class="text-content-tertiary text-p3">Curator</div>
         </div>
         <div class="flex gap-8 justify-end items-center text-right flex-1">
           <div
-            v-if="!isGovernorVerified"
+            v-if="isUngoverned"
+            class="text-p2 text-content-primary"
+          >
+            Ungoverned
+          </div>
+          <div
+            v-else-if="!isGovernorVerified"
             class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
           >
             <SvgIcon
@@ -441,12 +473,12 @@ watchEffect(async () => {
             class="flex items-center gap-8"
             :class="{ 'opacity-20': isGovernanceLimited }"
           >
-            <BaseAvatar
-              class="icon--20"
+            <CuratorEntityLink
+              :entities="entities"
               :label="entityName"
-              :src="entityLogos"
+              span-link
+              text-class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors truncate"
             />
-            <span class="text-p2 text-content-primary truncate">{{ entityName }}</span>
           </div>
           <div
             v-else

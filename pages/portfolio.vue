@@ -26,15 +26,24 @@ const { rewards } = useSdkRewards()
 const { locks, refreshLocks } = useREULLocks()
 const { isConnected, address, spyAddress, effectiveAddress, isSpyMode } = useEffectiveAddress()
 const { isLoaded: isBalancesLoaded, updateBalances } = useWallets()
-const { eulerLensAddresses } = useEulerAddresses()
+const { chainId, eulerLensAddresses } = useEulerAddresses()
+const { isReady: labelsReady, loadError: labelsError } = useEulerLabels()
+const labelsUnavailable = computed(() => !labelsReady.value && Boolean(labelsError.value))
 const { portfolioRefreshCounter } = usePortfolioRefresh()
 const showAllLabelEntries = useShowAllLabelEntries()
 const {
   positions: migrationPositions,
   isLoading: isMigrationLoading,
   error: migrationError,
+  unavailableSources: migrationUnavailableSources,
   hasLoaded: hasMigrationLoaded,
 } = useExternalMigrationPositions()
+const activityAvailability = useActivityAvailability({ kind: 'account' }, chainId)
+const activityRuntimeSupport = usePortfolioActivityRuntimeSupport(effectiveAddress, chainId)
+const showActivityTab = computed(() => shouldShowPortfolioActivityTab(
+  activityAvailability.shouldRender.value,
+  activityRuntimeSupport.isRuntimeUnsupported.value,
+))
 
 const interval: Ref<NodeJS.Timeout | null> = ref(null)
 const hasShownMigrationTab = ref(false)
@@ -84,6 +93,7 @@ const showMigrationTab = computed(() =>
   && (
     visibleMigrationPositionCount.value > 0
     || isMigrationLoading.value
+    || migrationUnavailableSources.value.length > 0
     || (!!migrationError.value && hasShownMigrationTab.value)
   ),
 )
@@ -106,6 +116,13 @@ const tabs = computed(() => {
       badge: rewards.value.length + locks.value.length || null,
     },
   ]
+
+  if (showActivityTab.value) {
+    items.push({
+      label: 'Activity',
+      value: 'portfolio-activity',
+    })
+  }
 
   if (showMigrationTab.value) {
     items.push({
@@ -133,6 +150,21 @@ watch([() => route.name, showMigrationTab, hasMigrationLoaded, isMigrationLoadin
   }
 })
 
+watch([
+  () => route.name,
+  showActivityTab,
+  activityAvailability.isChecking,
+  activityAvailability.reason,
+], () => {
+  if (shouldLeavePortfolioActivityRoute({
+    routeName: route.name,
+    isChecking: activityAvailability.isChecking.value,
+    shouldShow: showActivityTab.value,
+  })) {
+    router.replace({ name: 'portfolio', query: route.query })
+  }
+}, { immediate: true })
+
 const portfolioNetApyDisplay = computed(() =>
   Number.isFinite(portfolioNetApy.value) ? `${formatNumber(portfolioNetApy.value)}%` : '-',
 )
@@ -157,6 +189,9 @@ const netAssetValueDisplay = computed(() => {
   if (total === 0 && hasMissingPrices) return '—'
   return formatCompactUsdValue(total)
 })
+const netAssetValuePricingText = computed(() => totalBorrowedValueInfo.value.hasMissingPrices
+  ? 'Some positions have no USD price, so this value leaves them out. Debt left out can make this value look higher than it is.'
+  : 'Some positions have no USD price, so this value leaves them out.')
 
 const updatePositions = async (
   options: { portfolioSource?: 'fast' | 'fresh', preemptPortfolio?: boolean } = {},
@@ -196,12 +231,17 @@ watch(showAllLabelEntries, (showAll) => {
 </script>
 
 <template>
-  <section class="flex flex-col gap-16 min-h-[calc(100dvh-178px)] mobile:-mx-16">
+  <section
+    class="flex flex-col gap-16 min-h-[calc(100dvh-178px)] mobile:-mx-16"
+  >
     <div class="flex items-center justify-between px-16">
       <h2 class="text-h2 text-content-primary">
         Your Portfolio
       </h2>
-      <div class="flex items-center gap-8">
+      <div
+        v-if="!labelsUnavailable"
+        class="flex items-center gap-8"
+      >
         <span class="text-h6 text-content-secondary">Show all</span>
         <UiHoverPreviewTooltip
           title="Show all"
@@ -214,11 +254,14 @@ watch(showAllLabelEntries, (showAll) => {
       </div>
     </div>
 
-    <PortfolioShowAllHint />
+    <PortfolioShowAllHint v-if="!labelsUnavailable" />
 
-    <PortfolioRampingBanner />
+    <PortfolioRampingBanner v-if="!labelsUnavailable" />
 
-    <div class="flex flex-col gap-16 mx-16 laptop:flex-row laptop:items-stretch">
+    <div
+      v-if="!labelsUnavailable"
+      class="flex flex-col gap-16 mx-16 laptop:flex-row laptop:items-stretch"
+    >
       <div class="flex flex-col gap-16 p-16 rounded-12 border border-line-default bg-card shadow-card laptop:flex-1">
         <div class="text-h4 text-content-primary">
           Portfolio performance
@@ -279,8 +322,8 @@ watch(showAllLabelEntries, (showAll) => {
             Total supplied
             <UiHoverPreviewTooltip
               v-if="totalSuppliedValueInfo.hasMissingPrices"
-              title="Incomplete pricing"
-              text="Some supplied assets don't have price data available. The displayed value may be higher than shown."
+              title="Partial pricing"
+              text="Some supplied assets have no USD price, so this total leaves them out."
               placement="bottom-end"
               icon-class="text-warning-500"
             />
@@ -291,7 +334,7 @@ watch(showAllLabelEntries, (showAll) => {
               data-id="data-point"
               :data-key="spyAddress || address"
               data-field="portfolio-total-supplied"
-              :data-value="totalSuppliedValueInfo.hasMissingPrices ? totalSuppliedDisplay : totalSuppliedValueInfo.total"
+              :data-value="totalSuppliedDisplay === '—' ? totalSuppliedDisplay : totalSuppliedValueInfo.total"
             >
               {{ totalSuppliedDisplay }}
             </div>
@@ -302,8 +345,8 @@ watch(showAllLabelEntries, (showAll) => {
             Total borrowed
             <UiHoverPreviewTooltip
               v-if="totalBorrowedValueInfo.hasMissingPrices"
-              title="Incomplete pricing"
-              text="Some borrowed assets don't have price data available. The displayed value may be higher than shown."
+              title="Partial pricing"
+              text="Some borrowed assets have no USD price, so this total leaves them out."
               placement="bottom-end"
               icon-class="text-warning-500"
             />
@@ -314,7 +357,7 @@ watch(showAllLabelEntries, (showAll) => {
               data-id="data-point"
               :data-key="spyAddress || address"
               data-field="portfolio-total-borrowed"
-              :data-value="totalBorrowedValueInfo.hasMissingPrices ? totalBorrowedDisplay : totalBorrowedValueInfo.total"
+              :data-value="totalBorrowedDisplay === '—' ? totalBorrowedDisplay : totalBorrowedValueInfo.total"
             >
               {{ totalBorrowedDisplay }}
             </div>
@@ -324,9 +367,9 @@ watch(showAllLabelEntries, (showAll) => {
           <div class="flex items-center gap-4 text-p2 text-content-secondary">
             Net asset value
             <UiHoverPreviewTooltip
-              v-if="totalSuppliedValueInfo.hasMissingPrices || totalBorrowedValueInfo.hasMissingPrices"
-              title="Incomplete pricing"
-              text="Some assets in your portfolio don't have price data available. The displayed value may be higher than shown."
+              v-if="netAssetValueInfo.hasMissingPrices"
+              title="Partial pricing"
+              :text="netAssetValuePricingText"
               placement="bottom-end"
               icon-class="text-warning-500"
             />
@@ -337,7 +380,7 @@ watch(showAllLabelEntries, (showAll) => {
               data-id="data-point"
               :data-key="spyAddress || address"
               data-field="portfolio-net-asset-value"
-              :data-value="netAssetValueInfo.hasMissingPrices ? netAssetValueDisplay : netAssetValueInfo.total"
+              :data-value="netAssetValueDisplay === '—' ? netAssetValueDisplay : netAssetValueInfo.total"
             >
               {{ netAssetValueDisplay }}
             </div>

@@ -1,56 +1,53 @@
+import { getEulerSdkForChain } from '~/composables/useEulerSdk'
+import { useV3ChainGate } from '~/composables/useV3ChainGate'
 import { logWarn } from '~/utils/errorHandling'
 
-// Recognized EulerRouter addresses (deployed by the recognized EulerRouterFactory)
-// are published per chain at `{oracle-checks}/{chainId}/routers/all.json` as a flat
-// array of addresses. We proxy + cache them through `/api/internal/oracle-routers` and keep a
-// lowercased Set per chain so router-recognition lookups are O(1).
+// Recognized EulerRouter addresses. Data V3's `/v3/oracles/routers` is built
+// from indexed `EulerRouterFactory` deployments, so every router it lists was
+// deployed by the recognized factory. Kept as a lowercased Set per chain so
+// router-recognition lookups are O(1).
 const recognizedRoutersRef = shallowRef<Set<string>>(new Set())
 const recognizedRoutersChainId = ref<number | null>(null)
-const recognizedRoutersByChain = new Map<number, Set<string>>()
+// The SDK owns bounded result freshness; Lite only deduplicates concurrent loads.
 const pendingRouterLoads = new Map<number, Promise<Set<string>>>()
-
-const toRecognizedSet = (data: unknown): Set<string> => {
-  if (!Array.isArray(data)) return new Set()
-  return new Set(
-    data
-      .filter((entry): entry is string => typeof entry === 'string')
-      .map(entry => entry.toLowerCase()),
-  )
-}
 
 const loadRecognizedRouters = async (chainId: number): Promise<Set<string>> => {
   if (!Number.isInteger(chainId) || chainId <= 0) return new Set()
 
-  recognizedRoutersChainId.value = chainId
-
-  const cached = recognizedRoutersByChain.get(chainId)
-  if (cached) {
-    recognizedRoutersRef.value = cached
-    return cached
+  if (recognizedRoutersChainId.value !== chainId) {
+    recognizedRoutersChainId.value = chainId
+    recognizedRoutersRef.value = new Set()
   }
-
-  recognizedRoutersRef.value = new Set()
+  if (!useV3ChainGate().isV3EnabledForChain(chainId)) return new Set()
 
   const inflight = pendingRouterLoads.get(chainId)
   if (inflight) return inflight
 
   const promise = (async () => {
-    const data = await $fetch('/api/internal/oracle-routers', { query: { chainId } })
-    const set = toRecognizedSet(data)
-    recognizedRoutersByChain.set(chainId, set)
-    if (recognizedRoutersChainId.value === chainId) {
-      recognizedRoutersRef.value = set
+    try {
+      const sdk = await getEulerSdkForChain(chainId)
+      const routers = await sdk.oracleAdapterService.fetchOracleRouters(chainId)
+      // CREATE2 factory deployments reuse the same router address across chains.
+      // Only count rows that actually belong to the requested chain.
+      const set = new Set<string>(
+        routers
+          .filter(router => router.chainId === chainId)
+          .map(router => router.router.toLowerCase()),
+      )
+      if (recognizedRoutersChainId.value === chainId) {
+        recognizedRoutersRef.value = set
+      }
+      return set
     }
-    return set
+    catch (err) {
+      logWarn('useEulerOracleRouters', `Failed to load recognized routers for chain ${chainId}: ${err instanceof Error ? err.message : String(err)}`)
+      return new Set<string>()
+    }
   })()
 
   pendingRouterLoads.set(chainId, promise)
   try {
     return await promise
-  }
-  catch (err) {
-    logWarn('useEulerOracleRouters', `Failed to load recognized routers for chain ${chainId}: ${err instanceof Error ? err.message : String(err)}`)
-    return new Set()
   }
   finally {
     pendingRouterLoads.delete(chainId)

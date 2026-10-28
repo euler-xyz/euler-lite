@@ -1,18 +1,30 @@
 <script setup lang="ts">
 const props = withDefaults(defineProps<{
   title: string
+  icon?: string
   defaultOpen?: boolean
   contentClass?: string
   hasActions?: boolean
+  keepMounted?: boolean
 }>(), {
   defaultOpen: true,
   contentClass: 'flex flex-col gap-24',
   hasActions: true,
+  keepMounted: false,
 })
+const emit = defineEmits<{
+  'update:open': [open: boolean]
+}>()
 
 const isOpen = ref(props.defaultOpen)
 const panelId = useId()
 const sectionEl = ref<HTMLElement>()
+
+const setOpen = (open: boolean) => {
+  if (isOpen.value === open) return
+  isOpen.value = open
+  emit('update:open', open)
+}
 
 const expandIfOnlySection = () => {
   const parentEl = sectionEl.value?.parentElement
@@ -20,7 +32,7 @@ const expandIfOnlySection = () => {
 
   const sections = Array.from(parentEl.querySelectorAll<HTMLElement>(':scope > [data-vault-overview-accordion-section]'))
   if (sections.length === 1) {
-    isOpen.value = true
+    setOpen(true)
     return
   }
 
@@ -28,13 +40,14 @@ const expandIfOnlySection = () => {
     section.querySelector('button[aria-expanded="false"]'),
   )
   if (collapsedSections.length === 1 && collapsedSections[0] === sectionEl.value) {
-    isOpen.value = true
+    setOpen(true)
   }
 }
 
 const toggle = () => {
-  isOpen.value = !isOpen.value
+  setOpen(!isOpen.value)
 }
+defineExpose({ setOpen })
 
 onMounted(async () => {
   await nextTick()
@@ -64,6 +77,12 @@ onMounted(async () => {
         :aria-label="`${isOpen ? 'Collapse' : 'Expand'} ${title}`"
         @click="toggle"
       />
+      <SvgIcon
+        v-if="icon"
+        :name="isOpen ? `${icon}-filled` : icon"
+        class="pointer-events-none relative z-10 !w-24 !h-24 shrink-0 text-accent-600"
+        aria-hidden="true"
+      />
       <span class="pointer-events-none relative z-10 min-w-0 flex-1 text-h3 text-content-primary transition-colors group-hover:text-accent-500">
         {{ title }}
       </span>
@@ -86,7 +105,8 @@ onMounted(async () => {
     </div>
 
     <div
-      v-if="isOpen"
+      v-if="isOpen || keepMounted"
+      v-show="isOpen"
       :id="panelId"
       class="px-24 pb-24"
     >

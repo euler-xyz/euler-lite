@@ -11,7 +11,8 @@ const { size = 'small', block = false, as = 'span', nudge = false } = defineProp
 
 <template>
   <VaultMetadataBadge
-    icon="shield"
+    icon="badge-keyring"
+    active-icon="badge-keyring-filled"
     label="Private"
     title="This vault requires identity verification"
     :modal="KeyringInfoModal"

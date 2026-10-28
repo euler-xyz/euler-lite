@@ -11,14 +11,14 @@ Welcome to the Euler Lite project! This guide will help you get up and running w
 - **Lending**: Users can deposit assets to earn yield
 - **Borrowing**: Users can borrow assets using collateral
 - **Portfolio Management**: Track positions and performance
-- **Rewards**: Participate in Merkl, Incentra, and Fuul reward programs
+- **Rewards**: Participate in Merkl, Incentra, Fuul, and Turtle reward programs
 - **Multi-chain**: Connect to any EVM-compatible network
 
 ## 🏗️ Technology Stack
 
 ### Frontend Framework
 
-- **Nuxt.js 3**: Full-stack Vue.js framework
+- **Nuxt.js 4**: Full-stack Vue.js framework
 - **Vue 3**: Progressive JavaScript framework with Composition API
 - **TypeScript**: Type-safe JavaScript development
 - **SCSS**: Advanced CSS preprocessing with custom design system
@@ -38,8 +38,8 @@ Welcome to the Euler Lite project! This guide will help you get up and running w
 
 ### Prerequisites
 
-- Node.js 24+
-- npm package manager
+- Node.js 24.22.1 (see `.nvmrc`; `package.json` `engines` is `>=24.22.1 <25`)
+- npm 11.20.0
 - Git
 - Basic knowledge of Vue.js and TypeScript
 
@@ -55,6 +55,7 @@ Welcome to the Euler Lite project! This guide will help you get up and running w
 2. **Install dependencies**
 
    ```bash
+   npm install --global npm@11.20.0
    npm ci
    ```
 
@@ -81,6 +82,8 @@ Welcome to the Euler Lite project! This guide will help you get up and running w
 - `npm run preview` - Preview production build
 - `npm run generate` - Generate static site (requires a running backend for data proxy endpoints)
 - `npm run lint` - Run ESLint
+- `npm run typecheck` - Run Nuxt type checking
+- `npm run test:run` - Run Vitest once (not `npm run test`, which is watch mode)
 
 ## Environment Configuration
 
@@ -96,12 +99,18 @@ NUXT_PUBLIC_APP_URL=https://your-domain.com
 # API URLs
 V3_API_URL=https://v3.euler.finance
 EULER_SDK_V3_API_KEY=your-v3-api-key # optional
+LIQUIDATION_BOT_API_URL=https://{chainId}-liquidations.euler.finance # optional
 SWAP_API_URL=https://swap.euler.finance
 
 # Chain RPC endpoints (one per chain you want to enable)
 RPC_URL_1=https://your-ethereum-rpc.com
-SUBGRAPH_URL_1=https://your-subgraph.com
+
+# Subgraph source: .env.example selects Euler's published catalog.
+SUBGRAPH_CATALOG_URL=https://raw.githubusercontent.com/euler-xyz/euler-subgraph/catalog/v1/catalog.json
+SUBGRAPH_CATALOG_DISABLED=false
 ```
+
+Each enabled chain needs an active entry in the selected catalog or an explicit compatible subgraph URL. `SUBGRAPH_URL_<chainId>` and its compatibility alias `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` override the catalog. Forks can use their own catalog or direct URLs with bundled Euler fallback disabled; see [Your own subgraphs](./fork-setup.md#your-own-subgraphs).
 
 ## Key External Services
 
@@ -114,33 +123,45 @@ SUBGRAPH_URL_1=https://your-subgraph.com
 ### Pyth Network
 
 - **Purpose**: Pull-based oracle price feeds
-- **Integration**: Hermes API (`PYTH_HERMES_URL`)
+- **Integration**: Hermes API (`PYTH_API_KEY`)
 - **Data Source**: Real-time price updates for oracle feeds
 
 ### Merkl
 
 - **Purpose**: Reward distribution and management
-- **Integration**: API for opportunities and rewards
+- **Integration**: Same-origin `/api/internal/proxy/merkl`
 - **Data Source**: Campaign information, user rewards
+
+### Incentra (Brevis)
+
+- **Purpose**: Euler campaign proofs and incentive distribution
+- **Integration**: Same-origin `/api/internal/proxy/incentra` (see [Server-Side Caching](./server-side-caching.md#per-host-proxies))
+- **Data Source**: Campaign APR data and Merkle proofs
 
 ### Fuul
 
 - **Purpose**: Incentive campaign distribution
-- **Integration**: API for incentive campaigns
+- **Integration**: Same-origin `/api/internal/proxy/fuul`
 - **Data Source**: Campaign APR data and claimable rewards
+
+### Turtle Club
+
+- **Purpose**: Earn-stream rewards
+- **Integration**: Browser fetches proofs through `/api/internal/proxy/turtle`; stream discovery runs in the server-side SDK with `TURTLE_EARN_API_KEY`
+- **Data Source**: Per-wallet Merkle proofs (`streams/merkle_proofs`)
 
 ## 🆘 Common Issues
 
 ### Build Errors
 
-- Ensure Node.js version is 24+
+- Ensure Node.js version is 24.22.1 (see `.nvmrc`)
 - Clear `node_modules` and reinstall dependencies
 - Check TypeScript compilation errors
 
 ### Blockchain Connection Issues
 
 - Verify `RPC_URL_<chainId>` env vars are set correctly
-- Ensure matching `SUBGRAPH_URL_<chainId>` or `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>` exists for each chain
+- For subgraph discovery, verify an active catalog entry with `SUBGRAPH_CATALOG_URL` set, or an explicit `SUBGRAPH_URL_<chainId>` / `NUXT_PUBLIC_SUBGRAPH_URI_<chainId>`. Leave both URL aliases unset when using the catalog entry.
 - Ensure RPC endpoints are accessible
 
 ### Wallet Connection Problems

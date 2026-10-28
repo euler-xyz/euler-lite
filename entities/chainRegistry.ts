@@ -44,19 +44,20 @@ const LEGACY_CHAIN_ALIASES: ReadonlyMap<string, number> = new Map([
   ['lineamainnet', 59144],
 ])
 
-const MONAD_CHAIN_ID = 143
-const MONAD_EXPLORER_URL = 'https://monadscan.com/'
+export const EXPLORER_OVERRIDES: ReadonlyMap<number, { readonly name: string, readonly url: string }> = new Map([
+  [143, { name: 'MonadScan', url: 'https://monadscan.com/' }],
+])
 
-const monad = chainMap.get(MONAD_CHAIN_ID)
-if (monad) {
-  chainMap.set(MONAD_CHAIN_ID, {
-    ...monad,
+for (const [chainId, explorer] of EXPLORER_OVERRIDES) {
+  const chain = chainMap.get(chainId)
+  if (!chain) continue
+  chainMap.set(chainId, {
+    ...chain,
     blockExplorers: {
-      ...monad.blockExplorers,
+      ...chain.blockExplorers,
       default: {
-        ...monad.blockExplorers?.default,
-        name: 'MonadScan',
-        url: MONAD_EXPLORER_URL,
+        ...chain.blockExplorers?.default,
+        ...explorer,
       },
     },
   })
@@ -106,23 +107,3 @@ export const getKnownChainIds = (ids: readonly number[]): number[] =>
 
 export const getUnknownChainIds = (ids: readonly number[]): number[] =>
   ids.filter(id => !isKnownChainId(id))
-
-const DEFI_LLAMA_NAMES: ReadonlyMap<number, string> = new Map([
-  [1, 'Ethereum'],
-  [56, 'BSC'],
-  [130, 'Unichain'],
-  [146, 'Sonic'],
-  [239, 'TAC'],
-  [1923, 'Swell'],
-  [42161, 'Arbitrum'],
-  [43114, 'Avalanche'],
-  [59144, 'Linea'],
-  [60808, 'BOB'],
-  [80094, 'Berachain'],
-  [8453, 'Base'],
-  [9745, 'Plasma'],
-  [999, 'Hyperliquid'],
-])
-
-export const getDefiLlamaChainName = (chainId: number): string | undefined =>
-  DEFI_LLAMA_NAMES.get(chainId)

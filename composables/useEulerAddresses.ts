@@ -13,8 +13,6 @@ export type EulerLensAddresses = {
 export type EulerTokenAddresses = {
   EUL: string | undefined
   rEUL: string | undefined
-  eUSD: string | undefined
-  seUSD: string | undefined
 } | null
 
 const allowedChainIds = ref<number[]>([])
@@ -63,11 +61,14 @@ export const useEulerAddresses = () => {
           .map(chainId => sdk.deploymentService.getDeployment(chainId))
         const filteredData = data.filter(chain => allowedChainIds.value.includes(chain.chainId))
 
-        if (!filteredData.length) {
-          logWarn('useEulerAddresses', 'enabledChainIds did not match any remote chains, using full list')
+        allowedChainIds.value = allowedChainIds.value.filter(id => filteredData.some(chain => chain.chainId === id))
+        if (!allowedChainIds.value.includes(chainId.value)) {
+          chainId.value = allowedChainIds.value[0] || 0
         }
-
-        eulerChainsConfig.value = filteredData.length ? filteredData : data
+        eulerChainsConfig.value = filteredData
+        if (!filteredData.length) {
+          throw new Error('No enabled chains have usable deployment metadata')
+        }
       }
       catch (err) {
         error.value = err instanceof Error ? err.message : 'Unknown error'
@@ -135,8 +136,6 @@ export const useEulerAddresses = () => {
     return {
       EUL: config.addresses.tokenAddrs.EUL,
       rEUL: config.addresses.tokenAddrs.rEUL,
-      eUSD: config.addresses.tokenAddrs.eUSD,
-      seUSD: config.addresses.tokenAddrs.seUSD,
     }
   })
 
@@ -150,18 +149,10 @@ export const useEulerAddresses = () => {
       capRiskStewardFactory: peripheryAddrs.capRiskStewardFactory,
       escrowedCollateralPerspective: peripheryAddrs.escrowedCollateralPerspective,
       eulerEarnFactoryPerspective: peripheryAddrs.eulerEarnFactoryPerspective,
-      eulerEarnGovernedPerspective: peripheryAddrs.eulerEarnGovernedPerspective,
-      eulerUngoverned0xPerspective: peripheryAddrs.eulerUngoverned0xPerspective,
-      eulerUngovernedNzxPerspective: peripheryAddrs.eulerUngovernedNzxPerspective,
       evkFactoryPerspective: peripheryAddrs.evkFactoryPerspective,
-      externalVaultRegistry: peripheryAddrs.externalVaultRegistry,
       feeFlowController: peripheryAddrs.feeFlowController,
-      governedPerspective: peripheryAddrs.governedPerspective,
-      governorAccessControlEmergencyFactory: peripheryAddrs.governorAccessControlEmergencyFactory,
-      irmRegistry: peripheryAddrs.irmRegistry,
       kinkIRMFactory: peripheryAddrs.kinkIRMFactory,
       kinkyIRMFactory: peripheryAddrs.kinkyIRMFactory,
-      oracleAdapterRegistry: peripheryAddrs.oracleAdapterRegistry,
       oracleRouterFactory: peripheryAddrs.oracleRouterFactory,
       securitizeFactory: peripheryAddrs.securitizeFactory,
       swapVerifier: peripheryAddrs.swapVerifier,

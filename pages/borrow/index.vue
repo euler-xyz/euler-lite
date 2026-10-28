@@ -9,6 +9,7 @@ import { isOpDisabled, OP_BORROW, OP_DEPOSIT, OP_TRANSFER } from '~/utils/vault-
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
 import { isSecuritizeBorrowPair } from '~/types/borrow-pair'
+import { isBorrowTableCollateral } from '~/utils/vault/borrow-table'
 import { useVaults } from '~/composables/useVaults'
 import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
@@ -121,14 +122,15 @@ const { borrowList, isEVaultUpdating, isEscrowUpdating } = useVaults()
 const { chainId } = useEulerAddresses()
 
 const isPricesReady = ref(false)
-const { entities, isReady: labelsReady } = useEulerLabels()
+const { entities, isReady: labelsReady, loadError: labelsError } = useEulerLabels()
+const labelsUnavailable = computed(() => !labelsReady.value && Boolean(labelsError.value))
 const { enableEntityBranding } = useDeployConfig()
 const showAllLabelEntries = useShowAllLabelEntries()
 
 const activeBorrowList = computed(() =>
   borrowList.value.filter((pair) => {
     if (!showAllLabelEntries.value && isVaultNotExplorableBorrow(pair.borrow.address)) return false
-    if (!showAllLabelEntries.value && isVaultNotExplorableBorrow(pair.collateral.address)) return false
+    if (!isBorrowTableCollateral(pair.collateral.address, showAllLabelEntries.value)) return false
     if (isOpDisabled(pair.borrow, OP_BORROW)) return false
     // Securitize collateral has no EVault hook flags — only check EVault collateral.
     // Fresh-deposit needs OP_DEPOSIT, savings-sourced needs OP_TRANSFER.
@@ -157,7 +159,7 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<AnyBorrowVaul
 const selectedCollateral = ref<string[]>([])
 const selectedDebt = ref<string[]>([])
 const selectedMarkets = ref<string[]>([])
-const selectedRiskManagers = ref<string[]>([])
+const selectedCurators = ref<string[]>([])
 const sortBy = ref<string>('Active')
 const sortDir = ref<'desc' | 'asc'>('desc')
 const MIN_BORROW_LIQUIDITY_USD = 1000
@@ -178,7 +180,7 @@ useUrlQuerySync([
   { ref: selectedCollateral, default: [], queryKey: 'collateral' },
   { ref: selectedDebt, default: [], queryKey: 'debt' },
   { ref: selectedMarkets, default: [], queryKey: 'market' },
-  { ref: selectedRiskManagers, default: [], queryKey: 'riskManager' },
+  { ref: selectedCurators, default: [], queryKey: 'curator', legacyKeys: ['riskManager'] },
 ])
 
 watch(sortBy, (newSortBy) => {
@@ -355,7 +357,7 @@ watch(chainId, (newChainId, oldChainId) => {
     selectedCollateral.value = []
     selectedDebt.value = []
     selectedMarkets.value = []
-    selectedRiskManagers.value = []
+    selectedCurators.value = []
     clearCustomFilters()
   }
 })
@@ -425,11 +427,11 @@ const marketOptions = computed(() => {
     counted.add(dedupKey)
     const entityName = Array.isArray(market?.entity) ? market?.entity[0] : market?.entity
     const entityObj = entityName ? entities[entityName] : null
-    return [{ key: market.name, label: market.name, tvl, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined }]
+    return [{ key: market.name, label: market.name, tvl, icon: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined }]
   }))
 })
 
-const riskManagerOptions = computed(() => {
+const curatorOptions = computed(() => {
   const counted = new Set<string>()
   return buildTvlSortedOptions(activeBorrowList.value.flatMap((pair) => {
     const pairKey = getPairKey(pair)
@@ -438,7 +440,7 @@ const riskManagerOptions = computed(() => {
       const dedupKey = `${entity.name}:${pair.borrow.address}`
       const tvl = counted.has(dedupKey) ? 0 : pairTvl
       counted.add(dedupKey)
-      return { key: entity.name, label: entity.name, tvl, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined }
+      return { key: entity.name, label: entity.name, tvl, icon: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined }
     })
   }))
 })
@@ -453,8 +455,8 @@ const filteredBorrowList = computed(() => {
         : true,
     )
     .filter(pair => selectedMarkets.value.length ? selectedMarkets.value.includes(getProductByVault(pair.collateral.address).name) : true)
-    .filter(pair => selectedRiskManagers.value.length
-      ? getUniqueEntitiesByVaults([pair.collateral, pair.borrow]).some(e => selectedRiskManagers.value.includes(e.name))
+    .filter(pair => selectedCurators.value.length
+      ? getUniqueEntitiesByVaults([pair.collateral, pair.borrow]).some(e => selectedCurators.value.includes(e.name))
       : true)
     .filter(matchesCustomFilters)
 })
@@ -579,7 +581,7 @@ const hasClearableFilters = computed(() =>
   || selectedCollateral.value.length > 0
   || selectedDebt.value.length > 0
   || selectedMarkets.value.length > 0
-  || selectedRiskManagers.value.length > 0
+  || selectedCurators.value.length > 0
   || customFilters.value.some(filter => filter.id !== defaultBorrowLiquidityFilter.id),
 )
 const hasBorrowMarkets = computed(() => activeBorrowList.value.length > 0)
@@ -595,7 +597,7 @@ const clearBorrowFilters = () => {
   selectedCollateral.value = []
   selectedDebt.value = []
   selectedMarkets.value = []
-  selectedRiskManagers.value = []
+  selectedCurators.value = []
   clearCustomFilters()
 }
 </script>
@@ -604,12 +606,16 @@ const clearBorrowFilters = () => {
   <section class="flex flex-col min-h-[calc(100dvh-178px)]">
     <div class="mb-16 flex items-start justify-between gap-16 mobile:flex-col">
       <BasePageHeader
-        title="Borrow/Multiply"
-        description="Borrow against your assets in isolated lending markets."
+        title="Borrow / Multiply"
+        description="Borrow against your assets or multiply your exposure with leverage in isolated lending markets."
+        icon="nav-borrow"
       />
     </div>
 
-    <div class="mb-16">
+    <div
+      v-if="!labelsUnavailable"
+      class="mb-16"
+    >
       <div class="flex justify-start items-center w-full gap-8 flex-wrap">
         <UiInput
           v-model="searchQuery"
@@ -622,64 +628,68 @@ const clearBorrowFilters = () => {
         <VaultSortButton
           v-model="sortBy"
           v-model:dir="sortDir"
-          class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
+          class="shrink-0"
           :options="[
             { label: 'Active', icon: 'sparks' },
-            { label: 'Liquidity', icon: 'wallet' },
-            { label: 'Total Borrowed', icon: 'borrow-outline' },
-            { label: 'Utilization', icon: 'pulse' },
-            { label: 'Supply APY', icon: 'percent' },
-            { label: 'Borrow APY', icon: 'percent' },
-            { label: 'Net APY', icon: 'percent' },
-            { label: 'Max ROE', icon: 'percent' },
+            { label: 'Liquidity', icon: 'sort-liquidity' },
+            { label: 'Total Borrowed', icon: 'sort-total-borrowed' },
+            { label: 'Utilization', icon: 'sort-utilization' },
+            { label: 'Supply APY', icon: 'sort-apy' },
+            { label: 'Borrow APY', icon: 'sort-apy' },
+            { label: 'Net APY', icon: 'sort-apy' },
+            { label: 'Max ROE', icon: 'sort-roe' },
           ]"
           :disable-dir="sortBy === 'Active'"
           title="Sorting type"
         />
         <UiSelect
           v-if="enableEntityBranding"
-          :key="`risk-managers-${chainId}`"
-          v-model="selectedRiskManagers"
-          class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
-          :options="riskManagerOptions"
-          placeholder="Risk manager"
-          title="Risk manager"
-          modal-input-placeholder="Search risk manager"
-          icon="shield"
+          :key="`curators-${chainId}`"
+          v-model="selectedCurators"
+          class="shrink-0"
+          :options="curatorOptions"
+          placeholder="Curator"
+          title="Curator"
+          modal-input-placeholder="Search curator"
+          icon="filter-curator"
+          active-icon="filter-curator-filled"
         />
         <UiSelect
           v-if="enableEntityBranding"
           :key="`markets-${chainId}`"
           v-model="selectedMarkets"
-          class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
+          class="shrink-0"
           :options="marketOptions"
           placeholder="Market"
           title="Market"
           modal-input-placeholder="Search market"
-          icon="bank"
+          icon="market"
+          active-icon="market-filled"
         />
         <UiSelect
           :key="`collateral-${chainId}`"
           v-model="selectedCollateral"
-          class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
+          class="shrink-0"
           :options="collateralAssetOptions.options"
           :quick-filters="collateralAssetOptions.quickFilters"
           placeholder="Collateral asset"
           title="Collateral asset"
           modal-input-placeholder="Search asset"
-          icon="wallet"
+          icon="filter-asset"
+          active-icon="filter-asset-filled"
           show-selected-options
         />
         <UiSelect
           :key="`debt-${chainId}`"
           v-model="selectedDebt"
-          class="shrink-0 mobile:flex-1 mobile:basis-[calc(50%-4px)]"
+          class="shrink-0"
           :options="debtAssetOptions.options"
           :quick-filters="debtAssetOptions.quickFilters"
           placeholder="Debt asset"
           title="Debt asset"
           modal-input-placeholder="Search asset"
-          icon="wallet"
+          icon="filter-asset"
+          active-icon="filter-asset-filled"
           show-selected-options
         />
         <UiCustomFilterChips
@@ -692,8 +702,14 @@ const clearBorrowFilters = () => {
     </div>
 
     <div class="flex flex-col flex-1">
+      <LabelsUnavailableState
+        v-if="labelsUnavailable"
+        class="flex-1"
+        title="Borrow markets unavailable"
+        description="Published vault verification could not be loaded. Borrow listings are unavailable until it returns."
+      />
       <div
-        v-if="isLoading"
+        v-else-if="isLoading"
         class="flex flex-col flex-1 items-center justify-center gap-12"
       >
         <UiLoader />
@@ -711,7 +727,7 @@ const clearBorrowFilters = () => {
       <UiEmptyState
         v-else
         class="flex-1"
-        icon="borrow-outline"
+        icon="nav-borrow"
         :title="emptyStateTitle"
         :description="emptyStateDescription"
       >

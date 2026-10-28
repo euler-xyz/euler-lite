@@ -12,6 +12,7 @@ import {
   type MigrationAuthorizationRequest,
   type MigrationPosition,
   type PluginPrefetchData,
+  type PlanMigrationSimulationResult,
   type PortfolioBorrowPosition,
   type SecuritizeCollateralVault,
   type SwapQuote,
@@ -20,7 +21,7 @@ import {
   type VaultEntity,
 } from '@eulerxyz/euler-v2-sdk'
 import { erc20Abi, formatUnits, getAddress, maxUint256, zeroAddress, type Address, type StateOverride } from 'viem'
-import { OperationReviewModal, SlippageSettingsModal } from '#components'
+import { SlippageSettingsModal } from '#components'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { AAVE_CONNECTOR_ID, METAMORPHO_CONNECTOR_ID, MORPHO_CONNECTOR_ID } from '~/entities/migration/constants'
 import { useSwapDebtOptions } from '~/composables/useSwapDebtOptions'
@@ -37,18 +38,28 @@ import { useToast } from '~/components/ui/composables/useToast'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { getQuoteAmount, getSwapInputAmount } from '~/utils/swapQuotes'
 import { isSameUnderlyingAsset, convertVaultSharesToAssets } from '~/utils/vault-utils'
-import { getAssetUsdValue, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
-import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
-import { areRoeCollateralVaultsCorrelatedWithBorrow } from '~/utils/position-roe'
+import { getRefinanceSlippageContext, type RefinanceSlippageLeg } from '~/utils/refinance-slippage'
+import { buildRefinanceIntentArgs } from '~/utils/refinance-intent'
+import { buildRefinanceProjectedRateRequests, getRefinanceRewardCollateralAddresses, getSameAssetRefinanceBorrowAmount, resolveRefinanceCollateralLegs } from '~/utils/refinance-apy'
+import { getAssetUsdValue, getAssetUsdValueForEstimate, getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
+import { withProjectedVaultIntrinsicApy, withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
+import { isRoeStateApplicable } from '~/utils/position-roe'
 import { formatNumber, formatSmartAmount, formatHealthScore, trimTrailingZeros, formatUsdValue } from '~/utils/string-utils'
-import { formatLiquidationBuffer as formatLiqBuffer, calculateRoe } from '~/utils/repayUtils'
+import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
+import { areProjectedRatesComplete, getPositionMultiplier, getProjectedRatesBatch, type ProjectedRates } from '~/utils/vault/apy'
+import { createRaceGuard } from '~/utils/race-guard'
 import { ltvToPercent, nanoToValue } from '~/utils/crypto-utils'
-import { getVaultProductName, isEarnVaultNotExplorable, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
-import { buildCollateralOption, computeSupplyApy } from '~/utils/collateralOptions'
-import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
+import { getVaultProductName, isEarnVaultNotExplorable, isVaultNotExplorableLend, isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
+import { buildCollateralOption, computeBorrowApy, computeSupplyApy } from '~/utils/collateralOptions'
+import { hasBorrowTablePair, isBorrowTableCollateral } from '~/utils/vault/borrow-table'
+import { getVaultGeoUnavailableReason, isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
 import type { DisplayStep } from '~/utils/stepDecoding'
 import {
+  buildMigrationAuthorizationTxSteps,
+} from '~/utils/migrationAuthorizationTxs'
+import {
+  COWSWAP_BATCH_UNSUPPORTED_REASON,
   COWSWAP_ORDER_DEADLINE_SECONDS,
   COWSWAP_PROVIDER_EXTRA_DATA,
   buildCollateralSwapQuoteAppData,
@@ -72,11 +83,20 @@ import { logWarn } from '~/utils/errorHandling'
 import { isOperationBlocked, registerOperationBlocker, unregisterOperationBlocker } from '~/utils/operationGuardRegistry'
 import { BATCH_ACTIVE_REASON } from '~/utils/tx-batch-messages'
 import type { CollateralOption } from '~/types/collateral-option'
+import {
+  getProjectedYieldState,
+  mergeProjectedRewardCampaigns,
+  type ProjectedYieldCampaignInput,
+  type ProjectedYieldDetails,
+  type ProjectedYieldRateLine,
+  type ProjectedYieldState,
+} from '~/utils/projected-yield'
+import { getLayeredVault } from '~/composables/useLayeredVaults'
 
 const route = useRoute()
 const router = useRouter()
 const modal = useModal()
-const { error: showError } = useToast()
+const { error: showError, warning: showWarning } = useToast()
 const { isConnected, address } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex, refreshAllPositions } = useEulerAccount()
@@ -86,15 +106,17 @@ const {
   planRefinancePosition,
   getMigrationPosition,
   getMigrationAuthorization,
-  signMigrationAuthorization,
   buildPlaceholderMigrationAuthorization,
   planCrossProtocolMigration,
   planCrossProtocolMigrationSimulation,
-  executePreparedPlan,
-  executePlan,
   prepareTransactionPlan,
   prefetchPluginData,
 } = useEulerTx()
+const { capture: captureReviewState } = useExecutionReview()
+const { create: createIntent } = useOperationIntentFactory()
+const { createMigrationIntent } = useMigrationIntentFactory()
+const { signaturesEnabled } = useSignaturePreference()
+const { isSafeWallet } = useSafeWallet()
 const { addEntry: addBatchEntry, entryCount: batchEntryCount } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { scheduleExternalMigrationRefreshes } = useExternalMigrationRefresh()
@@ -102,11 +124,19 @@ const { account: planAccount } = usePlanAccount()
 const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
 const { runPreparedSimulation, runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const { settings } = useUserSettings()
-const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
+const {
+  getSupplyRewardApy,
+  getSupplyRewardCampaigns,
+  getBorrowRewardApyForCollaterals,
+  getBorrowRewardCampaignsForCollaterals,
+  getEligibleLoopingRewardApyForCollaterals,
+  getEligibleLoopingRewardCampaignsForCollaterals,
+  version: rewardsVersion,
+} = useRewardsApy()
 const { viewer } = useApyVisibility()
 const { getTokenCategoryTags } = useTokenList()
 const { borrowList } = useVaults()
-const { getVaultCategory, getVault, getVerifiedEVaults, getEarnVaults } = useVaultRegistry()
+const { getVaultCategory, getVault, getVerifiedEVaults, getEarnVaults, get: getRegistryEntry } = useVaultRegistry()
 const showAllLabelEntries = useShowAllLabelEntries()
 const cowSwapExecution = useCowSwapCollateralSwapExecution()
 const cowSwapOrderStatus = useCowSwapOrderStatus(
@@ -143,15 +173,23 @@ const {
 const inboundExternalEulerAccount = shallowRef<Address | null>(null)
 const inboundExternalEulerAccountKey = ref('')
 
-const position: Ref<PortfolioBorrowPosition<VaultEntity> | null> = ref(null)
-const isLoading = ref(false)
+// Layer-aware: `getPositionBySubAccountIndex` follows the active batch layer's
+// portfolio, so refinance debt/collateral inputs must stay reactive to it. A
+// one-shot ref would combine simulated vault utilization with layer-0 balances.
+const position = computed<PortfolioBorrowPosition<VaultEntity> | null>(() => {
+  if (isExternalSourceRoute.value || (!isConnected.value && !isSpyMode.value)) return null
+  return getPositionBySubAccountIndex(+positionIndex) || null
+})
+const isLoading = computed(() =>
+  !isExternalSourceRoute.value
+  && (isConnected.value || isSpyMode.value)
+  && !isPositionsLoaded.value,
+)
 const isSubmitting = ref(false)
 const isPreparing = ref(false)
 const isAddingToBatch = ref(false)
 const plan = shallowRef<TransactionPlan | null>(null)
 const preparedPlan = shallowRef<TransactionPlanPrepared | null>(null)
-const inboundExternalPlan = shallowRef<TransactionPlan | null>(null)
-const inboundExternalPreparedPlan = shallowRef<TransactionPlanPrepared | null>(null)
 const inboundExternalAuthorizationConnector = ref<string | null>(null)
 const inboundExternalMigrationPreview = shallowRef<InboundExternalMigrationPreview | null>(null)
 
@@ -201,7 +239,7 @@ const externalCollateralOptionsEmptyDescription = computed(() =>
 )
 const inboundBorrowAmountWithBuffer = computed(() => {
   const debt = externalDebtAsset.value?.amount ?? 0n
-  return debt > 0n ? (debt * 10_100n) / 10_000n : 0n
+  return getSameAssetRefinanceBorrowAmount(debt, true)
 })
 const externalSourcePairLabel = computed(() => {
   const collateral = externalCollateralAsset.value?.symbol ?? ''
@@ -296,13 +334,38 @@ const effectiveCollateralVault = computed<EVault | EulerEarn | SecuritizeCollate
 const effectiveCollateralEVaultForOptions = computed<EVault | SecuritizeCollateralVault | undefined>(() =>
   targetCollateralEVault.value || sourceCollateralVault.value,
 )
+const effectiveCollateralAddressesForOptions = computed(() =>
+  getRefinanceRewardCollateralAddresses(
+    position.value?.collaterals ?? [],
+    sourceCollateralVault.value?.address,
+    targetCollateralEVault.value?.address,
+  ),
+)
+const projectionSourceDebtVault = computed(() => {
+  const fallback = sourceDebtVault.value
+  return fallback ? getLayeredVault(fallback.address, fallback) : undefined
+})
+const projectionEffectiveDebtVault = computed(() => {
+  const fallback = effectiveDebtVault.value
+  return fallback ? getLayeredVault(fallback.address, fallback) : undefined
+})
+const projectionSourceCollateralVault = computed(() => {
+  const fallback = sourceCollateralVault.value
+  return fallback ? getLayeredVault(fallback.address, fallback) : undefined
+})
+const projectionTargetCollateralVault = computed(() => {
+  const fallback = targetCollateralVault.value
+  return fallback ? getLayeredVault(fallback.address, fallback) : undefined
+})
 
 useOperationGuard(computed(() => [
   sourceDebtVault.value?.address,
   sourceCollateralVault.value?.address,
   targetDebtVault.value?.address,
   targetCollateralVault.value?.address,
-].filter(Boolean)))
+].filter(Boolean)), {
+  depositedVaultAddresses: computed(() => [targetCollateralVault.value?.address].filter(Boolean)),
+})
 
 const pairAssetsLabel = usePositionPairLabel(position)
 const externalDebtAmount = computed(() => externalDebtAsset.value?.amount ?? 0n)
@@ -335,11 +398,10 @@ const subAccount = computed<Address>(() =>
 const cowSwapOwner = computed<Address>(() =>
   (address.value || (isSpyMode.value ? spyAddress.value : undefined) || zeroAddress) as Address,
 )
-// Migration authorization must be signed by a real connected wallet. Spy mode
-// stays read-only (discovery/preview) and cannot sign, so it must not satisfy
-// the review/execute gate — otherwise a spy-only user passes "Connect wallet to
-// migrate" and fails later at signing.
-const hasConnectedWallet = computed(() => isConnected.value)
+// A connected wallet can review and execute migrations. Spy mode can prepare
+// the same review through the read-only execution path, while confirmation
+// remains unavailable in the review modal.
+const hasMigrationReviewContext = computed(() => isConnected.value || isSpyMode.value)
 
 const hasDebtChange = computed(() =>
   isExternalSourceRoute.value ? !!targetDebtVault.value && !!externalDebtAsset.value : !!targetDebtVault.value && !!sourceDebtVault.value,
@@ -393,6 +455,7 @@ const {
   allBorrowVaults: rawAllDebtTargetVaults,
 } = useSwapDebtOptions({
   collateralVault: effectiveCollateralEVaultForOptions,
+  collateralAddresses: effectiveCollateralAddressesForOptions,
   currentBorrowVault: computed(() => sourceDebtVault.value),
 })
 
@@ -507,18 +570,16 @@ const prioritizeVaultsByAsset = <TVault extends EVault | EulerEarn | SecuritizeC
 
 const externalSupplyOnlyTargetVaults = computed<SupplyTargetVault[]>(() => {
   if (!externalIsSupplyOnly.value) return []
-  const borrowableAddresses = new Set(
-    borrowList.value.map(pair => normalizeVaultAddress(pair.borrow.address)),
-  )
   const lendVaults = getVerifiedEVaults(showAllLabelEntries.value).filter(vault =>
     (showAllLabelEntries.value || !isVaultNotExplorableLend(vault.address))
-    && borrowableAddresses.has(normalizeVaultAddress(vault.address))
+    && hasBorrowTablePair(vault.address, borrowList.value, address => isBorrowTableCollateral(address, showAllLabelEntries.value))
     && !isOpDisabled(vault, OP_DEPOSIT),
   )
   // Earn vaults have no hook-based op gating; geo/deprecation restrictions are
   // applied per option via getVaultTags in buildCollateralOption.
   const earnVaults = getEarnVaults().filter(vault =>
-    showAllLabelEntries.value || !isEarnVaultNotExplorable(vault.address),
+    !getRegistryEntry(vault.address)?.portfolioOnly
+    && isVaultSelectedByTag(vault.address) && (showAllLabelEntries.value || !isEarnVaultNotExplorable(vault.address)),
   )
   return [...lendVaults, ...earnVaults]
 })
@@ -866,9 +927,42 @@ const collateralSelectionVaults = computed(() => [
   ...collateralTargetVaults.value,
 ])
 
+const refinanceSlippageLegs = computed<RefinanceSlippageLeg[]>(() => {
+  const legs: RefinanceSlippageLeg[] = []
+
+  if (collateralNeedsSwap.value && targetCollateralVault.value) {
+    const fromSymbol = isExternalSourceRoute.value
+      ? externalCollateralAsset.value?.symbol
+      : sourceCollateralEVault.value?.asset.symbol
+    if (fromSymbol) {
+      legs.push({
+        fromSymbol,
+        toSymbol: targetCollateralVault.value.asset.symbol,
+      })
+    }
+  }
+
+  if (debtNeedsSwap.value && targetDebtVault.value) {
+    const toSymbol = isExternalSourceRoute.value
+      ? externalDebtAsset.value?.symbol
+      : sourceDebtVault.value?.asset.symbol
+    if (toSymbol) {
+      legs.push({
+        fromSymbol: targetDebtVault.value.asset.symbol,
+        toSymbol,
+      })
+    }
+  }
+
+  return legs
+})
+const refinanceSlippageContext = computed(() =>
+  getRefinanceSlippageContext(refinanceSlippageLegs.value),
+)
+
 const { slippage } = useSlippage({
-  fromSymbol: () => externalCollateralAsset.value?.symbol || externalDebtAsset.value?.symbol || sourceCollateralVault.value?.asset.symbol || sourceDebtVault.value?.asset.symbol,
-  toSymbol: () => targetCollateralVault.value?.asset.symbol || targetDebtVault.value?.asset.symbol,
+  fromSymbol: () => refinanceSlippageContext.value?.fromSymbol,
+  toSymbol: () => refinanceSlippageContext.value?.toSymbol,
 })
 
 const buildRefinanceStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
@@ -960,8 +1054,22 @@ const buildRefinancePlan = async (
   return planRefinancePosition(input)
 }
 
+const createRefinanceIntent = (
+  input: Omit<PlanRefinancePositionInput, 'account'>,
+  source: string,
+) => createIntent({
+  kind: 'refinance',
+  planner: 'refinance-position',
+  args: buildRefinanceIntentArgs(input),
+  source,
+  subAccounts: [subAccount.value as Address],
+})
+
+const { cowSwapForcedOff } = useCowSwapEligibility()
+
 const canRequestCollateralCowSwap = computed(() =>
-  collateralNeedsSwap.value
+  !cowSwapForcedOff.value
+  && collateralNeedsSwap.value
   && !hasDebtChange.value
   && currentCollateralShares.value > 0n
   && !!getCowSwapChainConfig(currentChainId.value ?? 0),
@@ -1014,10 +1122,15 @@ const {
     includeIncomplete: true,
     context,
   }),
+  createIntentsForQuote: quote => [createRefinanceIntent(buildRefinanceInput({
+    collateralQuote: quote,
+    debtQuote: selectedDebtQuote.value,
+    includeIncomplete: true,
+  }), 'position/refinance')],
   getPlanAccount: () => currentPlanAccount(),
   getStateOverrideOptions: () => buildRefinanceStateOverrideOptions(),
-  prefetchPluginData: (candidatePlan, account) => prefetchPluginData(candidatePlan, { account }),
-  prepareTransactionPlan: (candidatePlan, account, prefetch) => prepareTransactionPlan(candidatePlan, { account, prefetch }),
+  prefetchPluginData: (candidatePlan, account, intents) => prefetchPluginData(candidatePlan, { account, intents }),
+  prepareTransactionPlan: (candidatePlan, account, prefetch, intents) => prepareTransactionPlan(candidatePlan, { account, prefetch, intents }),
 })
 
 const {
@@ -1042,10 +1155,15 @@ const {
     includeIncomplete: true,
     context,
   }),
+  createIntentsForQuote: quote => [createRefinanceIntent(buildRefinanceInput({
+    collateralQuote: selectedCollateralQuote.value,
+    debtQuote: quote,
+    includeIncomplete: true,
+  }), 'position/refinance')],
   getPlanAccount: () => currentPlanAccount(),
   getStateOverrideOptions: () => buildRefinanceStateOverrideOptions(),
-  prefetchPluginData: (candidatePlan, account) => prefetchPluginData(candidatePlan, { account }),
-  prepareTransactionPlan: (candidatePlan, account, prefetch) => prepareTransactionPlan(candidatePlan, { account, prefetch }),
+  prefetchPluginData: (candidatePlan, account, intents) => prefetchPluginData(candidatePlan, { account, intents }),
+  prepareTransactionPlan: (candidatePlan, account, prefetch, intents) => prepareTransactionPlan(candidatePlan, { account, prefetch, intents }),
 })
 
 const isSelectedCollateralCowSwapProvider = computed(() =>
@@ -1388,17 +1506,55 @@ const fromSupplyApy = computed(() => {
   const base = getVaultSupplyApy(vault)
   return withVaultIntrinsicApy(base, vault, enableIntrinsicApy.value) + getSupplyRewardApy(vault.address)
 })
+
+interface RefinanceBorrowApyValue {
+  baseApy: number
+  intrinsicApy: number
+  totalApy: number
+}
+
+const getRefinanceBorrowApyValue = (
+  vault: EVault,
+  projected?: ProjectedRates | null,
+): RefinanceBorrowApyValue => {
+  const currentRaw = getVaultBorrowApy(vault)
+  const projectedRaw = projected ? nanoToValue(projected.borrowAPY, 25) : null
+  const baseApy = projectedRaw ?? currentRaw
+  const totalApy = withProjectedVaultIntrinsicApy(
+    currentRaw,
+    projectedRaw,
+    vault,
+    enableIntrinsicApy.value,
+  )
+  return {
+    baseApy,
+    intrinsicApy: totalApy - baseApy,
+    totalApy,
+  }
+}
+
+const currentBorrowApyValue = computed(() =>
+  projectionSourceDebtVault.value ? getRefinanceBorrowApyValue(projectionSourceDebtVault.value) : null,
+)
+const effectiveCurrentBorrowApyValue = computed(() =>
+  projectionEffectiveDebtVault.value ? getRefinanceBorrowApyValue(projectionEffectiveDebtVault.value) : null,
+)
 const fromBorrowApy = computed(() => {
-  if (!sourceDebtVault.value) return null
-  const base = getVaultBorrowApy(sourceDebtVault.value)
-  return withVaultIntrinsicApy(base, sourceDebtVault.value, enableIntrinsicApy.value)
-    - getBorrowRewardApy(sourceDebtVault.value.address, sourceCollateralVault.value?.address)
+  void rewardsVersion.value
+  const vault = projectionSourceDebtVault.value
+  if (!vault) return null
+  return computeBorrowApy(
+    vault,
+    viewer.value,
+    {
+      enableIntrinsicApy: enableIntrinsicApy.value,
+      enableRewardsApy: enableRewardsApy.value,
+    },
+    effectiveCollateralAddressesForOptions.value,
+  )
 })
 const toBorrowApy = computed(() => {
-  if (!effectiveDebtVault.value) return null
-  const base = getVaultBorrowApy(effectiveDebtVault.value)
-  return withVaultIntrinsicApy(base, effectiveDebtVault.value, enableIntrinsicApy.value)
-    - getBorrowRewardApy(effectiveDebtVault.value.address, effectiveCollateralVault.value?.address)
+  return effectiveCurrentBorrowApyValue.value?.totalApy ?? null
 })
 
 const effectiveDebtProduct = useEulerProductOfVault(computed(() => effectiveDebtVault.value?.address || ''))
@@ -1411,9 +1567,28 @@ interface RefinanceCollateralLeg {
   amount: bigint
 }
 
+interface CollateralPortfolioEntry {
+  address: string
+  valueUsd: number
+  baseSupplyApy: number
+  intrinsicSupplyApy: number
+  supplyRewardApy: number
+  supplyCampaigns: ReturnType<typeof getSupplyRewardCampaigns>
+}
+
 interface CollateralPortfolioValue {
   valueUsd: number
-  supplyApy: number | null
+  baseSupplyApy: number | null
+  intrinsicSupplyApy: number | null
+  supplyRewardApy: number | null
+  entries: CollateralPortfolioEntry[]
+}
+
+interface NextRefinanceEstimate {
+  supplyPortfolio: CollateralPortfolioValue
+  borrowValueUsd: number
+  borrowApy: RefinanceBorrowApyValue
+  rateLines: ProjectedYieldRateLine[]
 }
 
 interface RefinanceRiskMetrics {
@@ -1436,12 +1611,11 @@ const nextCollateralAmountNano = computed<bigint | null>(() => {
 })
 
 const currentCollateralLegs = computed<RefinanceCollateralLeg[]>(() =>
-  (position.value?.collaterals ?? [])
-    .filter(collateral => isRefinanceCollateralVault(collateral.vault) && collateral.assets > 0n)
-    .map(collateral => ({
-      vault: collateral.vault as RefinanceCollateralVault,
-      amount: collateral.assets,
-    })),
+  resolveRefinanceCollateralLegs(
+    position.value?.collaterals ?? [],
+    (address, fallback) => getLayeredVault(address, fallback ?? getVault(address)),
+    isRefinanceCollateralVault,
+  ),
 )
 const sourceCollateralVaultAddresses = computed(() => {
   const currentPosition = position.value
@@ -1463,7 +1637,7 @@ const sourceCollateralVaultAddresses = computed(() => {
 const nextCollateralLegs = computed<RefinanceCollateralLeg[]>(() => {
   if (!hasCollateralChange.value) return currentCollateralLegs.value
 
-  const target = targetCollateralVault.value
+  const target = projectionTargetCollateralVault.value
   const targetAmount = nextCollateralAmountNano.value
   const sourceAddress = normalizeVaultAddress(sourceCollateralVault.value?.address)
   const legs: RefinanceCollateralLeg[] = []
@@ -1492,78 +1666,443 @@ const nextDebtAmountNano = computed<bigint | null>(() => {
   if (!effectiveDebtVault.value) return null
   if (!hasDebtChange.value) return currentDebt.value
   if (!targetDebtVault.value) return null
-  if (isSameDebtAsset.value) return currentDebt.value
+  if (isSameDebtAsset.value) {
+    return getSameAssetRefinanceBorrowAmount(currentDebt.value, isExternalSourceRoute.value)
+  }
   if (!activeDebtQuote.value) return null
-  return BigInt(activeDebtQuote.value.amountIn || 0)
+  return getSwapInputAmount(activeDebtQuote.value, SwapperMode.TARGET_DEBT)
 })
 
-const areRoeLegsApplicable = (legs: readonly RefinanceCollateralLeg[], debtVault: EVault | undefined) =>
-  areRoeCollateralVaultsCorrelatedWithBorrow(legs.map(({ vault }) => vault), debtVault, getTokenCategoryTags)
+const areCurrentRoeLegsComplete = computed(() =>
+  sourceCollateralVaultAddresses.value.every(address =>
+    currentCollateralLegs.value.some(leg => normalizeVaultAddress(leg.vault.address) === address),
+  ),
+)
 const isCurrentRoeApplicable = computed(() =>
-  areRoeLegsApplicable(currentCollateralLegs.value, sourceDebtVault.value),
+  isRoeStateApplicable({
+    vaults: currentCollateralLegs.value.map(({ vault }) => vault),
+    isComplete: areCurrentRoeLegsComplete.value,
+  }, projectionSourceDebtVault.value, getTokenCategoryTags),
 )
 const isNextRoeApplicable = computed(() =>
-  areRoeLegsApplicable(nextCollateralLegs.value, effectiveDebtVault.value),
+  isRoeStateApplicable({
+    vaults: nextCollateralLegs.value.map(({ vault }) => vault),
+    isComplete: areCurrentRoeLegsComplete.value,
+  }, projectionEffectiveDebtVault.value, getTokenCategoryTags),
 )
 
-const getSupplyApyForVault = (vault: RefinanceCollateralVault) =>
-  withVaultIntrinsicApy(getVaultSupplyApy(vault), vault, enableIntrinsicApy.value) + getSupplyRewardApy(vault.address)
+const getRefinanceRateAddress = (address: string) => address.toLowerCase()
 
-const getCollateralPortfolioValue = async (legs: RefinanceCollateralLeg[]): Promise<CollateralPortfolioValue | null> => {
-  if (!legs.length) return null
-
-  let valueUsd = 0
-  let weightedSupplyApy = 0
-  for (const leg of legs) {
-    const legValue = await getAssetUsdValue(leg.amount, leg.vault, 'off-chain')
-    if (legValue === undefined || legValue === null) return null
-    valueUsd += legValue
-    weightedSupplyApy += legValue * getSupplyApyForVault(leg.vault)
-  }
-
+const getSupplyApyValueForVault = (vault: RefinanceCollateralVault, projected?: ProjectedRates | null) => {
+  const currentRaw = getVaultSupplyApy(vault)
+  const projectedRaw = projected ? nanoToValue(projected.supplyAPY, 25) : null
+  const baseSupplyApy = projectedRaw ?? currentRaw
+  const supplyApyWithIntrinsic = withProjectedVaultIntrinsicApy(
+    currentRaw,
+    projectedRaw,
+    vault,
+    enableIntrinsicApy.value,
+  )
+  const supplyRewardApy = getSupplyRewardApy(vault.address)
   return {
-    valueUsd,
-    supplyApy: valueUsd > 0 ? weightedSupplyApy / valueUsd : null,
+    baseSupplyApy,
+    intrinsicSupplyApy: supplyApyWithIntrinsic - baseSupplyApy,
+    supplyRewardApy,
   }
 }
 
-const currentSupplyPortfolioValue = ref<CollateralPortfolioValue | null>(null)
-watchEffect(async () => {
-  currentSupplyPortfolioValue.value = await getCollateralPortfolioValue(currentCollateralLegs.value)
-})
-const currentBorrowValueUsd = ref<number | null>(null)
-watchEffect(async () => {
-  if (!sourceDebtVault.value) {
-    currentBorrowValueUsd.value = null
-    return
+const getCollateralPortfolioValue = async (
+  legs: RefinanceCollateralLeg[],
+  projectedByAddress: ReadonlyMap<string, ProjectedRates> = new Map(),
+): Promise<CollateralPortfolioValue | null> => {
+  if (!legs.length) return null
+
+  let valueUsd = 0
+  const entries: CollateralPortfolioEntry[] = []
+  for (const leg of legs) {
+    const legValue = await getAssetUsdValueForEstimate(leg.amount, leg.vault, 'off-chain')
+    if (legValue === undefined || legValue === null) return null
+    const apy = getSupplyApyValueForVault(
+      leg.vault,
+      projectedByAddress.get(getRefinanceRateAddress(leg.vault.address)),
+    )
+    valueUsd += legValue
+    entries.push({
+      address: leg.vault.address,
+      valueUsd: legValue,
+      ...apy,
+      supplyCampaigns: getSupplyRewardCampaigns(leg.vault.address),
+    })
   }
-  currentBorrowValueUsd.value = (await getAssetUsdValue(currentDebt.value, sourceDebtVault.value, 'off-chain')) ?? null
-})
-const nextSupplyPortfolioValue = ref<CollateralPortfolioValue | null>(null)
-watchEffect(async () => {
-  nextSupplyPortfolioValue.value = await getCollateralPortfolioValue(nextCollateralLegs.value)
-})
-const nextBorrowValueUsd = ref<number | null>(null)
-watchEffect(async () => {
-  const vault = effectiveDebtVault.value
-  const amount = nextDebtAmountNano.value
-  if (!vault || amount === null) {
-    nextBorrowValueUsd.value = null
-    return
+
+  const weighted = (select: (entry: CollateralPortfolioEntry) => number) =>
+    valueUsd > 0
+      ? entries.reduce((sum, entry) => sum + entry.valueUsd * select(entry), 0) / valueUsd
+      : null
+
+  return {
+    valueUsd,
+    baseSupplyApy: weighted(entry => entry.baseSupplyApy),
+    intrinsicSupplyApy: weighted(entry => entry.intrinsicSupplyApy),
+    supplyRewardApy: weighted(entry => entry.supplyRewardApy),
+    entries,
   }
-  nextBorrowValueUsd.value = (await getAssetUsdValue(amount, vault, 'off-chain')) ?? null
+}
+
+const getRefinanceProjectedRateLines = (
+  beforeCollateralLegs: readonly RefinanceCollateralLeg[],
+  afterCollateralLegs: readonly RefinanceCollateralLeg[],
+  sourceDebt: EVault | undefined,
+  targetDebt: EVault,
+  projectedByAddress: ReadonlyMap<string, ProjectedRates>,
+): ProjectedYieldRateLine[] => {
+  const lines: ProjectedYieldRateLine[] = []
+  const collateralVaults = new Map<string, RefinanceCollateralVault>()
+  for (const leg of [...beforeCollateralLegs, ...afterCollateralLegs]) {
+    collateralVaults.set(getRefinanceRateAddress(leg.vault.address), leg.vault)
+  }
+
+  for (const [address, vault] of collateralVaults) {
+    const currentRaw = getVaultSupplyApy(vault)
+    const projected = projectedByAddress.get(address)
+    lines.push({
+      id: `supply:${address}`,
+      label: 'Collateral lending APY',
+      symbol: vault.asset.symbol,
+      vaultAddress: vault.address,
+      before: currentRaw,
+      after: projected ? nanoToValue(projected.supplyAPY, 25) : currentRaw,
+    })
+  }
+
+  const sourceAddress = sourceDebt ? getRefinanceRateAddress(sourceDebt.address) : ''
+  const targetAddress = getRefinanceRateAddress(targetDebt.address)
+  if (sourceDebt && sourceAddress === targetAddress) {
+    const currentRaw = getVaultBorrowApy(sourceDebt)
+    const projected = projectedByAddress.get(sourceAddress)
+    lines.push({
+      id: `borrow:${sourceAddress}`,
+      label: 'Liability borrow APY',
+      symbol: sourceDebt.asset.symbol,
+      vaultAddress: sourceDebt.address,
+      before: currentRaw,
+      after: projected ? nanoToValue(projected.borrowAPY, 25) : currentRaw,
+    })
+    return lines
+  }
+
+  if (sourceDebt) {
+    const projected = projectedByAddress.get(sourceAddress)
+    lines.push({
+      id: `borrow:${sourceAddress}`,
+      label: 'Current liability borrow APY',
+      symbol: sourceDebt.asset.symbol,
+      vaultAddress: sourceDebt.address,
+      before: getVaultBorrowApy(sourceDebt),
+      ...(projected ? { after: nanoToValue(projected.borrowAPY, 25) } : {}),
+    })
+  }
+
+  const targetCurrentRaw = getVaultBorrowApy(targetDebt)
+  const targetProjected = projectedByAddress.get(targetAddress)
+  lines.push({
+    id: `borrow:${targetAddress}`,
+    label: sourceDebt ? 'New liability borrow APY' : 'Liability borrow APY',
+    symbol: targetDebt.asset.symbol,
+    vaultAddress: targetDebt.address,
+    before: targetCurrentRaw,
+    after: targetProjected ? nanoToValue(targetProjected.borrowAPY, 25) : targetCurrentRaw,
+  })
+  return lines
+}
+
+const nextCollateralRateDeltas = computed(() => {
+  const deltas = new Map<string, { vault: EVault, cashDelta: bigint }>()
+  const addDelta = (vault: VaultEntity | undefined, cashDelta: bigint) => {
+    if (!vault || !isEVault(vault) || cashDelta === 0n) return
+    const address = normalizeVaultAddress(vault.address)
+    const existing = deltas.get(address)
+    deltas.set(address, {
+      vault,
+      cashDelta: (existing?.cashDelta ?? 0n) + cashDelta,
+    })
+  }
+
+  if (hasCollateralChange.value) {
+    addDelta(projectionSourceCollateralVault.value, -currentCollateralAssets.value)
+    addDelta(projectionTargetCollateralVault.value, nextCollateralAmountNano.value ?? 0n)
+  }
+
+  return [...deltas.values()].filter(delta => delta.cashDelta !== 0n)
 })
 
-const roeBefore = computed(() => {
+const currentSupplyPortfolioValue = shallowRef<CollateralPortfolioValue | null>(null)
+const currentSupplyPortfolioGuard = createRaceGuard()
+watchEffect(async () => {
+  void rewardsVersion.value
+  void enableIntrinsicApy.value
+  const gen = currentSupplyPortfolioGuard.next()
+  currentSupplyPortfolioValue.value = null
+  const legs = currentCollateralLegs.value
+  const value = await getCollateralPortfolioValue(legs)
+  if (!currentSupplyPortfolioGuard.isStale(gen)) currentSupplyPortfolioValue.value = value
+})
+const currentBorrowValueUsd = ref<number | null>(null)
+const currentBorrowValueGuard = createRaceGuard()
+watchEffect(async () => {
+  const gen = currentBorrowValueGuard.next()
+  currentBorrowValueUsd.value = null
+  const vault = projectionSourceDebtVault.value
+  const amount = currentDebt.value
+  if (!vault) return
+  const value = (await getAssetUsdValueForEstimate(amount, vault, 'off-chain')) ?? null
+  if (!currentBorrowValueGuard.isStale(gen)) currentBorrowValueUsd.value = value
+})
+const nextRefinanceEstimate = shallowRef<NextRefinanceEstimate | null>(null)
+const nextSupplyPortfolioValue = computed(() => nextRefinanceEstimate.value?.supplyPortfolio ?? null)
+const nextBorrowValueUsd = computed(() => nextRefinanceEstimate.value?.borrowValueUsd ?? null)
+const projectedNextBorrowApyValue = computed(() => nextRefinanceEstimate.value?.borrowApy ?? null)
+const nextRefinanceEstimateGuard = createRaceGuard()
+watchEffect(async () => {
+  void rewardsVersion.value
+  void enableIntrinsicApy.value
+  const gen = nextRefinanceEstimateGuard.next()
+  nextRefinanceEstimate.value = null
+  const beforeLegs = currentCollateralLegs.value
+  const legs = nextCollateralLegs.value
+  const vault = projectionEffectiveDebtVault.value
+  const amount = nextDebtAmountNano.value
+  const baseApy = toBorrowApy.value
+  const collateralRateDeltas = nextCollateralRateDeltas.value
+  const sourceDebt = projectionSourceDebtVault.value
+  const currentDebtAmount = currentDebt.value
+
+  if (!vault || amount === null || baseApy === null) return
+
+  const staysInSourceVault = normalizeVaultAddress(vault.address) === normalizeVaultAddress(sourceDebt?.address)
+  const debtRateDeltas = [{
+    vault,
+    borrowsDelta: staysInSourceVault ? amount - currentDebtAmount : amount,
+  }]
+  const sourceDebtIsProjectedCollateral = !!sourceDebt && legs.some(leg =>
+    leg.amount > 0n
+    && normalizeVaultAddress(leg.vault.address) === normalizeVaultAddress(sourceDebt.address),
+  )
+  if (sourceDebt && !staysInSourceVault && sourceDebtIsProjectedCollateral && currentDebtAmount > 0n) {
+    debtRateDeltas.push({ vault: sourceDebt, borrowsDelta: -currentDebtAmount })
+  }
+  const projectionEntries = buildRefinanceProjectedRateRequests(
+    collateralRateDeltas,
+    debtRateDeltas,
+  )
+
+  try {
+    const [projectedRates, borrowValue] = await Promise.all([
+      projectionEntries.length
+        ? getProjectedRatesBatch(projectionEntries.map(projection => projection.request))
+        : Promise.resolve([]),
+      getAssetUsdValueForEstimate(amount, vault, 'off-chain'),
+    ])
+    if (nextRefinanceEstimateGuard.isStale(gen)) return
+
+    if (!areProjectedRatesComplete(projectedRates, projectionEntries.length)) return
+
+    const projectedByAddress = new Map(
+      projectionEntries.map((projection, index) => [projection.address, projectedRates[index]]),
+    )
+    const portfolioValue = await getCollateralPortfolioValue(legs, projectedByAddress)
+    if (nextRefinanceEstimateGuard.isStale(gen)) return
+    if (!portfolioValue || borrowValue === undefined || borrowValue === null) return
+
+    const projectedBorrow = projectedByAddress.get(getRefinanceRateAddress(vault.address))
+    nextRefinanceEstimate.value = {
+      supplyPortfolio: portfolioValue,
+      borrowValueUsd: borrowValue,
+      borrowApy: getRefinanceBorrowApyValue(vault, projectedBorrow),
+      rateLines: getRefinanceProjectedRateLines(
+        beforeLegs,
+        legs,
+        sourceDebt,
+        vault,
+        projectedByAddress,
+      ),
+    }
+  }
+  catch (error) {
+    if (!nextRefinanceEstimateGuard.isStale(gen)) {
+      logWarn('refinance/projectedEstimates', error)
+    }
+  }
+})
+
+const externalSupplyProjectedYieldDetails = shallowRef<ProjectedYieldDetails | null>(null)
+const externalSupplyEstimateGuard = createRaceGuard()
+watchEffect(async () => {
+  void rewardsVersion.value
+  void enableIntrinsicApy.value
+  const gen = externalSupplyEstimateGuard.next()
+  externalSupplyProjectedYieldDetails.value = null
+  const target = projectionTargetCollateralVault.value
+  const amount = nextCollateralAmountNano.value
+  if (
+    !externalIsSupplyOnly.value
+    || !target
+    || amount === null
+    || amount <= 0n
+    || !isEVault(target)
+    || (collateralNeedsSwap.value && !activeSelectedCollateralQuote.value)
+  ) return
+
+  try {
+    const projectedRates = await getProjectedRatesBatch([{
+      vaultAddress: target.address,
+      currentCash: target.totalCash,
+      currentBorrows: target.totalBorrowed,
+      cashDelta: amount,
+      borrowsDelta: 0n,
+    }])
+    if (externalSupplyEstimateGuard.isStale(gen) || !areProjectedRatesComplete(projectedRates, 1)) return
+
+    const currentRaw = getVaultSupplyApy(target)
+    const projectedRaw = nanoToValue(projectedRates[0]!.supplyAPY, 25)
+    const projectedWithIntrinsic = withProjectedVaultIntrinsicApy(
+      currentRaw,
+      projectedRaw,
+      target,
+      enableIntrinsicApy.value,
+    )
+    const after = getProjectedYieldState('supply-apy', {
+      supplyUsd: 1,
+      baseSupplyApy: projectedRaw,
+      intrinsicSupplyApy: projectedWithIntrinsic - projectedRaw,
+      supplyRewardApy: getSupplyRewardApy(target.address),
+      borrowUsd: 0,
+      baseBorrowApy: 0,
+    })
+    if (!after) return
+    const campaigns = getSupplyRewardCampaigns(target.address)
+      .map(campaign => ({ campaign, vaultAddress: target.address }))
+    externalSupplyProjectedYieldDetails.value = {
+      metric: 'supply-apy',
+      after,
+      rateLines: [{
+        id: `supply:${target.address.toLowerCase()}`,
+        label: 'Lending APY',
+        symbol: target.asset.symbol,
+        vaultAddress: target.address,
+        before: currentRaw,
+        after: projectedRaw,
+      }],
+      rewards: mergeProjectedRewardCampaigns([], campaigns),
+    }
+  }
+  catch (error) {
+    if (!externalSupplyEstimateGuard.isStale(gen)) logWarn('external-migration/projectedSupplyApy', error)
+  }
+})
+const externalSupplyApyAfter = computed(() => externalSupplyProjectedYieldDetails.value?.after.total ?? null)
+
+const currentCollateralAddresses = computed(() => currentCollateralLegs.value.map(leg => leg.vault.address))
+const nextCollateralAddresses = computed(() => nextCollateralLegs.value.map(leg => leg.vault.address))
+const currentBorrowRewardApy = computed(() => sourceDebtVault.value
+  ? getBorrowRewardApyForCollaterals(sourceDebtVault.value.address, currentCollateralAddresses.value)
+  : 0)
+const nextBorrowRewardApy = computed(() => effectiveDebtVault.value
+  ? getBorrowRewardApyForCollaterals(effectiveDebtVault.value.address, nextCollateralAddresses.value)
+  : 0)
+const currentPositionMultiplier = computed(() =>
+  getPositionMultiplier(currentSupplyPortfolioValue.value?.valueUsd, currentBorrowValueUsd.value),
+)
+const nextPositionMultiplier = computed(() =>
+  getPositionMultiplier(nextSupplyPortfolioValue.value?.valueUsd, nextBorrowValueUsd.value),
+)
+const currentLoopingRewardApy = computed(() => sourceDebtVault.value
+  ? getEligibleLoopingRewardApyForCollaterals(
+      sourceDebtVault.value.address,
+      currentCollateralAddresses.value,
+      currentPositionMultiplier.value,
+    )
+  : 0)
+const nextLoopingRewardApy = computed(() => effectiveDebtVault.value
+  ? getEligibleLoopingRewardApyForCollaterals(
+      effectiveDebtVault.value.address,
+      nextCollateralAddresses.value,
+      nextPositionMultiplier.value,
+    )
+  : 0)
+
+const getRefinanceRoeState = (
+  supplyPortfolio: CollateralPortfolioValue | null,
+  borrowValueUsd: number | null,
+  borrowApy: RefinanceBorrowApyValue | null,
+  borrowRewardApy: number,
+  loopingRewardApy: number,
+): ProjectedYieldState | null => {
+  if (
+    !supplyPortfolio
+    || borrowValueUsd === null
+    || !borrowApy
+    || supplyPortfolio.baseSupplyApy === null
+    || supplyPortfolio.intrinsicSupplyApy === null
+    || supplyPortfolio.supplyRewardApy === null
+  ) return null
+
+  return getProjectedYieldState('roe', {
+    supplyUsd: supplyPortfolio.valueUsd,
+    baseSupplyApy: supplyPortfolio.baseSupplyApy,
+    intrinsicSupplyApy: supplyPortfolio.intrinsicSupplyApy,
+    supplyRewardApy: supplyPortfolio.supplyRewardApy,
+    borrowUsd: borrowValueUsd,
+    baseBorrowApy: borrowApy.baseApy,
+    intrinsicBorrowApy: borrowApy.intrinsicApy,
+    borrowRewardApy,
+    loopingRewardApy,
+  })
+}
+
+const currentRoeState = computed(() => {
   if (!isCurrentRoeApplicable.value) return null
-  return position.value?.roe
-    ?? calculateRoe(currentSupplyPortfolioValue.value?.valueUsd ?? null, currentBorrowValueUsd.value, currentSupplyPortfolioValue.value?.supplyApy ?? null, fromBorrowApy.value)
+  return getRefinanceRoeState(
+    currentSupplyPortfolioValue.value,
+    currentBorrowValueUsd.value,
+    currentBorrowApyValue.value,
+    currentBorrowRewardApy.value,
+    currentLoopingRewardApy.value,
+  )
 })
-const roeAfter = computed(() => {
+const nextRoeState = computed(() => {
   if (!isNextRoeApplicable.value) return null
-  if (!hasAnyChange.value && position.value?.roe !== undefined && isCurrentRoeApplicable.value) return position.value.roe
-  return calculateRoe(nextSupplyPortfolioValue.value?.valueUsd ?? null, nextBorrowValueUsd.value, nextSupplyPortfolioValue.value?.supplyApy ?? null, toBorrowApy.value)
+  return getRefinanceRoeState(
+    nextSupplyPortfolioValue.value,
+    nextBorrowValueUsd.value,
+    projectedNextBorrowApyValue.value,
+    nextBorrowRewardApy.value,
+    nextLoopingRewardApy.value,
+  )
 })
+const roeBefore = computed(() => currentRoeState.value?.total ?? null)
+const roeAfter = computed(() => nextRoeState.value?.total ?? null)
+
+const getRefinanceRewardCampaignInputs = (
+  supplyPortfolio: CollateralPortfolioValue,
+  borrowVault: EVault,
+  collateralAddresses: readonly string[],
+  multiplier: number | null,
+): ProjectedYieldCampaignInput[] => [
+  ...supplyPortfolio.entries
+    .filter(entry => entry.valueUsd > 0)
+    .flatMap(entry => entry.supplyCampaigns.map(campaign => ({
+      campaign,
+      vaultAddress: entry.address,
+    }))),
+  ...getBorrowRewardCampaignsForCollaterals(borrowVault.address, collateralAddresses)
+    .map(campaign => ({ campaign, vaultAddress: borrowVault.address })),
+  ...getEligibleLoopingRewardCampaignsForCollaterals(
+    borrowVault.address,
+    collateralAddresses,
+    multiplier,
+  ).map(campaign => ({ campaign, vaultAddress: borrowVault.address })),
+]
 
 const currentLtv = computed(() => {
   const ltv = position.value?.userLTV ?? position.value?.currentLTV
@@ -1690,6 +2229,45 @@ const hasAllRequiredQuotes = computed(() =>
   && (!debtNeedsSwap.value || !!activeSelectedDebtQuote.value),
 )
 const showNextRefinanceMetrics = computed(() => hasAnyChange.value && hasAllRequiredQuotes.value)
+const refinanceProjectedYieldDetails = computed<ProjectedYieldDetails | null>(() => {
+  void rewardsVersion.value
+  const before = currentRoeState.value
+  const after = nextRoeState.value
+  const estimate = nextRefinanceEstimate.value
+  const currentPortfolio = currentSupplyPortfolioValue.value
+  const sourceDebt = sourceDebtVault.value
+  const targetDebt = effectiveDebtVault.value
+  if (
+    !showNextRefinanceMetrics.value
+    || roeAfter.value === null
+    || !after
+    || !estimate
+    || !targetDebt
+  ) return null
+
+  const beforeCampaigns = before && currentPortfolio && sourceDebt
+    ? getRefinanceRewardCampaignInputs(
+        currentPortfolio,
+        sourceDebt,
+        currentCollateralAddresses.value,
+        currentPositionMultiplier.value,
+      )
+    : []
+  const afterCampaigns = getRefinanceRewardCampaignInputs(
+    estimate.supplyPortfolio,
+    targetDebt,
+    nextCollateralAddresses.value,
+    nextPositionMultiplier.value,
+  )
+
+  return {
+    metric: 'roe',
+    before,
+    after,
+    rateLines: estimate.rateLines,
+    rewards: mergeProjectedRewardCampaigns(beforeCampaigns, afterCampaigns),
+  }
+})
 const healthError = computed(() => {
   if (isExternalSourceRoute.value) return null
   if (!hasAnyChange.value || !hasAllRequiredQuotes.value || nextHealth.value === null) return null
@@ -1874,7 +2452,7 @@ const canAddToBatch = computed(() => {
   return true
 })
 const isSubmitDisabled = computed(() => {
-  if (!isConnected.value) return false
+  if (!hasMigrationReviewContext.value) return false
   if (isLoading.value || isExternalPositionsLoading.value || isSubmitting.value) return true
   if (validationError.value) return true
   if (!hasAllRequiredQuotes.value) return true
@@ -1893,7 +2471,7 @@ const reviewRefinanceLabel = computed(() => {
   return 'Review Refinance'
 })
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: getVaultGeoUnavailableReason(...getOperationVaultAddresses()) || 'This operation is not available in your region', variant: 'warning' }
   if (validationError.value) return { message: validationError.value, variant: validationError.value === healthError.value ? 'error' : 'warning' }
   if (activeCollateralQuoteError.value && collateralNeedsSwap.value) return { message: activeCollateralQuoteError.value, variant: 'warning' }
   if (activeDebtQuoteError.value && debtNeedsSwap.value) return { message: activeDebtQuoteError.value, variant: 'warning' }
@@ -2005,7 +2583,7 @@ const effectiveQuoteFetchedAt = computed(() => {
 
 const inboundMigrationDisabledReason = computed(() => {
   if (!isExternalSourceRoute.value) return null
-  if (!hasConnectedWallet.value) return 'Connect wallet to migrate'
+  if (!hasMigrationReviewContext.value) return 'Connect wallet to migrate'
   if (isExternalPositionsLoading.value) return 'Loading external position'
   if (externalPositionsError.value && !externalPosition.value) return externalPositionsError.value
   if (!externalPosition.value) return 'External position not found'
@@ -2031,7 +2609,7 @@ const inboundMigrationDisabledReason = computed(() => {
   if (debtNeedsSwap.value && selectedExternalDebtQuote.value && getQuoteAmount(selectedExternalDebtQuote.value, 'amountOutMin') < currentDebt.value) {
     return 'Selected debt swap route does not cover the external debt'
   }
-  if (isGeoBlocked.value) return 'This operation is not available in your region'
+  if (isGeoBlocked.value) return getVaultGeoUnavailableReason(...getOperationVaultAddresses()) || 'This operation is not available in your region'
   if (simulationError.value) return simulationError.value
   return null
 })
@@ -2047,6 +2625,7 @@ type InboundExternalMigrationInput = {
   owner: Address
   position: MigrationPosition
   eulerTarget: EulerMigrationTarget
+  deadline: bigint
   collateralSwapQuote?: SwapQuote
   debtSwapQuote?: SwapQuote
 }
@@ -2059,11 +2638,21 @@ type PreparedMigrationTenderlySimulation = {
 
 type InboundExternalMigrationPreview = {
   key: string
+  useSignatures: boolean
+  /**
+   * The review showed the authorization riding in ONE atomic Safe proposal.
+   * Latched at review time and revalidated at confirmation — execution must
+   * never silently run a reviewed execution the user did not review.
+   */
+  bundledReview: boolean
   input: InboundExternalMigrationInput
+  account: Account<IHasVaultAddress>
   tenderlySimulation: PreparedMigrationTenderlySimulation
   calldataPrepared: TransactionPlanPrepared
   authorizationRequest?: MigrationAuthorizationRequest
   prefetch?: PluginPrefetchData
+  compilerResult: PlanMigrationSimulationResult
+  observedBlock?: bigint
 }
 
 let inboundExternalMigrationPreviewRequestId = 0
@@ -2085,6 +2674,12 @@ const swapQuotePreviewKey = (quote: SwapQuote | null | undefined): string => {
     quote.amountOut,
     quote.amountOutMin,
     quote.slippage,
+    quote.swap.swapperAddress,
+    quote.swap.swapperData,
+    quote.verify.verifierAddress,
+    quote.verify.verifierData,
+    quote.verify.deadline,
+    String(quote.transferOutputToReceiver ?? false),
     selectedQuoteProviderKey(quote),
   ].join(':')
 }
@@ -2118,6 +2713,8 @@ const inboundExternalMigrationPreviewKey = computed(() => {
     externalDebtSelectedProvider.value ?? '',
     swapQuotePreviewKey(selectedExternalCollateralQuote.value),
     swapQuotePreviewKey(selectedExternalDebtQuote.value),
+    // Signature mode changes the built plan and the displayed steps.
+    signaturesEnabled.value ? 'sig' : 'nosig',
   ].join('|')
 })
 
@@ -2158,23 +2755,33 @@ const buildInboundExternalMigrationInput = async (): Promise<InboundExternalMigr
       ? getSwapInputAmount(debtSwapQuote, SwapperMode.TARGET_DEBT)
       : inboundBorrowAmountWithBuffer.value
   }
-  const input: InboundExternalMigrationInput = { source, owner, position, eulerTarget }
+  // The connector uses one deadline for authorization and final verification.
+  // A skim collateral quote commits its exact deadline inside verifierData, so
+  // that value must also be used when the migration intent is recompiled.
+  const deadline = BigInt(
+    collateralSwapQuote?.verify.deadline
+    ?? debtSwapQuote?.verify.deadline
+    ?? Math.floor(Date.now() / 1000) + 60 * 60,
+  )
+  const input: InboundExternalMigrationInput = { source, owner, position, eulerTarget, deadline }
   if (collateralSwapQuote) input.collateralSwapQuote = collateralSwapQuote
   if (debtSwapQuote) input.debtSwapQuote = debtSwapQuote
   return input
 }
 
-const shouldRemoveInboundExternalAuthorization = (connectorId: string) =>
-  connectorId === MORPHO_CONNECTOR_ID
+// The SDK's post-migration disable is a second signed authorization appended to
+// the batch. Without signatures the revoke is a plain tx sent afterwards.
+const shouldRemoveInboundExternalAuthorization = (connectorId: string, useSignatures: boolean) =>
+  connectorId === MORPHO_CONNECTOR_ID && useSignatures
 
 const getInboundExternalMigrationAuthorizationRequest = async (
   input: InboundExternalMigrationInput,
+  useSignatures = signaturesEnabled.value,
 ): Promise<MigrationAuthorizationRequest | undefined> => {
   if (!chainId.value) {
     throw new Error('Migration inputs are incomplete')
   }
   const migrationChainId = input.position.chainId
-  const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 60)
   return getMigrationAuthorization({
     direction: 'external-to-euler',
     connectorId: input.source.connectorId,
@@ -2183,43 +2790,19 @@ const getInboundExternalMigrationAuthorizationRequest = async (
     position: input.position,
     positionRef: input.source.ref,
     target: input.eulerTarget,
-    removeAuthorizationAfterMigration: shouldRemoveInboundExternalAuthorization(input.source.connectorId),
-    deadline,
-  })
-}
-
-const buildInboundExternalMigrationExecutionPlan = async (
-  input: InboundExternalMigrationInput,
-): Promise<TransactionPlan> => {
-  if (!chainId.value) {
-    throw new Error('Migration inputs are incomplete')
-  }
-  const migrationChainId = input.position.chainId
-  const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input)
-  inboundExternalAuthorizationConnector.value = authorizationRequest ? input.source.connectorId : null
-  const authorization = authorizationRequest
-    ? await signMigrationAuthorization(authorizationRequest)
-    : undefined
-
-  return planCrossProtocolMigration({
-    direction: 'external-to-euler',
-    connectorId: input.source.connectorId,
-    chainId: migrationChainId,
-    owner: input.owner,
-    position: input.position,
-    positionRef: input.source.ref,
-    target: input.eulerTarget,
-    authorization,
-    removeAuthorizationAfterMigration: shouldRemoveInboundExternalAuthorization(input.source.connectorId),
-    collateralSwapQuote: input.collateralSwapQuote,
-    debtSwapQuote: input.debtSwapQuote,
-    operationName: `${input.source.connectorId}ToEulerMigration`,
+    removeAuthorizationAfterMigration: input.source.connectorId === MORPHO_CONNECTOR_ID && useSignatures,
+    // Without signatures the connectors return msg.sender grants to send as
+    // their own transactions instead of an EIP-712 message to sign.
+    authorizationKind: useSignatures ? 'typedData' : 'transaction',
+    deadline: input.deadline,
   })
 }
 
 const buildInboundExternalMigrationCalldataPreview = async (
   input: InboundExternalMigrationInput,
+  account: Account<IHasVaultAddress>,
   authorizationRequest: MigrationAuthorizationRequest | undefined,
+  useSignatures: boolean,
   prefetch?: PluginPrefetchData,
 ): Promise<TransactionPlanPrepared> => {
   if (!chainId.value) {
@@ -2238,21 +2821,25 @@ const buildInboundExternalMigrationCalldataPreview = async (
     positionRef: input.source.ref,
     target: input.eulerTarget,
     authorization,
-    removeAuthorizationAfterMigration: shouldRemoveInboundExternalAuthorization(input.source.connectorId),
+    deadline: input.deadline,
+    removeAuthorizationAfterMigration: shouldRemoveInboundExternalAuthorization(input.source.connectorId, useSignatures),
     collateralSwapQuote: input.collateralSwapQuote,
     debtSwapQuote: input.debtSwapQuote,
     operationName: `${input.source.connectorId}ToEulerMigration`,
   })
-  return prepareTransactionPlan(plan, { account: currentPlanAccount(), chainId: migrationChainId, prefetch })
+  return prepareTransactionPlan(plan, {
+    account,
+    chainId: migrationChainId,
+    prefetch,
+    usePermit2: useSignatures,
+  })
 }
-
-const buildInboundExternalMigrationPlan = async (): Promise<TransactionPlan> =>
-  buildInboundExternalMigrationExecutionPlan(await buildInboundExternalMigrationInput())
 
 const buildInboundExternalMigrationSimulationResult = async (
   input: InboundExternalMigrationInput,
   authorizationRequest?: MigrationAuthorizationRequest,
   account?: Account<IHasVaultAddress>,
+  useSignatures = signaturesEnabled.value,
 ) => {
   if (!chainId.value) {
     throw new Error('Migration inputs are incomplete')
@@ -2267,7 +2854,8 @@ const buildInboundExternalMigrationSimulationResult = async (
     positionRef: input.source.ref,
     target: input.eulerTarget,
     authorizationRequest,
-    removeAuthorizationAfterMigration: shouldRemoveInboundExternalAuthorization(input.source.connectorId),
+    deadline: input.deadline,
+    removeAuthorizationAfterMigration: shouldRemoveInboundExternalAuthorization(input.source.connectorId, useSignatures),
     collateralSwapQuote: input.collateralSwapQuote,
     debtSwapQuote: input.debtSwapQuote,
     account,
@@ -2277,9 +2865,10 @@ const buildInboundExternalMigrationSimulationResult = async (
 
 const prefetchInboundExternalMigrationPlugins = async (
   plan: TransactionPlan,
+  account: Account<IHasVaultAddress>,
 ): Promise<PluginPrefetchData | undefined> => {
   try {
-    return await prefetchPluginData(plan, { account: currentPlanAccount() })
+    return await prefetchPluginData(plan, { account })
   }
   catch (err) {
     logWarn('externalMigration/prefetchPluginData', err)
@@ -2300,18 +2889,32 @@ const prepareInboundExternalMigrationPreview = async (): Promise<InboundExternal
   const requestId = ++inboundExternalMigrationPreviewRequestId
   inboundExternalMigrationPreviewPromiseKey = key
   const promise = (async () => {
+    const useSignatures = signaturesEnabled.value
     const input = await buildInboundExternalMigrationInput()
-    const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input)
-    const simulationResult = await buildInboundExternalMigrationSimulationResult(input, authorizationRequest)
-    const prefetch = await prefetchInboundExternalMigrationPlugins(simulationResult.plan)
-    const [tenderlyPrepared, calldataPrepared] = await Promise.all([
+    const account = currentPlanAccount()
+    if (!account) throw new Error('Migration inputs are incomplete')
+    const authorizationRequest = await getInboundExternalMigrationAuthorizationRequest(input, useSignatures)
+    const simulationResult = await buildInboundExternalMigrationSimulationResult(input, authorizationRequest, account, useSignatures)
+    const prefetch = await prefetchInboundExternalMigrationPlugins(simulationResult.plan, account)
+    // Without signatures the authorization is granted by a standalone tx, so the
+    // simulation plan (authorization item filtered out) is already the exact
+    // calldata that executes — no stub-signed preview plan needed.
+    const [tenderlyPrepared, previewPrepared] = await Promise.all([
       prepareTransactionPlan(simulationResult.plan, {
-        account: currentPlanAccount(),
+        account,
         chainId: input.position.chainId,
         prefetch,
+        usePermit2: useSignatures,
       }),
-      buildInboundExternalMigrationCalldataPreview(input, authorizationRequest, prefetch),
+      useSignatures
+        ? buildInboundExternalMigrationCalldataPreview(input, account, authorizationRequest, useSignatures, prefetch)
+        : Promise.resolve(undefined),
     ])
+    const calldataPrepared = previewPrepared ?? tenderlyPrepared
+    const observedBlock = await rpcClient.value?.getBlockNumber().catch((err) => {
+      logWarn('externalMigration/previewBlock', err)
+      return undefined
+    })
 
     if (requestId !== inboundExternalMigrationPreviewRequestId || key !== inboundExternalMigrationPreviewKey.value) {
       throw new Error(STALE_INBOUND_EXTERNAL_MIGRATION_PREVIEW_ERROR)
@@ -2319,13 +2922,18 @@ const prepareInboundExternalMigrationPreview = async (): Promise<InboundExternal
 
     const preview: InboundExternalMigrationPreview = {
       key,
+      useSignatures,
+      bundledReview: !useSignatures && isSafeWallet.value && !!authorizationRequest,
       input,
+      account,
       tenderlySimulation: {
         plan: simulationResult.plan,
         prepared: tenderlyPrepared,
         stateOverrides: simulationResult.stateOverrides,
       },
       calldataPrepared,
+      compilerResult: simulationResult,
+      ...(observedBlock === undefined ? {} : { observedBlock }),
       ...(authorizationRequest ? { authorizationRequest } : {}),
       ...(prefetch ? { prefetch } : {}),
     }
@@ -2498,27 +3106,6 @@ watch(
   },
   { immediate: true },
 )
-
-const loadPosition = async () => {
-  if (isExternalSourceRoute.value) {
-    position.value = null
-    isLoading.value = false
-    return
-  }
-  if (!isConnected.value && !isSpyMode.value) {
-    position.value = null
-    return
-  }
-  isLoading.value = true
-  await until(isPositionsLoaded).toBe(true)
-  position.value = getPositionBySubAccountIndex(+positionIndex) || null
-  isLoading.value = false
-}
-
-watch([isPositionsLoaded, () => route.params.number], ([loaded]) => {
-  if (isExternalSourceRoute.value) return
-  if (loaded) void loadPosition()
-}, { immediate: true })
 
 const resolveSelectedVault = <T extends EVault | EulerEarn | SecuritizeCollateralVault>(
   vaults: T[],
@@ -2729,8 +3316,7 @@ const submitCowSwapCollateralSwap = async () => {
   })
 }
 
-function schedulePostMigrationRefreshes() {
-  const refreshAddress = address.value || inboundExternalOwner.value || ''
+function schedulePostMigrationRefreshes(refreshAddress: Address) {
   scheduleExternalMigrationRefreshes()
   for (const delay of POST_EXTERNAL_MIGRATION_REFRESH_DELAYS_MS) {
     setTimeout(() => {
@@ -2756,35 +3342,48 @@ watch(() => cowSwapOrderStatus.orderStatus.value, (status) => {
 const reviewInboundExternalMigration = async () => {
   const reviewAsset = externalDebtAsset.value ?? externalCollateralAsset.value
   if (isOperationBlocked.value || directInboundMigrationDisabledReason.value || !canReviewInboundExternalMigration.value || !reviewAsset) return
+  const quoteFetchedAt = effectiveQuoteFetchedAt.value
+  const knownAssets = externalMigrationKnownAssets.value
+  const swapQuoteOutputs = externalMigrationSwapQuoteOutputs.value
   isPreparing.value = true
   clearSimulationError()
   try {
-    inboundExternalPreparedPlan.value = null
     inboundExternalAuthorizationConnector.value = null
-    inboundExternalPlan.value = null
     const preview = await prepareInboundExternalMigrationPreview()
     inboundExternalAuthorizationConnector.value = preview.authorizationRequest ? preview.input.source.connectorId : null
-
-    modal.open(OperationReviewModal, {
-      props: {
+    const intent = createInboundMigrationIntent(preview)
+    const reviewLaunch = captureReviewState([intent], {
+      presentationKind: 'migration',
+      tenderlyPrepared: preview.tenderlySimulation.prepared,
+      tenderlyStateOverrides: preview.tenderlySimulation.stateOverrides,
+      review: {
         type: 'migration',
         asset: reviewAsset,
         amount: formatUnits(reviewAsset.amount, Number(reviewAsset.decimals)),
-        signatureSteps: buildInboundExternalMigrationSignatureSteps(preview.authorizationRequest),
-        calldataPrepared: preview.calldataPrepared,
-        calldataUsesPlaceholderSignatures: !!preview.authorizationRequest,
-        tenderlyPrepared: preview.tenderlySimulation.prepared,
-        tenderlyStateOverrides: preview.tenderlySimulation.stateOverrides,
+        signatureSteps: buildInboundExternalMigrationSignatureSteps(preview.authorizationRequest, preview.useSignatures, preview.bundledReview),
+        postSteps: buildInboundExternalMigrationRevokeSteps(preview.authorizationRequest, preview.useSignatures, preview.bundledReview),
+        calldataUsesPlaceholderSignatures: preview.useSignatures && !!preview.authorizationRequest,
         allowConfirmWithoutPlan: true,
-        quoteFetchedAt: effectiveQuoteFetchedAt.value,
-        knownAssets: externalMigrationKnownAssets.value,
-        swapQuoteOutputs: externalMigrationSwapQuoteOutputs.value,
-        onConfirm: async () => {
-          await sendInboundExternalMigration()
-        },
+        quoteFetchedAt,
+        knownAssets,
+        swapQuoteOutputs,
         submittingLabel: 'Migrating...',
       },
+      onResult: (result) => {
+        const migration = result.migration
+        if (!migration || result.status !== 'submitted') return
+        if (migration.warning) showWarning('Migration completed with a warning', { description: migration.warning })
+      },
+      onConfirmed: () => {
+        schedulePostMigrationRefreshes(preview.input.owner)
+      },
+      onSucceeded: () => {
+        const redirectPath = preview.input.eulerTarget.borrowVault ? '/portfolio' : '/portfolio/saving'
+        setTimeout(() => void router.replace({ path: redirectPath, query: { network: route.query.network } }), MODAL_CLOSE_REDIRECT_DELAY_MS)
+      },
+      onFailed: (cause) => { showError(cause instanceof Error ? cause.message : 'Migration failed') },
     })
+    await reviewLaunch.open()
   }
   catch (err) {
     logWarn('externalMigration/review', err)
@@ -2795,39 +3394,43 @@ const reviewInboundExternalMigration = async () => {
   }
 }
 
-const sendInboundExternalMigration = async () => {
-  isSubmitting.value = true
-  clearSimulationError()
-  try {
-    inboundExternalPreparedPlan.value = null
-    const migrationChainId = externalPosition.value?.chainId
-    inboundExternalPlan.value = await buildInboundExternalMigrationPlan()
-    inboundExternalPreparedPlan.value = await prepareTransactionPlan(inboundExternalPlan.value, { account: currentPlanAccount(), chainId: migrationChainId })
-    const ok = await runPreparedSimulation(inboundExternalPreparedPlan.value, buildRefinanceStateOverrideOptions())
-    if (!ok) return
-    // executePreparedPlan resolves once the migration tx is mined (it returns
-    // receipts), so everything below runs after on-chain confirmation.
-    await executePreparedPlan(inboundExternalPreparedPlan.value)
-    schedulePostMigrationRefreshes()
-    modal.close()
-    // Land on the Positions (or Deposits) list rather than returning to the
-    // external migration route, which no longer has a source position after tx.
-    const redirectPath = targetDebtVault.value
-      ? '/portfolio'
-      : targetCollateralVault.value
-        ? '/portfolio/saving'
-        : '/portfolio'
-    setTimeout(() => {
-      void router.replace({ path: redirectPath, query: { network: route.query.network } })
-    }, MODAL_CLOSE_REDIRECT_DELAY_MS)
-  }
-  catch (err) {
-    showError(err instanceof Error ? err.message : 'Migration failed')
-    logWarn('externalMigration/send', err)
-  }
-  finally {
-    isSubmitting.value = false
-  }
+const createInboundMigrationIntent = (preview: InboundExternalMigrationPreview) => {
+  const { input, useSignatures, authorizationRequest } = preview
+  const bounds = [
+    { kind: 'maximum-input' as const, token: input.source.collateral.address, amount: input.source.collateral.amount },
+    ...(input.source.debt
+      ? [{ kind: 'maximum-input' as const, token: input.source.debt.address, amount: input.source.debt.amount }]
+      : []),
+  ]
+  return createMigrationIntent({
+    args: {
+      direction: 'external-to-euler',
+      connectorId: input.source.connectorId,
+      owner: input.owner,
+      positionRef: input.source.ref,
+      target: input.eulerTarget,
+      collateralSwapQuote: input.collateralSwapQuote,
+      debtSwapQuote: input.debtSwapQuote,
+      deadline: input.deadline,
+      removeAuthorizationAfterMigration: shouldRemoveInboundExternalAuthorization(input.source.connectorId, useSignatures),
+      operationName: `${input.source.connectorId}ToEulerMigration`,
+      authorizationKind: useSignatures ? 'typedData' : 'transaction',
+    },
+    authorizationRequest,
+    ...(preview.observedBlock === undefined
+      ? {}
+      : {
+          previewCompilation: {
+            result: preview.compilerResult,
+            observedBlock: preview.observedBlock,
+            ...(preview.prefetch ? { prefetch: preview.prefetch } : {}),
+            prepared: preview.calldataPrepared,
+          },
+        }),
+    source: 'position/external-migration-inbound',
+    subAccounts: [input.owner, input.eulerTarget.eulerAccount],
+    bounds,
+  })
 }
 
 const addInboundExternalMigrationToBatch = async () => {
@@ -2852,10 +3455,13 @@ const addInboundExternalMigrationToBatch = async () => {
       ? `${sourceCollateralSymbol}/${sourceDebtSymbol}`
       : sourceCollateralSymbol
 
-    const batchEntry = {
+    const { useSignatures } = preview
+    const intent = createInboundMigrationIntent(preview)
+
+    await addBatchEntry({
+      intent,
       label: `Migrate ${positionLabel} to Euler`,
       nameOverride: `Migrate ${positionLabel}`,
-      buildExecutionPlan: () => buildInboundExternalMigrationExecutionPlan(input),
       stateOverrides: preview.tenderlySimulation.stateOverrides,
       subAccount: input.eulerTarget.eulerAccount,
       refreshExternalMigrationPositions: true,
@@ -2863,33 +3469,14 @@ const addInboundExternalMigrationToBatch = async () => {
         type: 'migration',
         asset: reviewAsset,
         amount: formatUnits(reviewAsset.amount, Number(reviewAsset.decimals)),
-        signatureSteps: buildInboundExternalMigrationSignatureSteps(preview.authorizationRequest),
+        // Add-time rows describe the sequential fallback. A latched Safe review
+        // uses rows from the exact bundled resolution instead.
+        signatureSteps: buildInboundExternalMigrationSignatureSteps(preview.authorizationRequest, useSignatures, false),
+        postSteps: buildInboundExternalMigrationRevokeSteps(preview.authorizationRequest, useSignatures, false),
         displayPlan: preview.calldataPrepared.plan,
         quoteFetchedAt: effectiveQuoteFetchedAt.value,
         knownAssets: externalMigrationKnownAssets.value,
         swapQuoteOutputs: externalMigrationSwapQuoteOutputs.value,
-      },
-    }
-
-    await addBatchEntry({
-      ...batchEntry,
-      buildPlan: async (account: Account<IHasVaultAddress>) => {
-        // The preview was warmed against the fresh owner account. For the first
-        // batch entry the planning account is that same account, so reuse the
-        // prewarmed plan instead of re-running the full cross-protocol migration
-        // simulation. Only re-simulate when the batch already has entries, where
-        // the planning account is a later layer the prewarm didn't account for.
-        if (!isBatchActive.value) {
-          return {
-            plan: preview.tenderlySimulation.plan,
-            stateOverrides: preview.tenderlySimulation.stateOverrides,
-          }
-        }
-        const simulationResult = await buildInboundExternalMigrationSimulationResult(input, preview.authorizationRequest, account)
-        return {
-          plan: simulationResult.plan,
-          stateOverrides: simulationResult.stateOverrides,
-        }
       },
     })
 
@@ -2944,7 +3531,7 @@ const addToBatch = async () => {
       await addBatchEntry({
         label: `Refinance ${sourceCollateralSymbol}/${sourceDebtSymbol} to ${targetCollateralSymbol}/${targetDebtSymbol}`,
         nameOverride: `Refinance ${sourceCollateralSymbol}/${sourceDebtSymbol}`,
-        buildPlan: account => planRefinancePosition({ ...refinanceInput, account }),
+        intent: createRefinanceIntent(refinanceInput, 'position/refinance'),
         subAccount: refinanceAccount,
         review: {
           type: 'refinance',
@@ -2974,21 +3561,54 @@ const submit = async () => {
     return
   }
   if (isPreparing.value || isGeoBlocked.value || isSubmitDisabled.value) return
+  const useCowSwap = isSelectedCollateralCowSwapProvider.value
+  let refinanceInput: ReturnType<typeof buildRefinanceInput> | undefined
+  let intent: ReturnType<typeof createRefinanceIntent> | undefined
+  let reviewLaunch: ReturnType<typeof captureReviewState> | undefined
+  const planAccountSnapshot = currentPlanAccount()
+  if (!useCowSwap) {
+    if (!sourceDebtVault.value) return
+    const sourceDebtVaultSnapshot = sourceDebtVault.value
+    refinanceInput = buildRefinanceInput()
+    intent = createRefinanceIntent(refinanceInput, 'position/refinance')
+    reviewLaunch = captureReviewState([intent], {
+      presentationKind: 'refinance',
+      review: {
+        type: 'refinance',
+        asset: sourceDebtVaultSnapshot.asset,
+        amount: formatVaultAmount(currentDebt.value, sourceDebtVaultSnapshot),
+        quoteFetchedAt: effectiveQuoteFetchedAt.value,
+        vaultAmounts: refinanceVaultAmounts.value,
+        ...refinanceSwapReviewInfo.value,
+        submittingLabel: 'Submitting...',
+      },
+      onSucceeded: () => {
+        setTimeout(() => {
+          router.replace({ path: '/portfolio', query: { network: route.query.network } })
+        }, 400)
+      },
+      onFailed: (cause) => {
+        showError('Transaction failed')
+        logWarn('refinance/send', cause)
+      },
+    })
+  }
   isPreparing.value = true
   try {
     await guardWithPriceImpact(async () => {
       if (isSubmitDisabled.value || !sourceDebtVault.value) return
 
-      if (isSelectedCollateralCowSwapProvider.value) {
+      if (useCowSwap) {
         await submitCowSwapCollateralSwap()
         return
       }
+      if (!refinanceInput || !intent || !reviewLaunch) return
 
       preparedPlan.value = null
       plan.value = null
       try {
-        plan.value = await buildRefinancePlan()
-        preparedPlan.value = await prepareTransactionPlan(plan.value, { account: currentPlanAccount() })
+        plan.value = await planRefinancePosition({ ...refinanceInput, account: planAccountSnapshot })
+        preparedPlan.value = await prepareTransactionPlan(plan.value, { account: planAccountSnapshot, intents: reviewLaunch.intents })
       }
       catch (e) {
         logWarn('refinance/buildPlan', e)
@@ -2997,54 +3617,16 @@ const submit = async () => {
       }
 
       const ok = preparedPlan.value
-        ? await runPreparedSimulation(preparedPlan.value, buildRefinanceStateOverrideOptions())
+        ? await runPreparedSimulation(preparedPlan.value, buildRefinanceStateOverrideOptions(), undefined, reviewLaunch.intents)
         : await runSimulation(plan.value, buildRefinanceStateOverrideOptions())
       if (!ok) return
 
-      modal.open(OperationReviewModal, {
-        props: {
-          type: 'refinance',
-          asset: sourceDebtVault.value.asset,
-          amount: formatVaultAmount(currentDebt.value, sourceDebtVault.value),
-          plan: preparedPlan.value ? undefined : plan.value,
-          prepared: preparedPlan.value || undefined,
-          quoteFetchedAt: effectiveQuoteFetchedAt.value,
-          vaultAmounts: refinanceVaultAmounts.value,
-          ...refinanceSwapReviewInfo.value,
-          onConfirm: async () => {
-            await send()
-          },
-          submittingLabel: 'Submitting...',
-        },
-      })
+      if (!plan.value) return
+      await reviewLaunch.open()
     })
   }
   finally {
     isPreparing.value = false
-  }
-}
-
-const send = async () => {
-  isSubmitting.value = true
-  try {
-    if (preparedPlan.value) {
-      await executePreparedPlan(preparedPlan.value)
-    }
-    else {
-      const txPlan = await buildRefinancePlan()
-      await executePlan(txPlan)
-    }
-    modal.close()
-    setTimeout(() => {
-      router.replace({ path: '/portfolio', query: { network: route.query.network } })
-    }, 400)
-  }
-  catch (e) {
-    showError('Transaction failed')
-    logWarn('refinance/send', e)
-  }
-  finally {
-    isSubmitting.value = false
   }
 }
 
@@ -3209,9 +3791,16 @@ function getTypedDataAuthorizationValue(request: MigrationAuthorizationRequest |
   return parseUnsignedIntegerAmount((request.typedData.message as { value?: unknown }).value)
 }
 
-function buildInboundExternalMigrationSignatureSteps(authorizationRequest: MigrationAuthorizationRequest | undefined): DisplayStep[] {
+function buildInboundExternalMigrationSignatureSteps(
+  authorizationRequest: MigrationAuthorizationRequest | undefined,
+  useSignatures: boolean,
+  bundled: boolean,
+): DisplayStep[] {
   const sourceCollateral = externalCollateralAsset.value
   if (!sourceCollateral) return []
+  if (!useSignatures) {
+    return buildMigrationAuthorizationTxSteps(authorizationRequest, 'grant', 1, { bundled })
+  }
   if (inboundExternalAuthorizationConnector.value === AAVE_CONNECTOR_ID) {
     const permitValue = getTypedDataAuthorizationValue(authorizationRequest)
     return [{
@@ -3241,6 +3830,16 @@ function buildInboundExternalMigrationSignatureSteps(authorizationRequest: Migra
     }]
   }
   return []
+}
+
+/** Rows for the revoke transactions sent after the batch settles. */
+function buildInboundExternalMigrationRevokeSteps(
+  authorizationRequest: MigrationAuthorizationRequest | undefined,
+  useSignatures: boolean,
+  bundled: boolean,
+): DisplayStep[] {
+  if (!authorizationRequest || useSignatures) return []
+  return buildMigrationAuthorizationTxSteps(authorizationRequest, 'revoke', 1, { bundled })
 }
 
 function getRoutedVia(provider: string | null, quote: SwapQuote | null): string | null {
@@ -3434,6 +4033,7 @@ function getOperationVaultAddresses(): string[] {
                     :disabled-reason="disabledReasonInfo?.message"
                     :disabled-reason-variant="disabledReasonInfo?.variant"
                     :can-add-to-batch="canAddToBatch"
+                    :add-to-batch-disabled-reason="isCowSwapSelectedForBatch ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
                     @add-to-batch="addToBatch"
                   >
                     {{ reviewRefinanceLabel }}
@@ -3470,6 +4070,20 @@ function getOperationVaultAddresses(): string[] {
                     {{ targetDebtVault ? getVaultMarketAssetLabel(targetDebtVault) : '-' }}
                   </span>
                 </SummaryRow>
+                <ProjectedYieldSummaryRow
+                  v-if="externalIsSupplyOnly"
+                  label="Supply APY"
+                  :after="externalSupplyApyAfter"
+                  :details="externalSupplyProjectedYieldDetails"
+                  estimate-only
+                />
+                <ProjectedYieldSummaryRow
+                  v-else
+                  label="ROE"
+                  :after="showNextRefinanceMetrics ? roeAfter : null"
+                  :details="refinanceProjectedYieldDetails"
+                  estimate-only
+                />
                 <SummaryRow :label="collateralNeedsSwap ? 'Source collateral' : 'Collateral'">
                   <span class="text-p2 text-right">
                     {{ formatExternalAssetAmount(externalCollateralAsset) }}
@@ -3683,12 +4297,10 @@ function getOperationVaultAddresses(): string[] {
               @refresh="onRefreshDebtQuotes"
             />
 
-            <UiAlert
+            <GeoBlockAlert
               v-if="isGeoBlocked"
-              title="Region restricted"
+              :vault-addresses="getOperationVaultAddresses()"
               description="This operation is not available in your region. You can still repay existing debt."
-              variant="warning"
-              size="compact"
             />
             <UiAlert
               v-if="validationError"
@@ -3727,6 +4339,7 @@ function getOperationVaultAddresses(): string[] {
                 :disabled-reason="disabledReasonInfo?.message"
                 :disabled-reason-variant="disabledReasonInfo?.variant"
                 :can-add-to-batch="canAddToBatch"
+                :add-to-batch-disabled-reason="isCowSwapSelectedForBatch ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
                 @add-to-batch="addToBatch"
               >
                 {{ reviewRefinanceLabel }}
@@ -3740,13 +4353,12 @@ function getOperationVaultAddresses(): string[] {
             allow-overflow
             class="w-full laptop:max-w-[360px]"
           >
-            <SummaryRow label="ROE">
-              <SummaryValue
-                :before="roeBefore !== null ? formatNumber(roeBefore) : undefined"
-                :after="roeAfter !== null && showNextRefinanceMetrics ? formatNumber(roeAfter) : undefined"
-                suffix="%"
-              />
-            </SummaryRow>
+            <ProjectedYieldSummaryRow
+              label="ROE"
+              :before="roeBefore"
+              :after="showNextRefinanceMetrics ? roeAfter : null"
+              :details="refinanceProjectedYieldDetails"
+            />
             <SummaryRow
               label="Liq. price"
               align-top

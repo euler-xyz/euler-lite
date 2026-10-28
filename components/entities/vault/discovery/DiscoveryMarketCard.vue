@@ -10,6 +10,9 @@ import {
   type BestMaxRoeResult,
 } from '~/utils/discoveryCalculations'
 import { useBestMaxROE } from '~/composables/useBestMaxROE'
+import { getUniqueEntitiesByVaults, getVaultDeprecation } from '~/utils/eulerLabelsUtils'
+import { useDiscoveryVaultWarningDetails } from '~/composables/useDiscoveryVaultWarningDetails'
+import { isDeprecationWarning } from '~/utils/vault-assessment/flagged'
 import { VaultMaxRoeModal, UiModalPreviewTrigger } from '#components'
 
 const props = defineProps<{
@@ -21,9 +24,56 @@ defineEmits<{
   toggle: []
 }>()
 
-const { products } = useEulerLabels()
+const { products, isReady, source, visibility } = useEulerLabels()
+const { getWarningText, loadWarningDetails, isAcceptedOnlyWarning } = useDiscoveryVaultWarningDetails()
+const disclosureEntities = computed(() => props.market.curator
+  ? [props.market.curator]
+  : getUniqueEntitiesByVaults(props.market.vaults))
 const bestRoeMarketGroups = computed(() => [props.market])
 const { getBestMaxROE } = useBestMaxROE(bestRoeMarketGroups)
+const warningCandidates = computed(() => {
+  if (!isReady.value || source.value !== 'v3') return []
+  const seen = new Set<string>()
+  return [...props.market.vaults, ...props.market.externalCollateral].flatMap((vault) => {
+    const address = vault.address.toLowerCase()
+    if (seen.has(address)) return []
+    seen.add(address)
+    const verdict = visibility.value?.[address]
+    if (verdict?.status !== 'warning') return []
+    if (isDeprecationWarning(verdict, getVaultDeprecation(address).deprecated)) return []
+    return [{ vault, reason: verdict.reason, decidedBy: verdict.decidedBy }]
+  })
+})
+watchEffect(() => {
+  for (const { vault, decidedBy } of warningCandidates.value) {
+    if (decidedBy === 'advisories') loadWarningDetails(vault)
+  }
+})
+const warningVaults = computed(() => warningCandidates.value.filter(({ vault, decidedBy }) =>
+  decidedBy !== 'advisories' || !isAcceptedOnlyWarning(vault),
+))
+
+const marketWarnings = computed(() => warningVaults.value.map(({ vault, reason }) => ({
+  title: vault.asset.symbol,
+  text: getWarningText(vault, reason || 'One or more vault checks need review.'),
+})))
+
+const loadMarketWarningDetails = () => {
+  for (const { vault } of warningVaults.value) {
+    loadWarningDetails(vault)
+  }
+}
+
+const marketDeprecationReasons = computed(() => {
+  const seen = new Set<string>()
+  return [...props.market.vaults, ...props.market.externalCollateral].flatMap((vault) => {
+    const address = vault.address.toLowerCase()
+    if (seen.has(address)) return []
+    seen.add(address)
+    const status = getVaultDeprecation(address)
+    return status.deprecated ? [{ title: vault.asset.symbol, text: status.reason }] : []
+  })
+})
 
 const isGovernanceLimited = computed(() =>
   props.market.source === 'product' && (products[props.market.id]?.tags?.includes('governance limited') ?? false),
@@ -64,13 +114,22 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
         v-for="(marketEntities, entitiesIdx) in [getMarketEntities(market)]"
         :key="'entities-' + entitiesIdx"
       >
-        <BaseAvatar
+        <VaultEntityDisclosureTooltip
           v-if="marketEntities.logos.length > 0"
-          class="icon--40 shrink-0"
-          :class="{ 'opacity-20': isGovernanceLimited }"
-          :src="marketEntities.logos"
-          :label="marketEntities.name"
-        />
+          :entities="disclosureEntities"
+        >
+          <span
+            class="inline-flex"
+            @click.stop
+          >
+            <BaseAvatar
+              class="icon--40 shrink-0"
+              :class="{ 'opacity-20': isGovernanceLimited }"
+              :src="marketEntities.logos"
+              :label="marketEntities.labels"
+            />
+          </span>
+        </VaultEntityDisclosureTooltip>
         <div
           class="flex-grow min-w-0"
           :class="marketEntities.logos.length > 0 ? 'ml-12' : ''"
@@ -82,18 +141,23 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
             data-field="market-entity"
             :data-value="marketEntities.name || market.curator?.name || 'Ungrouped'"
           >
-            <span
-              v-if="marketEntities.name"
-              :class="{ 'opacity-20': isGovernanceLimited }"
-            >{{ marketEntities.name }}</span>
-            <template v-else-if="market.curator">
-              {{ market.curator.name }}
-            </template>
+            <VaultEntityDisclosureTooltip
+              v-if="marketEntities.name || market.curator"
+              :entities="disclosureEntities"
+            >
+              <span
+                :class="{ 'opacity-20': isGovernanceLimited }"
+                @click.stop
+              >
+                {{ marketEntities.name || market.curator?.name }}
+              </span>
+            </VaultEntityDisclosureTooltip>
             <template v-else>
               Ungrouped
             </template>
             <RecentlyAddedBadge
               v-if="market.metrics.hasRecentlyAdded"
+              entity="market"
             />
             <GovernanceLimitedBadge v-if="isGovernanceLimited" />
           </div>
@@ -137,16 +201,41 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
             data-field="pair-count"
             :data-value="diagram.pairCount"
           >{{ diagram.pairCount }} pairs</span>
-          <span
+          <UiHoverPreviewTooltip
             v-if="getDeprecatedVaultCount(market) > 0"
-            class="text-warning-500 text-p5 mt-4"
+            title="Deprecated vaults"
+            :sections="marketDeprecationReasons"
+            placement="top-start"
           >
-            {{ getDeprecatedVaultCount(market) }} deprecated
-          </span>
+            <span
+              class="text-warning-500 text-p5 mt-4"
+              @click.stop
+            >
+              {{ getDeprecatedVaultCount(market) }} deprecated
+            </span>
+          </UiHoverPreviewTooltip>
+          <UiHoverPreviewTooltip
+            v-if="marketWarnings.length"
+            title="Market warnings"
+            :sections="marketWarnings"
+            placement="top-start"
+            @mouseenter="loadMarketWarningDetails"
+            @focusin="loadMarketWarningDetails"
+            @pointerdown="loadMarketWarningDetails"
+          >
+            <span
+              class="text-warning-500 text-p5 mt-4"
+              data-id="discovery-market-warning"
+              :data-warning-count="marketWarnings.length"
+              @click.stop
+            >
+              {{ marketWarnings.length }} {{ marketWarnings.length === 1 ? 'warning' : 'warnings' }}
+            </span>
+          </UiHoverPreviewTooltip>
           <UiHoverPreviewTooltip
             v-if="getUnknownCollateralCount(market) > 0"
             title="Unknown collateral"
-            text="Collateral vaults whose risk manager isn't part of any declared product entity (or whose vault isn't loaded into the registry)."
+            text="Collateral vaults whose curator isn't part of any declared product entity (or whose vault isn't loaded into the registry)."
             placement="top-start"
           >
             <span class="text-error-500 text-p5 mt-4">
@@ -160,8 +249,9 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
     <div class="flex pt-12 items-center mobile:justify-between mobile:border-b mobile:border-line-subtle mobile:pb-12">
       <div class="flex-1 flex gap-12 mobile:hidden">
         <div class="flex-1 min-w-0">
-          <div class="text-content-tertiary text-p3 mb-4">
+          <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
             Total supply
+            <MarketPartialPricingHint v-if="!market.metrics.allVaultsPriced" />
           </div>
           <div
             class="text-p2 text-content-primary"
@@ -254,8 +344,9 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
       <!-- Mobile: 2-column row matching lend card style -->
       <div class="hidden mobile:flex mobile:flex-1 mobile:justify-between">
         <div>
-          <div class="text-content-tertiary text-p3 mb-4">
+          <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
             Total supply
+            <MarketPartialPricingHint v-if="!market.metrics.allVaultsPriced" />
           </div>
           <div class="text-p2 text-content-primary">
             {{ formatCompactUsdValue(market.metrics.totalTVL) }}

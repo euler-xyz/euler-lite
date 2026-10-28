@@ -14,7 +14,13 @@ let isAnnouncementOpen = false
 const { loadEulerConfig, chainId } = useEulerAddresses()
 const { loadVaults, isReady: isVaultsReady, resetVaultsState, refreshVaults, setShowAllLabelEntries } = useVaults()
 const { loadTokenList, isLoaded: isTokenListLoaded } = useTokenList()
-const { loadLabels } = useEulerLabels()
+const { loadLabels, refreshLabelsIfStale, retryLabels, isReady: isLabelsReady, isLoading: isLabelsLoading, loadError: labelsLoadError } = useEulerLabels()
+const hasPageLabelsErrorState = computed(() =>
+  ['/explore', '/lend', '/borrow', '/earn'].includes(route.path)
+  || route.path.startsWith('/portfolio')
+  || route.path.startsWith('/curators/'),
+)
+const { refreshLiquidationCoverageIfStale } = useLiquidationCoverage()
 const { loadCountry } = useGeoBlock()
 const { updateBalances, resetBalances } = useWallets()
 const { isConnected, address } = useWagmi()
@@ -33,6 +39,8 @@ useExternalMigrationPositions()
 // Instantiate the batch store at app root so its simulation watchers stay
 // alive across navigation (mirrors useEulerAccount above).
 useTxBatch()
+// Owns all in-scope reviewed execution preparation and acceptance handlers.
+useReviewedExecution()
 
 const { theme } = useTheme()
 
@@ -160,6 +168,25 @@ watch([chainId, showAllLabelEntries], () => {
   })
 }, { immediate: true })
 
+// Refresh live label verdicts and liquidation bot coverage for an open tab and
+// after returning from a suspended/background tab. Each store owns its freshness.
+let labelsRefreshInterval: ReturnType<typeof setInterval> | undefined
+const refreshVisibleData = () => {
+  if (document.visibilityState !== 'visible') return
+  void refreshLabelsIfStale()
+  refreshLiquidationCoverageIfStale()
+}
+onMounted(() => {
+  labelsRefreshInterval = setInterval(refreshVisibleData, POLL_INTERVAL_60S_MS)
+  window.addEventListener('focus', refreshVisibleData)
+  document.addEventListener('visibilitychange', refreshVisibleData)
+})
+onUnmounted(() => {
+  clearInterval(labelsRefreshInterval)
+  window.removeEventListener('focus', refreshVisibleData)
+  document.removeEventListener('visibilitychange', refreshVisibleData)
+})
+
 // Refresh balances when token list finishes loading (includes new DefiLlama tokens)
 watch(isTokenListLoaded, (loaded) => {
   if (loaded && (isConnected.value || isVaultsReady.value)) {
@@ -215,6 +242,15 @@ onUnmounted(() => {
       :class="isMenuVisible ? 'pb-[98px]' : 'pb-16'"
     >
       <div class="w-full max-w-container mx-16 mobile:px-16 mobile:mx-0">
+        <UiAlert
+          v-if="labelsLoadError && !isLabelsReady && !hasPageLabelsErrorState"
+          class="mb-16"
+          title="Vault verification unavailable"
+          :description="labelsLoadError"
+          variant="error"
+          :action-text="isLabelsLoading ? 'Retrying…' : 'Retry'"
+          @action="retryLabels"
+        />
         <NuxtLayout>
           <NuxtPage
             :keepalive="{ include: ['ExplorePage', 'EarnPage', 'LendPage', 'BorrowPage', 'PortfolioPage'] }"

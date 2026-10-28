@@ -12,6 +12,47 @@ export interface TosGuardState {
   acceptTerms: () => void
 }
 
+interface TosRequirementState {
+  hasWalletAddress: boolean
+  enableTosSignature: boolean
+  hasSigned: boolean | null
+  sessionAccepted: boolean
+  tosLoadFailed: boolean
+}
+
+export const TOS_ACCEPTANCE_PENDING_REASON = 'Checking Terms of Use acceptance'
+export const TOS_LOAD_FAILED_REASON = 'Unable to load Terms of Use'
+export const TOS_ACCEPTANCE_REQUIRED_REASON = 'Terms of Use acceptance required'
+
+let tosGuardInstanceSequence = 0
+
+export const isTosAcceptanceRequired = ({
+  hasWalletAddress,
+  enableTosSignature,
+  hasSigned,
+  sessionAccepted,
+  tosLoadFailed,
+}: TosRequirementState): boolean =>
+  hasWalletAddress
+  && enableTosSignature
+  && hasSigned === false
+  && !sessionAccepted
+  && !tosLoadFailed
+
+export const getTosBlockReason = ({
+  hasWalletAddress,
+  enableTosSignature,
+  hasSigned,
+  sessionAccepted,
+  tosLoadFailed,
+}: TosRequirementState): string | undefined => {
+  if (!hasWalletAddress || !enableTosSignature) return undefined
+  if (tosLoadFailed) return TOS_LOAD_FAILED_REASON
+  if (hasSigned === null) return TOS_ACCEPTANCE_PENDING_REASON
+  if (hasSigned === false && !sessionAccepted) return TOS_ACCEPTANCE_REQUIRED_REASON
+  return undefined
+}
+
 export const useTosGuard = () => {
   const { address } = useWagmi()
   const { eulerPeripheryAddresses, isReady, loadEulerConfig, chainId } = useEulerAddresses()
@@ -21,30 +62,66 @@ export const useTosGuard = () => {
   const hasSigned = useState<boolean | null>('tosGuardHasSigned', () => null)
   const sessionAccepted = useState<boolean>('tosGuardSessionAccepted', () => false)
   const tosLoadFailed = useState<boolean>('tosGuardLoadFailed', () => false)
+  const checkGeneration = useState<number>('tosGuardCheckGeneration', () => 0)
+  const acceptanceContext = useState<string>('tosGuardAcceptanceContext', () => '')
   const tosData = ref<TosData | null>(null)
+  const blockerKey = `tos:${++tosGuardInstanceSequence}`
 
-  const isTermsRequired = computed(() =>
-    enableTosSignature && hasSigned.value === false && !sessionAccepted.value && !tosLoadFailed.value,
-  )
+  const syncAcceptanceContext = () => {
+    const nextContext = `${chainId.value ?? 'none'}:${address.value?.toLowerCase() ?? 'none'}`
+    if (acceptanceContext.value === nextContext) return
+    acceptanceContext.value = nextContext
+    checkGeneration.value += 1
+    hasSigned.value = null
+    sessionAccepted.value = false
+    tosLoadFailed.value = false
+    tosData.value = null
+  }
+
+  // Shared state survives navigation. Rebind it synchronously when a guard
+  // mounts so an account/chain switch that happened between pages cannot
+  // inherit acceptance from the previous context.
+  syncAcceptanceContext()
+
+  const tosRequirementState = computed<TosRequirementState>(() => ({
+    hasWalletAddress: !!address.value,
+    enableTosSignature,
+    hasSigned: hasSigned.value,
+    sessionAccepted: sessionAccepted.value,
+    tosLoadFailed: tosLoadFailed.value,
+  }))
+  const isTermsRequired = computed(() => isTosAcceptanceRequired(tosRequirementState.value))
+  const tosBlockReason = computed(() => getTosBlockReason(tosRequirementState.value))
 
   const tosSignerAddress = computed(() =>
     eulerPeripheryAddresses.value?.termsOfUseSigner as Address | undefined,
   )
 
   const checkHasSigned = async () => {
+    syncAcceptanceContext()
+    const generation = ++checkGeneration.value
+    const checkedAddress = address.value
+    const checkedChainId = chainId.value
+    const isCurrentCheck = () =>
+      generation === checkGeneration.value
+      && address.value === checkedAddress
+      && chainId.value === checkedChainId
+
     if (!enableTosSignature) {
       hasSigned.value = true
       return
     }
     if (hasSigned.value === true) return
-    if (!address.value) {
+    if (!checkedAddress) {
       hasSigned.value = false
       return
     }
     if (!isReady.value) {
       await loadEulerConfig()
+      if (!isCurrentCheck()) return
     }
-    if (!tosSignerAddress.value) {
+    const signerAddress = tosSignerAddress.value
+    if (!signerAddress) {
       hasSigned.value = false
       return
     }
@@ -52,10 +129,12 @@ export const useTosGuard = () => {
     let data: TosData
     try {
       data = await getTosData()
+      if (!isCurrentCheck()) return
       tosData.value = data
       tosLoadFailed.value = false
     }
     catch (e) {
+      if (!isCurrentCheck()) return
       logWarn('tosGuard/loadTos', e)
       tosLoadFailed.value = true
       hasSigned.value = false
@@ -65,15 +144,17 @@ export const useTosGuard = () => {
     try {
       const client = rpcClient.value!
       const lastSignTimestamp = await client.readContract({
-        address: tosSignerAddress.value,
+        address: signerAddress,
         abi: tosSignerReadAbi,
         functionName: 'lastTermsOfUseSignatureTimestamp',
         authorizationList: undefined,
-        args: [address.value as Address, data.tosMessageHash],
+        args: [checkedAddress as Address, data.tosMessageHash],
       })
+      if (!isCurrentCheck()) return
       hasSigned.value = (lastSignTimestamp as bigint) > 0
     }
     catch (e) {
+      if (!isCurrentCheck()) return
       logWarn('tosGuard/checkSignature', e)
       hasSigned.value = false
     }
@@ -81,11 +162,22 @@ export const useTosGuard = () => {
 
   const prefetchTosData = async () => {
     if (!enableTosSignature || tosData.value) return
+    syncAcceptanceContext()
+    const generation = checkGeneration.value
+    const prefetchedAddress = address.value
+    const prefetchedChainId = chainId.value
+    const isCurrentPrefetch = () =>
+      generation === checkGeneration.value
+      && address.value === prefetchedAddress
+      && chainId.value === prefetchedChainId
     try {
-      tosData.value = await getTosData()
+      const data = await getTosData()
+      if (!isCurrentPrefetch()) return
+      tosData.value = data
       tosLoadFailed.value = false
     }
     catch (e) {
+      if (!isCurrentPrefetch()) return
       logWarn('tosGuard/prefetchTos', e)
       tosLoadFailed.value = true
     }
@@ -116,41 +208,23 @@ export const useTosGuard = () => {
     }
   }
 
-  // Register/unregister blocker — fail closed
-  const updateBlockerRegistration = () => {
-    if (enableTosSignature && tosLoadFailed.value) {
-      registerOperationBlocker('tos', 'Unable to load Terms of Use')
-    }
-    else if (isTermsRequired.value) {
-      registerOperationBlocker('tos', 'Terms of Use acceptance required')
-    }
-    else {
-      unregisterOperationBlocker('tos')
-    }
-  }
-
   watch([sessionAccepted, hasSigned, tosSignerAddress, () => tosData.value, address, chainId], () => {
     updateSdkSignature()
-    updateBlockerRegistration()
   }, { immediate: true })
 
-  watch(isTermsRequired, () => {
-    updateBlockerRegistration()
-  })
+  // Keep execution fail-closed while the connected account's signature state
+  // is pending or TOS data is unavailable, without showing the acceptance UI
+  // until the account is confirmed unsigned.
+  watch(tosBlockReason, (reason) => {
+    if (reason) registerOperationBlocker(blockerKey, reason)
+    else unregisterOperationBlocker(blockerKey)
+  }, { immediate: true })
 
-  watch(address, (next, prev) => {
-    hasSigned.value = null
-    sessionAccepted.value = false
-    if (prev && chainId.value) clearLiteTosSignature({ chainId: chainId.value, account: prev as Address })
-    if (enableTosSignature) {
-      void checkHasSigned()
+  watch([address, chainId], (_next, [previousAddress, previousChainId]) => {
+    syncAcceptanceContext()
+    if (previousAddress && previousChainId) {
+      clearLiteTosSignature({ chainId: previousChainId, account: previousAddress as Address })
     }
-  })
-
-  watch(chainId, (next, prev) => {
-    hasSigned.value = null
-    sessionAccepted.value = false
-    if (prev && address.value) clearLiteTosSignature({ chainId: prev, account: address.value as Address })
     if (enableTosSignature) {
       void checkHasSigned()
     }
@@ -169,12 +243,15 @@ export const useTosGuard = () => {
   // (and its guard) is gone. Clearing here would strip signTermsOfUse from the
   // prepared batch. Account/chain switches are handled by the watches above.
   onUnmounted(() => {
-    unregisterOperationBlocker('tos')
+    unregisterOperationBlocker(blockerKey)
   })
 
-  provide('tos-guard', reactive({
+  const guardState = reactive({
     isTermsRequired,
     tosLoadFailed,
     acceptTerms,
-  }))
+  })
+  provide('tos-guard', guardState)
+
+  return guardState
 }

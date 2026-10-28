@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import type { EVault, EulerEarn, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, type EVault, type EulerEarn, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import { zeroAddress } from 'viem'
 import { getVaultTypeLabel, getVaultTypeDescription } from '~/utils/vault/descriptions'
 import { useModal } from '~/components/ui/composables/useModal'
 import { VaultTypeInfoModal } from '#components'
@@ -14,7 +15,7 @@ const { type, vault, size = 'small', block = false, as = 'span', nudge = false }
 }>()
 
 const modal = useModal()
-const { isVaultGovernorVerified, isEarnVaultOwnerVerified } = useVaults()
+const { isVaultGovernorVerified, isSecuritizeGovernorVerified, isEarnVaultOwnerVerified } = useVaults()
 
 // Check if vault is verified by checking governorAdmin/owner matches declared entities
 const isVerified = computed(() => {
@@ -26,11 +27,22 @@ const isVerified = computed(() => {
     return isEarnVaultOwnerVerified(vault as EulerEarn)
   }
 
+  if (type === 'securitize') {
+    return isSecuritizeGovernorVerified(vault as SecuritizeCollateralVault)
+  }
+
   // governed, ungoverned, securitize
   return isVaultGovernorVerified(vault as EVault)
 })
 
-const isWarning = computed(() => !isVerified.value || type === 'unknown')
+const isKnownUngoverned = computed(() => type === 'ungoverned' && (
+  isEVault(vault)
+    ? vault.governorAdmin?.toLowerCase() === zeroAddress
+    : 'governor' in vault && vault.governor?.toLowerCase() === zeroAddress
+))
+const hasKnownGovernanceType = computed(() => isVerified.value || isKnownUngoverned.value)
+
+const isWarning = computed(() => !hasKnownGovernanceType.value || type === 'unknown')
 
 const icon = computed(() => {
   if (isWarning.value) {
@@ -39,22 +51,23 @@ const icon = computed(() => {
   switch (type) {
     case 'governed':
     case 'managed':
-      return 'governed'
+      return 'vault-type-governed'
     case 'escrow':
+      return 'vault-type-escrow'
     case 'securitize':
       return 'shield'
     case 'ungoverned':
-      return 'pulse'
+      return 'vault-type-ungoverned'
   }
 
   return 'pulse'
 })
 
 const label = computed(() => {
-  return getVaultTypeLabel(type, isVerified.value)
+  return getVaultTypeLabel(type, hasKnownGovernanceType.value)
 })
 
-const effectiveType = computed(() => isVerified.value ? type : 'unknown')
+const effectiveType = computed(() => hasKnownGovernanceType.value ? type : 'unknown')
 
 const tone = computed(() => {
   if (isWarning.value) return 'danger'
@@ -66,8 +79,8 @@ const tone = computed(() => {
 const openModal = () => {
   modal.open(VaultTypeInfoModal, {
     props: {
-      title: getVaultTypeLabel(effectiveType.value, isVerified.value),
-      description: getVaultTypeDescription(effectiveType.value, isVerified.value),
+      title: getVaultTypeLabel(effectiveType.value, hasKnownGovernanceType.value),
+      description: getVaultTypeDescription(effectiveType.value, hasKnownGovernanceType.value),
     },
   })
 }

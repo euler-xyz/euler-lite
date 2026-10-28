@@ -1,16 +1,18 @@
-/**
- * Nitro plugin that scans process.env for chain-related env vars
- * and injects the computed config into the HTML via render:html hook.
- *
- * This runs at server startup, so Doppler-injected env vars are available.
- * The config is embedded as a <script> tag in the HTML head, making it
- * accessible to the client synchronously via window.__CHAIN_CONFIG__.
- */
 import { parseChainIds } from '../../utils/parseChainIds'
+import { loadEulerChains, peekEulerChains } from '../api/internal/euler-chains.get'
 import { getChainEnvIssues, getConfiguredChainIds, getEnabledChainIds } from '~/utils/chain-env'
+import { applyChainRegistry, readChainRegistry } from '~/utils/chain-status'
 import { getUnknownChainIds } from '~/entities/chainRegistry'
+import { escapeScriptJson } from '~/server/utils/escape-script-json'
 import { logger } from '~/server/utils/logger'
 import { parseEVaultFetchChunkChainIds } from '~/utils/eVaultFetchChunkConfig'
+
+const BOOT_READ_WAIT_MS = 1_000
+
+const delay = (ms: number) => new Promise<void>((resolve) => {
+  const timer = setTimeout(resolve, ms)
+  timer.unref?.()
+})
 
 export default defineNitroPlugin((nitroApp) => {
   const configuredChainIds = getConfiguredChainIds()
@@ -42,9 +44,23 @@ export default defineNitroPlugin((nitroApp) => {
   const onchainSdkChainIds = parseChainIds(process.env.ONCHAIN_SDK_CHAINS, enabledSet)
   const eVaultFetchChunkChainIds = parseEVaultFetchChunkChainIds(process.env, enabledSet)
 
-  const scriptTag = `<script>window.__CHAIN_CONFIG__=${JSON.stringify({ enabledChainIds, deprecatedChainIds, onchainSdkChainIds, eVaultFetchChunkChainIds, unsupportedChainIds: unknownChainIds, chainEnvIssues })}</script>`
+  const envChainConfig = {
+    enabledChainIds,
+    deprecatedChainIds,
+    onchainSdkChainIds,
+    eVaultFetchChunkChainIds,
+    unsupportedChainIds: unknownChainIds,
+    chainEnvIssues,
+  }
+  const isProduction = process.env.DOPPLER_ENVIRONMENT === 'prd'
+  // Prerendered pages are static, so they must not bake in a value read at build time.
+  const bootRead = import.meta.prerender
+    ? Promise.resolve()
+    : Promise.race([loadEulerChains().catch(() => undefined), delay(BOOT_READ_WAIT_MS)])
 
-  nitroApp.hooks.hook('render:html', (html) => {
-    html.head.push(scriptTag)
+  nitroApp.hooks.hook('render:html', async (html) => {
+    await bootRead
+    const chainConfig = applyChainRegistry(envChainConfig, readChainRegistry(peekEulerChains()), isProduction)
+    html.head.push(`<script>window.__CHAIN_CONFIG__=${escapeScriptJson(JSON.stringify(chainConfig))}</script>`)
   })
 })

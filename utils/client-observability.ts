@@ -1,4 +1,5 @@
 import { summarizeViemError } from './viem-errors'
+import { logger } from './logger'
 
 const CLIENT_EVENTS = [
   'tx_plan_build_failed',
@@ -38,16 +39,6 @@ const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/
 const ALLOWED_EVENTS = new Set<string>(CLIENT_EVENTS)
 const TEXT_FIELDS = ['flow', 'phase', 'routeTemplate', 'operationType', 'quoteProvider', 'reason', 'invariant'] as const
 const NUMBER_FIELDS = ['chainId', 'count'] as const
-const ERROR_KINDS = new Set<ReturnType<typeof summarizeViemError>['kind']>([
-  'rpc-timeout',
-  'rpc-http',
-  'rpc-rate-limited',
-  'rpc-resource-unavailable',
-  'rpc-socket-closed',
-  'rpc-unreachable',
-  'contract-revert',
-  'unknown',
-])
 
 export function routeTemplate(pathname: string): string {
   return pathname
@@ -59,8 +50,6 @@ export function routeTemplate(pathname: string): string {
 const truncate = (value: string, max: number): string => value.length > max ? value.slice(0, max) : value
 const isEvent = (value: unknown): value is ClientObservabilityEvent => typeof value === 'string' && ALLOWED_EVENTS.has(value)
 const isAddress = (value: unknown): value is string => typeof value === 'string' && ADDRESS_RE.test(value)
-const isErrorKind = (value: unknown): value is ReturnType<typeof summarizeViemError>['kind'] =>
-  typeof value === 'string' && ERROR_KINDS.has(value as ReturnType<typeof summarizeViemError>['kind'])
 
 function redactText(value: string): string {
   return value
@@ -118,15 +107,6 @@ export function isUserRejectedError(error: unknown): boolean {
   return /user rejected|user denied|rejected by user|request rejected|user cancelled|user canceled/i.test(message)
 }
 
-function isUserRejectedRecord(record: Record<string, unknown>): boolean {
-  const error = record.error && typeof record.error === 'object' ? record.error as Record<string, unknown> : undefined
-  return isUserRejectedError(record.message)
-    || isUserRejectedError(error?.message)
-    || isUserRejectedError(error?.shortMessage)
-    || error?.code === 4001
-    || error?.code === '4001'
-}
-
 function addAllowlistedFields(payload: ClientObservabilityPayload, source: Record<string, unknown>): void {
   for (const key of TEXT_FIELDS) {
     const value = cleanString(source[key])
@@ -176,50 +156,12 @@ export function normalizeClientObservabilityPayload(
   return payload
 }
 
-export function sanitizeClientObservabilityInput(input: unknown): ClientObservabilityPayload | null {
-  if (!input || typeof input !== 'object') return null
-  const record = input as Record<string, unknown>
-  if (record.source !== 'client' || !isEvent(record.event) || typeof record.fingerprint !== 'string') return null
-  if (record.event === 'tx_execute_failed' && isUserRejectedRecord(record)) return null
-
-  const payload = normalizeClientObservabilityPayload({ event: record.event, ...record } as ClientObservabilityFields)
-  if (!payload) return null
-
-  const message = cleanString(record.message, 240)
-  const name = cleanString(record.name, 80)
-  if (message) payload.message = message
-  if (name) payload.name = name
-
-  const error = record.error
-  if (error && typeof error === 'object') {
-    const err = error as Record<string, unknown>
-    const functionName = cleanString(err.functionName, 80)
-    const causeName = cleanString(err.causeName, 80)
-    payload.error = {
-      kind: isErrorKind(err.kind) ? err.kind : 'unknown',
-      name: cleanString(err.name, 80) || 'Error',
-      shortMessage: cleanString(err.shortMessage, 240) || '',
-      isTransport: typeof err.isTransport === 'boolean' ? err.isTransport : false,
-      ...(typeof err.status === 'number' ? { status: err.status } : {}),
-      ...(typeof err.code === 'number' ? { code: err.code } : {}),
-      ...(functionName ? { functionName } : {}),
-      ...(causeName ? { causeName } : {}),
-    }
-  }
-
-  payload.fingerprint = clientPayloadFingerprint(payload)
-
-  return payload
-}
-
 export function shouldSampleClientPayload(payload: ClientObservabilityPayload): boolean {
   return payload.event !== 'tx_execute_failed' || Number.parseInt(payload.fingerprint.slice(0, 2), 16) < 64
 }
 
 export async function reportClientEvent(fields: ClientObservabilityFields, error?: unknown): Promise<void> {
-  // Production-only by default; set NUXT_PUBLIC_OBSERVABILITY_DEV=true to test
-  // the browser-to-/api/internal/client-error path during local development.
-  if (!import.meta.client || (import.meta.dev && import.meta.env.NUXT_PUBLIC_OBSERVABILITY_DEV !== 'true')) return
+  if (!import.meta.client) return
   const payload = normalizeClientObservabilityPayload({
     routeTemplate: routeTemplate(window.location.pathname),
     ...fields,
@@ -237,13 +179,8 @@ export async function reportClientEvent(fields: ClientObservabilityFields, error
     // sessionStorage can be unavailable in hardened browser contexts.
   }
 
-  const body = JSON.stringify(payload)
-  if (navigator.sendBeacon?.('/api/internal/client-error', new Blob([body], { type: 'application/json' }))) return
-
-  await fetch('/api/internal/client-error', {
-    method: 'POST',
-    body,
-    headers: { 'content-type': 'application/json' },
-    keepalive: true,
-  }).catch(() => undefined)
+  // Browser diagnostics stay local. The shared client logger drops warnings
+  // unless verbose logging is enabled, and no client-controlled payload crosses
+  // the server logging boundary into the remote log sink.
+  logger.warn({ ctx: 'client-observability', ...payload }, 'client observability event')
 }

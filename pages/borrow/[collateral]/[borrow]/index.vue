@@ -1,27 +1,28 @@
 <script setup lang="ts">
+import { captureSwapReview } from '~/utils/swapReview'
 import { type BorrowVaultPair, isSecuritizeBorrowPair, type AnyBorrowVaultPair } from '~/types/borrow-pair'
 import type { VaultAsset } from '~/types/asset'
 import type { CollateralOption } from '~/types/collateral-option'
-import { collectPythFeedsFromAdapters, isEVault, type EVault, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import { SwapperMode, collectPythFeedsFromAdapters, isEVault, type EVault, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { getAssetOraclePrice, getCollateralShareOraclePrice } from '~/utils/sdk-prices'
 import { getCollateralOracleRouteSteps, getDebtOracleRouteSteps, getOracleRouteAdapters } from '~/utils/oracle-route-steps'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { getNewSubAccount } from '~/composables/useSubAccounts'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
+import { getVaultGeoUnavailableReason, isAnyVaultBlockedByCountry, isVaultRestrictedByCountry } from '~/composables/useGeoBlock'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import { ltvToPercent } from '~/utils/crypto-utils'
-import { useBorrowForm, type BorrowBatchSnapshot } from '~/composables/borrow/useBorrowForm'
+import { useBorrowForm } from '~/composables/borrow/useBorrowForm'
 import { useMultiplyForm, type MultiplyBatchSnapshot } from '~/composables/borrow/useMultiplyForm'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
-import { SlippageSettingsModal, VaultUnverifiedDisclaimerModal } from '#components'
-import { getAddress, type Address } from 'viem'
+import { SlippageSettingsModal } from '#components'
+import { formatUnits, getAddress, type Address } from 'viem'
 import { areRoeCollateralVaultsCorrelatedWithBorrow, mergeRoeCollateralVaults } from '~/utils/position-roe'
 import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
-import { isCowProvider, isCowProviderOrQuote } from '~/entities/cowswap'
+import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
 
 const router = useRouter()
 const route = useRoute()
@@ -53,7 +54,7 @@ const openSlippageSettings = () => {
 
 const collateralAddress = route.params.collateral as string
 const borrowAddress = route.params.borrow as string
-useOperationGuard([collateralAddress, borrowAddress])
+const { warning: assessmentWarning } = useVaultAssessmentWarning(borrowAddress)
 
 const formTabFromQuery = (value: unknown): 'borrow' | 'multiply' | undefined => {
   const tabValue = Array.isArray(value) ? value[0] : value
@@ -68,7 +69,6 @@ const formTab = ref<'borrow' | 'multiply'>(formTabFromQuery(route.query.tab) ?? 
 const pendingSubAccount = ref<string | null>(null)
 const isPendingSubAccountLoading = ref(false)
 let pendingSubAccountPromise: Promise<string> | null = null
-let unverifiedDisclaimerShown = false
 
 // Load vault pair (non-blocking to avoid Suspense + pageTransition crash on direct navigation)
 const pair: Ref<AnyBorrowVaultPair | undefined> = ref()
@@ -78,6 +78,7 @@ getBorrowVaultPair(collateralAddress, borrowAddress).then((p) => {
   logWarn('[borrow] failed to load vault pair', e)
   void router.replace({ path: '/borrow', query: route.query })
 })
+useVaultOpeningNotice(() => pair.value ? [pair.value.collateral.address, pair.value.borrow.address] : [])
 
 const borrowVault = computed(() => pair.value?.borrow)
 const collateralVault = computed(() => pair.value?.collateral)
@@ -155,6 +156,7 @@ const borrow = useBorrowForm({
   formTab,
   savingPositions,
   balance,
+  pendingSubAccount,
   resolvePendingSubAccount,
   collateralSupplyApy,
   borrowApy,
@@ -177,6 +179,16 @@ const multiply = useMultiplyForm({
   isPendingSubAccountLoading,
   isGeoBlocked,
   isMultiplyRestricted,
+})
+useOperationGuard(computed(() => formTab.value === 'multiply'
+  ? [collateralAddress, borrowAddress, multiply.multiplySupplyVault.value?.address, multiply.multiplyLongVault.value?.address].filter(Boolean)
+  : [collateralAddress, borrowAddress]), {
+  depositedVaultAddresses: computed(() => formTab.value === 'multiply'
+    ? [
+        ...(multiply.isMultiplySavingCollateral.value ? [] : [multiply.multiplySupplyVault.value?.address]),
+        multiply.multiplyLongVault.value?.address,
+      ].filter(Boolean)
+    : borrow.isSavingCollateral.value ? [] : [collateralAddress]),
 })
 const showMultiplyRoe = computed(() =>
   areRoeCollateralVaultsCorrelatedWithBorrow(
@@ -226,10 +238,10 @@ const reviewBorrowDisabled = computed(() => isGeoBlocked.value || isBorrowRestri
 const reviewMultiplyDisabled = computed(() => isGeoBlocked.value || isMultiplyRestricted.value || multiply.isMultiplySubmitDisabled.value)
 
 const borrowDisabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
-  if (isBorrowRestricted.value) return { message: 'Borrowing this asset is not available in your region', variant: 'warning' }
-  if (borrow.isBorrowPayWithBlocked.value) return { message: 'Paying with this asset is not available in your region', variant: 'warning' }
-  if (borrow.isBorrowSwapRestricted.value) return { message: 'Swapping into this collateral vault is not available in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: getVaultGeoUnavailableReason(collateralAddress, borrowAddress) || 'This operation is not available in your region', variant: 'warning' }
+  if (isBorrowRestricted.value) return { message: getVaultGeoUnavailableReason(collateralAddress, borrowAddress) || 'Borrowing this asset is not available in your region', variant: 'warning' }
+  if (borrow.isBorrowPayWithBlocked.value) return { message: getVaultGeoUnavailableReason(collateralAddress, borrowAddress) || 'Paying with this asset is not available in your region', variant: 'warning' }
+  if (borrow.isBorrowSwapRestricted.value) return { message: getVaultGeoUnavailableReason(collateralAddress, borrowAddress) || 'Swapping into this collateral vault is not available in your region', variant: 'warning' }
   if (borrow.errorText.value) return { message: borrow.errorText.value, variant: 'error' }
   if (borrow.borrowSimulationError.value) return { message: borrow.borrowSimulationError.value, variant: 'error' }
   if (borrow.borrowNeedsSwap.value && borrow.isBorrowSwapQuoteLoading.value && +borrow.collateralAmount.value > 0) return { message: 'Fetching swap quotes...', variant: 'warning' }
@@ -238,8 +250,8 @@ const borrowDisabledReasonInfo = computed((): DisabledReasonInfo | undefined => 
 })
 
 const multiplyDisabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
-  if (isMultiplyRestricted.value) return { message: 'Multiply is not available for this pair in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: getVaultGeoUnavailableReason(collateralAddress, borrowAddress) || 'This operation is not available in your region', variant: 'warning' }
+  if (isMultiplyRestricted.value) return { message: getVaultGeoUnavailableReason(collateralAddress, borrowAddress) || 'Multiply is not available for this pair in your region', variant: 'warning' }
   if (multiply.multiplyErrorText.value) return { message: multiply.multiplyErrorText.value, variant: 'error' }
   if (multiply.multiplyCapErrorText.value) return { message: multiply.multiplyCapErrorText.value, variant: 'error' }
   if (multiply.multiplySimulationError.value) return { message: multiply.multiplySimulationError.value, variant: 'error' }
@@ -254,6 +266,10 @@ const multiplyDisabledReasonInfo = computed((): DisabledReasonInfo | undefined =
 // effective quote is captured into the fixed batch plan at add-time.
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
+const isBorrowCowSwapSelected = computed(() =>
+  borrow.borrowNeedsSwap.value
+  && isCowProviderOrQuote(borrow.borrowSwapSelectedProvider.value, borrow.borrowSwapEffectiveQuote.value),
+)
 const canAddBorrowToBatch = computed(() => {
   // Region/geo blocks are hard legal restrictions, so they still gate the batch.
   // Real-wallet guards (insufficient balance, vault liquidity) are intentionally
@@ -268,36 +284,23 @@ const canAddBorrowToBatch = computed(() => {
   // Savings-sourced collateral needs a resolved position, else plan capture throws.
   if (borrow.isSavingCollateral.value && !borrow.savingCollateral.value) return false
   if (borrow.borrowNeedsSwap.value) {
-    return !!borrow.borrowSwapEffectiveQuote.value && !isCowProvider(borrow.borrowSwapSelectedProvider.value)
+    return !!borrow.borrowSwapEffectiveQuote.value && !isBorrowCowSwapSelected.value
   }
   return true
 })
 const addToBatch = async () => {
   if (!canAddBorrowToBatch.value) return
   await guardWithBorrowSwapPriceImpact(async () => {
+    const subAccount = (await resolvePendingSubAccount()) as Address
     const cVault = collateralVault.value
     const bVault = borrowVault.value
     if (!cVault || !bVault) return
-    const subAccount = (await resolvePendingSubAccount()) as Address
     // Capture every input by value NOW — the batch re-simulates asynchronously and
     // we reset the form below, so a lazy read of the reactive refs would see the
     // cleared values (an empty amount builds a no-op borrow).
-    const snap: BorrowBatchSnapshot = {
-      subAccount,
-      // The composable treats collateral as an EVault (see useBorrowForm construction).
-      collateralVault: cVault as EVault,
-      borrowVault: bVault,
-      collateralAmount: borrow.collateralAmount.value,
-      borrowAmount: borrow.borrowAmount.value,
-      needsSwap: borrow.borrowNeedsSwap.value,
-      selectedAsset: borrow.borrowSelectedAsset.value,
-      isSavingCollateral: borrow.isSavingCollateral.value,
-      savingCollateral: borrow.savingCollateral.value,
-      isBorrowNativeWrap: borrow.isBorrowNativeWrap.value,
-      quote: borrow.borrowNeedsSwap.value ? borrow.borrowSwapEffectiveQuote.value ?? undefined : undefined,
-    }
+    const snap = borrow.captureBorrowSnapshot(subAccount)
     const label = `Borrow ${snap.borrowAmount} ${bVault.asset.symbol}`
-    await addBatchEntry({ label, buildPlan: account => borrow.buildBorrowPlan(snap, account), subAccount, review: { type: 'borrow', asset: bVault.asset, amount: snap.borrowAmount, quoteFetchedAt: snap.needsSwap ? borrow.borrowSwapEffectiveQuoteFetchedAt.value : null } })
+    await addBatchEntry({ intent: borrow.createBorrowIntent(snap), label, nameOverride: snap.needsSwap ? `Borrow ${bVault.asset.symbol}` : undefined, subAccount, sourceSubAccount: snap.isSavingCollateral && !snap.needsSwap ? snap.savingCollateral?.subAccount as Address | undefined : undefined, review: { type: snap.needsSwap ? 'swap-borrow' : 'borrow', asset: snap.needsSwap ? (snap.selectedAsset || cVault.asset) : bVault.asset, amount: snap.needsSwap ? snap.collateralAmount : snap.borrowAmount, ...captureSwapReview(snap.quote, SwapperMode.EXACT_IN), quoteFetchedAt: snap.needsSwap ? borrow.borrowSwapEffectiveQuoteFetchedAt.value : null } })
     borrow.collateralAmount.value = ''
     borrow.borrowAmount.value = ''
     redirectAfterAdd('/portfolio', { subAccount })
@@ -307,12 +310,16 @@ const addToBatch = async () => {
 // --- Multiply tab → batch ---
 // Same-asset multiply needs no quote; cross-asset needs a non-CoW quote (CoW
 // can't merge into an EVC batch). Region/geo blocks gate it like direct execute.
+const isMultiplyCowSwapSelected = computed(() =>
+  !multiply.multiplyIsSameAsset.value
+  && isCowProviderOrQuote(multiply.multiplySelectedProvider.value, multiply.multiplyEffectiveQuote.value),
+)
 const canAddMultiplyToBatch = computed(() => {
   if (isGeoBlocked.value || isMultiplyRestricted.value) return false
   if (multiply.multiplyDebtAmountNano.value <= 0n) return false
   if (!multiply.multiplySupplyVault.value || !multiply.multiplyLongVault.value || !multiply.multiplyShortVault.value) return false
   if (multiply.multiplyIsSameAsset.value) return true
-  return !!multiply.multiplyEffectiveQuote.value && !isCowProviderOrQuote(multiply.multiplySelectedProvider.value, multiply.multiplyEffectiveQuote.value)
+  return !!multiply.multiplyEffectiveQuote.value && !isMultiplyCowSwapSelected.value
 })
 const addMultiplyToBatch = async () => {
   if (!canAddMultiplyToBatch.value) return
@@ -337,7 +344,10 @@ const addMultiplyToBatch = async () => {
       savingShares: multiply.multiplySavingBalance.value,
       quote: sameAsset ? undefined : multiply.multiplyEffectiveQuote.value ?? undefined,
     }
-    await addBatchEntry({ label: `Multiply → ${longVault.asset.symbol}`, buildPlan: account => multiply.buildMultiplyPlan(snap, account), subAccount, multiply: true, review: { type: 'borrow', asset: shortVault.asset, amount: multiply.multiplyInputAmount.value, swapToAsset: longVault.asset, quoteFetchedAt: sameAsset ? null : multiply.multiplyEffectiveQuoteFetchedAt.value } })
+    const quoteIntents = snap.quote
+      ? multiply.multiplyQuoteCardsSorted.value.find(card => card.quote === snap.quote)?.intents
+      : undefined
+    await addBatchEntry({ intent: multiply.createMultiplyIntent(snap), preparedIntent: quoteIntents?.[0], label: `Multiply → ${longVault.asset.symbol}`, subAccount, sourceSubAccount: snap.isSavingCollateral ? snap.savingFrom : undefined, multiply: true, review: { type: 'borrow', asset: shortVault.asset, amount: formatUnits(snap.debtAmount, Number(shortVault.asset.decimals)), supplyingAssetForBorrow: supplyVault.asset, supplyingAmount: snap.inputAmount, swapToAsset: longVault.asset, ...captureSwapReview(snap.quote, SwapperMode.EXACT_IN), quoteFetchedAt: sameAsset ? null : multiply.multiplyEffectiveQuoteFetchedAt.value } })
     redirectAfterAdd('/portfolio', { subAccount })
   })
 }
@@ -502,20 +512,6 @@ watch(pair, async (val) => {
     : false
   if (!multiply.multiplySupplyVault.value || !isSupplyAllowed) {
     multiply.initMultiplySupplyVault(current.collateral as EVault)
-  }
-  const { isVerifiedVault } = useVaultRegistry()
-  if (!isVerifiedVault(current.collateral.address) || !isVerifiedVault(current.borrow.address)) {
-    if (!unverifiedDisclaimerShown) {
-      unverifiedDisclaimerShown = true
-      modal.open(VaultUnverifiedDisclaimerModal, {
-        isNotClosable: true,
-        props: {
-          cancelAction: () => {
-            router.replace('/')
-          },
-        },
-      })
-    }
   }
   await updateBalance()
 }, { immediate: true })
@@ -769,40 +765,33 @@ watch(
                   @input="borrow.onBorrowInput"
                 />
 
-                <UiAlert
+                <GeoBlockAlert
                   v-if="isGeoBlocked"
-                  title="Region restricted"
+                  :vault-addresses="[collateralAddress, borrowAddress]"
                   description="This operation is not available in your region. You can still repay existing debt."
-                  variant="warning"
-                  size="compact"
                 />
-                <UiAlert
-                  v-if="isPairFullyRestricted"
-                  title="Region restricted"
+                <GeoBlockAlert
+                  v-if="!isGeoBlocked && isPairFullyRestricted"
+                  :vault-addresses="[collateralAddress, borrowAddress]"
                   description="This pair is not available in your region."
-                  variant="warning"
-                  size="compact"
                 />
-                <UiAlert
+                <GeoBlockAlert
                   v-if="!isGeoBlocked && !isPairFullyRestricted && isBorrowRestricted"
+                  :vault-addresses="[collateralAddress, borrowAddress]"
                   title="Asset restricted"
                   description="Borrowing this asset is not available in your region."
-                  variant="warning"
-                  size="compact"
                 />
-                <UiAlert
+                <GeoBlockAlert
                   v-if="!isGeoBlocked && !isPairFullyRestricted && !isBorrowRestricted && borrow.isBorrowPayWithBlocked.value"
+                  :vault-addresses="[collateralAddress, borrowAddress]"
                   title="Asset restricted"
                   description="Paying with this asset is not available in your region. Pick a different token."
-                  variant="warning"
-                  size="compact"
                 />
-                <UiAlert
+                <GeoBlockAlert
                   v-if="!isGeoBlocked && !isPairFullyRestricted && !isBorrowRestricted && !borrow.isBorrowPayWithBlocked.value && borrow.isBorrowSwapRestricted.value"
+                  :vault-addresses="[collateralAddress, borrowAddress]"
                   title="Swap restricted"
                   description="Swapping into this collateral vault is not available in your region. You can provide the vault's underlying asset directly."
-                  variant="warning"
-                  size="compact"
                 />
                 <UiAlert
                   v-show="borrow.errorText.value"
@@ -819,20 +808,19 @@ watch(
                   size="compact"
                 />
 
-                <VaultWarningBanner :warnings="borrow.borrowFormWarnings.value" />
+                <VaultWarningBanner :warnings="[assessmentWarning, ...borrow.borrowFormWarnings.value]" />
 
                 <VaultFormInfoBlock
                   v-if="pair"
                   :loading="borrow.isEstimatesLoading.value"
                   variant="card"
                 >
-                  <SummaryRow label="Net APY">
-                    <SummaryValue
-                      :after="borrow.netAPY.value ? formatNumber(borrow.netAPY.value) : undefined"
-                      suffix="%"
-                      estimate-only
-                    />
-                  </SummaryRow>
+                  <ProjectedYieldSummaryRow
+                    label="Net APY"
+                    :after="borrow.netAPY.value"
+                    :details="borrow.projectedYieldDetails.value"
+                    estimate-only
+                  />
                   <SummaryRow label="Oracle price">
                     <SummaryPriceValue
                       :value="!borrow.priceFixed.value.isZero() ? formatSmartAmount(borrow.borrowPriceInvert.invertValue(borrow.priceFixed.value.toUnsafeFloat())) : undefined"
@@ -932,26 +920,21 @@ watch(
                       :readonly="true"
                     />
 
-                    <UiAlert
+                    <GeoBlockAlert
                       v-if="isGeoBlocked"
-                      title="Region restricted"
+                      :vault-addresses="[collateralAddress, borrowAddress]"
                       description="This operation is not available in your region. You can still repay existing debt."
-                      variant="warning"
-                      size="compact"
                     />
-                    <UiAlert
-                      v-if="isPairFullyRestricted"
-                      title="Region restricted"
+                    <GeoBlockAlert
+                      v-if="!isGeoBlocked && isPairFullyRestricted"
+                      :vault-addresses="[collateralAddress, borrowAddress]"
                       description="This pair is restricted in your region."
-                      variant="warning"
-                      size="compact"
                     />
-                    <UiAlert
+                    <GeoBlockAlert
                       v-if="!isGeoBlocked && !isPairFullyRestricted && isMultiplyRestricted"
+                      :vault-addresses="[collateralAddress, borrowAddress]"
                       title="Asset restricted"
                       description="Multiply is not available for this pair in your region."
-                      variant="warning"
-                      size="compact"
                     />
                     <UiAlert
                       v-show="multiply.multiplyErrorText.value"
@@ -976,7 +959,7 @@ watch(
                       size="compact"
                     />
 
-                    <VaultWarningBanner :warnings="multiply.multiplyFormWarnings.value" />
+                    <VaultWarningBanner :warnings="[assessmentWarning, ...multiply.multiplyFormWarnings.value]" />
                   </div>
 
                   <div class="flex flex-col gap-16 w-full">
@@ -984,13 +967,20 @@ watch(
                       :loading="multiply.isMultiplyQuoteLoading.value"
                       variant="card"
                     >
-                      <SummaryRow label="ROE">
-                        <SummaryValue
-                          :after="multiply.multiplyRoeAfter.value !== null && multiply.multiplySwapReady.value ? formatNumber(multiply.multiplyRoeAfter.value) : (multiply.multiplyRoeBefore.value !== null ? formatNumber(multiply.multiplyRoeBefore.value) : undefined)"
-                          suffix="%"
-                          estimate-only
-                        />
-                      </SummaryRow>
+                      <ProjectedYieldSummaryRow
+                        v-if="showMultiplyRoe"
+                        label="ROE"
+                        :after="multiply.multiplyRoeAfter.value !== null && multiply.multiplySwapReady.value ? multiply.multiplyRoeAfter.value : multiply.multiplyRoeBefore.value"
+                        :details="multiply.multiplySwapReady.value ? multiply.projectedYieldDetails.value?.roe : null"
+                        estimate-only
+                      />
+                      <ProjectedYieldSummaryRow
+                        v-else
+                        label="Net APY"
+                        :after="multiply.multiplyNetApyAfter.value !== null && multiply.multiplySwapReady.value ? multiply.multiplyNetApyAfter.value : null"
+                        :details="multiply.multiplySwapReady.value ? multiply.projectedYieldDetails.value?.netApy : null"
+                        estimate-only
+                      />
                       <SummaryRow
                         label="Swap price"
                         align-top
@@ -1065,6 +1055,7 @@ watch(
             <template #buttons>
               <VaultFormInfoButton
                 :pair="(pair as BorrowVaultPair)"
+                reveal-oracle-link
                 :extra-vault="formTab === 'multiply' ? multiply.multiplySupplyVault.value : undefined"
                 class="laptop:!hidden"
               />
@@ -1075,6 +1066,7 @@ watch(
                 :disabled-reason-variant="borrowDisabledReasonInfo?.variant"
                 :loading="borrow.isSubmitting.value || borrow.isPreparing.value"
                 :can-add-to-batch="canAddBorrowToBatch"
+                :add-to-batch-disabled-reason="isBorrowCowSwapSelected ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
                 @add-to-batch="addToBatch"
               >
                 {{ reviewBorrowLabel }}
@@ -1086,6 +1078,7 @@ watch(
                 :disabled-reason-variant="multiplyDisabledReasonInfo?.variant"
                 :loading="multiply.isMultiplySubmitting.value || multiply.isMultiplyPreparing.value"
                 :can-add-to-batch="canAddMultiplyToBatch"
+                :add-to-batch-disabled-reason="isMultiplyCowSwapSelected ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
                 @add-to-batch="addMultiplyToBatch"
               >
                 {{ reviewMultiplyLabel }}

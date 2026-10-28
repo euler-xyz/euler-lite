@@ -5,27 +5,40 @@ It extends the existing parity scenario format with a connected injected wallet,
 fork seeding, SDK `query*` call recording, raw API response capture, visible
 `data-*` tag snapshots, and post-transaction portfolio captures.
 
-## Current status
+## Coverage
 
-The scenario file covers the supported transaction-type target set in dry-run
-validation. `swap-from-wallet` is listed as unsupported because Lite has no
-regular wallet-to-wallet swap screen. `same-asset-debt-migration` is listed as
-unsupported because the current active mainnet product labels do not expose two
-same-asset debt vaults against one collateral vault at the pinned fork block.
-`multiply-same-asset` is listed as unsupported because the current active
-mainnet product labels do not expose a supported same-asset multiply market at
-the pinned fork block. `earn-supply` and `earn-withdraw` cover the EulerEarn
-deposit and withdraw flows against the verified eeUSDC vault
-(`0x3B4802FDb0E5d74aA37d58FD77d63e93d4f9A4AF`).
-Live fork recording requires a running Anvil fork, a Lite dev server pointed at
-that fork, and a funded `FORK_RPC_URL`.
+The UI groups exercise supply, withdrawal, redemption, borrow, the four repayment
+paths, collateral/debt swaps, same-asset collateral migration, Multiply with a
+swap, cleanup, EulerEarn supply/withdrawal, and mature/early rEUL unlocks.
+The `transferMin` cases include partial savings and collateral withdrawals, a
+full Max redemption, and two withdrawals in one reviewed atomic batch.
+
+`unsupportedTransactionTypes` describes gaps in this UI fixture: wallet swaps
+have no regular screen, and same-asset debt migration/Multiply have no selected
+UI market here. Standalone share transfer also needs a separate fixture; max
+repayment cleanup does not establish transfer coverage. These are not unsupported
+SDK operations. The supplemental
+`execution:transfer-min` script exercises wallet swaps to the owner and another
+recipient, plus an Aave USDT-to-EulerEarn USDC migration. It runs the real shared
+requirement collector and snapshot loader, backed by fork contract reads, before
+sending SDK plans and asserting receipt/balance results. It does not exercise the
+complete browser review or policy pipeline for those supplemental cases.
+
+Dry-run validation checks scenario declarations only. Execution coverage requires
+successful receipts; UI success text or an approval alone is insufficient.
+These Ethereum fixtures do not establish coverage for every chain, wallet type,
+reward provider, migration connector, or asynchronously settled CoW order.
+
+Live recording requires an archive-capable `FORK_RPC_URL`, a running Anvil fork,
+and a local Lite server pointed at that fork. The fixture block must contain the
+lenses and SwapVerifier named by the deployment manifest served by Lite.
 
 ## Run
 
 Start Anvil at the pinned fixture block:
 
 ```sh
-anvil --fork-url "$FORK_RPC_URL" --fork-block-number 25159633 --auto-impersonate --port 8545
+anvil --fork-url "$FORK_RPC_URL" --fork-block-number 26182477 --auto-impersonate --port 8545
 ```
 
 Start Lite with the fork as chain 1. Wallet reads and transactions go through
@@ -40,6 +53,21 @@ NUXT_PUBLIC_EXECUTION_RECORD_SDK_QUERIES=true \
 npm run dev -- --host 127.0.0.1 --port 3001
 ```
 
+For production-bundle validation, run `npm run build` and serve
+`.output/server/index.mjs` with the same environment and `HOST=127.0.0.1 PORT=3001`.
+Keep only the intended fork chain enabled. Use a disposable local configuration
+with the terms gate disabled; accepting external service terms is outside these
+transaction fixtures.
+
+The public Anvil fixture account is configured with `wallet.resetCode: true`.
+Setup clears its delegated mainnet bytecode **on Anvil only** to exercise an
+ordinary EOA, and records the original bytecode in `run.json`. ERC-20 balances
+are seeded by impersonated holder transfers. The signature preference is
+`signatures-enabled`; swap scenarios set slippage through the form's actual
+control so context changes cannot silently discard a storage preset.
+The batch scenario enables Advanced mode through `user-settings` so its batch
+controls are available.
+
 Record:
 
 ```sh
@@ -53,8 +81,26 @@ Run the full transaction suite:
 ```sh
 npm run execution:suite -- \
   --url http://127.0.0.1:3001 \
-  --swap-api-url https://swap-dev.euler.finance
+  --swap-api-url https://swap-dev.euler.finance \
+  --all-browser-rpc-to-anvil --headless
 ```
+
+Run the supplemental `transferMin` checks on an independently started fork at the
+same fixture block, or after the UI suite finishes. Do not run both against one
+Anvil instance concurrently: UI groups revert snapshots between groups.
+
+```sh
+npm run execution:transfer-min -- \
+  --url http://127.0.0.1:3001 \
+  --anvil-rpc http://127.0.0.1:8546 \
+  --output-dir artifacts/execution-recordings/sdk-transfer-min
+```
+
+This script rejects non-Anvil clients and a fork block that differs from the
+fixture. Live swap quotes are simulated against the fork before submission;
+upstream liquidity can differ from a pinned block. Its output files are
+`wallet-swaps.json` and `earn-migration.json`, including verification modes,
+required vaults, successful receipts, and received tokens/shares.
 
 Targeted group runs use `--group <id>`. The suite validates global
 transaction-type coverage, so a focused group can exit nonzero even when every
@@ -86,7 +132,13 @@ Artifacts are written to `artifacts/execution-recordings/<timestamp>/`:
 - `network.jsonl`: raw API/swap network captures.
 - `wallet-requests.jsonl`: injected wallet RPC requests, transaction hashes,
   and receipts. Transaction receipts with a non-success status fail the
-  scenario.
+  scenario. A scenario with a non-empty `covers` list also requires a successful
+  execution call, excluding approvals, and idle wallet activity before the final
+  capture. `requiredCalls` asserts decoded target/signature/count matches inside
+  EVC batches; `requireAtomicExecution` requires one execution transaction.
+  Withdrawal and redemption cases assert their distinct selectors so a partial
+  withdrawal cannot count as full redemption. `run.json` checkpoints each finished
+  scenario and includes its decoded `executionCalls`.
 - `report.md`: a short human-readable summary with transaction hashes.
 - `report.html`: a drill-down report with scenario details, captures,
   sidecar links, transaction hashes, and embedded videos.
@@ -94,6 +146,10 @@ Artifacts are written to `artifacts/execution-recordings/<timestamp>/`:
   scenario. The recorder keeps the page open for 2500 ms after the final
   capture so the last rendered state is visible in the video. Pass
   `--video-tail-ms <ms>` to adjust that wait or `--no-video` to skip recording.
+
+The recorder raises Anvil's block gas limit only for the large read-only
+Multicall used to load the vault inventory. Wallet transactions remain capped
+at the recorder's separate fork-only transaction gas limit.
 
 `execution:suite` writes a top-level `report.html`, `report.md`, and
 `summary.json` in addition to each group's artifact directory.

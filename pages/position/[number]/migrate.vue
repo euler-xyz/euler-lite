@@ -14,27 +14,30 @@ import {
   type MorphoMarketParams,
   type MorphoMigrationTargetRaw,
   type PluginPrefetchData,
+  type PlanMigrationSimulationResult,
   type PortfolioBorrowPosition,
   type SecuritizeCollateralVault,
-  type SignedMigrationAuthorization,
   type TransactionPlan,
   type TransactionPlanPrepared,
   type VaultEntity,
 } from '@eulerxyz/euler-v2-sdk'
 import { formatUnits, getAddress, type Address, type StateOverride } from 'viem'
-import { OperationReviewModal } from '#components'
 import { AAVE_CONNECTOR_ID, MORPHO_CONNECTOR_ID } from '~/entities/migration/constants'
 import { POST_EXTERNAL_MIGRATION_REFRESH_DELAYS_MS } from '~/composables/useExternalMigrationPositions'
 import { getAssetUsdValue } from '~/utils/sdk-prices'
 import { formatCompactUsdValue, formatSmartAmount, trimTrailingZeros } from '~/utils/string-utils'
 import { MODAL_CLOSE_REDIRECT_DELAY_MS } from '~/entities/tuning-constants'
 import { getPlanHookDisabledWarning } from '~/composables/useVaultWarnings'
-import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
+import { getVaultGeoUnavailableReason, isAnyVaultBlockedByCountry, useGeoBlock } from '~/composables/useGeoBlock'
 import { OP_REDEEM, OP_REPAY, OP_TRANSFER, type PlannedOp } from '~/utils/vault-hooks'
 import type { DisplayStep } from '~/utils/stepDecoding'
+import {
+  buildMigrationAuthorizationTxSteps,
+} from '~/utils/migrationAuthorizationTxs'
 import { logWarn } from '~/utils/errorHandling'
-import { isOperationBlocked } from '~/utils/operationGuardRegistry'
+import { isOperationBlocked, operationBlockReason } from '~/utils/operationGuardRegistry'
 import { BATCH_ACTIVE_REASON } from '~/utils/tx-batch-messages'
+import { AcknowledgeTermsModal, VaultUnverifiedDisclaimerModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 
@@ -64,11 +67,22 @@ type OutgoingMigrationInput = ReturnType<typeof buildMigrationInput>
 
 type OutgoingMigrationPreview = {
   key: string
+  useSignatures: boolean
+  /**
+   * The review showed the authorization riding in ONE atomic Safe proposal.
+   * Latched at review time and revalidated at confirmation — execution must
+   * never silently run a reviewed execution the user did not review.
+   */
+  bundledReview: boolean
   input: OutgoingMigrationInput
+  account: Account<IHasVaultAddress>
   position: MigrationPosition
   authorizationRequest?: MigrationAuthorizationRequest
   tenderlySimulation: PreparedMigrationTenderlySimulation
   calldataPrepared: TransactionPlanPrepared
+  compilerResult: PlanMigrationSimulationResult
+  observedBlock?: bigint
+  prefetch?: PluginPrefetchData
 }
 
 type MigrationTargetAssetLike = {
@@ -85,7 +99,7 @@ type TargetExternalLink = {
 const route = useRoute()
 const router = useRouter()
 const modal = useModal()
-const { error: showError } = useToast()
+const { error: showError, warning: showWarning } = useToast()
 const { isConnected, address } = useWagmi()
 const { isSpyMode, spyAddress } = useSpyMode()
 const { isPositionsLoading, getPositionBySubAccountIndex, refreshAllPositions } = useEulerAccount()
@@ -93,25 +107,27 @@ const { chainId } = useEulerAddresses()
 const { getVault } = useVaultRegistry()
 const { settings } = useUserSettings()
 const { account: planAccount } = usePlanAccount()
-const { buildStateOverrideOptions, primeSlotHintsFor } = useStateOverrideOptions()
+const { client: rpcClient } = useRpcClient()
+const { primeSlotHintsFor } = useStateOverrideOptions()
 const {
   listMigrationTargets,
   getMigrationPosition,
   getMigrationAuthorization,
-  signMigrationAuthorization,
-  planCrossProtocolMigration,
   planCrossProtocolMigrationSimulation,
-  executePreparedPlan,
   prepareTransactionPlan,
   prefetchPluginData,
 } = useEulerTx()
+const { signaturesEnabled } = useSignaturePreference()
+const { isSafeWallet } = useSafeWallet()
 const {
   addEntry: addBatchEntry,
   entryCount: batchEntryCount,
 } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { scheduleExternalMigrationRefreshes } = useExternalMigrationRefresh()
-const { runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
+const { simulationError, clearSimulationError } = useTransactionPlanSimulation()
+const { capture: captureReviewState } = useExecutionReview()
+const { createMigrationIntent } = useMigrationIntentFactory()
 
 const positionIndex = usePositionIndex()
 const enableExternalMigrations = computed(() => settings.value.enableAdvancedMode)
@@ -179,11 +195,10 @@ const positionDetailsFallback = computed(() => {
   const search = query.toString()
   return `/position/${positionIndex}${search ? `?${search}` : ''}`
 })
-// Migration authorization must be signed by a real connected wallet. Spy mode
-// stays read-only (discovery/preview) and cannot sign, so it must not satisfy
-// the review/execute gate — otherwise a spy-only user passes "Connect wallet to
-// migrate" and fails later at signing.
-const hasConnectedWallet = computed(() => isConnected.value)
+// A connected wallet can review and execute migrations. Spy mode can prepare
+// the same review through the read-only execution path, while confirmation
+// remains unavailable in the review modal.
+const hasMigrationReviewContext = computed(() => isConnected.value || isSpyMode.value)
 const migrationOwner = computed<Address | undefined>(() => {
   const raw = isSpyMode.value ? spyAddress.value : address.value
   if (!raw) return undefined
@@ -216,7 +231,6 @@ const hasLoadedTargets = ref(false)
 const targetsError = ref('')
 const reviewingTargetId = ref('')
 const batchingTargetId = ref('')
-const submittingTargetId = ref('')
 const targetLiquidityUsdById = shallowRef<Record<string, number | null>>({})
 let targetsRequestId = 0
 let targetLiquidityUsdRequestId = 0
@@ -390,6 +404,7 @@ const plannedOps = computed<PlannedOp[]>(() => {
   return steps
 })
 const hookWarning = computed(() => getPlanHookDisabledWarning(plannedOps.value))
+const { isPolicyAvailable } = useGeoBlock()
 const isGeoBlocked = computed(() => isAnyVaultBlockedByCountry(
   ...[
     sourceDebtVault.value?.address,
@@ -405,7 +420,8 @@ const canLoadTargets = computed(() =>
 )
 const pageDisabledReason = computed(() => {
   if (!enableExternalMigrations.value) return 'Enable advanced mode in settings'
-  if (isGeoBlocked.value) return 'This operation is not available in your region'
+  if (!isPolicyAvailable.value) return 'Compliance data unavailable. Please retry.'
+  if (isGeoBlocked.value) return getVaultGeoUnavailableReason(sourceDebtVault.value?.address, sourceCollateralVault.value?.address) || 'This operation is not available in your region'
   if (!sourceDebtVault.value || !sourceCollateralEVault.value || !migrationAccount.value) return 'Migration requires standard Euler collateral and debt vaults'
   if (!planAccount.value) return 'Account data is loading'
   if (currentDebt.value <= 0n) return 'This position has no debt to migrate out'
@@ -420,10 +436,54 @@ const noTargetsFound = computed(() =>
   && targets.value.length === 0,
 )
 
-useOperationGuard(computed(() => [
+const { tosGuard, unverifiedVaultGuard } = useOperationGuard(computed(() => [
   sourceDebtVault.value?.address,
   sourceCollateralVault.value?.address,
 ].filter(Boolean)))
+
+function continueAfterRequiredAcknowledgments(action: () => Promise<void>) {
+  if (tosGuard.isTermsRequired && !tosGuard.tosLoadFailed) {
+    modal.open(AcknowledgeTermsModal, {
+      props: {
+        onReject: () => modal.close(),
+        onAccept: () => {
+          tosGuard.acceptTerms()
+          modal.close()
+          void nextTick(() => continueAfterRequiredAcknowledgments(action))
+        },
+      },
+    })
+    return
+  }
+
+  if (unverifiedVaultGuard.isAcknowledgmentRequired) {
+    modal.open(VaultUnverifiedDisclaimerModal, {
+      props: {
+        flaggedNotice: unverifiedVaultGuard.flaggedNotice,
+        acceptAction: () => {
+          unverifiedVaultGuard.acknowledgeRisk()
+          void nextTick(() => continueAfterRequiredAcknowledgments(action))
+        },
+      },
+    })
+    return
+  }
+
+  if (isOperationBlocked.value) {
+    showError(operationBlockReason.value ?? 'Complete the required verification before migrating')
+    return
+  }
+
+  void action()
+}
+
+function handleMigrateClick(target: OutgoingMigrationTarget) {
+  continueAfterRequiredAcknowledgments(() => reviewMigration(target))
+}
+
+function handleAddToBatchClick(target: OutgoingMigrationTarget) {
+  continueAfterRequiredAcknowledgments(() => addMigrationToBatch(target))
+}
 
 watch(
   [
@@ -518,7 +578,7 @@ async function loadTargetLiquidityUsd() {
 
 function getTargetDisabledReason(target: OutgoingMigrationTarget | undefined) {
   if (pageDisabledReason.value) return pageDisabledReason.value
-  if (!hasConnectedWallet.value) return 'Connect wallet to migrate'
+  if (!hasMigrationReviewContext.value) return 'Connect wallet to migrate'
   if (isTargetsLoading.value) return 'Loading migration targets'
   if (targetsError.value && !target) return targetsError.value
   if (hasLoadedTargets.value && !target) return 'No compatible migration target'
@@ -550,8 +610,12 @@ function canAddToBatchTarget(target: OutgoingMigrationTarget) {
   return canUseTarget(target)
 }
 
-function buildMigrationInput(target: OutgoingMigrationTarget) {
-  if (!chainId.value || !migrationOwner.value || !migrationAccount.value || !sourceDebtVault.value || !sourceCollateralEVault.value) {
+function buildMigrationInput(
+  target: OutgoingMigrationTarget,
+  useSignatures = signaturesEnabled.value,
+  owner = migrationOwner.value,
+) {
+  if (!chainId.value || !owner || !migrationAccount.value || !sourceDebtVault.value || !sourceCollateralEVault.value) {
     throw new Error('Migration inputs are incomplete')
   }
 
@@ -564,9 +628,12 @@ function buildMigrationInput(target: OutgoingMigrationTarget) {
   const externalTarget = {
     interestBufferBps: outgoingMigrationInterestBufferBps,
   }
-  const removeAuthorizationAfterMigration = target.connectorId === MORPHO_CONNECTOR_ID
+  // The SDK's post-migration disable is a second signed authorization appended
+  // to the batch. Without signatures the revoke is a plain tx sent afterwards.
+  const removeAuthorizationAfterMigration = target.connectorId === MORPHO_CONNECTOR_ID && useSignatures
   const cleanupEulerPosition = true
   return {
+    owner,
     target,
     source,
     externalTarget,
@@ -579,63 +646,43 @@ async function getAuthorizationRequest(
   input: OutgoingMigrationInput,
   migrationPosition?: MigrationPosition,
   account?: Account<IHasVaultAddress>,
+  useSignatures = signaturesEnabled.value,
 ): Promise<MigrationAuthorizationRequest | undefined> {
-  if (!migrationOwner.value) throw new Error('Migration inputs are incomplete')
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 60)
   return getMigrationAuthorization({
     direction: 'euler-to-external',
     connectorId: input.target.connectorId,
     chainId: input.target.chainId,
-    owner: migrationOwner.value,
+    owner: input.owner,
     position: migrationPosition,
     positionRef: input.target.ref,
     source: input.source,
     externalTarget: input.externalTarget,
     account,
     removeAuthorizationAfterMigration: input.removeAuthorizationAfterMigration,
+    // Without signatures the connectors return msg.sender grants to send as
+    // their own transactions instead of an EIP-712 message to sign.
+    authorizationKind: useSignatures ? 'typedData' : 'transaction',
     deadline,
-  })
-}
-
-async function buildMigrationPlan(
-  input: OutgoingMigrationInput,
-  authorization?: SignedMigrationAuthorization,
-  migrationPosition?: MigrationPosition,
-  account: Account<IHasVaultAddress> | undefined = planAccount.value,
-): Promise<TransactionPlan> {
-  if (!migrationOwner.value) throw new Error('Migration inputs are incomplete')
-  return planCrossProtocolMigration({
-    direction: 'euler-to-external',
-    connectorId: input.target.connectorId,
-    chainId: input.target.chainId,
-    owner: migrationOwner.value,
-    position: migrationPosition,
-    positionRef: input.target.ref,
-    source: input.source,
-    externalTarget: input.externalTarget,
-    authorization,
-    removeAuthorizationAfterMigration: input.removeAuthorizationAfterMigration,
-    account,
-    cleanupEulerPosition: input.cleanupEulerPosition,
-    operationName: `${input.target.connectorId}OutgoingMigration`,
   })
 }
 
 async function buildMigrationSimulation(
   input: OutgoingMigrationInput,
   migrationPosition: MigrationPosition,
+  authorizationRequest: MigrationAuthorizationRequest | undefined,
   account?: Account<IHasVaultAddress>,
 ) {
-  if (!migrationOwner.value) throw new Error('Migration inputs are incomplete')
   return planCrossProtocolMigrationSimulation({
     direction: 'euler-to-external',
     connectorId: input.target.connectorId,
     chainId: input.target.chainId,
-    owner: migrationOwner.value,
+    owner: input.owner,
     position: migrationPosition,
     positionRef: input.target.ref,
     source: input.source,
     externalTarget: input.externalTarget,
+    authorizationRequest,
     removeAuthorizationAfterMigration: input.removeAuthorizationAfterMigration,
     account,
     cleanupEulerPosition: input.cleanupEulerPosition,
@@ -663,6 +710,8 @@ const outgoingPreviewBaseKey = computed(() => {
     sourceCollateralEVault.value.address,
     currentDebt.value.toString(),
     outgoingMigrationBorrowAmountWithBuffer.value.toString(),
+    // Signature mode changes the built plan and the displayed steps.
+    signaturesEnabled.value ? 'sig' : 'nosig',
   ].join('|')
 })
 const outgoingPreviews = shallowRef<Record<string, OutgoingMigrationPreview>>({})
@@ -673,11 +722,6 @@ const STALE_OUTGOING_MIGRATION_PREVIEW_ERROR = 'Migration inputs changed while p
 const outgoingPreviewKeyFor = (target: OutgoingMigrationTarget) => {
   const base = outgoingPreviewBaseKey.value
   return base ? `${base}|${target.id}` : ''
-}
-
-const getCachedOutgoingPreview = (target: OutgoingMigrationTarget): OutgoingMigrationPreview | undefined => {
-  const key = outgoingPreviewKeyFor(target)
-  return key ? outgoingPreviews.value[key] : undefined
 }
 
 async function prepareOutgoingMigrationPreview(
@@ -693,9 +737,10 @@ async function prepareOutgoingMigrationPreview(
 
   const epoch = outgoingPreviewEpoch
   const promise = (async () => {
-    const owner = migrationOwner.value
-    if (!owner) throw new Error('Migration inputs are incomplete')
-    const input = buildMigrationInput(target)
+    const useSignatures = signaturesEnabled.value
+    const input = buildMigrationInput(target, useSignatures)
+    const account = planAccount.value
+    if (!account) throw new Error('Migration inputs are incomplete')
 
     // Resolve the external position once and thread it through every SDK
     // call below — without it each plan/authorization call re-resolves the
@@ -703,29 +748,59 @@ async function prepareOutgoingMigrationPreview(
     const migrationPosition = await getMigrationPosition({
       connectorId: input.target.connectorId,
       chainId: input.target.chainId,
-      owner,
+      owner: input.owner,
       positionRef: input.target.ref,
     })
 
+    // Match the inbound migration flow: resolve the exact authorization form
+    // first, then pass it into simulation. In no-signature mode this must be a
+    // standalone transaction request so the review can list its grant/revoke
+    // rows instead of receiving the SDK's default typed-data request.
+    const authorizationRequest = await getAuthorizationRequest(
+      input,
+      migrationPosition,
+      account,
+      useSignatures,
+    )
     // One batch build returns both plans: the simulation plan (auth item
     // stripped, replaced by state overrides) and the stub-signed preview
-    // plan for calldata display — plus the resolved authorization request.
-    const simulationResult = await buildMigrationSimulation(input, migrationPosition, planAccount.value)
+    // plan for calldata display.
+    const simulationResult = await buildMigrationSimulation(
+      input,
+      migrationPosition,
+      authorizationRequest,
+      account,
+    )
 
     // Resolve plugin payloads (Pyth Hermes pull, Keyring reads, TOS) once,
     // then run both prepares in parallel against the shared prefetch.
     let prefetch: PluginPrefetchData | undefined
     try {
-      prefetch = await prefetchPluginData(simulationResult.plan, { account: planAccount.value })
+      prefetch = await prefetchPluginData(simulationResult.plan, { account })
     }
     catch (err) {
       logWarn('positionMigration/prefetchPluginData', err)
     }
-    const prepareOptions = { account: planAccount.value, chainId: input.target.chainId, prefetch }
-    const [tenderlyPrepared, calldataPrepared] = await Promise.all([
+    const prepareOptions = {
+      account,
+      chainId: input.target.chainId,
+      prefetch,
+      usePermit2: useSignatures,
+    }
+    // Without signatures the authorization is granted by a standalone tx, so the
+    // simulation plan (authorization item filtered out) is already the exact
+    // calldata that executes — no stub-signed preview plan needed.
+    const [tenderlyPrepared, previewPrepared] = await Promise.all([
       prepareTransactionPlan(simulationResult.plan, prepareOptions),
-      prepareTransactionPlan(simulationResult.previewPlan, prepareOptions),
+      useSignatures
+        ? prepareTransactionPlan(simulationResult.previewPlan, prepareOptions)
+        : Promise.resolve(undefined),
     ])
+    const calldataPrepared = previewPrepared ?? tenderlyPrepared
+    const observedBlock = await rpcClient.value?.getBlockNumber().catch((err) => {
+      logWarn('positionMigration/previewBlock', err)
+      return undefined
+    })
 
     if (epoch !== outgoingPreviewEpoch || key !== outgoingPreviewKeyFor(target)) {
       throw new Error(STALE_OUTGOING_MIGRATION_PREVIEW_ERROR)
@@ -733,7 +808,10 @@ async function prepareOutgoingMigrationPreview(
 
     const preview: OutgoingMigrationPreview = {
       key,
+      useSignatures,
+      bundledReview: !useSignatures && isSafeWallet.value && !!authorizationRequest,
       input,
+      account,
       position: migrationPosition,
       tenderlySimulation: {
         plan: simulationResult.plan,
@@ -741,8 +819,11 @@ async function prepareOutgoingMigrationPreview(
         stateOverrides: simulationResult.stateOverrides,
       },
       calldataPrepared,
-      ...(simulationResult.authorizationRequest
-        ? { authorizationRequest: simulationResult.authorizationRequest }
+      compilerResult: simulationResult,
+      ...(observedBlock === undefined ? {} : { observedBlock }),
+      ...(prefetch ? { prefetch } : {}),
+      ...(authorizationRequest
+        ? { authorizationRequest }
         : {}),
     }
     outgoingPreviews.value = { ...outgoingPreviews.value, [key]: preview }
@@ -783,29 +864,42 @@ watch([targets, outgoingPreviewBaseKey], ([targetList, baseKey]) => {
 }, { immediate: true })
 
 async function reviewMigration(target: OutgoingMigrationTarget) {
-  if (reviewingTargetId.value || submittingTargetId.value || isOperationBlocked.value || !canReviewTarget(target) || !sourceDebtVault.value) return
+  if (reviewingTargetId.value || !canReviewTarget(target) || !sourceDebtVault.value) return
+  const sourceDebtVaultSnapshot = sourceDebtVault.value
+  const debtAmount = formatVaultAmount(currentDebt.value, sourceDebtVaultSnapshot)
   reviewingTargetId.value = target.id
   clearSimulationError()
   try {
     const preview = await prepareOutgoingMigrationPreview(target)
-
-    modal.open(OperationReviewModal, {
-      props: {
+    const intent = createOutgoingMigrationIntent(preview)
+    const reviewLaunch = captureReviewState([intent], {
+      presentationKind: 'migration',
+      tenderlyPrepared: preview.tenderlySimulation.prepared,
+      tenderlyStateOverrides: preview.tenderlySimulation.stateOverrides,
+      review: {
         type: 'migration',
-        asset: sourceDebtVault.value.asset,
-        amount: formatVaultAmount(currentDebt.value, sourceDebtVault.value),
-        signatureSteps: buildSignatureSteps(preview.input.target, preview.authorizationRequest),
-        calldataPrepared: preview.calldataPrepared,
-        calldataUsesPlaceholderSignatures: !!preview.authorizationRequest,
-        tenderlyPrepared: preview.tenderlySimulation.prepared,
-        tenderlyStateOverrides: preview.tenderlySimulation.stateOverrides,
+        asset: sourceDebtVaultSnapshot.asset,
+        amount: debtAmount,
+        signatureSteps: buildSignatureSteps(preview.input.target, preview.authorizationRequest, preview.useSignatures, preview.bundledReview),
+        postSteps: buildRevokeSteps(preview.authorizationRequest, preview.useSignatures, preview.bundledReview),
+        calldataUsesPlaceholderSignatures: preview.useSignatures && !!preview.authorizationRequest,
         allowConfirmWithoutPlan: true,
-        onConfirm: async () => {
-          await sendMigration(preview.input.target)
-        },
         submittingLabel: 'Migrating...',
       },
+      onResult: (result) => {
+        const migration = result.migration
+        if (!migration || result.status !== 'submitted') return
+        if (migration.warning) showWarning('Migration completed with a warning', { description: migration.warning })
+      },
+      onConfirmed: () => {
+        schedulePostMigrationRefreshes()
+      },
+      onSucceeded: () => {
+        setTimeout(() => void router.replace({ path: '/portfolio', query: { network: route.query.network } }), MODAL_CLOSE_REDIRECT_DELAY_MS)
+      },
+      onFailed: (cause) => { showError(cause instanceof Error ? cause.message : 'Migration failed') },
     })
+    await reviewLaunch.open()
   }
   catch (err) {
     logWarn('positionMigration/review', err)
@@ -816,37 +910,40 @@ async function reviewMigration(target: OutgoingMigrationTarget) {
   }
 }
 
-async function sendMigration(target: OutgoingMigrationTarget) {
-  submittingTargetId.value = target.id
-  clearSimulationError()
-  try {
-    const input = buildMigrationInput(target)
-    // Reuse the cached preview's resolved position (its addresses are static);
-    // amounts, the authorization request, and the executed plan are still
-    // rebuilt fresh here for execution safety.
-    const migrationPosition = getCachedOutgoingPreview(target)?.position
-    const authorizationRequest = await getAuthorizationRequest(input, migrationPosition, planAccount.value)
-    const authorization = authorizationRequest
-      ? await signMigrationAuthorization(authorizationRequest)
-      : undefined
-    const plan = await buildMigrationPlan(input, authorization, migrationPosition)
-    const prepared = await prepareTransactionPlan(plan, { account: planAccount.value, chainId: input.target.chainId })
-    const ok = await runPreparedSimulation(prepared, buildStateOverrideOptions({ noBalanceOverride: true }))
-    if (!ok) return
-    await executePreparedPlan(prepared)
-    schedulePostMigrationRefreshes()
-    modal.close()
-    setTimeout(() => {
-      void router.replace({ path: '/portfolio', query: { network: route.query.network } })
-    }, MODAL_CLOSE_REDIRECT_DELAY_MS)
-  }
-  catch (err) {
-    showError(err instanceof Error ? err.message : 'Migration failed')
-    logWarn('positionMigration/send', err)
-  }
-  finally {
-    submittingTargetId.value = ''
-  }
+const createOutgoingMigrationIntent = (preview: OutgoingMigrationPreview) => {
+  const { input, useSignatures, authorizationRequest } = preview
+  const migrationSubAccount = input.source.eulerAccount
+  return createMigrationIntent({
+    args: {
+      direction: 'euler-to-external',
+      connectorId: input.target.connectorId,
+      owner: input.owner,
+      positionRef: input.target.ref,
+      source: input.source,
+      externalTarget: input.externalTarget,
+      removeAuthorizationAfterMigration: input.removeAuthorizationAfterMigration,
+      cleanupEulerPosition: input.cleanupEulerPosition,
+      operationName: `${input.target.connectorId}OutgoingMigration`,
+      authorizationKind: useSignatures ? 'typedData' : 'transaction',
+    },
+    authorizationRequest,
+    ...(preview.observedBlock === undefined
+      ? {}
+      : {
+          previewCompilation: {
+            result: preview.compilerResult,
+            observedBlock: preview.observedBlock,
+            ...(preview.prefetch ? { prefetch: preview.prefetch } : {}),
+            prepared: preview.calldataPrepared,
+          },
+        }),
+    source: 'position/external-migration-outbound',
+    subAccounts: [input.owner, migrationSubAccount],
+    bounds: [
+      { kind: 'maximum-input', token: sourceDebtVault.value!.asset.address as Address, amount: input.source.debtAmount ?? currentDebt.value },
+      { kind: 'maximum-input', token: sourceCollateralEVault.value!.asset.address as Address, amount: currentCollateralAssets.value },
+    ],
+  })
 }
 
 async function addMigrationToBatch(target: OutgoingMigrationTarget) {
@@ -871,22 +968,16 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
     throw new Error('Migration inputs are incomplete')
   }
 
-  const { input, position: migrationPosition, authorizationRequest } = preview
+  const { input, authorizationRequest, useSignatures } = preview
   const sourceDebtAsset = sourceDebtVault.value.asset
   const sourceDebtSymbol = sourceDebtAsset.symbol
   const sourceCollateralSymbol = sourceCollateralEVault.value.asset.symbol
   const debtAmount = formatVaultAmount(currentDebt.value, sourceDebtVault.value)
-
-  const batchEntry = {
+  const intent = createOutgoingMigrationIntent(preview)
+  await addBatchEntry({
+    intent,
     label: `Migrate ${sourceCollateralSymbol}/${sourceDebtSymbol} to ${targetProtocolDisplay(input.target)}`,
     nameOverride: `Migrate ${sourceCollateralSymbol}/${sourceDebtSymbol}`,
-    buildExecutionPlan: async (account: Account<IHasVaultAddress>) => {
-      const executionAuthorizationRequest = await getAuthorizationRequest(input, migrationPosition, account)
-      const authorization = executionAuthorizationRequest
-        ? await signMigrationAuthorization(executionAuthorizationRequest)
-        : undefined
-      return buildMigrationPlan(input, authorization, migrationPosition, account)
-    },
     stateOverrides: preview.tenderlySimulation.stateOverrides,
     subAccount: migrationAccount.value,
     refreshExternalMigrationPositions: true,
@@ -898,31 +989,11 @@ async function addPreparedMigrationToBatch(preview: OutgoingMigrationPreview) {
       type: 'migration',
       asset: sourceDebtAsset,
       amount: debtAmount,
-      signatureSteps: buildSignatureSteps(input.target, authorizationRequest),
+      // Add-time rows describe the sequential fallback. A latched Safe review
+      // uses rows from the exact bundled resolution instead.
+      signatureSteps: buildSignatureSteps(input.target, authorizationRequest, useSignatures, false),
+      postSteps: buildRevokeSteps(authorizationRequest, useSignatures, false),
       displayPlan: preview.calldataPrepared.plan,
-    },
-  }
-
-  await addBatchEntry({
-    ...batchEntry,
-    buildPlan: async (account: Account<IHasVaultAddress>) => {
-      // The preview was warmed against the fresh owner account. For the first
-      // batch entry the planning account is that same account, so reuse the
-      // prewarmed plan instead of re-running the full cross-protocol migration
-      // simulation (position resolve → plan build). Only re-simulate when the
-      // batch already has entries, where the planning account is a later layer
-      // the prewarm didn't account for.
-      if (!isBatchActive.value) {
-        return {
-          plan: preview.tenderlySimulation.plan,
-          stateOverrides: preview.tenderlySimulation.stateOverrides,
-        }
-      }
-      const simulationResult = await buildMigrationSimulation(input, migrationPosition, account)
-      return {
-        plan: simulationResult.plan,
-        stateOverrides: simulationResult.stateOverrides,
-      }
     },
   })
   redirectAfterAdd('/portfolio', {
@@ -941,8 +1012,16 @@ function flattenAuthorizationRequests(request: MigrationAuthorizationRequest | u
   ]
 }
 
-function buildSignatureSteps(target: OutgoingMigrationTarget | undefined, authorizationRequest: MigrationAuthorizationRequest | undefined): DisplayStep[] {
+function buildSignatureSteps(
+  target: OutgoingMigrationTarget | undefined,
+  authorizationRequest: MigrationAuthorizationRequest | undefined,
+  useSignatures: boolean,
+  bundled: boolean,
+): DisplayStep[] {
   if (!authorizationRequest || !target) return []
+  if (!useSignatures) {
+    return buildMigrationAuthorizationTxSteps(authorizationRequest, 'grant', 1, { bundled })
+  }
   if (target.connectorId === AAVE_CONNECTOR_ID) {
     return [{
       index: 1,
@@ -957,6 +1036,16 @@ function buildSignatureSteps(target: OutgoingMigrationTarget | undefined, author
       : 'Signature: enable Morpho authorization',
     isSeparateTx: false,
   }))
+}
+
+/** Rows for the revoke transactions sent after the batch settles. */
+function buildRevokeSteps(
+  authorizationRequest: MigrationAuthorizationRequest | undefined,
+  useSignatures: boolean,
+  bundled: boolean,
+): DisplayStep[] {
+  if (!authorizationRequest || useSignatures) return []
+  return buildMigrationAuthorizationTxSteps(authorizationRequest, 'revoke', 1, { bundled })
 }
 
 function targetLiquidityDisplay(target: OutgoingMigrationTarget): string {
@@ -1222,7 +1311,7 @@ function normalizeAddressKey(value?: string): string {
                     :disabled="!canReviewTarget(target)"
                     :loading="reviewingTargetId === target.id"
                     :aria-label="targetActionAriaLabel(target, 'migrate')"
-                    @click="reviewMigration(target)"
+                    @click="handleMigrateClick(target)"
                   >
                     Migrate
                   </UiButton>
@@ -1237,7 +1326,7 @@ function normalizeAddressKey(value?: string): string {
                     :disabled="!!batchingTargetId || !canAddToBatchTarget(target)"
                     :loading="batchingTargetId === target.id"
                     :aria-label="targetActionAriaLabel(target, 'batch')"
-                    @click="addMigrationToBatch(target)"
+                    @click="handleAddToBatchClick(target)"
                   >
                     Add to batch
                   </UiButton>

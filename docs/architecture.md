@@ -94,7 +94,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Nuxt.js 3                                │
+│                        Nuxt.js 4                                │
 ├─────────────────────────────────────────────────────────────────┤
 │                    Vue 3 + Composition API                      │
 ├─────────────────────────────────────────────────────────────────┤
@@ -131,9 +131,9 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 
 ## 🎯 Key Architectural Decisions
 
-### 1. Nuxt.js 3 Framework
+### 1. Nuxt.js 4 Framework
 
-**Why Nuxt.js 3?**
+**Why Nuxt.js 4?**
 
 - **SSR Disabled**: Client-side only SPA, SSR is not needed
 - **Auto-imports**: Reduces boilerplate and improves developer experience
@@ -182,8 +182,8 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 ├─────────────────────────────────────────────────────────────────┤
 │              Server-Side Proxy Layer (Nuxt server/)             │
 │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐                │
-│  │ /api/internal│ │ /api/internal/pyth   │ │ /api/internal/labels │                │
-│  │ /token-list │ │ /updates    │ │ /rpc/[chain]│                │
+│  │ /api/internal│ │ /api/internal/pyth   │ │ /api/internal/public │                │
+│  │ /token-list │ │ /updates    │ │ -labels, /rpc/[chain]│       │
 │  └─────────────┘ └─────────────┘ └─────────────┘                │
 ├─────────────────────────────────────────────────────────────────┤
 │                    External Services                            │
@@ -195,27 +195,30 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Server-Side Proxy Layer**: External data sources (token lists, Pyth Hermes, labels, oracle checks, RPC) are proxied through Nuxt server endpoints rather than called directly from the browser. This provides caching, rate limiting, CORS avoidance, and keeps credentials server-side. Vault reads use the Euler SDK from the client layer. See [Development Guide - Server-Side Data Proxies](./development-guide.md#server-side-data-proxies) for the full endpoint reference.
+**Server-Side Proxy Layer**: External data sources (token lists, Pyth Hermes, Public Labels, Data V3 oracle assessments, RPC) are reached through Nuxt server endpoints rather than called directly from the browser. This provides caching, rate limiting, CORS avoidance, and keeps credentials server-side. Vault reads use the Euler SDK from the client layer. See [Development Guide - Server-Side Data Proxies](./development-guide.md#server-side-data-proxies) for the full endpoint reference.
 
 **Proxy cache strategy**:
 
 | Endpoint | TTL | Notes |
 |----------|-----|-------|
-| `/api/internal/labels/{file}` | 5 min | Query-shape labels endpoint (`?chainId=N`); used internally by Lite helpers. 404 → empty shape; stale-fallback on upstream error |
-| `/api/internal/labels/{chainId}/{file}` | 5 min | Path-shape labels endpoint matching the SDK's default `eulerLabelsBaseUrl` template; shares the underlying cache with the query-shape route |
-| `/api/internal/token-list` | 5 min | Four sources merged via `Promise.allSettled` (Euler SDK, DefiLlama, Uniswap, Merkl); per-source cache with stale fallback |
-| `/api/internal/oracle-adapter` | 5 min | Lazy per-address fetch |
-| `/api/internal/euler-chains` | 5 min | Static chain-agnostic config from `euler-interfaces` repo |
+| `/api/internal/public-labels` | 5 min | One chain/version-scoped Public Labels V3 bundle; in-flight dedup and bounded stale fallback |
+| `/api/internal/liquidation-coverage` | 5 min | One chain's default liquidation bot coverage (`LIQUIDATION_BOT_API_URL`); last answer kept 30 min, then `no-bot`. Badge is borrow-side only; unknown coverage renders nothing. See [Server-Side Caching](./server-side-caching.md#liquidation-bot-coverage) |
+| `/api/internal/token-list` | 5 min | Checks the current configured AppKit/RPC chain set before cache or upstream work; four sources merged via `Promise.allSettled` (Euler SDK, DefiLlama, Uniswap, Merkl), with per-source cache and stale fallback. Browser registry visibility rules do not narrow server admission; see [Token List](./token-list.md#server-endpoint) |
+| `/api/internal/v3/oracles/adapter-assessments/{address}?chainId={chainId}` | request-scoped | Lazy per-address Data V3 assessment fetch through the exact SDK browser endpoint allowlist |
+| `/api/internal/euler-chains` | 5 min | Static chain-agnostic config from `euler-interfaces` repo. 7-day stale window so a running instance outlives upstream outages |
+| `/api/internal/abis/{contract}` | 5 min | Runtime ABI documents from `euler-interfaces` (`AccountLens`/`VaultLens`/`UtilsLens` allowlist; SDK `setQueryABI` target). Same 7-day stale window as euler-chains |
 | `/api/internal/vaults` | 2 min (V3) / 5 min (no V3) | Pre-computed chain vault snapshot. Handler is read-only — no request-triggered refresh; warm-cache rewrites at the same cadence as the TTL |
-| `/api/internal/proxy/merkl/{path}` | 60 s | Same-origin proxy to Merkl v4; path allowlist; GET/HEAD only |
-| `/api/internal/proxy/fuul/{path}` | 30 s | Same-origin proxy to Fuul; path allowlist; GET/HEAD/POST |
-| `/api/internal/proxy/incentra/{path}` | 30 s | Same-origin proxy to Incentra/Brevis; path allowlist; GET/HEAD/POST |
-| `/api/internal/proxy/subgraph/{chainId}` | 30 s | Same-origin proxy to per-chain Goldsky subgraph; POST only |
+| `/api/internal/proxy/{merkl,fuul,incentra}/{path}` | 60 s | Rewards-provider proxies built with `createProviderProxy`; allowlists, credentials and browser hints in [Server-Side Caching](./server-side-caching.md#per-host-proxies) |
+| `/api/internal/proxy/turtle/{path}` | none (`no-store`) | Same factory; per-wallet proofs bypass the cache and the server-only Turtle key is required (503 without it) |
+| `/api/internal/proxy/subgraph/{chainId}` | none (`no-store`) | Same-origin proxy to the chain's explicit subgraph URL or selected catalog endpoint; POST only; in-flight coalescing only; 8 MiB decoded response cap and 10 s total fetch/body deadline; budget failures return 502 |
+| `/api/internal/proxy/aave` | none (`no-store`) | Aave migration markets; POST only; exact document and single-chain variables; in-flight coalescing only; 8 MiB / 10 s total response budget |
+| `/api/internal/proxy/morpho` | none (`no-store`) | Morpho migration markets and wallet positions; POST only; exact documents and bounded variables; in-flight coalescing only; 8 MiB / 10 s total response budget |
+| `/api/internal/proxy/intrinsic-apy-overrides` | 5 min | Lite overlay aggregator for HyperEVM (`999`) / Monad (`143`); cache key is `chainId` only |
 | `/api/internal/v3/{...path}` | request-scoped | Rate-limited proxy for the exact SDK browser V3 endpoint allowlist; no TTL — V3 manages its own caching |
 
-Every cacheable proxy above uses the same pattern: TTL cache for fresh hits, stale-cache fallback on upstream failure, and in-flight request deduplication so concurrent cache-miss callers (e.g. warm-cache racing real traffic) collapse onto a single upstream fetch per cache key. The in-flight dedup pattern itself is a shared util — `createInFlightDedup` / `scheduleBackgroundRefresh` in `server/utils/in-flight.ts`. The per-host proxies (`/api/internal/proxy/{merkl,fuul,incentra,subgraph}`) share a common forwarder at `server/utils/external-proxy.ts`.
+Every cacheable proxy above uses a TTL cache for fresh hits and in-flight request deduplication so concurrent cache-miss callers (e.g. warm-cache racing real traffic) collapse onto a single upstream fetch per cache key. The in-flight dedup pattern itself is a shared util — `createInFlightDedup` / `scheduleBackgroundRefresh` in `server/utils/in-flight.ts`. The rewards-provider proxies are one `createProviderProxy` pipeline (`server/utils/provider-proxy.ts`) over the shared forwarder `server/utils/external-proxy.ts`; the rules every provider proxy follows are documented once in [Server-Side Caching](./server-side-caching.md#per-host-proxies). Most cacheable proxies also return stale data on upstream failure. The intrinsic-APY overlay is a separate aggregator with chain-keyed TTL and in-flight coalescing; it does not use that forwarder and does not stale-fallback a previous successful payload. See [Intrinsic APY](./intrinsic-apy.md#lite-override-proxy).
 
-`server/plugins/warm-cache.ts` pre-populates labels and token-list for every enabled chain, plus `/api/internal/euler-chains` once globally, on a 5-min cycle. The vault snapshot runs on its own faster timer (1 min when V3 is configured, 5 min otherwise) so V3-backed refreshes stay tight without hammering upstream. Every warm task is a **direct function call** to a `refreshX()` that bypasses the handler's fresh-cache short-circuit and writes straight to the cache. This matters: if warm cycled via HTTP, the handler would short-circuit on the still-fresh entry from the previous cycle (age ≈ TTL − 2 s) and the entry would then expire with no refresh until the next cycle — leaving a stale window per cycle. With direct refresh calls, the cache is always rewritten while the previous entry is still serving live traffic, so user requests arriving during a refresh continue to read the fresh previous entry (no blocking on the in-flight refresh). Warming runs fire-and-forget so Nitro's listener is never delayed; caches are typically hot within ~5 s of boot, and users arriving before that just pay the usual cold-upstream latency for whichever endpoints they hit.
+`server/plugins/warm-cache.ts` pre-populates the Public Labels bundle, its temporary effective-policy overlay, the token list and (when `LIQUIDATION_BOT_API_URL` is set) liquidation bot coverage for every enabled chain, plus Euler Chains and runtime ABI manifests once globally, on a 5-minute cycle. The vault snapshot runs on its own faster timer (1 minute when V3 is configured, 5 minutes otherwise). Warm calls refresh the shared utilities directly; concurrent requests deduplicate against the same in-flight work, and stale fallback is bounded by `createTtlCache`.
 
 For the full setup — per-host proxies, vault snapshot pipeline, two-pass client hydration, V3-conditional cadence, and the bigint wire codec — see [Server-Side Caching](./server-side-caching.md).
 
@@ -230,13 +233,13 @@ The client composable `useVaults.loadVaults()` runs in two phases:
 
 The public interface of `useVaults()` is unchanged — the 15 exports (`isReady`, `borrowList`, `getVault`, etc.) keep their names, types, and semantics. Vault entities are SDK-owned (`EVault`, `EulerEarn`, `SecuritizeCollateralVault`), while Lite keeps UI-only categorization, LTV, APY, collateral discovery, and presentation helpers under `utils/vault/`.
 
-The wire payload uses the bigint codec at `utils/snapshot-codec.ts`: bigints serialise as `{ __bi: "<decimal>" }` (object-wrapper tag, unforgeable by adversary-controlled ERC-20 metadata). The server-side SDK builder at `server/utils/sdk-server.ts` instantiates one `EulerSDK` per chain (lazy, cached at module scope) with the default `'fallback'` adapter chain — V3 primary, onchain secondary when V3 is configured; pure onchain otherwise.
+The wire payload uses the bigint codec at `utils/snapshot-codec.ts`: bigints serialise as `{ __bi: "<decimal>" }` (object-wrapper tag, unforgeable by adversary-controlled ERC-20 metadata). The server-side SDK builder at `server/utils/sdk-server.ts` instantiates one `EulerSDK` per chain (lazy, cached at module scope) with the default `'fallback'` adapter chain — V3 primary, onchain secondary when V3 is configured; pure onchain otherwise. That builder talks to `RPC_URL_<chainId>` through the SDK provider, using registry `viemName` resolution with a smaller Multicall aggregate configured for Sonic (`146`); every other chain keeps the SDK transport defaults. See [Server-Side Caching → Server provider overrides](./server-side-caching.md#server-provider-overrides).
 
 ### Reward campaign and claim pipeline
 
-Reward APRs and account claimable rewards are SDK-owned data. Lite reads reward campaigns through SDK-populated vault entities and reads claimable user rewards from `portfolio.account.userRewards`. Claim plans are built through `sdk.rewardsService.buildClaimPlan(s)` and executed as SDK `TransactionPlan` items through `useEulerTx()`.
+Reward APRs and account claimable rewards are SDK-owned data. Lite reads reward campaigns through SDK-populated vault entities and reads claimable user rewards from `portfolio.account.userRewards`. Claim plans are built through `sdk.rewardsService.buildClaimPlan` (`composables/useSdkRewards.ts`) and submitted as reviewed-execution `reward-claim` intents. `useEulerTx()` is planning and simulation only — see [Reviewed Execution Inventory](./reviewed-execution-inventory.md) and [Transaction Building](./transaction-building.md).
 
-The SDK's default rewards adapter reads V3 reward APIs and uses direct provider reads where V3 does not expose claim-specific helper data. Lite's provider feature flags are passed into SDK config as `rewardsEnableMerkl`, `rewardsEnableBrevis`, and `rewardsEnableFuul` only when a provider is disabled. Display formatting, provider labels, sorting, and transaction review remain in Lite.
+The SDK's default rewards adapter reads V3 reward APIs and uses direct provider reads where V3 does not expose claim-specific helper data. Lite's provider feature flags are passed into SDK config as `rewardsEnableMerkl`, `rewardsEnableBrevis`, `rewardsEnableFuul`, and `rewardsEnableTurtle` only when a provider is disabled. Display formatting, provider labels, sorting, the Settings **Rewards** toggle (`enableRewardsApy`), and transaction review remain in Lite. Display-toggle and spy-mode viewer rules are in [Projected Yield](./projected-yield.md#apy-visibility-and-viewer-address); claim snapshots (including Brevis epoch identity) are in [SDK Integration](./sdk-integration.md#reward-token-decimals). rEUL vesting unlock is a separate reviewed-execution path: [rEUL Unlocks](./reul-unlocks.md).
 
 ## 🔍 Explore Page & Market Discovery
 
@@ -246,7 +249,7 @@ The Explore page (`pages/explore/index.vue`) provides a market discovery interfa
 
 The `useMarketGroups` composable (`composables/useMarketGroups.ts`) implements a hybrid grouping algorithm:
 
-1. **Product-label groups** — Vaults are first assigned to groups using `products` metadata from euler-labels. Each product defines a curator entity, name, and list of vault addresses.
+1. **Product-label groups** — Vaults are first assigned to groups using versioned Public Labels product metadata from V3. Each product defines its managing entity, optional display-only co-brands, name, and assigned vaults. Curator ownership and governance verification use only the managing entity.
 2. **Collateral graph augmentation** — For each group, external collateral vaults (referenced by member vaults but not in the group) are resolved and attached.
 3. **Orphan clustering** — Vaults not assigned to any product are clustered using a BFS connected-component algorithm over their collateral relationships. This produces "Ungrouped" markets.
 4. **Async TVL resolution** — Group metrics (TVL, available liquidity, borrowed) are resolved asynchronously using USD pricing.
@@ -285,6 +288,30 @@ The listing pages (Lend, Borrow, Earn, Explore) support user-defined metric filt
 - `UiCustomFilterModal` — Modal for creating filters with metric, operator (gt/lt), and value
 - `UiCustomFilterChips` — Displays active filters as removable chips
 - Filters are applied client-side using `matchesCustomFilters(item)`
+- Custom filters are **not** written to the URL. Shareable links only carry the `useUrlQuerySync` keys below.
+
+### Shareable list query parameters
+
+Listing pages persist search, sort, and chip filters in the query string through `useUrlQuerySync` (`composables/useUrlQuerySync.ts`) and `resolveUrlQueryValue` (`utils/url-query-alias.ts`).
+
+Rules:
+
+1. Each filter has one **current** key (`queryKey`). That is the only name written.
+2. Former names (`legacyKeys`) are still **read** from saved links. After the first paint the URL is rewritten without them.
+3. If both the current and a legacy name are present, the current value wins. The legacy key is still stripped.
+4. Default values are omitted from the URL (empty chip arrays, default sort).
+5. Keys that this helper does not own (notably `network`) are preserved.
+
+| Page | Current keys | Legacy aliases |
+| ---- | ------------ | -------------- |
+| Explore | `search`, `sort`, `dir`, `market`, `asset`, `curator` | `riskManager` → `curator` |
+| Lend | `search`, `sort`, `dir`, `vault`, `market`, `curator` | `riskManager` → `curator` |
+| Borrow | `search`, `sort`, `dir`, `collateral`, `debt`, `market`, `curator` | `riskManager` → `curator` |
+| Earn | `search`, `sort`, `dir`, `vault`, `curator` | `allocator` → `curator` |
+
+Example: `/explore?network=1&curator=Gauntlet` is the canonical curator filter. `/explore?riskManager=Gauntlet` still applies that filter, then replaces the URL with `?curator=Gauntlet`. Do not mint new `riskManager` or Earn `allocator` links.
+
+Chain selection is separate: `middleware/01.network.global.ts` normalizes `?network=` (or legacy `?chainId=`) to a numeric chain id and rewrites pre-lite paths (`/vault` → `/lend`, `/positions` → `/borrow`, `/account` → `/position`, `/market` → `/explore` and drops `tab`).
 
 ## 🚀 Performance Architecture
 
@@ -336,46 +363,84 @@ The composable accepts optional `fromSymbol`/`toSymbol` getters to detect stable
 
 ### Server-Side API Protection
 
-The Nuxt server layer (`server/api/`) proxies requests to external services (RPC nodes, Tenderly, TRM) to keep operator API keys out of client bundles. Several layers protect these endpoints:
+The Nuxt server layer (`server/api/`) proxies requests to external services (RPC nodes, Tenderly, the compliance screening API) to keep operator API keys out of client bundles. Several layers protect these endpoints:
 
 | Layer | Purpose |
 |---|---|
 | **CORS** (`server/middleware/cors.ts`) | Restricts API access to configured origins |
 | **Body size limits** (`server/middleware/body-limit.ts`) | Caps request payloads (1 MB RPC, 2 MB Tenderly) |
-| **Geo-blocking** (`server/middleware/geo-gate.ts`) | Blocks sanctioned countries via Cloudflare `CF-IPCountry`; fails closed (HTTP 451) if country is undetermined in prod |
-| **RPC method whitelist** (`server/api/internal/rpc/[chainId].ts`) | Only 15 safe read-only methods are proxied |
-| **Rate limiting** (`server/utils/rate-limit.ts`) | Per-IP cost-based budgets (see below); fails closed (HTTP 403) if `CF-Connecting-IP` is absent in prod |
+| **Geo-blocking** (`server/middleware/geo-gate.ts`) | Blocks sanctioned countries via the edge-provided country (`getEdgeContext`); fails closed (HTTP 451) if a geo-capable edge leaves the country undetermined outside dev |
+| **RPC method allowlist** (`server/api/internal/rpc/[chainId].ts`) | JSON-RPC 2.0 POST proxy; read/simulation methods only (see below) |
+| **Rate limiting** (`server/utils/rate-limit.ts`) | Per-IP cost-based budgets (see below); fails closed (HTTP 403) if the edge provides no trusted client identity in prod |
 | **Swap quote contract validation** (`@eulerxyz/euler-v2-sdk` `swapService`) | Validates each fetched quote's swapper and verifier addresses against the chain's canonical deployment allowlist |
+
+#### JSON-RPC proxy
+
+`POST /api/internal/rpc/{chainId}` forwards JSON-RPC 2.0 to the matching `RPC_URL_<chainId>`. Browser SDK and wagmi transports use it; `getServerSdk` talks to `RPC_URL_*` directly and does **not** go through this proxy.
+
+`ALLOWED_METHODS` in `server/api/internal/rpc/[chainId].ts`:
+
+`eth_call`, `eth_estimateGas`, `eth_createAccessList`, `eth_getTransactionReceipt`, `eth_getTransactionByHash`, `eth_blockNumber`, `eth_getBlockByNumber`, `eth_getBalance`, `eth_getCode`, `eth_getLogs`, `eth_chainId`, `eth_gasPrice`, `eth_maxPriorityFeePerGas`, `eth_feeHistory`, `eth_getTransactionCount`, `net_version`.
+
+`eth_createAccessList` is required for SDK state-override simulation: `fetchErc20SlotHints` / `primeSlotHintsFor` discover ERC-20 allowance and balance slots so later simulate/estimate calls can skip that probe. See [Transaction Building → Simulation Performance Tuning](./transaction-building.md#simulation-performance-tuning). Wallet writes never use this proxy; they go through the connected wallet provider.
+
+| Constraint | Behavior |
+|---|---|
+| HTTP | POST only (`405` otherwise). |
+| Chain | Integer `chainId` with a configured `RPC_URL_<chainId>`; otherwise `400` / `404`. |
+| Envelope | JSON-RPC 2.0 objects with an `id`. Notifications (no `id`) are rejected. |
+| Batch | Max 100 items; empty batches are `400`. |
+| Method | Not in the allowlist → `403 Method not allowed`. |
+| Upstream | 30 s timeout → `504`; fetch failure → `502`. Response body is the upstream text. |
+| Rate limit | 10,000 units / 60 s per client IP, shared across chains. Each JSON-RPC call costs 1 unit, so a 100-item batch costs 100. An over-budget batch gets `429` before any calls are forwarded and consumes no budget. |
+
+**Public-RPC fallback can mask a 403.** `plugins/00.wagmi.ts` builds a viem `fallback` of `[/api/internal/rpc/{chainId}, ...network.rpcUrls.default.http]` with `retryCount: 0`. If the proxy rejects a method, the public URL may still succeed, so a missing allowlist entry can look fine in the browser while the proxy log shows `method-not-allowed`. Add the method to `ALLOWED_METHODS` (only if it is a read/simulation call) rather than relying on the fallback. Both legs use `{ batchSize: 100, wait: 100 }`.
 
 #### Rate Limiting
 
 The app includes a built-in per-IP rate limiter as a defense-in-depth measure. Default budgets per 60-second window:
 
-- **RPC proxy**: 10,000 units (batch of N costs N)
-- **All other proxies**: 1,000 requests (token list, Pyth updates, labels, oracle adapter, euler chains, intrinsic APY, TOS)
+- **RPC proxy**: 10,000 units per client IP, shared across chains (one unit per JSON-RPC call; a 100-item batch costs 100)
+- **All other proxies**: 1,000 requests (token list, Pyth updates, labels, euler chains, intrinsic APY, TOS, V3)
 - **Tenderly simulate**: 10 requests
 - **Address screening**: 10 requests
 
-**Wallet screening fail-closed**: `server/api/internal/screen-address.post.ts` proxies address checks to the TRM API (configured via `WALLET_SCREENING_URI`). If the env var is not set, or the TRM API returns an error or times out, the endpoint returns `addressIsSuspicious: true` — the app fails closed rather than open. Operators must set `WALLET_SCREENING_URI` or all users will be treated as suspicious.
+RPC budget rejections emit structured JSON warning logs with `ctx: "rpc"`, `msg: "rate limited"`, and `ip` (`server/utils/rate-limit.ts`). Monitor their frequency and affected IPs after deployment, especially shared corporate, VPN, or carrier NAT exits. Only tune the RPC limiter's `max` after comparing observed rejections with legitimate traffic volume; retain per-call charging and whole-batch rejection. These warnings report rejected attempts, not remaining capacity or successful-call volume.
+
+**Wallet screening fail-closed**: connect-time only. `POST /api/internal/screen-address` proxies to data-v3 (`ADDRESS_SCREENING_URI` + `ADDRESS_SCREENING_API_KEY`). Both unset is an opt-out except in `DOPPLER_ENVIRONMENT=prd`, where missing config fails closed. Partial config, non-TLS URIs, upstream errors, and incomplete verdicts all return `addressIsSuspicious: true`. VPN usage is audit metadata and does not gate access. First-party `*.euler.finance` SPAs share this one path via a scoped CORS exception — keep the contract backward-compatible. Full runbook: [Address Screening](./address-screening.md).
 
 **Important**: This is a best-effort safeguard, not a security boundary. It catches accidental abuse (e.g. a client stuck in a retry loop) but will not stop a determined attacker. Known limitations:
 
 - **In-memory state is per-process** — if Nitro spawns multiple workers, each gets its own budget, effectively multiplying the limit.
 
-#### Cloudflare Requirement
+#### Edge Provider
 
-**Production deployments must be behind Cloudflare.** This is a hard requirement, not a recommendation — two independent server features depend on it:
+The server never reads vendor edge headers directly. `getEdgeContext(event)` (`server/utils/edge.ts`) normalizes whatever the fronting infrastructure provides into a single shape — trusted client IP, country, VPN evidence, origin-auth status — and every consumer (geo-gate, rate limiter, CORS country hint, screening audit) reads that. The vendor-specific header mapping lives exclusively in `utils/edge-presets.ts`, selected by the `EDGE_PROVIDER` env var:
 
-1. **Geo-gate** (`server/middleware/geo-gate.ts`) reads `CF-IPCountry` to enforce sanctioned-country blocks. Without Cloudflare, the country cannot be determined and all API requests are rejected with HTTP 451.
-2. **Rate limiter** (`server/utils/rate-limit.ts`) uses `CF-Connecting-IP` as the trusted client IP. Without Cloudflare, `CF-Connecting-IP` is absent and all API requests are rejected with HTTP 403.
+| Preset | Trusted client IP | Country | VPN evidence |
+|---|---|---|---|
+| `cloudflare` | `cf-connecting-ip` | `cf-ipcountry` | `x-is-vpn` / `x-is-proxy-or-vpn` |
+| `google` | `x-forwarded-for` second-to-last entry (LB-appended) | `x-client-geo` (LB custom request header, see below) | — |
+| `cloudfront` | `cloudfront-viewer-address` (port stripped) | `cloudfront-viewer-country` | — |
+| `none` (default) | rightmost `x-forwarded-for` entry, else socket | — | — |
 
-Bypass behaviour per environment:
+**Production deployments must set `EDGE_PROVIDER` explicitly** — the server refuses to boot in `prd` without it (`server/plugins/edge-guard.ts`), because the `none` default runs with geo-blocking off. `none` is intended for forks and previews that have no fronting edge. It is permitted in production only as an explicit opt-out (edge-guard logs a warning at boot): under `none` there is no trusted identity at all — the rate limiter keys on the rightmost `x-forwarded-for` entry, which a direct client can rotate unless the hosting platform's proxy rewrites it — so `none` must not be read as rate-limit protection.
+
+**`google` preset prerequisite**: Google's external load balancer does not set a country header on its own. The backend service must be configured with the custom request header `x-client-geo: {client_region}`, which the LB then stamps on every forwarded request (replacing any client-supplied value). Without it the header arrives from the client untouched and the country is forgeable — origin auth proves the request traversed the LB, not that the LB wrote this header. The preset also assumes exactly one LB hop for the `x-forwarded-for` identity.
+
+**Origin auth** (`EDGE_ORIGIN_SECRET`): when set, every request must carry a matching `x-edge-origin-auth` header, stamped by the edge (e.g. a request-header transform rule). Requests without it are treated as having bypassed the edge: their trusted inputs are voided and the fail-closed paths below apply. The secret is optional for the `cloudflare` and `none` presets — until it is set, the edge headers are trusted on the historical assumption that the origin is only reachable through the edge. It is **required** for `google` and `cloudfront` (the server refuses to boot without it): those edges forward client headers untouched, so without origin auth their trusted inputs would be forgeable by anyone who can reach the origin. Configuring the secret is what closes direct-to-origin spoofing in every preset.
+
+**Internal fetches** (`server/utils/internal-headers.ts`): server-internal `$fetch` calls (warm-cache, vaults-cache, labels) authenticate with an `x-edge-internal` marker whose value is the origin-auth secret or, when none is configured, a random per-process value — unforgeable under every preset with zero configuration. The container healthcheck does not use it: it probes `/healthz`, which lives outside `/api/` and is deliberately independent of edge configuration.
+
+Fail-closed behaviour per environment (geo-capable presets):
 
 | Environment | Geo-gate | Rate limiter |
 |---|---|---|
-| `prd` | CF required; fail-closed (HTTP 451) if absent. `DEV_GEO_COUNTRY` bypasses fail-closed if set. | CF required; fail-closed (HTTP 403) if absent. |
-| `stg` | CF required; fail-closed (HTTP 451) if absent. `DEV_GEO_COUNTRY` bypasses fail-closed if set. | CF **not** required; falls back to `X-Forwarded-For`. |
-| `dev` | CF not required; falls back to `DEV_GEO_COUNTRY`, then allows through if unset. | CF not required; falls back to `X-Forwarded-For`. |
+| `prd` | Country required; fail-closed (HTTP 451) if undetermined. `DEV_GEO_COUNTRY` is rejected at boot (`assertEdgeConfig`), so it cannot mask a missing country. | Trusted identity required; fail-closed (HTTP 403) if absent. |
+| `stg` | Country required; fail-closed (HTTP 451) if undetermined. `DEV_GEO_COUNTRY` bypasses fail-closed if set. | Trusted identity **not** required; falls back to `X-Forwarded-For`. |
+| `dev` | Country not required; falls back to `DEV_GEO_COUNTRY`, then allows through if unset. | Trusted identity not required; falls back to `X-Forwarded-For`. |
+
+Under the `none` preset the geo-gate does not fail closed (there is no geo evidence by design) and the rate limiter keys budgets on the rightmost `x-forwarded-for` entry, best-effort (see the production caveat above).
 
 ### Clickjacking & Framing Defenses
 

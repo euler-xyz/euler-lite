@@ -62,3 +62,66 @@ describe('useEffectiveAddress', () => {
     expect(result.spyAddress).toBe(spyAddress)
   })
 })
+
+describe('useEffectiveAddress with real spy-mode verification', () => {
+  const TARGET = '0x0000000000000000000000000000000000000003'
+  const TARGET_OWNER = '0x0000000000000000000000000000000000000033'
+  const EVC = '0x00000000000000000000000000000000000000e0'
+
+  const deferred = <T>() => {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>((resolvePromise) => {
+      resolve = resolvePromise
+    })
+    return { promise, resolve }
+  }
+
+  beforeEach(() => {
+    vi.resetModules()
+    vi.stubGlobal('computed', computed)
+    vi.stubGlobal('window', { location: { search: '' } })
+    vi.stubGlobal('useRoute', () => ({ path: '/portfolio/activity', query: {}, hash: '' }))
+    vi.stubGlobal('useRouter', () => ({ replace: vi.fn() }))
+    vi.stubGlobal('useEulerAddresses', () => ({
+      eulerCoreAddresses: ref({ evc: EVC }),
+      chainId: ref(1),
+    }))
+    vi.stubGlobal('useWagmi', () => ({ address: ref(WALLET), isConnected: ref(true) }))
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('never falls back to the connected wallet while spy verification is pending', async () => {
+    const owner = deferred<string>()
+    vi.stubGlobal('useRpcClient', () => ({
+      client: ref({ readContract: vi.fn(() => owner.promise) }),
+    }))
+    const { useSpyMode } = await import('~/composables/useSpyMode')
+    vi.stubGlobal('useSpyMode', useSpyMode)
+    const { useEffectiveAddress: useEffectiveAddressFresh }
+      = await import('~/composables/useEffectiveAddress')
+
+    const { effectiveAddress } = useEffectiveAddressFresh()
+    const spy = useSpyMode()
+
+    // No spy context: the connected wallet is the acting address.
+    expect(effectiveAddress.value).toBe(WALLET)
+
+    // Spy activated but unverified — the banner says "Verifying address…",
+    // so consumers must not show or query the connected wallet's data. This
+    // is also the steady state after owner-resolution retries exhaust.
+    spy.activateSpyMode(TARGET)
+    expect(spy.isSpyResolving.value).toBe(true)
+    expect(effectiveAddress.value).toBeFalsy()
+
+    // Verified: the spied owner becomes the acting address.
+    owner.resolve(TARGET_OWNER)
+    await vi.waitFor(() => expect(effectiveAddress.value).toBe(TARGET_OWNER))
+
+    // Exiting spy mode returns to the connected wallet.
+    await spy.clearSpyMode()
+    expect(effectiveAddress.value).toBe(WALLET)
+  })
+})

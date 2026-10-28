@@ -128,6 +128,8 @@ export default defineNuxtConfig({
     public: {
       // CONFIG_ vars (Doppler: NUXT_PUBLIC_CONFIG_*)
       configDocsUrl: '',
+      configToolboxUrl: '',
+      configRiskAnalyticsUrl: '',
       configStargateUrl: '',
       configTosUrl: '',
       configTosMdUrl: '',
@@ -143,11 +145,6 @@ export default defineNuxtConfig({
       // Absolute URL to an image used for social share previews (og:image /
       // twitter:image). Empty default so forks don't inherit our branding.
       configSocialImageUrl: '',
-      configLabelsRepo: 'euler-xyz/euler-labels',
-      configLabelsRepoBranch: 'master',
-      configOracleChecksRepo: 'euler-xyz/oracle-checks',
-      configLabelsBaseUrl: '',
-      configOracleChecksBaseUrl: '',
       configEulerChainsUrl: '',
       // Feature flags: enabled by default. Set to 'false' to disable.
       configEnableEntityBranding: '',
@@ -177,11 +174,13 @@ export default defineNuxtConfig({
       pythHermesUrl: '',
       v3ApiUrl: '',
       enableV3Backend: '',
+      disableV3: '',
       // Adapter chain for the browser "fast" SDK. fallback (default) | onchain | v3.
       // Maps to NUXT_PUBLIC_BROWSER_VAULT_SOURCE.
       browserVaultSource: '',
       executionRecordSdkQueries: '',
       swapApiUrl: '',
+      eulerInterfacesBranch: '',
     },
   },
 
@@ -272,13 +271,6 @@ export default defineNuxtConfig({
           'Cloudflare-CDN-Cache-Control': 'public, max-age=604800',
         },
       },
-      '/oracles/**': {
-        headers: {
-          'Cache-Control': 'public, max-age=86400',
-          'CDN-Cache-Control': 'public, max-age=604800',
-          'Cloudflare-CDN-Cache-Control': 'public, max-age=604800',
-        },
-      },
       '/favicons/**': {
         headers: {
           'Cache-Control': 'public, max-age=86400',
@@ -311,7 +303,7 @@ export default defineNuxtConfig({
           'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
         },
       },
-      '/api/internal/labels/**': {
+      '/api/internal/public-labels': {
         headers: {
           'CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
           'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
@@ -321,6 +313,12 @@ export default defineNuxtConfig({
         headers: {
           'CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
           'Cloudflare-CDN-Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+        },
+      },
+      '/api/internal/abis/**': {
+        headers: {
+          'CDN-Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+          'Cloudflare-CDN-Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
         },
       },
       '/api/internal/proxy/merkl/opportunities': {

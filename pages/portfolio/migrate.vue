@@ -12,6 +12,7 @@ const {
   positions,
   isLoading,
   error,
+  unavailableSources,
   hasLoaded,
   load,
 } = useExternalMigrationPositions()
@@ -24,9 +25,15 @@ const disabledReason = (position: ExternalMigrationCandidate) => {
   return position.disabledReason ?? ''
 }
 
+const incompleteScanDescription = computed(() => {
+  if (!unavailableSources.value.length) return ''
+  return `Some positions may be missing because ${unavailableSources.value.join(' and ')} could not be scanned.`
+})
+
 const liveStatus = computed(() => {
   if (isLoading.value) return 'Scanning Aave and Morpho'
   if (error.value) return 'Migration scan failed'
+  if (incompleteScanDescription.value) return `Migration scan incomplete. ${incompleteScanDescription.value}`
   if (hasLoaded.value) return `${visiblePositions.value.length} migration positions available`
   return ''
 })
@@ -105,6 +112,14 @@ onActivated(() => {
         v-else
         class="portfolio-migrate__list flex-1"
       >
+        <UiAlert
+          v-if="incompleteScanDescription"
+          variant="warning"
+          title="Migration scan incomplete"
+          :description="incompleteScanDescription"
+          action-text="Retry scan"
+          @action="load({ force: true })"
+        />
         <PortfolioMigrateRow
           v-for="position in visiblePositions"
           :key="position.id"

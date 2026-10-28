@@ -1,3 +1,14 @@
+/** `governor()` getter from euler-price-oracle's Governable (EulerRouter). */
+export const governableGovernorAbi = [
+  {
+    type: 'function',
+    name: 'governor',
+    inputs: [],
+    outputs: [{ name: 'governor', type: 'address' }],
+    stateMutability: 'view',
+  },
+] as const
+
 export const priceOracleAbi = [
   {
     type: 'function',

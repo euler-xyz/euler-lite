@@ -1,27 +1,27 @@
 <script setup lang="ts">
+import { captureSwapReview } from '~/utils/swapReview'
 import { isEVault, type EVault, type PortfolioBorrowPosition, type SecuritizeCollateralVault, type TransactionPlan, type VaultEntity } from '@eulerxyz/euler-v2-sdk'
 import { maxUint256, type Address } from 'viem'
 import type { VaultAsset } from '~/types/asset'
-import { getNetAPY } from '~/utils/vault/apy'
-import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
-import { getAssetUsdValueOrZero, getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
+import { getCollateralOraclePrice, getAssetOraclePrice, conservativePriceRatioNumber } from '~/utils/sdk-prices'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { useModal } from '~/components/ui/composables/useModal'
 import { SlippageSettingsModal, SwapTokenSelector } from '#components'
 import { nanoToValue } from '~/utils/crypto-utils'
-import { createRaceGuard } from '~/utils/race-guard'
 import { formatNumber, formatSmartAmount, formatHealthScore } from '~/utils/string-utils'
 import { formatLiquidationBuffer as formatLiqBuffer } from '~/utils/repayUtils'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
-import { isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
+import { getVaultGeoUnavailableReason, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useWalletRepay } from '~/composables/repay/useWalletRepay'
 import { useWalletSwapRepay } from '~/composables/repay/useWalletSwapRepay'
 import { useCollateralSwapRepay } from '~/composables/repay/useCollateralSwapRepay'
 import { useSavingsRepay } from '~/composables/repay/useSavingsRepay'
+import { useRepayNetApy } from '~/composables/repay/useRepayNetApy'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { areRoeCollateralVaultsCorrelatedWithBorrow, resolvePositionRoeCollateralVaults } from '~/utils/position-roe'
-import { isCowProvider } from '~/entities/cowswap'
+import { isRoeStateApplicable, resolvePositionRoeCollateralVaults, resolveRoeCollateralVaultsByAddresses } from '~/utils/position-roe'
+import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
+import { collectPlannerVaultAddresses } from '~/features/reviewed-execution/planning/requirements'
 
 const _route = useRoute()
 const _router = useRouter()
@@ -31,14 +31,11 @@ const { isSpyMode } = useSpyMode()
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
 const positionIndex = usePositionIndex()
-const { planRepayFromWallet } = useEulerTx()
+const { create: createIntent } = useOperationIntentFactory()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { isPositionsLoading, isPositionsLoaded, isDepositsLoaded, refreshAllPositions: _refreshAllPositions, getPositionBySubAccountIndex, portfolioAddress } = useEulerAccount()
-const { getSupplyRewardApy, getBorrowRewardApy } = useRewardsApy()
 const { getTokenCategoryTags } = useTokenList()
-const { settings } = useUserSettings()
-const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { eulerLensAddresses: _eulerLensAddresses } = useEulerAddresses()
 const { getBalance } = useWallets()
 const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
@@ -73,7 +70,6 @@ const collateralVault = computed<EVault | SecuritizeCollateralVault | undefined>
 const positionCollateralVaults = computed(() =>
   resolvePositionRoeCollateralVaults(position.value, collateralVault.value),
 )
-useOperationGuard(computed(() => [borrowVault.value?.address].filter(Boolean)))
 const assets = computed<VaultAsset[]>(() => [collateralVault.value?.asset, borrowVault.value?.asset].filter((asset): asset is VaultAsset => !!asset))
 const assetsLabel = usePositionPairLabel(position)
 const isEligibleForLiquidation = computed(() => position.value?.liquidatable ?? false)
@@ -105,40 +101,16 @@ const liqPriceFromHealth = (health: number | null | undefined): number | null =>
 }
 
 // --- APYs ---
-const collateralSupplyRewardApy = computed(() => getSupplyRewardApy(collateralVault.value?.address || ''))
-const borrowRewardApy = computed(() => getBorrowRewardApy(borrowVault.value?.address || '', collateralVault.value?.address || ''))
-const collateralSupplyApy = computed(() => withVaultIntrinsicApy(
-  getVaultSupplyApy(collateralVault.value),
-  collateralVault.value,
-  enableIntrinsicApy.value,
-))
-const borrowApy = computed(() => withVaultIntrinsicApy(
-  getVaultBorrowApy(borrowVault.value),
-  borrowVault.value,
-  enableIntrinsicApy.value,
-))
-
-const netApyGuard = createRaceGuard()
-const netAPY = ref(0)
-watchEffect(async () => {
-  if (!position.value || !collateralVault.value || !borrowVault.value) {
-    netAPY.value = 0
-    return
-  }
-  const gen = netApyGuard.next()
-  const [supplyUsd, borrowUsd] = await Promise.all([
-    getAssetUsdValueOrZero(position.value.supplied || 0n, collateralVault.value, 'off-chain'),
-    getAssetUsdValueOrZero(position.value.borrowed ?? 0n, borrowVault.value, 'off-chain'),
-  ])
-  if (netApyGuard.isStale(gen)) return
-  netAPY.value = getNetAPY(
-    supplyUsd,
-    collateralSupplyApy.value,
-    borrowUsd,
-    borrowApy.value,
-    collateralSupplyRewardApy.value || null,
-    borrowRewardApy.value || null,
-  )
+const {
+  netAPY,
+  collateralSupplyApy,
+  borrowApy,
+  collateralSupplyRewardApy,
+  borrowRewardApy,
+} = useRepayNetApy({
+  position,
+  borrowVault,
+  collateralVault,
 })
 
 // --- Tab composables ---
@@ -179,28 +151,55 @@ const walletSwap = useWalletSwapRepay({
   borrowRewardApy,
   oraclePriceRatio,
 })
+const walletEstimateNetAPY = computed(() =>
+  walletSwap.needsSwap.value ? walletSwap.estimateNetAPY.value : wallet.estimateNetAPY.value,
+)
+const walletProjectedYieldDetails = computed(() =>
+  walletSwap.needsSwap.value ? walletSwap.projectedYieldDetails.value : wallet.projectedYieldDetails.value,
+)
 
 // Add the current repay (any tab) to the batch. CoW orders can't be merged
 // into an EVC batch, so swap routes via CoW are excluded.
+const isCowSwapSelectedForBatch = computed(() => {
+  if (formTab.value === 'wallet') {
+    return walletSwap.needsSwap.value && isCowProviderOrQuote(
+      walletSwap.quotes.selectedProvider.value,
+      walletSwap.quotes.selectedQuote.value,
+    )
+  }
+  if (formTab.value === 'collateral') {
+    return !collateral.isSameAsset.value && isCowProviderOrQuote(
+      collateral.quotes.selectedProvider.value,
+      collateral.quotes.selectedQuote.value,
+    )
+  }
+  if (formTab.value === 'savings') {
+    return !savings.isSameAsset.value && isCowProviderOrQuote(
+      savings.quotes.selectedProvider.value,
+      savings.quotes.selectedQuote.value,
+    )
+  }
+  return false
+})
 const canAddToBatch = computed(() => {
   if (!borrowVault.value || !position.value) return false
   if (formTab.value === 'wallet') {
     if (!(+wallet.amount.value) && !(+walletSwap.amount.value)) return false
     if (walletSwap.needsSwap.value) {
       if (isWalletSwapRestricted.value || isPayWithAssetBlocked.value) return false
-      return !!walletSwap.quotes.selectedQuote.value && !isCowProvider(walletSwap.quotes.selectedProvider.value)
+      return !!walletSwap.quotes.selectedQuote.value && !isCowSwapSelectedForBatch.value
     }
     return !!(+wallet.amount.value)
   }
   if (formTab.value === 'collateral') {
     if (!collateral.sourceVault.value || !(+collateral.amount.value || +collateral.debtAmount.value)) return false
     if (collateral.isSameAsset.value) return true
-    return !!collateral.quotes.selectedQuote.value && !isCowProvider(collateral.quotes.selectedProvider.value)
+    return !!collateral.quotes.selectedQuote.value && !isCowSwapSelectedForBatch.value
   }
   if (formTab.value === 'savings') {
     if (!savings.sourceVault.value || !(+savings.amount.value || +savings.debtAmount.value)) return false
     if (savings.isSameAsset.value) return true
-    return !!savings.quotes.selectedQuote.value && !isCowProvider(savings.quotes.selectedProvider.value)
+    return !!savings.quotes.selectedQuote.value && !isCowSwapSelectedForBatch.value
   }
   return false
 })
@@ -249,17 +248,22 @@ const addToBatchWithoutWarnings = async () => {
       const inSymbol = walletSwap.selectedAsset.value?.symbol ?? ''
       const isClosing = walletSwap.isFullRepay.value
       if (!swapAsset) return
+      const quoteIntents = walletSwap.quotes.selectedQuoteCard.value?.quote === quote
+        ? walletSwap.quotes.selectedQuoteCard.value.intents
+        : undefined
+      const currentIntent = walletSwap.createRepayIntent(quote, {
+        selectedAsset: swapAsset,
+        direction: swapDirection,
+        isFullRepay: isClosing,
+      })
       await addBatchEntry({
         label: `Repay-swap ${inSymbol} → ${borrowSymbol}`,
-        buildPlan: account => walletSwap.buildRepayPlan(quote, account, {
-          selectedAsset: swapAsset,
-          direction: swapDirection,
-          isFullRepay: isClosing,
-        }),
+        intent: currentIntent,
+        preparedIntent: quoteIntents?.[0],
         subAccount: position.value.subAccount as Address,
         affectedSubAccounts: getFullRepayAffectedSubAccounts(isClosing),
         nameOverride: `Repay ${borrowSymbol}`,
-        review: { type: 'repay', asset: swapAsset, amount: swapAmount, swapToAsset: borrowVault.value.asset, quoteFetchedAt: walletSwap.quotes.effectiveQuoteFetchedAt.value },
+        review: { type: 'repay', asset: swapAsset, amount: swapAmount, ...captureSwapReview(quote, swapDirection, walletSwap.debtAmount.value), quoteFetchedAt: walletSwap.quotes.effectiveQuoteFetchedAt.value },
       })
       walletSwap.amount.value = ''
       redirectAfterRepayAdd(isClosing)
@@ -272,12 +276,12 @@ const addToBatchWithoutWarnings = async () => {
     const receiver = position.value.subAccount as Address
     await addBatchEntry({
       label: `Repay ${wallet.amount.value} ${borrowSymbol}`,
-      buildPlan: account => planRepayFromWallet({
-        liabilityVault,
-        liabilityAmount: isFullRepay ? maxUint256 : amountNano,
-        receiver,
-        cleanupOnMax: isFullRepay,
-        account,
+      intent: createIntent({
+        kind: 'repay',
+        planner: 'repay-from-wallet',
+        args: { liabilityVault, liabilityAsset: borrowVault.value.asset.address as Address, liabilityAmount: isFullRepay ? maxUint256 : amountNano, receiver, cleanupOnMax: isFullRepay },
+        source: 'position/repay-wallet:add-to-batch',
+        subAccounts: [receiver],
       }),
       subAccount: position.value.subAccount as Address,
       affectedSubAccounts: getFullRepayAffectedSubAccounts(isFullRepay),
@@ -291,6 +295,7 @@ const addToBatchWithoutWarnings = async () => {
   if (formTab.value === 'collateral') {
     const quote = collateral.isSameAsset.value ? undefined : collateral.quotes.selectedQuote.value ?? undefined
     const sourceVault = collateral.sourceVault.value
+    const sourceAccount = collateral.selectedSourceAccount.value
     const sourceAmount = collateral.amount.value
     const sourceDebtAmount = collateral.debtAmount.value
     const sourceDirection = collateral.direction.value
@@ -298,22 +303,31 @@ const addToBatchWithoutWarnings = async () => {
     const srcSymbol = sourceVault?.asset.symbol ?? ''
     const isClosing = collateral.isFullRepay.value
     if (!sourceVault) return
+    const quoteIntents = quote && collateral.quotes.selectedQuoteCard.value?.quote === quote
+      ? collateral.quotes.selectedQuoteCard.value.intents
+      : undefined
+    const currentIntent = collateral.createRepayIntent(quote, {
+      sourceVault,
+      sourceAccount,
+      amount: sourceAmount,
+      debtAmount: sourceDebtAmount,
+      direction: sourceDirection,
+      isSameAsset,
+    })
     await addBatchEntry({
       label: `Repay from ${srcSymbol} collateral → ${borrowSymbol}`,
-      buildPlan: account => collateral.buildRepayPlan(quote, account, {
-        sourceVault,
-        amount: sourceAmount,
-        debtAmount: sourceDebtAmount,
-        direction: sourceDirection,
-        isSameAsset,
-      }),
+      intent: currentIntent,
+      preparedIntent: quoteIntents?.[0],
       subAccount: position.value.subAccount as Address,
-      affectedSubAccounts: getFullRepayAffectedSubAccounts(isClosing),
-      review: { type: 'repay', asset: sourceVault.asset, amount: sourceAmount, swapToAsset: borrowVault.value.asset, quoteFetchedAt: isSameAsset ? null : collateral.quotes.effectiveQuoteFetchedAt.value },
+      sourceSubAccount: sourceAccount,
+      affectedSubAccounts: collateral.isCrossPositionSource.value
+        ? getAffectedSubAccounts(position.value.subAccount, sourceAccount)
+        : getFullRepayAffectedSubAccounts(isClosing),
+      review: { type: 'repay', asset: sourceVault.asset, amount: sourceAmount, ...captureSwapReview(quote, sourceDirection, sourceDebtAmount), quoteFetchedAt: isSameAsset ? null : collateral.quotes.effectiveQuoteFetchedAt.value },
     })
     collateral.amount.value = ''
     collateral.debtAmount.value = ''
-    redirectAfterRepayAdd(isClosing)
+    redirectAfterRepayAdd(isClosing && !collateral.isCrossPositionSource.value)
     return
   }
 
@@ -328,19 +342,25 @@ const addToBatchWithoutWarnings = async () => {
     const srcSymbol = sourceVault?.asset.symbol ?? ''
     const isClosing = savings.isFullRepay.value
     if (!sourceVault) return
+    const quoteIntents = quote && savings.quotes.selectedQuoteCard.value?.quote === quote
+      ? savings.quotes.selectedQuoteCard.value.intents
+      : undefined
+    const currentIntent = savings.createRepayIntent(quote, {
+      sourceVault,
+      sourceSubAccount,
+      amount: sourceAmount,
+      debtAmount: sourceDebtAmount,
+      direction: sourceDirection,
+      isSameAsset,
+    })
     await addBatchEntry({
       label: `Repay from ${srcSymbol} savings → ${borrowSymbol}`,
-      buildPlan: account => savings.buildRepayPlan(quote, account, {
-        sourceVault,
-        sourceSubAccount,
-        amount: sourceAmount,
-        debtAmount: sourceDebtAmount,
-        direction: sourceDirection,
-        isSameAsset,
-      }),
+      intent: currentIntent,
+      preparedIntent: quoteIntents?.[0],
       subAccount: position.value.subAccount as Address,
+      sourceSubAccount: sourceSubAccount as Address | undefined,
       affectedSubAccounts: getFullRepayAffectedSubAccounts(isClosing, sourceSubAccount),
-      review: { type: 'repay', asset: sourceVault.asset, amount: sourceAmount, swapToAsset: borrowVault.value.asset, quoteFetchedAt: isSameAsset ? null : savings.quotes.effectiveQuoteFetchedAt.value },
+      review: { type: 'repay', asset: sourceVault.asset, amount: sourceAmount, ...captureSwapReview(quote, sourceDirection, sourceDebtAmount), quoteFetchedAt: isSameAsset ? null : savings.quotes.effectiveQuoteFetchedAt.value },
     })
     savings.amount.value = ''
     savings.debtAmount.value = ''
@@ -419,16 +439,52 @@ const savings = useSavingsRepay({
   getCurrentDebt,
   collateralSupplyApy,
   borrowApy,
+  borrowRewardApy,
 })
 
+const repayGuardVaults = computed(() => {
+  const liabilityVault = borrowVault.value?.address
+  if (formTab.value === 'wallet') {
+    return walletSwap.needsSwap.value && walletSwap.quotes.selectedQuote.value
+      ? collectPlannerVaultAddresses({ swapQuote: walletSwap.quotes.selectedQuote.value })
+      : collectPlannerVaultAddresses({ liabilityVault })
+  }
+  const sourceVault = formTab.value === 'collateral' ? collateral.sourceVault.value : savings.sourceVault.value
+  const sameAsset = formTab.value === 'collateral' ? collateral.isSameAsset.value : savings.isSameAsset.value
+  const quote = formTab.value === 'collateral' ? collateral.quotes.selectedQuote.value : savings.quotes.selectedQuote.value
+  return !sameAsset && quote
+    ? collectPlannerVaultAddresses({ swapQuote: quote })
+    : collectPlannerVaultAddresses({ liabilityVault, fromVault: sourceVault?.address })
+})
+useOperationGuard(repayGuardVaults, { acquiresExposure: false })
+
 const isPositionRoeApplicable = computed(() =>
-  positionCollateralVaults.value.isComplete
-  && areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value.vaults, borrowVault.value, getTokenCategoryTags),
+  isRoeStateApplicable(positionCollateralVaults.value, borrowVault.value, getTokenCategoryTags),
 )
-const isCollateralRepayRoeApplicable = computed(() =>
-  positionCollateralVaults.value.isComplete
-  && areRoeCollateralVaultsCorrelatedWithBorrow(positionCollateralVaults.value.vaults, borrowVault.value, getTokenCategoryTags),
+const nextCollateralRepayRoeVaults = computed(() => {
+  const nextState = resolveRoeCollateralVaultsByAddresses(
+    collateral.nextCollateralAddresses.value,
+    positionCollateralVaults.value.vaults,
+  )
+  return {
+    ...nextState,
+    isComplete: collateral.nextCollateralSnapshotComplete.value && nextState.isComplete,
+  }
+})
+const isCurrentCollateralRepayRoeApplicable = computed(() =>
+  isRoeStateApplicable(positionCollateralVaults.value, borrowVault.value, getTokenCategoryTags),
 )
+const isNextCollateralRepayRoeApplicable = computed(() =>
+  isRoeStateApplicable(nextCollateralRepayRoeVaults.value, borrowVault.value, getTokenCategoryTags),
+)
+const collateralProjectedYieldDetails = computed(() => {
+  const details = collateral.projectedYieldDetails.value
+  if (!details || !isNextCollateralRepayRoeApplicable.value) return null
+  return {
+    ...details,
+    before: isCurrentCollateralRepayRoeApplicable.value ? details.before : null,
+  }
+})
 
 const { guardWithPriceImpact: guardWithCollateralPriceImpact } = usePriceImpactGate({
   directPriceImpact: collateral.priceImpact,
@@ -474,8 +530,8 @@ const reviewRepayDisabled = computed(() => {
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (formTab.value === 'wallet') {
     if (walletSwap.needsSwap.value) {
-      if (isPayWithAssetBlocked.value) return { message: 'Paying with this asset is not available in your region', variant: 'warning' }
-      if (isWalletSwapRestricted.value) return { message: 'Swapping into this vault is not available in your region', variant: 'warning' }
+      if (isPayWithAssetBlocked.value) return { message: getVaultGeoUnavailableReason(borrowVault.value?.address) || 'Paying with this asset is not available in your region', variant: 'warning' }
+      if (isWalletSwapRestricted.value) return { message: getVaultGeoUnavailableReason(borrowVault.value?.address) || 'Swapping into this vault is not available in your region', variant: 'warning' }
       if (walletSwap.disabledReason.value) return { message: walletSwap.disabledReason.value, variant: 'error' }
       if (walletSwap.estimatesError.value) return { message: walletSwap.estimatesError.value, variant: 'error' }
     }
@@ -737,19 +793,17 @@ watch(formTab, () => {
                 @refresh="walletSwap.onRefreshSwapQuotes"
               />
 
-              <UiAlert
+              <GeoBlockAlert
                 v-if="isPayWithAssetBlocked"
+                :vault-addresses="[borrowVault?.address]"
                 title="Asset restricted"
                 description="Paying with this asset is not available in your region. Pick a different asset."
-                variant="warning"
-                size="compact"
               />
-              <UiAlert
+              <GeoBlockAlert
                 v-if="!isPayWithAssetBlocked && isWalletSwapRestricted"
+                :vault-addresses="[borrowVault?.address]"
                 title="Swap restricted"
                 description="Swapping into this vault is not available in your region. You can repay with the vault's underlying asset directly."
-                variant="warning"
-                size="compact"
               />
               <UiAlert
                 v-if="walletSwap.needsSwap.value && !isWalletSwapRestricted && !isPayWithAssetBlocked && walletSwap.disabledReason.value"
@@ -787,13 +841,12 @@ watch(formTab, () => {
               variant="card"
               class="w-full laptop:max-w-[360px]"
             >
-              <SummaryRow label="Net APY">
-                <SummaryValue
-                  :before="formatNumber(netAPY)"
-                  :after="formatNumber(walletSwap.needsSwap.value ? walletSwap.estimateNetAPY.value : wallet.estimateNetAPY.value)"
-                  suffix="%"
-                />
-              </SummaryRow>
+              <ProjectedYieldSummaryRow
+                label="Net APY"
+                :before="netAPY"
+                :after="walletEstimateNetAPY"
+                :details="walletProjectedYieldDetails"
+              />
               <SummaryRow label="Oracle price">
                 <SummaryPriceValue
                   :value="oraclePriceRatio != null ? formatSmartAmount(walletPriceInvert.invertValue(oraclePriceRatio)!) : undefined"
@@ -857,6 +910,7 @@ watch(formTab, () => {
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
               :can-add-to-batch="canAddToBatch"
+              :add-to-batch-disabled-reason="isCowSwapSelectedForBatch ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
               @add-to-batch="addToBatch"
             >
               {{ reviewRepayLabel }}
@@ -883,6 +937,7 @@ watch(formTab, () => {
                 :asset="collateral.sourceVault.value.asset"
                 :vault="collateral.sourceVault.value"
                 :collateral-options="collateral.repayCollateralOptions.value"
+                :selected-option-id="collateral.selectedSourceId.value"
                 :balance="collateral.sourceBalance.value"
                 :max-handler="collateral.onSourceMax"
                 maxable
@@ -959,16 +1014,13 @@ watch(formTab, () => {
               variant="card"
               class="w-full laptop:max-w-[360px]"
             >
-              <SummaryRow
-                v-if="isCollateralRepayRoeApplicable"
+              <ProjectedYieldSummaryRow
+                v-if="isCurrentCollateralRepayRoeApplicable || isNextCollateralRepayRoeApplicable"
                 label="ROE"
-              >
-                <SummaryValue
-                  :before="collateral.roeBefore.value !== null ? formatNumber(collateral.roeBefore.value) : undefined"
-                  :after="collateral.roeAfter.value !== null && (collateral.quotes.quote.value || collateral.isSameAsset.value) ? formatNumber(collateral.roeAfter.value) : undefined"
-                  suffix="%"
-                />
-              </SummaryRow>
+                :before="isCurrentCollateralRepayRoeApplicable ? collateral.roeBefore.value : null"
+                :after="isNextCollateralRepayRoeApplicable && (collateral.quotes.quote.value || collateral.isSameAsset.value) ? collateral.roeAfter.value : null"
+                :details="collateralProjectedYieldDetails"
+              />
               <template v-if="!collateral.isSameAsset.value">
                 <SummaryRow
                   label="Swap price"
@@ -1041,6 +1093,7 @@ watch(formTab, () => {
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
               :can-add-to-batch="canAddToBatch"
+              :add-to-batch-disabled-reason="isCowSwapSelectedForBatch ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
               @add-to-batch="addToBatch"
             >
               {{ reviewRepayLabel }}
@@ -1139,16 +1192,13 @@ watch(formTab, () => {
               variant="card"
               class="w-full laptop:max-w-[360px]"
             >
-              <SummaryRow
+              <ProjectedYieldSummaryRow
                 v-if="isPositionRoeApplicable"
                 label="ROE"
-              >
-                <SummaryValue
-                  :before="savings.roeBefore.value !== null ? formatNumber(savings.roeBefore.value) : undefined"
-                  :after="savings.roeAfter.value !== null && (savings.quotes.quote.value || savings.isSameAsset.value) ? formatNumber(savings.roeAfter.value) : undefined"
-                  suffix="%"
-                />
-              </SummaryRow>
+                :before="savings.roeBefore.value"
+                :after="savings.quotes.quote.value || savings.isSameAsset.value ? savings.roeAfter.value : null"
+                :details="savings.projectedYieldDetails.value"
+              />
               <template v-if="!savings.isSameAsset.value">
                 <SummaryRow
                   label="Swap price"
@@ -1221,6 +1271,7 @@ watch(formTab, () => {
               :disabled-reason="disabledReasonInfo?.message"
               :disabled-reason-variant="disabledReasonInfo?.variant"
               :can-add-to-batch="canAddToBatch"
+              :add-to-batch-disabled-reason="isCowSwapSelectedForBatch ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
               @add-to-batch="addToBatch"
             >
               {{ reviewRepayLabel }}

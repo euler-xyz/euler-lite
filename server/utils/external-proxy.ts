@@ -12,6 +12,7 @@
  */
 import { createHash } from 'node:crypto'
 import { fetchWithTimeout } from './fetchWithTimeout'
+import { fetchTextWithBudget, type ResponseBudget } from './fetch-text-with-budget'
 import { createTtlCache } from './cache'
 import { createInFlightDedup, type InFlightDedup } from '~/utils/in-flight'
 import { logger } from './logger'
@@ -39,6 +40,15 @@ export interface ProxyForwardArgs {
    * subgraph response predates.
    */
   bypassCache?: boolean
+  /** Bounds the entire upstream response for public GraphQL proxies. */
+  responseBudget?: ResponseBudget
+  /**
+   * Fetch redirect policy. Proxies that attach an upstream credential should
+   * pass `'manual'` so a redirect is surfaced as a non-2xx upstream failure
+   * instead of being followed — otherwise the credential would be replayed
+   * against whatever host the redirect names.
+   */
+  redirect?: RequestRedirect
 }
 
 export interface ProxyForwardResult {
@@ -75,7 +85,7 @@ export function createProxyInFlight(): InFlightDedup<string, string> {
 }
 
 export async function forwardProxied(args: ProxyForwardArgs): Promise<ProxyForwardResult> {
-  const { cache, inFlight, method, target, headers, body, ctx, bypassCache } = args
+  const { cache, inFlight, method, target, headers, body, ctx, bypassCache, redirect, responseBudget } = args
   const cacheKey = buildCacheKey(method, target, body)
 
   if (!bypassCache) {
@@ -87,18 +97,21 @@ export async function forwardProxied(args: ProxyForwardArgs): Promise<ProxyForwa
 
   try {
     const fresh: string = await inFlight.run(cacheKey, async () => {
-      const upstream = await fetchWithTimeout(target, undefined, {
+      const init = {
         method,
         headers,
         body: body ?? undefined,
-      })
+        ...(redirect ? { redirect } : {}),
+      }
+      const bounded = responseBudget ? await fetchTextWithBudget(target, init, responseBudget) : undefined
+      const upstream = bounded?.response ?? await fetchWithTimeout(target, undefined, init)
       if (!upstream.ok) {
-        const text = await upstream.text().catch(() => '')
+        const text = bounded?.text ?? await upstream.text().catch(() => '')
         const err = new Error(`upstream ${upstream.status}: ${text.slice(0, 200)}`)
         ;(err as Error & { status?: number }).status = upstream.status
         throw err
       }
-      const text = await upstream.text()
+      const text = bounded?.text ?? await upstream.text()
       if (!bypassCache) cache.set(cacheKey, text)
       return text
     })

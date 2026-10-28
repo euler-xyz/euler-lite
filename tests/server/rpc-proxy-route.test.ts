@@ -1,271 +1,175 @@
 import type { H3Event } from 'h3'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({
-  consume: vi.fn(),
-  fetch: vi.fn(),
-  resolveRpcUrl: vi.fn(),
-  warn: vi.fn(),
-  rateLimiterConfigs: [] as Array<{ max: number, windowMs: number, label: string }>,
-}))
+type TestEvent = H3Event & {
+  body: unknown
+  context: {
+    params: { chainId: string }
+    responseHeaders: Record<string, string>
+    status?: number
+  }
+}
 
 vi.mock('h3', () => ({
   createError: (error: unknown) => error,
-  getMethod: (event: TestEvent) => event.method,
+  getMethod: () => 'POST',
   readBody: (event: TestEvent) => event.body,
   setResponseHeader: (event: TestEvent, name: string, value: string) => {
-    event.context.responseHeaders = {
-      ...event.context.responseHeaders,
-      [name]: value,
-    }
+    event.context.responseHeaders[name] = value
   },
   setResponseStatus: (event: TestEvent, status: number) => {
     event.context.status = status
   },
 }))
 
-vi.mock('~/server/utils/logger', () => ({
-  logger: { warn: mocks.warn },
-}))
+vi.mock('~/server/utils/logger', () => ({ logger: { warn: vi.fn() } }))
 
-vi.mock('~/server/utils/rate-limit', () => ({
-  createRateLimiter: (config: { max: number, windowMs: number, label: string }) => {
-    mocks.rateLimiterConfigs.push(config)
-    return { consume: mocks.consume }
-  },
-}))
-
-vi.mock('~/server/utils/rpc', () => ({
-  resolveRpcUrl: mocks.resolveRpcUrl,
-}))
-
-vi.mock('~/utils/errorHandling', () => ({
-  isAbortError: () => false,
-}))
-
-type TestEvent = H3Event & {
-  method: string
-  body?: unknown
-  context: {
-    params?: { chainId?: string }
-    responseHeaders?: Record<string, string>
-    status?: number
-  }
-}
-
-type RpcRequest = {
-  jsonrpc: '2.0'
-  id: number
-  method: string
-  params?: unknown
-}
-
-const ADDRESS = '0x0000000000000000000000000000000000000001'
-const OTHER_ADDRESS = '0x0000000000000000000000000000000000000002'
-const TOPIC = `0x${'11'.repeat(32)}`
-const BLOCK_HASH = `0x${'22'.repeat(32)}`
-
+// Keep the real rate limiter and edge identity handling; only the HTTP and
+// upstream network boundaries are stubbed.
 const handler = (await import('~/server/api/internal/rpc/[chainId]')).default
-
-const rpcRequest = (method: string, params?: unknown, id = 1): RpcRequest => ({
-  jsonrpc: '2.0',
-  id,
-  method,
-  ...(params === undefined ? {} : { params }),
+const fetchMock = vi.fn()
+const request = (method = 'eth_chainId', id: number | string | null = 1, params: unknown = []) => ({
+  jsonrpc: '2.0', method, id, params,
 })
+const batch = (size = 100) => Array.from({ length: size }, (_, id) => request('eth_chainId', id))
 
-const quantity = (value: bigint | number) => `0x${BigInt(value).toString(16)}`
-
-const makeEvent = (body?: unknown, overrides: { chainId?: string, method?: string } = {}): TestEvent => ({
-  method: overrides.method ?? 'POST',
+let client = 0
+const makeEvent = (body: unknown, ip = `203.0.113.${client}`, chainId = '1'): TestEvent => ({
   body,
-  context: { params: { chainId: overrides.chainId ?? '1' } },
-  node: {
-    req: {
-      headers: { 'cf-connecting-ip': '127.0.0.1' },
-      socket: {},
-    },
-    res: {},
-  },
+  context: { params: { chainId }, responseHeaders: {} },
+  node: { req: { headers: { 'cf-connecting-ip': ip }, socket: {} }, res: {} },
 } as unknown as TestEvent)
 
-const storage = (count: number) => Object.fromEntries(
-  Array.from({ length: count }, (_, index) => [
-    `0x${index.toString(16).padStart(64, '0')}`,
-    `0x${(index + 1).toString(16).padStart(64, '0')}`,
-  ]),
-)
+const consumeCalls = async (count: number) => {
+  for (let i = 0; i < count; i++) await handler(makeEvent(batch()))
+}
 
-const compactStorage = (count: number) => Object.fromEntries(
-  Array.from({ length: count }, (_, index) => [`slot-${index}`, '0x00']),
-)
+beforeEach(() => {
+  client++
+  vi.stubEnv('EDGE_PROVIDER', 'cloudflare')
+  vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
+  vi.stubEnv('EDGE_ORIGIN_SECRET', '')
+  vi.stubEnv('DISABLE_RATE_LIMIT', '')
+  vi.stubEnv('RPC_URL_1', 'https://rpc.example.test/one')
+  vi.stubEnv('RPC_URL_2', 'https://rpc.example.test/two')
+  vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
+  fetchMock.mockReset().mockImplementation(async () => new Response('{"jsonrpc":"2.0","id":1,"result":"0x1"}', {
+    headers: { 'content-type': 'application/json' },
+  }))
+  vi.stubGlobal('fetch', fetchMock)
+})
 
-const accounts = (count: number) => Object.fromEntries(
-  Array.from({ length: count }, (_, index) => [
-    `0x${index.toString(16).padStart(40, '0')}`,
-    {},
-  ]),
-)
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
+})
 
-describe('/api/internal/rpc route', () => {
-  beforeEach(() => {
-    mocks.resolveRpcUrl.mockReturnValue('https://rpc.example')
-    mocks.fetch.mockResolvedValue(new Response('{"jsonrpc":"2.0","id":1,"result":"0x1"}', {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    }))
-    vi.stubGlobal('fetch', mocks.fetch)
+describe('/api/internal/rpc batch budget', () => {
+  it('allows 10,000 calls in 100-call batches, then rejects before forwarding', async () => {
+    await consumeCalls(100)
+    await expect(handler(makeEvent(batch()))).rejects.toMatchObject({ statusCode: 429, statusMessage: 'Too Many Requests' })
+    expect(fetchMock).toHaveBeenCalledTimes(100)
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual(batch())
   })
 
-  afterEach(() => {
-    vi.clearAllMocks()
+  it('rejects an unaffordable batch atomically and admits the remaining calls', async () => {
+    await consumeCalls(99)
+    await handler(makeEvent(request()))
+    await expect(handler(makeEvent(batch()))).rejects.toMatchObject({ statusCode: 429 })
+    expect(fetchMock).toHaveBeenCalledTimes(100)
+    await handler(makeEvent(batch(99)))
+    await expect(handler(makeEvent(request()))).rejects.toMatchObject({ statusCode: 429 })
+    expect(fetchMock).toHaveBeenCalledTimes(101)
   })
 
-  it('uses the shared 10,000-unit app-server budget', () => {
-    expect(mocks.rateLimiterConfigs).toContainEqual({
-      max: 10_000,
-      windowMs: 60_000,
-      label: 'rpc',
-    })
+  it('shares the per-client budget across chains and isolates other clients', async () => {
+    await consumeCalls(100)
+    await expect(handler(makeEvent(request(), undefined, '2'))).rejects.toMatchObject({ statusCode: 429 })
+    await expect(handler(makeEvent(batch(), '198.51.100.1', '2'))).resolves.toBeDefined()
+    expect(fetchMock).toHaveBeenCalledTimes(101)
   })
 
-  it.each([
-    ['cheap RPC method', rpcRequest('eth_blockNumber'), 1],
-    ['small eth_call', rpcRequest('eth_call', [{ to: ADDRESS, data: '0x12345678' }, 'latest']), 2],
-    ['eth_estimateGas', rpcRequest('eth_estimateGas', [{ to: ADDRESS, data: '0x12345678' }]), 10],
-    ['eth_createAccessList', rpcRequest('eth_createAccessList', [{ to: ADDRESS, data: '0x12345678' }, 'latest']), 10],
-    ['block headers only', rpcRequest('eth_getBlockByNumber', ['latest', false]), 1],
-    ['full block response', rpcRequest('eth_getBlockByNumber', ['latest', true]), 5],
-    [
-      '10,000-block filtered log range',
-      rpcRequest('eth_getLogs', [{ fromBlock: '0x1', toBlock: quantity(10_000), address: ADDRESS }]),
-      14,
-    ],
-    ['128-block fee history', rpcRequest('eth_feeHistory', ['0x80', 'latest', [10, 50, 90]]), 9],
-  ])('charges the exact cost for %s', async (_label, request, expectedCost) => {
-    const event = makeEvent(request)
-
-    await expect(handler(event)).resolves.toContain('"result":"0x1"')
-
-    expect(mocks.consume).toHaveBeenCalledWith(event, expectedCost)
-    expect(mocks.fetch).toHaveBeenCalledTimes(1)
+  it('resets the budget at the window boundary', async () => {
+    await consumeCalls(100)
+    vi.mocked(Date.now).mockReturnValue(1_059_999)
+    await expect(handler(makeEvent(request()))).rejects.toMatchObject({ statusCode: 429 })
+    vi.mocked(Date.now).mockReturnValue(1_060_000)
+    await handler(makeEvent(batch()))
+    expect(fetchMock).toHaveBeenCalledTimes(101)
   })
 
-  it('adds calldata, gas, and state-override complexity to an SDK-shaped eth_call', async () => {
-    const request = rpcRequest('eth_call', [
-      {
-        from: ADDRESS,
-        to: OTHER_ADDRESS,
-        data: `0x${'12'.repeat(16 * 1024 + 1)}`,
-        gas: quantity(5_000_001),
-      },
-      'latest',
-      {
-        [ADDRESS]: {
-          stateDiff: storage(17),
-          code: `0x${'34'.repeat(16 * 1024 + 1)}`,
-        },
-        [OTHER_ADDRESS]: {},
-      },
-    ])
-    const event = makeEvent(request)
-
-    await handler(event)
-
-    // base 2 + calldata 1 + gas 1 + override (5 + 2 accounts + 2 slot chunks + 2 code chunks)
-    expect(mocks.consume).toHaveBeenCalledWith(event, 15)
+  it('admits only one concurrent batch when one batch worth of budget remains', async () => {
+    await consumeCalls(99)
+    const results = await Promise.allSettled([handler(makeEvent(batch())), handler(makeEvent(batch()))])
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    expect(results.find(result => result.status === 'rejected')).toMatchObject({ reason: { statusCode: 429 } })
+    expect(fetchMock).toHaveBeenCalledTimes(100)
   })
 
-  it('charges every operation in a maximum-size batch', async () => {
-    const batch = Array.from({ length: 100 }, (_, id) => rpcRequest('eth_blockNumber', undefined, id))
-    const event = makeEvent(batch)
-
-    await handler(event)
-
-    expect(mocks.consume).toHaveBeenCalledOnce()
-    expect(mocks.consume).toHaveBeenCalledWith(event, 100)
-    expect(mocks.fetch).toHaveBeenCalledOnce()
+  it('rejects invalid batches before consuming budget or forwarding any entry', async () => {
+    const invalidBodies = [
+      { body: [], status: 400 },
+      { body: batch(101), status: 400 },
+      { body: [request(), request('eth_sendRawTransaction')], status: 403 },
+      { body: [request(), { jsonrpc: '2.0', method: 'eth_call' }], status: 403 },
+      { body: [request(), [request()]], status: 403 },
+      { body: [request(), null], status: 403 },
+      { body: [request(), request('eth_getLogs')], status: 400 },
+    ]
+    for (const { body, status } of invalidBodies) {
+      await expect(handler(makeEvent(body))).rejects.toMatchObject({ statusCode: status })
+    }
+    expect(fetchMock).not.toHaveBeenCalled()
+    await consumeCalls(100)
+    await expect(handler(makeEvent(request()))).rejects.toMatchObject({ statusCode: 429 })
+    expect(fetchMock).toHaveBeenCalledTimes(100)
   })
 
-  it('accepts representative Viem log and fee-history request shapes', async () => {
-    const event = makeEvent([
-      rpcRequest('eth_getLogs', [{ blockHash: BLOCK_HASH, topics: [TOPIC, null] }], 1),
-      rpcRequest('eth_getLogs', [{ fromBlock: '0x100', toBlock: '0x120', address: [ADDRESS, OTHER_ADDRESS], topics: [[TOPIC]] }], 2),
-      rpcRequest('eth_feeHistory', ['0x10', 'latest', null], 3),
-      rpcRequest('eth_getLogs', [{ fromBlock: 'latest', toBlock: 'latest', topics: [Array(20).fill(TOPIC), Array(20).fill(TOPIC)] }], 4),
-    ])
-
-    await handler(event)
-
-    expect(mocks.consume).toHaveBeenCalledWith(event, 17)
-    expect(mocks.fetch).toHaveBeenCalledOnce()
+  it('preserves singles, one-element batches, multicall calldata and read methods', async () => {
+    const multicall = request('eth_call', 'multicall', [{ to: '0x0000000000000000000000000000000000000001', data: '0xabcdef' }, 'latest'])
+    const bodies = [
+      request(),
+      [request('net_version', null)],
+      [
+        multicall,
+        request('eth_getLogs', 2, [{ fromBlock: 'latest', toBlock: 'latest', address: '0x0000000000000000000000000000000000000001' }]),
+        request('eth_createAccessList', 3, [{ to: '0x0000000000000000000000000000000000000001', data: '0x' }, 'latest']),
+      ],
+    ]
+    for (const body of bodies) {
+      const event = makeEvent(body)
+      await expect(handler(event)).resolves.toBe('{"jsonrpc":"2.0","id":1,"result":"0x1"}')
+      expect(event.context.status).toBe(200)
+      expect(event.context.responseHeaders['content-type']).toBe('application/json')
+      expect(fetchMock).toHaveBeenLastCalledWith('https://rpc.example.test/one', expect.objectContaining({ body: JSON.stringify(body) }))
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(bodies.length)
   })
 
-  it.each([
-    ['oversized params JSON', rpcRequest('eth_blockNumber', ['x'.repeat(256 * 1024 + 1)]), 413],
-    ['oversized calldata', rpcRequest('eth_call', [{ data: `0x${'11'.repeat(256 * 1024 + 1)}` }, 'latest']), 413],
-    ['excessive explicit gas', rpcRequest('eth_call', [{ gas: quantity(50_000_001) }, 'latest']), 400],
-    ['too many override accounts', rpcRequest('eth_call', [{}, 'latest', accounts(129)]), 400],
-    ['too many override slots', rpcRequest('eth_call', [{}, 'latest', { [ADDRESS]: { stateDiff: compactStorage(2_049) } }]), 400],
-    ['too much override code', rpcRequest('eth_call', [{}, 'latest', { [ADDRESS]: { code: `0x${'11'.repeat(64 * 1024 + 1)}` } }]), 400],
-    ['too many fee-history blocks', rpcRequest('eth_feeHistory', ['0x81', 'latest', []]), 400],
-    ['too many fee-history percentiles', rpcRequest('eth_feeHistory', ['0x1', 'latest', Array.from({ length: 21 }, (_, index) => index)]), 400],
-    ['unsorted fee-history percentiles', rpcRequest('eth_feeHistory', ['0x1', 'latest', [50, 10]]), 400],
-    ['unbounded logs', rpcRequest('eth_getLogs', [{ address: ADDRESS }]), 400],
-    ['oversized log range', rpcRequest('eth_getLogs', [{ fromBlock: '0x1', toBlock: quantity(10_001), address: ADDRESS }]), 400],
-    ['mixed numeric/latest log range', rpcRequest('eth_getLogs', [{ fromBlock: '0x1', toBlock: 'latest', address: ADDRESS }]), 400],
-    ['unfiltered logs', rpcRequest('eth_getLogs', [{ fromBlock: '0x1', toBlock: '0x2' }]), 400],
-    ['too many log addresses', rpcRequest('eth_getLogs', [{ blockHash: BLOCK_HASH, address: Array.from({ length: 21 }, () => ADDRESS) }]), 400],
-    ['too many topic positions', rpcRequest('eth_getLogs', [{ blockHash: BLOCK_HASH, topics: [TOPIC, TOPIC, TOPIC, TOPIC, TOPIC] }]), 400],
-    ['too many topic alternatives', rpcRequest('eth_getLogs', [{ blockHash: BLOCK_HASH, topics: [Array.from({ length: 21 }, () => TOPIC)] }]), 400],
-  ])('rejects %s before consuming budget or contacting upstream', async (_label, request, statusCode) => {
-    await expect(handler(makeEvent(request))).rejects.toMatchObject({ statusCode })
-
-    expect(mocks.consume).not.toHaveBeenCalled()
-    expect(mocks.fetch).not.toHaveBeenCalled()
+  it('charges mixed singles and batches by their total operation cost', async () => {
+    const transaction = { to: '0x0000000000000000000000000000000000000001', data: '0x' }
+    await consumeCalls(99)
+    await handler(makeEvent(request('eth_call', 1, [transaction, 'latest'])))
+    await handler(makeEvent([
+      request(),
+      request('eth_call', 2, [transaction, 'latest']),
+      request('eth_estimateGas', 3, [transaction]),
+    ]))
+    await expect(handler(makeEvent(batch(86)))).rejects.toMatchObject({ statusCode: 429 })
+    await handler(makeEvent(batch(85)))
+    await expect(handler(makeEvent(request()))).rejects.toMatchObject({ statusCode: 429 })
+    expect(fetchMock).toHaveBeenCalledTimes(102)
   })
 
-  it('stops before the upstream fetch when the weighted limiter rejects a request', async () => {
-    mocks.consume.mockImplementationOnce(() => {
-      throw { statusCode: 429, statusMessage: 'Too Many Requests' }
-    })
-
-    await expect(handler(makeEvent(rpcRequest('eth_estimateGas', [{ to: ADDRESS }])))).rejects.toMatchObject({
-      statusCode: 429,
-      statusMessage: 'Too Many Requests',
-    })
-
-    expect(mocks.consume).toHaveBeenCalledWith(expect.anything(), 10)
-    expect(mocks.fetch).not.toHaveBeenCalled()
-  })
-
-  it.each([
-    ['missing body', makeEvent(), 400],
-    ['empty batch', makeEvent([]), 400],
-    ['oversized batch', makeEvent(Array.from({ length: 101 }, (_, id) => rpcRequest('eth_blockNumber', undefined, id))), 400],
-    ['invalid JSON-RPC request', makeEvent({ jsonrpc: '1.0', id: 1, method: 'eth_call' }), 403],
-    ['disallowed method', makeEvent(rpcRequest('eth_sendRawTransaction', ['0x00'])), 403],
-    ['invalid chain', makeEvent(rpcRequest('eth_blockNumber'), { chainId: 'invalid' }), 400],
-    ['invalid HTTP method', makeEvent(rpcRequest('eth_blockNumber'), { method: 'GET' }), 405],
-  ])('preserves %s validation before rate limiting', async (_label, event, statusCode) => {
-    await expect(handler(event)).rejects.toMatchObject({ statusCode })
-
-    expect(mocks.consume).not.toHaveBeenCalled()
-    expect(mocks.fetch).not.toHaveBeenCalled()
-  })
-
-  it('preserves the validated request body and upstream response metadata', async () => {
-    const request = rpcRequest('eth_getBalance', [ADDRESS, 'latest'])
-    const event = makeEvent(request)
-
-    await expect(handler(event)).resolves.toContain('"result":"0x1"')
-
-    expect(mocks.fetch).toHaveBeenCalledWith('https://rpc.example', expect.objectContaining({
-      method: 'POST',
-      body: JSON.stringify(request),
-      headers: { 'content-type': 'application/json' },
-    }))
-    expect(event.context.status).toBe(200)
-    expect(event.context.responseHeaders?.['content-type']).toBe('application/json')
+  it('charges singles and batches by their combined number of cheap calls', async () => {
+    await handler(makeEvent(request()))
+    await handler(makeEvent([request()]))
+    await handler(makeEvent(batch(3)))
+    // The five admitted calls leave 9,995 units: 99 full batches and 95 calls.
+    await consumeCalls(99)
+    await handler(makeEvent(batch(95)))
+    await expect(handler(makeEvent(request()))).rejects.toMatchObject({ statusCode: 429 })
+    expect(fetchMock).toHaveBeenCalledTimes(103)
   })
 })

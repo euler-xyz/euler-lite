@@ -2,22 +2,27 @@
 import { inject } from 'vue'
 import { flip, offset, shift, useFloating } from '@floating-ui/vue'
 
-import { isOperationBlocked, operationBlockerEntries, operationBlockReason } from '~/utils/operationGuardRegistry'
+import { isOperationBlocked, isOperationBlockerKey, operationBlockerEntries, operationBlockReason } from '~/utils/operationGuardRegistry'
 import type { DisabledReasonVariant } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
-import { AcknowledgeTermsModal, VaultUnverifiedDisclaimerModal } from '#components'
+import { AcknowledgeTermsModal, VaultDeprecatedDepositModal, VaultUnverifiedDisclaimerModal } from '#components'
 import type { KeyringFlowState, CredentialData } from '~/composables/useKeyring'
 import type { TosGuardState } from '~/composables/guards/useTosGuard'
 import type { UnverifiedVaultGuardState } from '~/composables/guards/useUnverifiedVaultGuard'
 import { useStateOverrideResolution } from '~/composables/useStateOverrideOptions'
 import { BATCH_ACTIVE_REASON } from '~/utils/tx-batch-messages'
+import { FLAGGED_VAULT_ACTION } from '~/utils/vault-assessment/flagged'
 
 interface KeyringGuardState {
   needsVerification: boolean
   isExpired: boolean
   flowState: KeyringFlowState
   credentialData: CredentialData | null
+  isCheckingStatus: boolean
+  statusMessage?: string
+  error?: string
   launchExtension: () => Promise<void>
+  retryVerification: () => Promise<void>
   checkStatus: () => Promise<void>
   cancelVerification: () => void
 }
@@ -31,6 +36,8 @@ const props = defineProps<{
   /** When defined, the form supports batching: a "+" segment is shown next to the
    *  main button, enabled when `canAddToBatch` is true, emitting `add-to-batch`. */
   canAddToBatch?: boolean
+  /** Explanation shown when this operation cannot be added to a batch. */
+  addToBatchDisabledReason?: string
 }>()
 const emit = defineEmits<{ (e: 'add-to-batch'): void }>()
 const { settings } = useUserSettings()
@@ -50,8 +57,7 @@ const modal = useModal()
 // op to it) first. The "Add to batch" button next to this one stays enabled.
 const isBatchActive = computed(() => entryCount.value > 0)
 // When a batch is queued and the user could otherwise execute directly, the
-// batch state takes over the button area (ahead of the keyring/TOS/unverified
-// gateways, which are all just pre-steps to a direct execute).
+// batch state takes over the button area after vault consent is resolved.
 const batchBlocksDirect = computed(() =>
   isBatchActive.value && hasActiveSession.value && !needToSwitchChain.value,
 )
@@ -158,13 +164,27 @@ const showTosFlow = computed(() =>
 const showUnverifiedVaultFlow = computed(() =>
   !showKeyringFlow.value && !showTosFlow.value && unverifiedVaultGuard?.isAcknowledgmentRequired === true,
 )
+const showDeprecatedDepositFlow = computed(() =>
+  !showKeyringFlow.value && !showTosFlow.value && !showUnverifiedVaultFlow.value
+  && unverifiedVaultGuard?.isDeprecatedDepositAcknowledgmentRequired === true,
+)
 
 const openUnverifiedVaultModal = () => {
   modal.open(VaultUnverifiedDisclaimerModal, {
     props: {
+      flaggedNotice: unverifiedVaultGuard?.flaggedNotice,
       acceptAction: () => {
         unverifiedVaultGuard?.acknowledgeRisk()
       },
+    },
+  })
+}
+
+const openDeprecatedDepositModal = () => {
+  modal.open(VaultDeprecatedDepositModal, {
+    props: {
+      reason: unverifiedVaultGuard?.deprecatedDepositNotice,
+      acceptAction: () => unverifiedVaultGuard?.acknowledgeDeprecatedDeposit(),
     },
   })
 }
@@ -188,7 +208,7 @@ const openTermsModal = () => {
 // acknowledgements. TOS is special: the add path may open the TOS modal, then
 // continue only if no non-TOS blockers remain.
 const nonTosOperationBlockReason = computed(() =>
-  operationBlockerEntries.value.find(([key]) => key !== 'tos')?.[1],
+  operationBlockerEntries.value.find(([key]) => !isOperationBlockerKey(key, 'tos'))?.[1],
 )
 const hasNonTosOperationBlocker = computed(() => !!nonTosOperationBlockReason.value)
 const isAddToBatchBaseDisabled = computed(() =>
@@ -212,12 +232,16 @@ const addToBatchDisabledReason = computed(() => {
   if (!hasActiveSession.value) return 'Connect a wallet before adding this operation to the batch.'
   if (showTosFlow.value && nonTosOperationBlockReason.value) return nonTosOperationBlockReason.value
   if (operationBlockReason.value) return operationBlockReason.value
+  if (props.addToBatchDisabledReason) return props.addToBatchDisabledReason
   if (props.disabledReason) return props.disabledReason
   if (isResolvingStateOverrideHints.value || !props.canAddToBatch) return GENERIC_DISABLED_REASON
   return undefined
 })
 
 const tooltipText = computed(() => {
+  if (batchBlocksDirect.value && supportsBatch.value) {
+    return isAddToBatchDisabled.value ? addToBatchDisabledReason.value : PLUS_TOOLTIP
+  }
   if (!isPlusHover.value) return effectiveDisabledReason.value
   return isAddToBatchDisabled.value ? addToBatchDisabledReason.value : PLUS_TOOLTIP
 })
@@ -257,7 +281,58 @@ const handleAddToBatch = () => {
          primary action becomes "Add to batch" (Option B) rather than a disabled
          execute button + a separate "+". Direct execute resumes once the batch
          is cleared (link below). -->
-      <template v-if="batchBlocksDirect && supportsBatch">
+      <template v-if="!hasActiveSession || needToSwitchChain">
+        <UiButton
+          type="button"
+          size="large"
+          :variant="needToSwitchChain ? 'red' : 'primary'"
+          @click="onClick"
+        >
+          {{ needToSwitchChain ? 'Switch chain' : 'Connect wallet' }}
+        </UiButton>
+      </template>
+      <template v-else-if="unverifiedVaultGuard?.isVerificationLoading">
+        <UiButton
+          size="large"
+          disabled
+          loading
+        >
+          Checking vault verification
+        </UiButton>
+      </template>
+      <template v-else-if="unverifiedVaultGuard?.verificationError">
+        <p class="text-content-secondary">
+          {{ unverifiedVaultGuard.verificationError }}
+        </p>
+        <UiButton
+          type="button"
+          size="large"
+          @click="unverifiedVaultGuard.retryVerification()"
+        >
+          Retry verification
+        </UiButton>
+      </template>
+      <!-- Vault consent stays reachable with a queued batch; after acceptance,
+           the Add to batch action takes over this button area. -->
+      <template v-else-if="showUnverifiedVaultFlow">
+        <UiButton
+          size="large"
+          variant="red"
+          @click="openUnverifiedVaultModal"
+        >
+          {{ unverifiedVaultGuard?.flaggedNotice ? FLAGGED_VAULT_ACTION : 'Acknowledge Unverified Vault Risk' }}
+        </UiButton>
+      </template>
+      <template v-else-if="showDeprecatedDepositFlow">
+        <UiButton
+          size="large"
+          variant="red"
+          @click="openDeprecatedDepositModal"
+        >
+          Acknowledge Deprecated Vault
+        </UiButton>
+      </template>
+      <template v-else-if="batchBlocksDirect && supportsBatch">
         <UiButton
           size="large"
           variant="primary"
@@ -299,7 +374,11 @@ const handleAddToBatch = () => {
           <KeyringVerificationFlow
             :flow-state="keyringGuard.flowState"
             :credential-cost="keyringGuard.credentialData?.cost"
+            :checking-status="keyringGuard.isCheckingStatus"
+            :status-message="keyringGuard.statusMessage"
+            :error-message="keyringGuard.error"
             @launch="keyringGuard.launchExtension()"
+            @retry="keyringGuard.retryVerification()"
             @check="keyringGuard.checkStatus()"
             @cancel="keyringGuard.cancelVerification()"
           />
@@ -317,35 +396,17 @@ const handleAddToBatch = () => {
         </UiButton>
       </template>
 
-      <!-- Unverified vault acknowledgment flow -->
-      <template v-else-if="showUnverifiedVaultFlow">
-        <UiButton
-          size="large"
-          variant="red"
-          @click="openUnverifiedVaultModal"
-        >
-          Acknowledge Unverified Vault Risk
-        </UiButton>
-      </template>
-
       <!-- Normal submit button -->
       <template v-else>
         <UiButton
           v-bind="$attrs"
           size="large"
           type="submit"
-          :variant="needToSwitchChain ? 'red' : 'primary'"
+          variant="primary"
           :loading="isLoading"
           :disabled="_disabled"
-          @click="onClick"
         >
-          <template v-if="needToSwitchChain">
-            Switch chain
-          </template>
-          <slot v-else-if="hasActiveSession" />
-          <template v-else>
-            Connect wallet
-          </template>
+          <slot />
         </UiButton>
       </template>
 

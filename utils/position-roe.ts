@@ -51,6 +51,21 @@ export type PositionRoeCollateralVaults = {
   isComplete: boolean
 }
 
+export const resolveRoeCollateralVaultsByAddresses = (
+  addresses: readonly string[],
+  availableVaults: readonly RoeCollateralVault[],
+): PositionRoeCollateralVaults => {
+  const expectedAddresses = new Set(addresses.map(normalizeAddress))
+  const vaults = mergeRoeCollateralVaults(
+    availableVaults.filter(vault => expectedAddresses.has(normalizeVaultAddress(vault))),
+  )
+  const resolvedAddresses = new Set(vaults.map(normalizeVaultAddress))
+  return {
+    vaults,
+    isComplete: [...expectedAddresses].every(address => resolvedAddresses.has(address)),
+  }
+}
+
 export const resolvePositionRoeCollateralVaults = (
   position: PortfolioBorrowPosition<VaultEntity> | null | undefined,
   fallback?: RoeCollateralVault | null,
@@ -98,3 +113,10 @@ export const areRoeCollateralVaultsCorrelatedWithBorrow = (
     getTokenCategoryTags,
   )
 }
+
+export const isRoeStateApplicable = (
+  state: PositionRoeCollateralVaults,
+  borrowVault: RoeCollateralVault | null | undefined,
+  getTokenCategoryTags: (address: string) => TokenCategoryTagSource,
+): boolean => state.isComplete
+  && areRoeCollateralVaultsCorrelatedWithBorrow(state.vaults, borrowVault, getTokenCategoryTags)

@@ -31,18 +31,33 @@ type SdkQueryRecorderWindow = Window & {
 }
 
 const failureCache = new Map<string, { error: unknown, expiresAt: number }>()
+const queryGenerations = new Map<string, number>()
+
+type SdkQueryInvalidationListener = (queryNames: ReadonlySet<string>) => void
+const sdkQueryInvalidationListeners = new Set<SdkQueryInvalidationListener>()
+
+export const subscribeToSdkQueryInvalidations = (
+  listener: SdkQueryInvalidationListener,
+) => {
+  sdkQueryInvalidationListeners.add(listener)
+  return () => sdkQueryInvalidationListeners.delete(listener)
+}
 
 const buildSdkQuery = (staleTimes: Partial<Record<EulerSDKQueryName, number>>): BuildQueryFn => {
   return ((queryName: string, fn, _target: object, context) => {
     const wrapped = (async (...args: Parameters<typeof fn>) => {
-      const serializedArgs = context?.getCacheKey(args) ?? serializeQueryArgs(args)
+      const sdkCacheKey = context?.getCacheKey(args)
+      // The SDK uses a null key to opt out of caching, including failure caching.
+      // Token decimals must be read again after each settled request.
+      if (sdkCacheKey === null) return fn(...args)
+      const serializedArgs = sdkCacheKey ?? serializeQueryArgs(args)
       if (serializedArgs === null) {
         throw new TypeError(`SDK query arguments for ${queryName} are not serializable`)
       }
 
       const startedAt = queryTimerNow()
       const stack = captureSdkQueryStack()
-      const queryKey = ['sdk', queryName, serializedArgs] as const
+      const queryKey = ['sdk', queryName, queryGenerations.get(queryName) ?? 0, serializedArgs] as const
       const failureKey = JSON.stringify(queryKey)
       let usedCachedFailure = false
       try {
@@ -137,17 +152,44 @@ export const sdkFreshBuildQuery = buildSdkQuery(FORM_STALE_TIMES)
 export const invalidateSdkQueries = (queryNames: EulerSDKQueryName[]) => {
   const names = new Set<string>(queryNames)
   for (const key of failureCache.keys()) {
-    const [, queryName] = JSON.parse(key) as [string, string, string]
+    const [, queryName] = JSON.parse(key) as [string, string, number, string]
     if (names.has(queryName)) failureCache.delete(key)
   }
-  return sdkQueryClient.invalidateQueries({
+  const invalidation = sdkQueryClient.invalidateQueries({
     predicate: query =>
       query.queryKey[0] === 'sdk'
       && typeof query.queryKey[1] === 'string'
       && names.has(query.queryKey[1]),
   })
+  for (const listener of sdkQueryInvalidationListeners) {
+    try {
+      listener(names)
+    }
+    catch {
+      // Query invalidation is a global transaction side effect. A display
+      // subscriber must not be able to interrupt the remaining invalidation.
+    }
+  }
+  return invalidation
+}
+
+/**
+ * Start distinct cache keys for subsequent reads before invalidating the
+ * preceding generation. An in-flight query may still finish for its original
+ * caller, but later callers cannot join it or publish into the new generation.
+ */
+export const advanceSdkQueryGeneration = (queryNames: EulerSDKQueryName[]) => {
+  const names = new Set(queryNames)
+  for (const name of names) {
+    queryGenerations.set(name, (queryGenerations.get(name) ?? 0) + 1)
+  }
+  return invalidateSdkQueries([...names])
 }
 
 export const clearSdkQueryFailureCacheForTest = () => {
   failureCache.clear()
+}
+
+export const clearSdkQueryGenerationsForTest = () => {
+  queryGenerations.clear()
 }

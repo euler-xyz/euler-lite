@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_V3_API_URL, readMerklApiKey, readResolvedV3ApiUrl, readV3ApiKey, readV3ApiUrl } from '~/utils/api-url-env'
+import { DEFAULT_V3_API_URL, readDisableV3, isV3BackendEnabled, readMerklApiKey, readResolvedV3ApiUrl, readTurtleEarnApiKey, readV3ApiKey, readV3ApiUrl } from '~/utils/api-url-env'
 
 describe('api-url-env', () => {
+  it('keeps V3 enabled by default and honours the explicit opt-out and SDK alias', () => {
+    expect(readDisableV3({})).toBe(false)
+    expect(isV3BackendEnabled({ V3_API_URL: DEFAULT_V3_API_URL })).toBe(true)
+    expect(isV3BackendEnabled({ V3_API_URL: DEFAULT_V3_API_URL, DISABLE_V3: 'true' })).toBe(false)
+    expect(readDisableV3({ EULER_SDK_DISABLE_V3: '1' })).toBe(true)
+    expect(readDisableV3({ DISABLE_V3: 'false', EULER_SDK_DISABLE_V3: 'true' })).toBe(false)
+    expect(readResolvedV3ApiUrl({ DISABLE_V3: 'true' })).toBe(DEFAULT_V3_API_URL)
+  })
   it('ignores non-V3 API URL variables', () => {
     const env = {
       OTHER_API_URL: 'https://example.test',
@@ -50,6 +58,18 @@ describe('api-url-env', () => {
   it('does not read public Merkl API key variables', () => {
     expect(readMerklApiKey({
       NUXT_PUBLIC_MERKL_API_KEY: 'public-key',
+    })).toBe('')
+  })
+
+  it('reads the server-side Turtle Earn API key', () => {
+    expect(readTurtleEarnApiKey({})).toBe('')
+    expect(readTurtleEarnApiKey({ TURTLE_EARN_API_KEY: 'sk_live_secret' })).toBe('sk_live_secret')
+  })
+
+  it('does not read public Turtle API key variables', () => {
+    expect(readTurtleEarnApiKey({
+      NUXT_PUBLIC_TURTLE_EARN_API_KEY: 'pk_live_public',
+      TURTLE_API_KEY: 'other-name',
     })).toBe('')
   })
 

@@ -2,15 +2,16 @@
   "version": 1,
   "name": "mainnet-prime-anvil",
   "chainId": 1,
-  "forkBlockNumber": 25159633,
+  "forkBlockNumber": 26182477,
   "anvil": {
     "rpcUrl": "http://127.0.0.1:8545",
-    "startCommand": "anvil --fork-url \"$FORK_RPC_URL\" --fork-block-number 25159633 --auto-impersonate --port 8545"
+    "startCommand": "anvil --fork-url \"$FORK_RPC_URL\" --fork-block-number 26182477 --auto-impersonate --port 8545"
   },
   "wallet": {
     "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
     "privateKey": "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-    "ethBalance": "1000"
+    "ethBalance": "1000",
+    "resetCode": true
   },
   "tokens": [
     {
@@ -25,7 +26,7 @@
       "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
       "decimals": 6,
       "amount": "10000",
-      "whale": "0x83A32a54D31Ee4f1f9dFFAd2A63A6d214e469eC3"
+      "whale": "0x28C6c06298d514Db089934071355E5743bf21d60"
     },
     {
       "symbol": "WETH",

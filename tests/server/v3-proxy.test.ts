@@ -30,17 +30,59 @@ describe('v3 proxy utilities', () => {
     expect(target).toBe('https://v3.example/base/v3/evk/vaults/batch?chainId=1')
   })
 
+  describe('upstream refresh parameters', () => {
+    const target = (path: string) => buildV3ProxyTarget(
+      new URL(`https://app.example/api/internal/v3${path}`),
+      { V3_API_URL: 'https://v3.example/base/' },
+    )
+
+    it.each(['forceFresh', 'maxAge', 'minBlock'])('strips %s on every proxied path', (name) => {
+      expect(target(`/accounts/${ACCOUNT}/positions?chainId=1&${name}=true&offset=0&limit=100`))
+        .toBe(`https://v3.example/base/v3/accounts/${ACCOUNT}/positions?chainId=1&offset=0&limit=100`)
+      expect(target(`/evk/vaults/1/${VAULT}/totals?${name}=1&resolution=1d`))
+        .toBe(`https://v3.example/base/v3/evk/vaults/1/${VAULT}/totals?resolution=1d`)
+      expect(target(`/earn/vaults/1/${VAULT}/totals?resolution=1d&${name}=1`))
+        .toBe(`https://v3.example/base/v3/earn/vaults/1/${VAULT}/totals?resolution=1d`)
+      expect(target(`/evk/vaults/batch?${name}=1`))
+        .toBe('https://v3.example/base/v3/evk/vaults/batch')
+    })
+
+    it('strips every occurrence, including percent-encoded names', () => {
+      expect(target(`/accounts/${ACCOUNT}/positions?forceFresh=true&chainId=1&forceFresh=false&force%46resh=1&maxAge=0&max%41ge=0&minBlock=1&minBlock=2&limit=100`))
+        .toBe(`https://v3.example/base/v3/accounts/${ACCOUNT}/positions?chainId=1&limit=100`)
+    })
+
+    it('keeps other parameters byte for byte, in order, with repeated keys', () => {
+      const query = `chainId=1&assets=${ACCOUNT},${VAULT}&tag=a&tag=b&forcefresh=1&ForceFresh=1&MAXAGE=5&minblock=3&q=a%20b+c&flag&&forceFreshness=1`
+      expect(target(`/prices?${query}`)).toBe(`https://v3.example/base/v3/prices?${query}`)
+    })
+
+    it('forwards a URL without a query, or with only refresh parameters, without a query', () => {
+      expect(target('/prices')).toBe('https://v3.example/base/v3/prices')
+      expect(target(`/accounts/${ACCOUNT}/positions?forceFresh=true&maxAge=0&minBlock=1`))
+        .toBe(`https://v3.example/base/v3/accounts/${ACCOUNT}/positions`)
+    })
+  })
+
   it('allows only SDK-owned V3 path shapes', () => {
     expect(isV3ProxyPathAllowed(`/v3/accounts/${ACCOUNT}/positions`)).toBe(true)
+    expect(isV3ProxyPathAllowed(`/v3/activity/accounts/${ACCOUNT}/events`)).toBe(true)
+    expect(isV3ProxyPathAllowed(`/v3/activity/vaults/1/${VAULT}/events`)).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/apys/intrinsic')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/apys/rewards')).toBe(true)
     expect(isV3ProxyPathAllowed(`/v3/earn/vaults/1/${VAULT}`)).toBe(true)
+    expect(isV3ProxyPathAllowed(`/v3/earn/vaults/1/${VAULT}/assessment`)).toBe(true)
     expect(isV3ProxyPathAllowed(`/v3/earn/vaults/1/${VAULT}/totals`)).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/bad-debt')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/batch')).toBe(true)
     expect(isV3ProxyPathAllowed(`/v3/evk/vaults/1/${VAULT}/totals`)).toBe(true)
-    expect(isV3ProxyPathAllowed('/v3/evk/vaults/open-interest')).toBe(true)
+    expect(isV3ProxyPathAllowed(`/v3/evk/vaults/1/${VAULT}/assessment`)).toBe(true)
+    expect(isV3ProxyPathAllowed('/v3/evk/vaults/open-interest')).toBe(false)
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/open-interest/by-collateral')).toBe(true)
+    expect(isV3ProxyPathAllowed('/v3/liquidations')).toBe(true)
+    expect(isV3ProxyPathAllowed('/v3/oracles/adapter-assessments')).toBe(true)
+    expect(isV3ProxyPathAllowed(`/v3/oracles/adapter-assessments/${ACCOUNT}`)).toBe(true)
+    expect(isV3ProxyPathAllowed('/v3/oracles/routers')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/prices')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/resolve/vaults')).toBe(true)
     expect(isV3ProxyPathAllowed('/v3/rewards/breakdown')).toBe(true)
@@ -53,7 +95,32 @@ describe('v3 proxy utilities', () => {
     expect(isV3ProxyPathAllowed('/v3/evk/vaults/bad-debt/history')).toBe(false)
     expect(isV3ProxyPathAllowed('/v3/evk/vaults-admin')).toBe(false)
     expect(isV3ProxyPathAllowed('/v3/apys/unknown')).toBe(false)
+    expect(isV3ProxyPathAllowed('/v3/liquidations/admin')).toBe(false)
+    expect(isV3ProxyPathAllowed('/v3/liquidations-extra')).toBe(false)
+    expect(isV3ProxyPathAllowed('/v3/oracles/adapter-assessments/not-an-address')).toBe(false)
+    expect(isV3ProxyPathAllowed(`/v3/oracles/adapter-assessments/${ACCOUNT}/admin`)).toBe(false)
+    expect(isV3ProxyPathAllowed('/v3/oracles/routers/admin')).toBe(false)
     expect(isV3ProxyPathAllowed('/v3/resolve')).toBe(false)
+    expect(isV3ProxyPathAllowed('/v3/activity/accounts/not-an-address/events')).toBe(false)
+    expect(isV3ProxyPathAllowed(`/v3/activity/accounts/${ACCOUNT}/events/admin`)).toBe(false)
+    expect(isV3ProxyPathAllowed(`/v3/activity/vaults/0/${VAULT}/events`)).toBe(false)
+    expect(isV3ProxyPathAllowed(`/v3/activity/vaults/${'1'.repeat(17)}/${VAULT}/events`)).toBe(false)
+    expect(isV3ProxyPathAllowed(`/v3/activity/vaults/1/not-an-address/events`)).toBe(false)
+    expect(isV3ProxyPathAllowed(`/v3/evk/vaults/1/not-an-address/assessment`)).toBe(false)
+    expect(isV3ProxyPathAllowed(`/v3/evk/vaults/1/${VAULT}/assessment/admin`)).toBe(false)
+    expect(isV3ProxyPathAllowed(`/v3/evk/vaults/0/${VAULT}/assessment`)).toBe(false)
+  })
+
+  it('rejects percent-encoded path bytes before attaching the upstream API key', () => {
+    for (const path of [
+      `/api/internal/v3/accounts/${ACCOUNT}%2Fadmin/positions`,
+      `/api/internal/v3/accounts/${ACCOUNT}%5Cadmin/positions`,
+      `/api/internal/v3/accounts/${ACCOUNT}%2e%2e/positions`,
+      `/api/internal/v3/accounts/${ACCOUNT}%00/positions`,
+    ]) {
+      expect(validateV3ProxyUrl('GET', new URL(`https://app.example${path}`)))
+        .toMatchObject({ ok: false, statusCode: 400 })
+    }
   })
 
   it('allows query strings on SDK-owned endpoints for V3 to validate', () => {
@@ -68,7 +135,7 @@ describe('v3 proxy utilities', () => {
     expect(validateV3ProxyUrl(
       'GET',
       new URL(`https://app.example/api/internal/v3/evk/vaults/open-interest?chainId=1&vault=${VAULT}&limit=1`),
-    )).toEqual({ ok: true })
+    )).toEqual({ ok: false, statusCode: 404, statusMessage: 'V3 path not allowed' })
     expect(validateV3ProxyUrl(
       'GET',
       new URL(`https://app.example/api/internal/v3/evk/vaults/1/${VAULT}/totals?resolution=1d&from=1782380000&to=1782984800`),
@@ -84,6 +151,30 @@ describe('v3 proxy utilities', () => {
     expect(validateV3ProxyUrl(
       'GET',
       new URL('https://app.example/api/internal/v3/tokens?chainId=1&limit=500&type=base'),
+    )).toEqual({ ok: true })
+    expect(validateV3ProxyUrl(
+      'GET',
+      new URL(`https://app.example/api/internal/v3/oracles/adapter-assessments/${ACCOUNT}?chainId=1`),
+    )).toEqual({ ok: true })
+    expect(validateV3ProxyUrl(
+      'GET',
+      new URL('https://app.example/api/internal/v3/oracles/adapter-assessments?chainId=1&recognized=true&active=true&offset=0&limit=100'),
+    )).toEqual({ ok: true })
+    expect(validateV3ProxyUrl(
+      'GET',
+      new URL('https://app.example/api/internal/v3/oracles/routers?chainId=1&offset=0&limit=100'),
+    )).toEqual({ ok: true })
+    expect(validateV3ProxyUrl(
+      'GET',
+      new URL(`https://app.example/api/internal/v3/activity/accounts/${ACCOUNT}/events?chainId=1,8453&category=lending,borrowing&cursor=opaque`),
+    )).toEqual({ ok: true })
+    expect(validateV3ProxyUrl(
+      'GET',
+      new URL(`https://app.example/api/internal/v3/activity/vaults/1/${VAULT}/events?vaultType=evk&category=governance`),
+    )).toEqual({ ok: true })
+    expect(validateV3ProxyUrl(
+      'GET',
+      new URL(`https://app.example/api/internal/v3/liquidations?chainId=1&vault=${VAULT}&violator=${ACCOUNT}&from=1782380000&to=1782984800&limit=100&offset=0`),
     )).toEqual({ ok: true })
     expect(validateV3ProxyUrl(
       'GET',
@@ -115,15 +206,7 @@ describe('v3 proxy utilities', () => {
     })
   })
 
-  it('extracts public open-interest and bad-debt failure context', () => {
-    expect(buildV3ProxyLogFields(
-      new URL(`https://app.example/api/internal/v3/evk/vaults/open-interest?chainId=1&vault=${VAULT}&limit=10`),
-    )).toEqual({
-      v3ChainId: '1',
-      v3Limit: '10',
-      v3VaultAddress: VAULT,
-    })
-
+  it('extracts public bad-debt failure context', () => {
     expect(buildV3ProxyLogFields(
       new URL('https://app.example/api/internal/v3/evk/vaults/bad-debt?chainId=1&minBadDebtUsd=0&offset=100&limit=100'),
     )).toEqual({
@@ -141,6 +224,54 @@ describe('v3 proxy utilities', () => {
       v3ChainId: '1',
       v3Limit: '100',
       v3Offset: '0',
+    })
+  })
+
+  it('logs bounded activity context without account addresses', () => {
+    expect(buildV3ProxyLogFields(
+      new URL(`https://app.example/api/internal/v3/activity/accounts/${ACCOUNT}/events?chainId=1,8453&from=1782380000&to=1782984800&category=lending,borrowing&eventType=deposit,borrow&offset=0&limit=25`),
+    )).toEqual({
+      v3ActivityCategories: 'lending,borrowing',
+      v3ActivityEventTypes: 'deposit,borrow',
+      v3ActivityScope: 'account',
+      v3ChainIds: '1,8453',
+      v3From: '1782380000',
+      v3Limit: '25',
+      v3Offset: '0',
+      v3To: '1782984800',
+    })
+
+    expect(buildV3ProxyLogFields(
+      new URL(`https://app.example/api/internal/v3/activity/accounts/${ACCOUNT}/events?chainId=${'1'.repeat(300)}&from=${'1'.repeat(17)}&category=${'a'.repeat(300)}`),
+    )).toEqual({
+      v3ActivityScope: 'account',
+    })
+  })
+
+  it('logs public vault activity context', () => {
+    expect(buildV3ProxyLogFields(
+      new URL(`https://app.example/api/internal/v3/activity/vaults/1/${VAULT}/events?vaultType=securitize&category=lending,governance&limit=25`),
+    )).toEqual({
+      v3ActivityCategories: 'lending,governance',
+      v3ActivityScope: 'vault',
+      v3ChainId: '1',
+      v3Limit: '25',
+      v3VaultAddress: VAULT,
+      v3VaultKind: 'securitize',
+    })
+  })
+
+  it('logs liquidations context without violator or liquidator addresses', () => {
+    expect(buildV3ProxyLogFields(
+      new URL(`https://app.example/api/internal/v3/liquidations?chainId=1&vault=${VAULT}&violator=${ACCOUNT}&liquidator=${ACCOUNT}&from=1782380000&to=1782984800&limit=100&offset=0`),
+    )).toEqual({
+      v3ActivityScope: 'liquidations',
+      v3ChainId: '1',
+      v3From: '1782380000',
+      v3Limit: '100',
+      v3Offset: '0',
+      v3To: '1782984800',
+      v3VaultAddress: VAULT,
     })
   })
 

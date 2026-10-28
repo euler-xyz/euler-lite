@@ -1,46 +1,55 @@
-# Golden tests: legacy → SDK plan-builder parity
+# Golden canary: SDK tx-plan calldata
 
-For each operation type exposed by `composables/useEulerTx.ts`, these tests:
+**This is a version canary, not a correctness suite.** The SDK tests each
+`executionService.plan*` builder comprehensively in its own repo
+(`euler-xyz/euler-sdks`, `test/executionService.test.ts`); duplicating that here
+would be redundant. This suite exists to catch the one thing the SDK's own tests
+can't: an SDK version bump (dependabot, or the preview-SDK path) that silently
+changes the byte-for-byte calldata a Lite user would sign.
 
-1. Run the **legacy** `useEulerOperations` builder, imported from a parallel git
-   worktree that pins the pre-migration `HEAD` (where `composables/useEulerOperations/*`
-   still exists).
-2. Run the **SDK** `executionService.plan*` method against the matching args, then
-   `resolveRequiredApprovals` to expand approval intents into concrete approve calls.
-3. Reduce both plans to a canonical `[{to, data, value, evcBatch}]` tx list
-   (see `normalize.ts`) and assert byte-for-byte equality.
+It runs a handful of representative operations — one per encoder family (plain
+vault op, borrow, repay, migration, swap, leverage) — and for each:
 
-The "canonical tx list" is the post-approval-expansion view a wallet would
-sign: ERC20 `approve` calls + the `EVC.batch(items)` call. Permit2 sign items
-are dropped (off-chain signatures, not txs).
+1. Runs the SDK `executionService.plan*` method against deterministic args, then
+   `resolveRequiredApprovals`.
+2. Reduces the plan to a canonical `[{to, data, value, evcBatch}]` tx list
+   (see `normalize.ts`) — the view a wallet would sign: ERC20 `approve` calls +
+   the `EVC.batch(items)` call. Permit2 sign items are dropped (off-chain).
+3. Asserts that list byte-for-byte against a committed fixture under `plans/`.
 
-## Setup
+If a fixture fails, an SDK change moved the calldata: review the diff and
+regenerate with `npm run test:golden:update`. Deliberately narrow — expand it
+only if there's a specific calldata path worth pinning across upgrades.
+
+These tests run as part of the normal suite (`npm run test:run`) — no separate
+config or setup.
+
+## Running
 
 ```sh
-# 1. Create the legacy worktree pinned to the last commit before the SDK
-#    migration. Path is sibling to this repo, expected by vitest.golden.config.ts.
-git worktree add ../euler-lite-sdk-exec-legacy HEAD
-
-# 2. Share node_modules so the legacy worktree resolves the same deps
-#    (viem, vue, @eulerxyz/euler-v2-sdk, etc.).
-ln -s "$(pwd)/node_modules" ../euler-lite-sdk-exec-legacy/node_modules
-
-# 3. Share the generated .nuxt/tsconfig.json so vitest's TS resolver finds the
-#    parent the legacy tsconfig extends from.
-ln -s "$(pwd)/.nuxt" ../euler-lite-sdk-exec-legacy/.nuxt
-
-# 4. Run the tests.
+# Run just the golden suite.
 npm run test:golden
+
+# Regenerate the plan fixtures from the current SDK output, then review the diff
+# before committing. Use this whenever a deliberate builder change moves calldata.
+npm run test:golden:update
 ```
+
+Outside update mode a missing fixture is a hard failure rather than a silent
+self-approval, so the suite can never "pass" in CI by minting its own baseline.
 
 ## Swap-quote fixtures
 
 The swap-quote tests load real quotes saved under `fixtures/*.json`. They were
-fetched once via the SDK's `SwapService` against `https://swap-dev.euler.finance`
-with the real Ethereum mainnet Euler deployment addresses (so the SDK's
-verifier-address + verifier-data validations pass).
+fetched via the SDK's `SwapService` against `https://swap-dev.euler.finance`,
+validated against the Ethereum mainnet deployment in euler-interfaces
+`EulerChains.json`. The same run writes that deployment's EVC, Permit2, Swapper,
+SwapVerifier and AccountLens addresses to `fixtures/deployment.json`, which
+`harness.ts` reads, so the SDK's verifier-address check passes.
 
-Regenerate when the swap API or the SDK validation rules change:
+Regenerate when the swap API, the SDK validation rules or the mainnet
+deployment change, then run `npm run test:golden:update` and review the plan
+diff:
 
 ```sh
 npm run test:golden:fetch-fixtures
@@ -52,51 +61,29 @@ To point the fetcher at a different swap API URL:
 GOLDEN_SWAP_API_URL=https://swap.example.org npm run test:golden:fetch-fixtures
 ```
 
-Each fixture is a `{ request, quote }` pair — the request is preserved so the
+Each quote fixture is a `{ request, quote }` pair — the request is preserved so the
 test can recover bigint inputs (`amount`, `currentDebt`) via the `$bigint`
 reviver in `load-fixture.ts`.
 
-## How the import resolution works
+## Addresses & scenarios
 
-`vitest.golden.config.ts` aliases `~` and `@` to the **legacy** worktree (so
-any `import '~/X'` inside a legacy source file resolves to the file in that
-worktree). The test file itself reaches into the SDK via the normal
-`@eulerxyz/euler-v2-sdk` package import, which is identical across worktrees.
+`harness.ts` reads the Euler deployment addresses from `fixtures/deployment.json`
+and pins real mainnet ERC20s, which the swap API requires. Vaults are placeholder
+`0xa00…` addresses (the swap API doesn't validate them), chosen so they stand out
+in calldata.
 
-Aside from `~`, the only extra alias is `@golden` → `tests/golden`, used to
-pull in the SDK harness + normalizer from the main worktree without ambiguity.
-
-## What's covered
-
-Each `describe` block targets one operation in `useEulerTx.ts`. Some are
-intentionally skipped where the SDK migration changed batch shape or
-ordering vs the legacy builder — those are kept in-file with a comment
-explaining the specific divergence, so the parity audit stays visible
-rather than getting lost.
-
-Swap-quote operations (`planSwapCollateral`, `planSwapDebt`, etc.) are
-listed as `it.todo` placeholders. Filling them in requires building a
-deterministic `SwapApiQuote` fixture (verifier address, multicall items,
-slippage bounds) that both implementations accept verbatim — that's a
-follow-up.
+Scenarios are tuned to bypass external dependencies the planners would otherwise
+touch: Pyth feed fetch (no controllers / no liability vault), swap verifier RPC
+(the `SkipMin`/`*Max` verify types in the fixtures), and previewWithdraw (the
+seeded account uses shares == assets).
 
 ## Extending
 
 For each new operation:
 
-1. Pick the legacy builder factory (`createVaultBuilders`,
-   `createRepayBuilders`, `createSameAssetSwapBuilders`, ...) and call its
-   builder with deterministic inputs.
-2. Pick the matching SDK planner. Populate `buildSdkAccount({positions})` with
-   the sub-account state the planner needs (e.g. `planRepayFromWallet` reads
-   `position.asset` and `position.borrowed`).
-3. Call `expectPlansEqual(legacyTxs, sdkPlan)` to assert byte equality after
-   approval expansion.
-
-The harness deliberately keeps mocks minimal — the legacy `OperationsContext`
-returns `maxUint256` from `erc20.allowance` reads (so no approval step is
-emitted), no enabled collaterals/controllers from the lens read (so cleanup
-emits nothing), and an undefined `registryGetVault` (so Pyth health-check
-injection is a no-op). When a new scenario needs extra RPC behavior, extend
-`buildLegacyContext.rpcProvider.readContract` in `harness.ts` rather than
-mocking at the test level.
+1. Pick the SDK planner and populate `buildSdkAccount({positions})` with the
+   sub-account state it needs (e.g. `planRepayFromWallet` reads `position.asset`
+   and `position.borrowed` via `account.getPosition(...)`).
+2. Call `expectGoldenPlan('<name>', plan)` in the test.
+3. Run `npm run test:golden:update` to capture `plans/<name>.json`, review the
+   generated calldata, and commit it.

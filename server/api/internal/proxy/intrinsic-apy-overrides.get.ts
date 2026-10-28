@@ -2,6 +2,7 @@ import { createError, getMethod, getQuery, setResponseHeaders } from 'h3'
 import type { Address } from 'viem'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { createRateLimiter } from '~/server/utils/rate-limit'
+import { createTtlCache } from '~/server/utils/cache'
 import { logger } from '~/server/utils/logger'
 import {
   extractHyperbeatWeightedApr,
@@ -11,6 +12,9 @@ import {
 
 const ALLOWED_METHODS = new Set(['GET', 'HEAD'])
 const PENDLE_STALE_MS = 2 * 60 * 60 * 1000
+
+const cache = createTtlCache<IntrinsicApyOverrideRow[]>({ ttlMs: 300_000, maxEntries: 2 })
+const inFlight = new Map<number, Promise<IntrinsicApyOverrideRow[]>>()
 
 const URLS = {
   defillama: 'https://yields.llama.fi/pools',
@@ -123,6 +127,23 @@ const fetchMonad = async (): Promise<IntrinsicApyOverrideRow[]> => {
   return await fetchDefillama(143, monadDefillamaSources)
 }
 
+const fetchCached = async (chainId: number): Promise<IntrinsicApyOverrideRow[]> => {
+  const key = String(chainId)
+  const cached = cache.get(key)
+  if (cached !== undefined) return cached
+  const pending = inFlight.get(chainId)
+  if (pending) return pending
+
+  const request = (chainId === 143 ? fetchMonad() : fetchHyperevm())
+    .then((rows) => {
+      cache.set(key, rows)
+      return rows
+    })
+    .finally(() => { inFlight.delete(chainId) })
+  inFlight.set(chainId, request)
+  return request
+}
+
 export default defineEventHandler(async (event) => {
   const method = getMethod(event).toUpperCase()
   if (!ALLOWED_METHODS.has(method)) {
@@ -142,7 +163,6 @@ export default defineEventHandler(async (event) => {
   })
 
   if (method === 'HEAD') return undefined
-  if (chainId === 143) return await fetchMonad()
-  if (chainId === 999) return await fetchHyperevm()
+  if (chainId === 143 || chainId === 999) return await fetchCached(chainId)
   return []
 })

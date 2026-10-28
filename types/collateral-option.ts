@@ -1,6 +1,8 @@
 import type { VaultEntity } from '@eulerxyz/euler-v2-sdk'
 
 export interface CollateralOption {
+  /** Stable internal identity for otherwise identical options. Never rendered. */
+  selectionId?: string
   type: string
   amount: number
   price: number

@@ -1,14 +1,27 @@
+<script setup lang="ts">
+const props = withDefaults(defineProps<{
+  entity?: 'vault' | 'market'
+}>(), {
+  entity: 'vault',
+})
+
+const tooltipText = computed(() => `This ${props.entity} was added recently.`)
+const isIconActive = ref(false)
+</script>
+
 <template>
   <UiHoverPreviewTooltip
     title="Recently added"
-    text="This vault was added recently."
+    :text="tooltipText"
     placement="top-start"
   >
     <span
       class="recently-added-badge relative inline-flex items-center gap-4 rounded-8 px-8 py-2 text-p5 mobile:gap-0 mobile:rounded-full mobile:w-26 mobile:h-26 mobile:p-0 mobile:justify-center"
+      @mouseenter="isIconActive = true"
+      @mouseleave="isIconActive = false"
     >
       <SvgIcon
-        name="star"
+        :name="isIconActive ? 'badge-recently-added-filled' : 'badge-recently-added'"
         class="!w-14 !h-14"
       />
       <span class="mobile:hidden">Recently added</span>

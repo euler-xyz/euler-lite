@@ -1,3 +1,5 @@
+import { withCheckedSubgraphQueries } from '~/utils/subgraph-queries'
+import { resolveSubgraphSource, LiteSubgraphUnavailableError as SubgraphUnavailableError } from './subgraph-catalog'
 /**
  * Lazy per-chain server-side `EulerSDK` builder.
  *
@@ -18,22 +20,55 @@
  *   - `v3`: pin to V3; SDK build throws when V3 is not configured.
  *
  * Chains listed in `ONCHAIN_SDK_CHAINS` always use the onchain config.
+ *
+ * Turtle Earn requires `X-API-Key` on every endpoint. The direct and
+ * fallback rewards adapters call Turtle upstream themselves rather than via
+ * `/api/internal/proxy/turtle`, so the builder hands them the same server-only
+ * `TURTLE_EARN_API_KEY` the proxy uses. Without a key every Turtle call is a
+ * guaranteed 401, so direct Turtle discovery is disabled instead of hammering
+ * upstream. The flag only gates the direct adapter: V3-sourced Turtle campaigns
+ * still flow through in fallback mode, while proof requests fail at the proxy.
  */
 import {
   buildEulerSDK,
+  createQueryCacheBuildQuery,
+  defaultVaultTypeSubgraphAdapterConfig,
   type EulerSDK,
   type EulerSDKConfig,
 } from '@eulerxyz/euler-v2-sdk'
 import {
   readResolvedV3ApiUrl,
+  readDisableV3,
   readServerVaultCacheSource,
+  readTurtleEarnApiKey,
   readV3ApiKey,
   readV3ApiUrl,
   type VaultDataSource,
 } from '~/utils/api-url-env'
 import { parseChainIds } from '~/utils/parseChainIds'
+import { LiteEulerLabelsService } from '~/utils/sdk-labels'
+import { getPublicLabelsBundle } from './public-labels-source'
+import { serverAbiService } from './sdk-abi-service'
+import { createNoV3IntrinsicApyService, disableSdkV3Utilities } from '~/utils/sdk-no-v3'
 import { resolveRpcUrl } from './rpc'
-import { resolveLabelsBaseUrl } from './labels-base-url'
+import { TURTLE_EARN_API_URL } from './turtle-proxy'
+
+const resolveServerSubgraphSource = async (chainId: number) => {
+  try {
+    return await resolveSubgraphSource(chainId)
+  }
+  catch (error) {
+    // Preserve the server SDK's bundled compatibility mode only before opt-in.
+    const endpoint = defaultVaultTypeSubgraphAdapterConfig.subgraphURLs[chainId]
+    if (error instanceof SubgraphUnavailableError && error.reason === 'missing' && endpoint
+      && !process.env.SUBGRAPH_CATALOG_URL?.trim()
+      && process.env.SUBGRAPH_CATALOG_DISABLED?.trim() !== 'true'
+      && process.env[`SUBGRAPH_DISABLED_${chainId}`]?.trim() !== 'true') {
+      return { endpoint, identity: `bundled:${chainId}` }
+    }
+    throw error
+  }
+}
 
 const sdkByChain = new Map<number, Promise<EulerSDK>>()
 
@@ -66,10 +101,24 @@ const adapterConfigForSource = (source: VaultDataSource): Partial<EulerSDKConfig
   }
 }
 
+/**
+ * Turtle rewards config for the server SDK: the server-only key plus the same
+ * fixed upstream the proxy uses. A missing key disables the direct adapter's
+ * Turtle discovery rather than issuing unauthenticated calls; it does not
+ * remove V3-sourced Turtle campaigns.
+ */
+export const resolveServerTurtleRewardsConfig = (
+  env: NodeJS.ProcessEnv = process.env,
+): Partial<EulerSDKConfig> => {
+  const apiKey = readTurtleEarnApiKey(env).trim()
+  if (!apiKey) return { rewardsEnableTurtle: false }
+  return { rewardsTurtleApiKey: apiKey, rewardsTurtleApiUrl: TURTLE_EARN_API_URL }
+}
+
 const isOnchainSdkChain = (chainId: number): boolean =>
   parseChainIds(process.env.ONCHAIN_SDK_CHAINS, new Set([chainId])).includes(chainId)
 
-const buildServerSdkConfig = (chainId: number): EulerSDKConfig => {
+const buildServerSdkConfig = (chainId: number): EulerSDKConfig & { rpcUrls: Record<number, string> } => {
   const rpcUrl = resolveRpcUrl(chainId)
   if (!rpcUrl) throw new Error(`No RPC URL configured for chain ${chainId}`)
 
@@ -81,20 +130,42 @@ const buildServerSdkConfig = (chainId: number): EulerSDKConfig => {
   return {
     rpcUrls: { [chainId]: rpcUrl },
     v3ApiUrl,
-    eulerLabelsBaseUrl: resolveLabelsBaseUrl(),
     tokenlistApiBaseUrl: v3ApiUrl,
     ...(v3ApiKey ? { v3ApiKey } : {}),
+    ...resolveServerTurtleRewardsConfig(),
     ...adapterConfigForSource(source),
     // Fallback short-circuits to onchain when no V3 is configured —
     // otherwise the SDK keeps trying V3 and every refresh logs failures.
-    ...(source === 'fallback' && !hasV3 ? { disableV3: true } : {}),
+    disableV3: readDisableV3() || (source === 'fallback' && !hasV3),
   }
 }
 
 export const getServerSdk = (chainId: number): Promise<EulerSDK> => {
   const existing = sdkByChain.get(chainId)
   if (existing) return existing
-  const promise = buildEulerSDK({ config: buildServerSdkConfig(chainId) }).catch((err) => {
+  const config = buildServerSdkConfig(chainId)
+  const disableV3 = readDisableV3()
+  const promise = buildEulerSDK({
+    config,
+    buildQuery: withCheckedSubgraphQueries(createQueryCacheBuildQuery(), resolveServerSubgraphSource),
+    // Let the SDK resolve registry viemNames before applying server-only tuning.
+    chains: {
+      146: {
+        transport: {
+          multicall: { batchSize: 128, wait: 10 },
+          http: { batch: { batchSize: 100, wait: 10 } },
+        },
+      },
+    },
+    servicesOverrides: {
+      abiService: serverAbiService,
+      eulerLabelsService: new LiteEulerLabelsService(getPublicLabelsBundle),
+      ...(disableV3 ? { intrinsicApyService: createNoV3IntrinsicApyService() } : {}),
+    },
+  }).then((sdk) => {
+    if (disableV3) disableSdkV3Utilities(sdk)
+    return sdk
+  }).catch((err) => {
     if (sdkByChain.get(chainId) === promise) sdkByChain.delete(chainId)
     throw err
   })

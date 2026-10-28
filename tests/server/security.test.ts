@@ -11,15 +11,38 @@
  * directive is "no longer needed," stop and review the threat model in
  * docs/architecture.md (Clickjacking & Framing Defenses) first.
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import type { H3Event } from 'h3'
 import { buildCsp } from '~/server/plugins/csp'
 import { applySecurityHeaders } from '~/server/middleware/security-headers'
 import { ANTI_CLICKJACK_SCRIPT } from '~/server/plugins/00-anti-clickjack'
 import { escapeScriptJson } from '~/server/plugins/app-config'
 
+const collectTsFiles = (dir: string): string[] => readdirSync(dir).flatMap((entry) => {
+  const path = join(dir, entry)
+  return statSync(path).isDirectory() ? collectTsFiles(path) : path.endsWith('.ts') ? [path] : []
+})
+
 describe('buildCsp', () => {
   const csp = buildCsp('test-nonce', [], { connect: [] }, [])
+
+  it('requires explicit configuration for development proxy origins', async () => {
+    vi.stubEnv('DOPPLER_ENVIRONMENT', 'dev')
+
+    try {
+      vi.resetModules()
+      const { buildCsp: buildDevCsp } = await import('~/server/plugins/csp')
+      const proxyOrigin = 'https://golang-proxy-development.up.railway.app'
+
+      expect(buildDevCsp('test-nonce', [], { connect: [] }, [])).not.toContain(proxyOrigin)
+      expect(buildDevCsp('test-nonce', [proxyOrigin], { connect: [] }, [])).toContain(proxyOrigin)
+    }
+    finally {
+      vi.unstubAllEnvs()
+    }
+  })
 
   it('forbids all frame ancestors', () => {
     expect(csp).toContain('frame-ancestors \'none\'')
@@ -177,5 +200,25 @@ describe('escapeScriptJson (inline __APP_CONFIG__ payload)', () => {
     // The unicode escapes are interpreted by the JS/JSON parser, yielding
     // the original characters back inside the string values.
     expect(JSON.parse(escaped)).toEqual(original)
+  })
+})
+
+describe('server logging and inline-config invariants', () => {
+  it('does not bypass the redacting server logger with console calls', () => {
+    const offenders = collectTsFiles(join(process.cwd(), 'server')).flatMap(file =>
+      readFileSync(file, 'utf8').split('\n').flatMap((line, index) =>
+        /(?<![\w.])console\.(?:log|warn|error|info|debug|trace)\s*\(/.test(line)
+          ? [`${file}:${index + 1}`]
+          : [],
+      ),
+    )
+    expect(offenders).toEqual([])
+  })
+
+  it('script-escapes every inline window config injection', () => {
+    for (const file of ['server/plugins/app-config.ts', 'server/plugins/chain-config.ts']) {
+      const source = readFileSync(join(process.cwd(), file), 'utf8')
+      expect(source).toContain('escapeScriptJson(')
+    }
   })
 })

@@ -2,8 +2,14 @@ import type { IntrinsicApyInfo } from '@eulerxyz/euler-v2-sdk'
 
 export const EMPTY_INTRINSIC_APY: IntrinsicApyInfo = { apy: 0, provider: '' }
 
-interface VaultWithIntrinsicApy {
+export interface VaultWithIntrinsicApy {
   intrinsicApy?: IntrinsicApyInfo
+}
+
+export function resolveVaultIntrinsicApySource(
+  ...vaults: Array<VaultWithIntrinsicApy | undefined>
+): VaultWithIntrinsicApy | undefined {
+  return vaults.find(vault => vault?.intrinsicApy !== undefined)
 }
 
 export function getVaultIntrinsicApyInfo(
@@ -39,4 +45,17 @@ export function withVaultIntrinsicApy(
   enabled: boolean,
 ): number {
   return combineApyWithIntrinsic(baseApy, getVaultIntrinsicApy(vault, enabled))
+}
+
+/**
+ * Recompute a vault APY from the projected raw rate so base/intrinsic
+ * compounding remains correct whenever utilization changes.
+ */
+export function withProjectedVaultIntrinsicApy(
+  currentRawApy: number,
+  projectedRawApy: number | null | undefined,
+  vault: VaultWithIntrinsicApy | undefined,
+  enabled: boolean,
+): number {
+  return withVaultIntrinsicApy(projectedRawApy ?? currentRawApy, vault, enabled)
 }

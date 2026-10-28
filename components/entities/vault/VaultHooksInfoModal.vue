@@ -41,10 +41,10 @@ const title = computed(() => {
 
 const intro = computed(() => {
   if (pausedKind.value === 'full') {
-    return 'All user-facing operations on this vault have been disabled by its risk manager. This typically indicates a freshly-deployed vault that has not been activated yet, or a full pause.'
+    return 'All user-facing operations on this vault have been disabled by its curator. This typically indicates a freshly-deployed vault that has not been activated yet, or a full pause.'
   }
   if (pausedKind.value === 'status-check') {
-    return 'The vault-status check has been disabled. This check is performed on every operation that touches the vault, so every operation reverts until the risk manager re-enables it.'
+    return 'The vault-status check has been disabled. This check is performed on every operation that touches the vault, so every operation reverts until the curator re-enables it.'
   }
   if (isHookDisabling(vault)) {
     return 'The following operations will revert on this vault.'
@@ -70,7 +70,7 @@ const hookTargetLabel = computed(() => {
 // an on-chain allowlist (access-control hook target).
 const hookTargetNote = computed(() =>
   isVaultAccessControlled(vault.address)
-    ? 'This vault is permissioned: the operations below can only be performed by addresses that the vault manager has added to an on-chain allowlist. If your address is not whitelisted, those operations will revert. Access is granted by the manager — there is no self-service verification.'
+    ? 'This vault is permissioned: the operations below can only be performed by addresses that the vault curator has added to an on-chain allowlist. If your address is not whitelisted, those operations will revert. Access is granted by the curator — there is no self-service verification.'
     : '',
 )
 

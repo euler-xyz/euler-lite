@@ -4,11 +4,11 @@ import { formatAssetValue } from '~/utils/sdk-prices'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { useEulerProductOfVault, useEulerEntitiesOfVault } from '~/composables/useEulerLabels'
 import { isVaultGovernanceLimited } from '~/utils/eulerLabelsUtils'
-import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { VaultApyModal, UiModalPreviewTrigger } from '#components'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
+import { zeroAddress } from 'viem'
 
 const { isConnected } = useWagmi()
 const { vault } = defineProps<{ vault: SecuritizeCollateralVault }>()
@@ -16,23 +16,20 @@ const { vault } = defineProps<{ vault: SecuritizeCollateralVault }>()
 const vaultAddress = computed(() => vault.address)
 const product = useEulerProductOfVault(vaultAddress)
 const { enableEntityBranding } = useDeployConfig()
-const { isVaultGovernorVerified } = useVaults()
+const { isSecuritizeGovernorVerified } = useVaults()
 const { isVerifiedVault } = useVaultRegistry()
-// SecuritizeCollateralVault has governorAdmin, safe to cast for entity lookup
+// Entity lookup accepts the shared vault shape; Securitize verification uses its governor field.
 const entities = useEulerEntitiesOfVault(vault as unknown as EVault)
 
 const isUnverified = computed(() => !isVerifiedVault(vault.address))
-const isGovernorVerified = computed(() => isVaultGovernorVerified(vault as unknown as EVault))
+const isGovernorVerified = computed(() => isSecuritizeGovernorVerified(vault))
+const isUngoverned = computed(() => vault.governor?.toLowerCase() === zeroAddress)
 const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
 const entityName = computed(() => {
   if (!isGovernorVerified.value || entities.length === 0) return ''
   if (entities.length === 1) return entities[0].name
   if (entities.length === 2) return `${entities[0].name} & ${entities[1].name}`
   return `${entities[0].name} & others`
-})
-const entityLogos = computed(() => {
-  if (!entityName.value || entities.length === 0) return []
-  return entities.map(e => getEulerLabelEntityLogo(e.logo))
 })
 const displayName = computed(() => product.name || vault.shares.name)
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
@@ -120,9 +117,20 @@ watchEffect(async () => {
           <VaultDisplayName
             :name="displayName"
             :is-unverified="isUnverified"
+            :addresses="[vault.address]"
           />
           <GovernanceLimitedBadge v-if="isGovernanceLimited" />
-          <RestrictedBadge v-if="isGeoBlocked" />
+          <RestrictedBadge
+            v-if="isGeoBlocked"
+            :vault-addresses="[vault.address]"
+            :chain-id="vault.chainId"
+          />
+          <VaultDeprecatedBadge :addresses="[vault.address]" />
+          <VaultAssessmentWarning
+            :address="vault.address"
+            :family="null"
+            hide-deprecated
+          />
         </div>
         <div
           class="text-h5 text-content-primary"
@@ -182,9 +190,15 @@ watchEffect(async () => {
         v-if="enableEntityBranding"
         class="flex-1"
       >
-        <div class="text-content-tertiary text-p3 mb-4">Risk manager</div>
+        <div class="text-content-tertiary text-p3 mb-4">Curator</div>
         <div
-          v-if="!isGovernorVerified"
+          v-if="isUngoverned"
+          class="text-p2 text-content-primary"
+        >
+          Ungoverned
+        </div>
+        <div
+          v-else-if="!isGovernorVerified"
           class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
         >
           <SvgIcon
@@ -198,18 +212,16 @@ watchEffect(async () => {
           class="flex items-center gap-6"
           :class="{ 'opacity-20': isGovernanceLimited }"
         >
-          <BaseAvatar
-            class="icon--20"
-            :label="entityName"
-            :src="entityLogos"
-          />
-          <span
-            class="text-p2 text-content-primary truncate"
-            data-id="data-point"
-            :data-key="vault.address.toLowerCase()"
-            data-field="risk-manager"
-            :data-value="entityName"
-          >{{ entityName }}</span>
+          <VaultEntityDisclosureTooltip :entities="entities">
+            <CuratorEntityLink
+              :entities="entities"
+              :label="entityName"
+              span-link
+              text-class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors truncate"
+              :data-key="vault.address.toLowerCase()"
+              data-field="curator"
+            />
+          </VaultEntityDisclosureTooltip>
         </div>
         <div
           v-else
@@ -257,11 +269,17 @@ watchEffect(async () => {
         class="flex w-full justify-between"
       >
         <div class="flex-1">
-          <div class="text-content-tertiary text-p3">Risk manager</div>
+          <div class="text-content-tertiary text-p3">Curator</div>
         </div>
         <div class="flex gap-8 justify-end items-center text-right flex-1">
           <div
-            v-if="!isGovernorVerified"
+            v-if="isUngoverned"
+            class="text-p2 text-content-primary"
+          >
+            Ungoverned
+          </div>
+          <div
+            v-else-if="!isGovernorVerified"
             class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
           >
             <SvgIcon
@@ -275,12 +293,12 @@ watchEffect(async () => {
             class="flex items-center gap-8"
             :class="{ 'opacity-20': isGovernanceLimited }"
           >
-            <BaseAvatar
-              class="icon--20"
+            <CuratorEntityLink
+              :entities="entities"
               :label="entityName"
-              :src="entityLogos"
+              span-link
+              text-class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors truncate"
             />
-            <span class="text-p2 text-content-primary truncate">{{ entityName }}</span>
           </div>
           <div
             v-else

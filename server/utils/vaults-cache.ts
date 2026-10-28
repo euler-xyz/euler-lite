@@ -1,3 +1,4 @@
+import { getLabelVaultCandidates } from '~/utils/public-labels'
 /**
  * Per-chain vault snapshot cache.
  *
@@ -24,6 +25,7 @@ import {
   StandardEVaultPerspectives,
   VaultType,
   type EulerSDK,
+  type EVault,
   type VaultFetchOptions,
 } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address } from 'viem'
@@ -31,16 +33,12 @@ import { createTtlCache } from './cache'
 import { createInFlightDedup } from '~/utils/in-flight'
 import { logger } from './logger'
 import { reportStatus } from './log'
-import { summarizeSdkIssue } from './observability'
+import { buildVaultAssetLookup, summarizeSdkIssue } from './observability'
 import { getServerSdk } from './sdk-server'
 import { isSdkErrorDiagnostic } from './sdk-diagnostics'
-import {
-  LABEL_FILES,
-  refreshLabelFile,
-  type LabelFile,
-} from '~/server/api/internal/labels/[file].get'
+import { getPublicEulerLabelsData } from './public-labels-source'
 import { encodeBigints } from '~/utils/snapshot-codec'
-import { readV3ApiUrl } from '~/utils/api-url-env'
+import { isV3BackendEnabled } from '~/utils/api-url-env'
 import {
   EVAULT_FETCH_CHUNK_DELAY_MS,
   EVAULT_FETCH_CHUNK_SIZE,
@@ -51,13 +49,15 @@ import type {
   SerialisedVault,
   SerialisedVaultKind,
 } from '~/utils/snapshot-types'
+import { resolveEulerRouterGovernors } from '~/utils/vault/euler-router-governance'
+import { governableGovernorAbi } from '~/abis/oracle'
 
 // With V3 configured the SDK falls back through V3's batched endpoints —
 // each refresh is cheap, so we can afford a tighter cache TTL and rewarm
 // cadence (see `server/plugins/warm-cache.ts:VAULTS_REWARM_INTERVAL_MS`).
 // Without V3, the snapshot is built from onchain lens multicalls which
 // are heavier; the 5-min TTL keeps the cost bounded.
-const CACHE_TTL_MS = readV3ApiUrl() ? 2 * 60_000 : 5 * 60_000
+const CACHE_TTL_MS = isV3BackendEnabled() ? 2 * 60_000 : 5 * 60_000
 
 export const SNAPSHOT_CACHE_TTL_MS = CACHE_TTL_MS
 
@@ -90,39 +90,6 @@ const uniqueAddresses = (addresses: Iterable<string>): Address[] => {
     if (checksummed) result.set(checksummed.toLowerCase(), checksummed)
   }
   return [...result.values()]
-}
-
-interface LabelProduct { vaults?: string[], deprecatedVaults?: string[] }
-interface EarnVaultEntry { address?: string }
-
-const fetchLabel = async <T>(scope: number | 'all', file: LabelFile, fallback: T): Promise<T> => {
-  try {
-    return (await refreshLabelFile(scope, file)) as T
-  }
-  catch (err) {
-    logger.warn({ ctx: 'vaults-cache', scope, file, err }, 'failed to fetch label')
-    return fallback
-  }
-}
-
-const getLabels = async (chainId: number) => {
-  const [products, earn] = await Promise.all([
-    fetchLabel<Record<string, LabelProduct>>(chainId, 'products.json', {}),
-    fetchLabel<Array<string | EarnVaultEntry>>(chainId, 'earn-vaults.json', []),
-  ])
-  const verified = new Set<string>()
-  for (const product of Object.values(products)) {
-    product.vaults?.forEach(addr => verified.add(addr))
-    product.deprecatedVaults?.forEach(addr => verified.add(addr))
-  }
-  const earnVaults: string[] = earn.flatMap((entry) => {
-    if (typeof entry === 'string') return [entry]
-    return typeof entry?.address === 'string' ? [entry.address] : []
-  })
-  return {
-    verifiedVaultAddresses: uniqueAddresses(verified),
-    earnVaults: uniqueAddresses(earnVaults),
-  }
 }
 
 const partitionVerified = async (
@@ -219,13 +186,13 @@ const fetchEVaultsForSnapshot = async (
 export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot> =>
   inFlight.run(chainId, async () => {
     const sdk = await getServerSdk(chainId)
-    const labels = await getLabels(chainId)
+    const labels = await getPublicEulerLabelsData(chainId)
     const escrowAddrs = await fetchEscrowAddrs(sdk, chainId)
     const { evkAddrs, securitizeAddrs, earnAddrs } = await partitionVerified(
       sdk,
       chainId,
-      labels.verifiedVaultAddresses,
-      labels.earnVaults,
+      uniqueAddresses(getLabelVaultCandidates(labels).vaults),
+      uniqueAddresses(getLabelVaultCandidates(labels).earn),
     )
 
     // populateCollaterals / populateStrategyVaults DISABLED — deferred to
@@ -259,6 +226,7 @@ export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot>
         : empty,
     ])
 
+    const assetForVault = buildVaultAssetLookup([...evk.result, ...earn.result, ...securitize.result, ...escrow.result])
     for (const { errors, ctx } of [
       { errors: evk.errors, ctx: 'evk' },
       { errors: earn.errors, ctx: 'earn' },
@@ -267,11 +235,26 @@ export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot>
     ] as const) {
       for (const issue of errors as unknown[]) {
         if (isSdkErrorDiagnostic(issue)) {
-          logger.error({ ctx: 'vaults-cache', chainId, kind: ctx, issue: summarizeSdkIssue(issue) }, 'sdk fetch issue')
+          logger.error({ ctx: 'vaults-cache', chainId, kind: ctx, issue: summarizeSdkIssue(issue, assetForVault) }, 'sdk fetch issue')
         }
       }
     }
 
+    await resolveEulerRouterGovernors(
+      [...evk.result, ...escrow.result].filter(Boolean) as EVault[],
+      (router) => {
+        const provider = sdk.providerService.getProvider(chainId)
+        return provider.readContract({
+          address: router,
+          abi: governableGovernorAbi,
+          functionName: 'governor',
+          authorizationList: undefined,
+        })
+      },
+    )
+
+    // These buckets retain discovery provenance. The serialized SDK isEscrow flag
+    // determines the loaded category in the browser, including explicit false.
     const payload: SerialisedSnapshot = encodeBigints({
       chainId,
       fetchedAt: Date.now(),
@@ -285,7 +268,3 @@ export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot>
     reportStatus('vaults-cache', `chain=${chainId}`, 'ok')
     return payload
   })
-
-// silence unused: LABEL_FILES is re-exported by callers via the labels
-// endpoint module, importing here keeps the file dependency edge explicit.
-void LABEL_FILES

@@ -5,8 +5,8 @@ import {
   computeNextLtv,
   computeNextHealth,
   computeLiquidationPrice,
-  calculateRoe,
 } from '~/utils/repayUtils'
+import { getRoe } from '~/utils/vault/apy'
 
 describe('amountToPercent', () => {
   it('returns 0 when totalDebt is zero', () => {
@@ -185,20 +185,20 @@ describe('computeLiquidationPrice', () => {
   })
 })
 
-describe('calculateRoe', () => {
+describe('getRoe', () => {
   it('returns null when any input is null', () => {
-    expect(calculateRoe(null, 100, 0.05, 0.08)).toBeNull()
-    expect(calculateRoe(100, null, 0.05, 0.08)).toBeNull()
-    expect(calculateRoe(100, 50, null, 0.08)).toBeNull()
-    expect(calculateRoe(100, 50, 0.05, null)).toBeNull()
+    expect(getRoe(null, 0.05, 100, 0.08)).toBeNull()
+    expect(getRoe(100, 0.05, null, 0.08)).toBeNull()
+    expect(getRoe(100, null, 50, 0.08)).toBeNull()
+    expect(getRoe(100, 0.05, 50, null)).toBeNull()
   })
 
-  it('returns null when equity is zero', () => {
-    expect(calculateRoe(100, 100, 0.05, 0.08)).toBeNull()
+  it('returns 0 when equity is zero', () => {
+    expect(getRoe(100, 0.05, 100, 0.08)).toBe(0)
   })
 
-  it('returns null when equity is negative', () => {
-    expect(calculateRoe(50, 100, 0.05, 0.08)).toBeNull()
+  it('returns 0 when equity is negative', () => {
+    expect(getRoe(50, 0.05, 100, 0.08)).toBe(0)
   })
 
   it('calculates ROE correctly', () => {
@@ -206,14 +206,14 @@ describe('calculateRoe', () => {
     // net = 200*0.05 - 100*0.08 = 10 - 8 = 2
     // equity = 200 - 100 = 100
     // roe = 2/100 = 0.02
-    expect(calculateRoe(200, 100, 0.05, 0.08)).toBeCloseTo(0.02, 6)
+    expect(getRoe(200, 0.05, 100, 0.08)).toBeCloseTo(0.02, 6)
   })
 
   it('returns null for non-finite equity', () => {
-    expect(calculateRoe(Infinity, 100, 0.05, 0.08)).toBeNull()
+    expect(getRoe(Infinity, 0.05, 100, 0.08)).toBeNull()
   })
 
   it('returns null for non-finite net', () => {
-    expect(calculateRoe(200, 100, Infinity, 0.08)).toBeNull()
+    expect(getRoe(200, Infinity, 100, 0.08)).toBeNull()
   })
 })

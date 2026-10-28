@@ -4,11 +4,14 @@ import { accountDiagnosticOwner, dataIssueLocation, type DataIssue, type Portfol
 import type { EulerLensAddresses } from '~/composables/useEulerAddresses'
 import { useVaults } from '~/composables/useVaults'
 import { useWallets } from '~/composables/useWallets'
+import { setBatchPrefetchedBaseAccount } from '~/composables/batchPrefetchState'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
 import { createAddressRefreshCoordinator } from '~/utils/address-refresh-coordinator'
 import { logWarn } from '~/utils/errorHandling'
-import { buildVisiblePortfolioPositionFilter } from '~/utils/portfolioPositionFilter'
+import { buildVisiblePortfolioPositionFilter, hydrateHeldVaults } from '~/utils/portfolioPositionFilter'
+import { portfolioPricingGaps } from '~/utils/portfolio-pricing'
 import { createRaceGuard } from '~/utils/race-guard'
+import { liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
 import {
   activeLayerPortfolioRef,
   activeLayerPortfolioAllRef,
@@ -86,9 +89,11 @@ export const useEulerAccount = () => {
   const { isReady: isLabelsReady } = useEulerLabels()
   const { isReady: isVaultsReady } = useVaults()
   const { isReady: isEulerAddressesReady, chainId } = useEulerAddresses()
-  const { address } = useWagmi()
-  const { spyAddress } = useSpyMode()
-  const portfolioAddress = computed(() => normalizeAddressOrEmpty(spyAddress.value) || normalizeAddressOrEmpty(address.value))
+  // Never falls back to the connected wallet while a spy candidate is still
+  // verifying — the portfolio must not show the connected user's positions
+  // under an active spy banner.
+  const { effectiveAddress } = useEffectiveAddress()
+  const portfolioAddress = computed(() => normalizeAddressOrEmpty(effectiveAddress.value ?? ''))
 
   const markLoaded = () => {
     isPositionsLoading.value = false
@@ -100,6 +105,7 @@ export const useEulerAccount = () => {
   const resetLoadingState = () => {
     visiblePortfolio.value = undefined
     allPortfolio.value = undefined
+    setBatchPrefetchedBaseAccount(undefined)
     portfolioDiagnostics.value = []
     isPositionsLoaded.value = false
     isPositionsLoading.value = true
@@ -124,6 +130,7 @@ export const useEulerAccount = () => {
       if (!walletAddress) {
         visiblePortfolio.value = undefined
         allPortfolio.value = undefined
+        setBatchPrefetchedBaseAccount(undefined)
         portfolioDiagnostics.value = []
         markLoaded()
         return
@@ -131,24 +138,37 @@ export const useEulerAccount = () => {
 
       const { getEulerSdkForChain, getEulerSdkFresh } = useEulerSdk()
       // Portfolio reads default to the fresh (onchain) instance so positions,
-      // balances and health always reflect the latest block. Callers can opt
-      // back into the cached V3-backed instance with `source: 'fast'`.
+      // balances and health come from chain rather than the V3 backend.
+      // That selects the data source, not the freshness: reads still resolve
+      // through the shared QueryClient at their `FORM_STALE_TIMES` windows.
+      // Immediate post-tx invalidation marks those rows stale; after subgraph
+      // catch-up, the reviewed-execution refresh advances their cache
+      // generation so its read cannot join a pre-catch-up `fetchQuery`.
+      // Callers can opt into the cached V3-backed instance with `source: 'fast'`.
       // Capture the chain id once so the SDK backend selection and the fetch
       // can't diverge if the user switches chains mid-await.
       const targetChainId = chainId.value
       const sdk = refreshOptions.source === 'fast'
         ? await getEulerSdkForChain(targetChainId)
         : await getEulerSdkFresh()
-      const fetched = await sdk.portfolioService.fetchPortfolio(
+      const fetched = await sdk.accountService.fetchAccount(
         targetChainId,
         getAddress(walletAddress) as Address,
+        {
+          populateVaults: true,
+          populateMarketPrices: true,
+          populateUserRewards: true,
+          vaultFetchOptions: liteVaultFetchOptions,
+        },
       )
       fetched.errors.forEach(issue => logWarn('useEulerAccount/fetchPortfolio', issue))
 
       if (positionGuard.isStale(gen)) return
 
-      const nextAllPortfolio = fetched.result
-      const nextVisiblePortfolio = sdk.portfolioService.buildPortfolio(fetched.result.account, {
+      const nextAllPortfolio = sdk.portfolioService.buildPortfolio(fetched.result)
+      await hydrateHeldVaults(nextAllPortfolio)
+      if (positionGuard.isStale(gen)) return
+      const nextVisiblePortfolio = sdk.portfolioService.buildPortfolio(fetched.result, {
         positionFilter: buildVisiblePortfolioPositionFilter(),
       })
 
@@ -156,11 +176,13 @@ export const useEulerAccount = () => {
 
       allPortfolio.value = nextAllPortfolio
       visiblePortfolio.value = nextVisiblePortfolio
+      setBatchPrefetchedBaseAccount(nextAllPortfolio.account)
       portfolioDiagnostics.value = fetched.errors
       markLoaded()
     }
     catch (error) {
       if (positionGuard.isStale(gen)) return
+      setBatchPrefetchedBaseAccount(undefined)
       logWarn('useEulerAccount/fetchAndUpdatePortfolio', error)
       portfolioDiagnostics.value = [{
         code: 'SOURCE_UNAVAILABLE',
@@ -232,24 +254,31 @@ export const useEulerAccount = () => {
   const totalSuppliedValue = computed(() => usdWadToNumber(portfolio.value?.totalSuppliedValueUsd))
   const totalBorrowedValue = computed(() => usdWadToNumber(portfolio.value?.totalBorrowedValueUsd))
   const netAssetMarketValue = computed(() => usdWadToNumber(portfolio.value?.netAssetValueUsd))
+  const pricingGaps = computed(() => portfolioPricingGaps(depositPositions.value, borrowPositions.value))
   const totalSuppliedValueInfo = computed(() => ({
     total: totalSuppliedValue.value,
-    hasMissingPrices: portfolio.value?.totalSuppliedValueUsd === undefined
-      && (depositPositions.value.length > 0 || borrowPositions.value.length > 0),
+    hasMissingPrices: pricingGaps.value.supplied
+      || (portfolio.value?.totalSuppliedValueUsd === undefined
+        && (depositPositions.value.length > 0 || borrowPositions.value.length > 0)),
   }))
   const totalBorrowedValueInfo = computed(() => ({
     total: totalBorrowedValue.value,
-    hasMissingPrices: portfolio.value?.totalBorrowedValueUsd === undefined
-      && borrowPositions.value.length > 0,
+    hasMissingPrices: pricingGaps.value.borrowed
+      || (portfolio.value?.totalBorrowedValueUsd === undefined
+        && borrowPositions.value.length > 0),
   }))
   const netAssetMarketValueInfo = computed(() => ({
     total: netAssetMarketValue.value,
-    hasMissingPrices: portfolio.value?.netAssetValueUsd === undefined
-      && (depositPositions.value.length > 0 || borrowPositions.value.length > 0),
+    hasMissingPrices: pricingGaps.value.supplied
+      || pricingGaps.value.borrowed
+      || (portfolio.value?.netAssetValueUsd === undefined
+        && (depositPositions.value.length > 0 || borrowPositions.value.length > 0)),
   }))
 
   const getPositionBySubAccountIndex = (subAccountIndex: number): PortfolioBorrowPosition<VaultEntity> | undefined => {
-    const owner = portfolioAddress.value || address.value
+    // portfolioAddress is already the spy-safe acting address (spied owner,
+    // or the connected wallet outside spy mode).
+    const owner = portfolioAddress.value
     if (!owner) return undefined
 
     return allBorrowPositions.value.find((position) => {

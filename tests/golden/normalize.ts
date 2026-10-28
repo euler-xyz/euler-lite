@@ -2,9 +2,7 @@ import { encodeFunctionData, getAddress, type Address, type Hex } from 'viem'
 import type { TransactionPlan, EVCBatchEntry, EVCBatchItem } from '@eulerxyz/euler-v2-sdk'
 import { flattenBatchEntries } from '@eulerxyz/euler-v2-sdk'
 
-// --- Imported lazily so the legacy types live in the legacy worktree ---
-// (Both sides describe the same shape: target/onBehalfOfAccount/value/data
-// EVC batch items.)
+// EVC batch item shape: target/onBehalfOfAccount/value/data.
 type EVCCall = {
   targetContract: Address
   onBehalfOfAccount: Address
@@ -57,44 +55,6 @@ const encodeBatch = (items: EVCCall[]): Hex => encodeFunctionData({
   functionName: 'batch',
   args: [items],
 })
-
-/**
- * Reduce a legacy `TxPlan` to canonical {to, data, value} txs.
- * Each `TxStep` corresponds to one transaction; `evc-batch` steps are
- * encoded as `EVC.batch(items)` calldata.
- */
-export function normalizeLegacyPlan(plan: {
-  steps: Array<{
-    type: string
-    to: Address
-    abi: readonly unknown[] | object
-    functionName: string
-    args: readonly unknown[]
-    value?: bigint
-  }>
-}, evcAddress: Address): CanonicalTx[] {
-  return plan.steps.map((step) => {
-    if (step.type === 'evc-batch') {
-      // args = [evcCalls]
-      const calls = step.args[0] as EVCCall[]
-      return {
-        to: evcAddress,
-        data: encodeBatch(calls),
-        value: (step.value ?? 0n).toString(),
-        evcBatch: calls.map(normalizeEvcCall),
-      }
-    }
-    return {
-      to: step.to,
-      data: encodeFunctionData({
-        abi: step.abi as never,
-        functionName: step.functionName,
-        args: step.args,
-      }),
-      value: (step.value ?? 0n).toString(),
-    }
-  })
-}
 
 /**
  * Reduce an SDK `TransactionPlan` (post-approval-expansion) to canonical txs.

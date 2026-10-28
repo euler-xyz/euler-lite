@@ -1,7 +1,9 @@
 import { resolve } from 'path'
 import { defineConfig } from 'vitest/config'
+import vue from '@vitejs/plugin-vue'
 
 export default defineConfig({
+  plugins: [vue()],
   resolve: {
     alias: {
       '~': resolve(__dirname),
@@ -11,7 +13,7 @@ export default defineConfig({
   },
   test: {
     include: ['tests/**/*.test.ts'],
-    exclude: ['tests/golden/**', 'node_modules/**'],
+    exclude: ['node_modules/**'],
     globals: true,
     setupFiles: ['./tests/setup.ts'],
   },

@@ -13,7 +13,8 @@
 import {
   DEFAULT_VAULT_DATA_SOURCE,
   readBrowserVaultSource,
-  readV3ApiUrl,
+  readDisableV3,
+  isV3BackendEnabled,
   V3_API_PROXY_URL,
   type VaultDataSource,
 } from '~/utils/api-url-env'
@@ -22,8 +23,9 @@ import {
   EMPTY_ANNOUNCEMENT_CONFIG,
   type AnnouncementConfig,
 } from '~/utils/announcement-config'
+import { edgeProvidesVpnEvidence, parseEdgeProvider } from '~/utils/edge-presets'
 
-interface EnvConfig {
+export interface EnvConfig {
   appTitle: string
   appDescription: string
   logoUrl: string
@@ -32,15 +34,32 @@ interface EnvConfig {
   appKitProjectId: string
   appUrl: string
   v3ApiUrl: string
+  /** Public V3 images base (ends in /v3/images) the server read from its V3;
+   *  empty when unknown, so chain logos use bundled files and oracle-provider
+   *  logos are hidden. */
+  v3ImagesUrl: string
   /** True when the deployment has an upstream V3 API configured. Drives the
    *  SDK "fast" instance: when true it uses v3 adapters; when false it falls
    *  back to direct on-chain reads with longer caching. */
   enableV3Backend: boolean
+  /** Explicit deployment-wide V3 opt-out, including optional utilities. */
+  disableV3: boolean
   /** Adapter chain the browser's "fast" SDK uses (vault lists, prices,
    *  rewards). Mirrors `SERVER_VAULT_CACHE_SOURCE` on the snapshot side. */
   browserVaultSource: VaultDataSource
   swapApiUrl: string
+  eulerInterfacesBranch: string
   announcement: AnnouncementConfig
+  /** Whether the deployment's edge provider measures VPN usage. Drives the
+   *  client VPN probe in services/vpn.ts — false skips it entirely. */
+  vpnDetection: boolean
+}
+
+declare global {
+  interface Window {
+    /** Server-injected runtime config (server/plugins/app-config.ts). */
+    __APP_CONFIG__?: EnvConfig
+  }
 }
 
 const DEFAULTS: EnvConfig = {
@@ -52,10 +71,14 @@ const DEFAULTS: EnvConfig = {
   appKitProjectId: '',
   appUrl: '',
   v3ApiUrl: '',
+  v3ImagesUrl: '',
   enableV3Backend: false,
+  disableV3: false,
   browserVaultSource: DEFAULT_VAULT_DATA_SOURCE,
   swapApiUrl: '',
+  eulerInterfacesBranch: 'master',
   announcement: EMPTY_ANNOUNCEMENT_CONFIG,
+  vpnDetection: false,
 }
 
 let cached: EnvConfig | null = null
@@ -68,25 +91,32 @@ function env(key: string, ...fallbackKeys: string[]): string {
 }
 
 function scanEnv(): EnvConfig {
-  const v3UpstreamConfigured = !!readV3ApiUrl()
   return {
     appTitle: env('APP_TITLE', 'NUXT_PUBLIC_CONFIG_APP_TITLE') || DEFAULTS.appTitle,
     appDescription: env('APP_DESCRIPTION', 'NUXT_PUBLIC_CONFIG_APP_DESCRIPTION') || DEFAULTS.appDescription,
     logoUrl: env('LOGO_URL', 'NUXT_PUBLIC_CONFIG_LOGO_URL') || DEFAULTS.logoUrl,
     socialImageUrl: env('SOCIAL_IMAGE_URL', 'NUXT_PUBLIC_CONFIG_SOCIAL_IMAGE_URL') || DEFAULTS.socialImageUrl,
-    pythHermesUrl: env('PYTH_HERMES_URL', 'NUXT_PUBLIC_PYTH_HERMES_URL') || '',
+    pythHermesUrl: env('PYTH_API_KEY').trim() ? 'proxy' : '',
     appKitProjectId: env('APPKIT_PROJECT_ID', 'NUXT_PUBLIC_APP_KIT_PROJECT_ID') || DEFAULTS.appKitProjectId,
     appUrl: env('NUXT_PUBLIC_APP_URL') || DEFAULTS.appUrl,
     v3ApiUrl: V3_API_PROXY_URL,
-    enableV3Backend: v3UpstreamConfigured,
+    v3ImagesUrl: DEFAULTS.v3ImagesUrl,
+    enableV3Backend: isV3BackendEnabled(),
+    disableV3: readDisableV3(),
     browserVaultSource: readBrowserVaultSource(),
     swapApiUrl: env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL') || DEFAULTS.swapApiUrl,
+    eulerInterfacesBranch: env(
+      'EULER_SDK_EULER_INTERFACES_BRANCH',
+      'NUXT_PUBLIC_EULER_INTERFACES_BRANCH',
+      'NUXT_PUBLIC_CONFIG_EULER_INTERFACES_BRANCH',
+    ) || DEFAULTS.eulerInterfacesBranch,
     announcement: buildAnnouncementConfig({
       title: env('CONFIG_ANNOUNCEMENT_TITLE', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_TITLE'),
       body: env('CONFIG_ANNOUNCEMENT_BODY', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_BODY'),
       items: env('CONFIG_ANNOUNCEMENT_ITEMS', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_ITEMS'),
       url: env('CONFIG_ANNOUNCEMENT_URL', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_URL'),
     }),
+    vpnDetection: edgeProvidesVpnEvidence(parseEdgeProvider(process.env.EDGE_PROVIDER)),
   }
 }
 
@@ -113,15 +143,22 @@ function fromRuntimeConfig(): EnvConfig {
     appKitProjectId: str(rc.appKitProjectId) || DEFAULTS.appKitProjectId,
     appUrl: str(rc.appUrl) || DEFAULTS.appUrl,
     v3ApiUrl: str(rc.v3ApiUrl) || V3_API_PROXY_URL,
-    enableV3Backend: isTruthy(rc.enableV3Backend),
+    v3ImagesUrl: DEFAULTS.v3ImagesUrl,
+    enableV3Backend: !isTruthy(rc.disableV3) && isTruthy(rc.enableV3Backend),
+    disableV3: isTruthy(rc.disableV3),
     browserVaultSource: parseSource(rc.browserVaultSource),
     swapApiUrl: str(rc.swapApiUrl) || DEFAULTS.swapApiUrl,
+    eulerInterfacesBranch: str(rc.eulerInterfacesBranch) || DEFAULTS.eulerInterfacesBranch,
     announcement: buildAnnouncementConfig({
       title: rc.configAnnouncementTitle,
       body: rc.configAnnouncementBody,
       items: rc.configAnnouncementItems,
       url: rc.configAnnouncementUrl,
     }),
+    // Static/CDN deployments carry no edge preset information — skip the
+    // VPN probe (the server derives the authoritative verdict from edge
+    // request headers regardless).
+    vpnDetection: false,
   }
 }
 
@@ -131,10 +168,8 @@ export const useEnvConfig = (): EnvConfig => {
   if (import.meta.server) {
     cached = scanEnv()
   }
-  /* eslint-disable @typescript-eslint/no-explicit-any -- server-injected window global */
-  else if (typeof window !== 'undefined' && (window as any).__APP_CONFIG__) {
-    cached = (window as any).__APP_CONFIG__
-  /* eslint-enable @typescript-eslint/no-explicit-any */
+  else if (typeof window !== 'undefined' && window.__APP_CONFIG__) {
+    cached = window.__APP_CONFIG__
   }
   else {
     cached = fromRuntimeConfig()

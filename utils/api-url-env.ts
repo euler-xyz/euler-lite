@@ -18,6 +18,10 @@ const MERKL_API_KEY_ENV_KEYS = [
   'MERKL_API_KEY',
 ] as const
 
+const TURTLE_EARN_API_KEY_ENV_KEYS = [
+  'TURTLE_EARN_API_KEY',
+] as const
+
 const SERVER_VAULT_CACHE_SOURCE_ENV_KEYS = [
   'SERVER_VAULT_CACHE_SOURCE',
 ] as const
@@ -78,6 +82,15 @@ export function readV3ApiUrl(env: NodeJS.ProcessEnv = process.env): string {
   return firstEnv(env, V3_API_ENV_KEYS)
 }
 
+/** Explicit opt-out; an empty V3 URL alone retains the hosted utility defaults. */
+export function readDisableV3(env: NodeJS.ProcessEnv = process.env): boolean {
+  return isTruthyEnv(firstEnv(env, ['DISABLE_V3', 'EULER_SDK_DISABLE_V3']))
+}
+
+export function isV3BackendEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return !readDisableV3(env) && !!readV3ApiUrl(env)
+}
+
 export function readV3ApiKey(env: NodeJS.ProcessEnv = process.env): string {
   return firstEnv(env, V3_API_KEY_ENV_KEYS)
 }
@@ -91,6 +104,15 @@ export function readV3ApiKey(env: NodeJS.ProcessEnv = process.env): string {
  */
 export function readMerklApiKey(env: NodeJS.ProcessEnv = process.env): string {
   return firstEnv(env, MERKL_API_KEY_ENV_KEYS)
+}
+
+/**
+ * Server-only Turtle Earn API key. Turtle requires it on every request, so the
+ * `/api/internal/proxy/turtle` route refuses to call upstream without it. Never
+ * read from a public/`NUXT_PUBLIC_` variable — the key must not reach the browser.
+ */
+export function readTurtleEarnApiKey(env: NodeJS.ProcessEnv = process.env): string {
+  return firstEnv(env, TURTLE_EARN_API_KEY_ENV_KEYS)
 }
 
 export function readResolvedV3ApiUrl(env: NodeJS.ProcessEnv = process.env): string {
@@ -132,6 +154,7 @@ export function readDisableServerVaultCache(env: NodeJS.ProcessEnv = process.env
 export function warnIfVaultSourceNeedsV3(
   env: NodeJS.ProcessEnv = process.env,
 ): void {
+  if (readDisableV3(env)) return
   if (readV3ApiUrl(env)) return
   const serverSource = readServerVaultCacheSource(env)
   const browserSource = readBrowserVaultSource(env)

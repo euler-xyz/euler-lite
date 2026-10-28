@@ -5,8 +5,8 @@ import { isSecuritizeVault } from '~/utils/vault/categories'
 import { getHookDisabledWarning, getUtilisationWarning, getSupplyCapWarning } from '~/composables/useVaultWarnings'
 import { getAssetOraclePrice, getTokenUsdPrice } from '~/utils/sdk-prices'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
-import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo, combineApyWithIntrinsic } from '~/utils/vault-intrinsic-apy'
-import { isVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
+import { getVaultIntrinsicApy, getVaultIntrinsicApyInfo, combineApyWithIntrinsic, resolveVaultIntrinsicApySource } from '~/utils/vault-intrinsic-apy'
+import { getVaultGeoUnavailableReason, isVaultBlockedByCountry, isVaultRestrictedByCountry, isAssetBlockedByCountry } from '~/composables/useGeoBlock'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 import { useStateOverrideOptions } from '~/composables/useStateOverrideOptions'
@@ -24,12 +24,18 @@ import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { getAddress, type Address, formatUnits, zeroAddress } from 'viem'
-import { VaultUnverifiedDisclaimerModal, OperationReviewModal, VaultApyModal, SwapTokenSelector, SlippageSettingsModal } from '#components'
+import { VaultApyModal, SwapTokenSelector, SlippageSettingsModal } from '#components'
 import { getProjectedRates } from '~/utils/vault/apy'
 import { isNativeCurrencyAddress, isNativeOfWrapped, resolveWrappedNativeAddress, resolveWrappedNativeAsset } from '~/utils/native-currency'
 import { getTxErrorMessage } from '~/utils/tx-errors'
 import { reportClientEvent } from '~/utils/client-observability'
-import { isCowProviderOrQuote } from '~/entities/cowswap'
+import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
+import {
+  getProjectedYieldState,
+  mergeProjectedRewardCampaigns,
+  type ProjectedYieldDetails,
+} from '~/utils/projected-yield'
+import { getLayeredVault } from '~/composables/useLayeredVaults'
 
 // Type definitions for vault display
 type VaultType = 'evk' | 'securitize'
@@ -69,7 +75,9 @@ const { error } = useToast()
 const reviewSupplyLabel = 'Review Supply'
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
-const { planDeposit, planDepositWithSwap, prepareTransactionPlan, executePreparedPlan } = useEulerTx()
+const { planDeposit, planDepositWithSwap, prepareTransactionPlan } = useEulerTx()
+const { create: createIntent } = useOperationIntentFactory()
+const { capture: captureReviewState } = useExecutionReview()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
@@ -95,11 +103,17 @@ const shareLinkQuery = computed(() => {
 const { getBalance } = useWallets()
 const { runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const vaultAddress = route.params.vault as string
-useOperationGuard([vaultAddress])
+const { warning: assessmentWarning } = useVaultAssessmentWarning(vaultAddress)
+useOperationGuard([vaultAddress], { depositedVaultAddresses: [vaultAddress] })
 const { name } = useEulerProductOfVault(vaultAddress)
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
-const { getSupplyRewardApy, hasSupplyRewards, getSupplyRewardCampaigns } = useRewardsApy()
+const {
+  version: rewardsVersion,
+  getSupplyRewardApy,
+  hasSupplyRewards,
+  getSupplyRewardCampaigns,
+} = useRewardsApy()
 
 // State
 const isLoading = ref(false)
@@ -109,7 +123,8 @@ const isEstimatesLoading = ref(false)
 const amount = ref('')
 const plan = ref<TransactionPlan | null>(null)
 const preparedPlan = shallowRef<TransactionPlanPrepared | null>(null)
-const estimateSupplyAPY = ref(0)
+const estimateSupplyAPY = ref<number | null>(0)
+const projectedYieldDetails = ref<ProjectedYieldDetails | null>(null)
 
 // Swap & deposit state
 const selectedAsset = ref<VaultAsset | undefined>()
@@ -137,6 +152,7 @@ const {
   sortedQuoteCards: swapQuoteCardsSorted,
   selectedProvider: swapSelectedProvider,
   selectedQuote: swapSelectedQuote,
+  selectedQuoteCard: swapSelectedQuoteCard,
   effectiveQuote: swapEffectiveQuote,
   effectiveQuoteFetchedAt: swapEffectiveQuoteFetchedAt,
   providersCount: _swapProvidersCount,
@@ -151,13 +167,19 @@ const {
   amountField: 'amountOut',
   compare: 'max',
   buildTxPlanForQuote: (quote, _provider, context) => buildSwapSupplyPlanFromQuote(quote, context.account),
+  createIntentsForQuote: quote => [createSupplyIntent(quote)],
   getPlanAccount: () => planAccount.value,
   getStateOverrideOptions: () => buildLendStateOverrideOptions(),
   prefetchPluginData: getLendPluginPrefetch,
+  prepareTransactionPlan: (plan, account, prefetch, intents) => prepareTransactionPlan(plan, { account, prefetch, intents }),
 })
 // Vault data - only one will be populated based on type
 const eVault: Ref<EVault | undefined> = ref(undefined)
 const securitizeVault: Ref<SecuritizeCollateralVault | undefined> = ref(undefined)
+const projectionEVault = computed(() => {
+  const fallback = eVault.value
+  return fallback ? getLayeredVault(fallback.address, fallback) : undefined
+})
 
 // Check if the active debt-pricing route uses Pyth oracles (requires fresh prices)
 const hasPythOracles = (v: EVault | undefined): boolean => {
@@ -330,9 +352,9 @@ const isSwapRestricted = computed(() => needsSwap.value && isVaultRestrictedByCo
 const isSourceAssetBlocked = computed(() => needsSwap.value && isAssetBlockedByCountry(selectedAsset.value))
 const reviewSupplyDisabled = computed(() => isGeoBlocked.value || isSwapRestricted.value || isSourceAssetBlocked.value || isSubmitDisabled.value)
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
-  if (isSourceAssetBlocked.value) return { message: 'Paying with this asset is not available in your region', variant: 'warning' }
-  if (isSwapRestricted.value) return { message: 'Swap deposits are not available in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: getVaultGeoUnavailableReason(vaultAddress) || 'This operation is not available in your region', variant: 'warning' }
+  if (isSourceAssetBlocked.value) return { message: getVaultGeoUnavailableReason(vaultAddress) || 'Paying with this asset is not available in your region', variant: 'warning' }
+  if (isSwapRestricted.value) return { message: getVaultGeoUnavailableReason(vaultAddress) || 'Swap deposits are not available in your region', variant: 'warning' }
   if (eVault.value && isOpDisabled(eVault.value, OP_DEPOSIT)) return { message: 'Deposits are currently disabled for this vault', variant: 'warning' }
   if (isSupplyCapReached.value) return { message: 'Supply cap has been reached', variant: 'warning' }
   if (errorText.value) return { message: errorText.value, variant: 'error' }
@@ -340,28 +362,65 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (needsSwap.value && !swapSelectedQuote.value && +amount.value > 0) return { message: 'Select a swap quote to continue', variant: 'warning' }
   return undefined
 })
-const totalRewardsAPY = computed(() => getSupplyRewardApy(vaultAddress))
-const hasRewards = computed(() => hasSupplyRewards(vaultAddress))
-const intrinsicApy = computed(() => getVaultIntrinsicApy(vault.value, enableIntrinsicApy.value))
+const totalRewardsAPY = computed(() => {
+  void rewardsVersion.value
+  return getSupplyRewardApy(vaultAddress)
+})
+const hasRewards = computed(() => {
+  void rewardsVersion.value
+  return hasSupplyRewards(vaultAddress)
+})
+const intrinsicApyVault = computed(() => resolveVaultIntrinsicApySource(
+  projectionEVault.value,
+  eVault.value,
+  securitizeVault.value,
+))
+const intrinsicApy = computed(() => getVaultIntrinsicApy(intrinsicApyVault.value, enableIntrinsicApy.value))
 
 const baseSupplyApy = computed(() => {
   if (!features.value.hasInterestRate) return 0
-  if (!eVault.value) return 0
-  return getVaultSupplyApy(eVault.value)
+  if (!projectionEVault.value) return 0
+  return getVaultSupplyApy(projectionEVault.value)
 })
 const supplyApyWithIntrinsic = computed(() => combineApyWithIntrinsic(baseSupplyApy.value, intrinsicApy.value))
 const supplyAPYDisplay = computed(() => {
   if (!eVault.value && !securitizeVault.value) return '0.00'
   return formatNumber(supplyApyWithIntrinsic.value + totalRewardsAPY.value)
 })
-const estimateSupplyAPYDisplay = computed(() => {
-  return formatNumber(estimateSupplyAPY.value)
-})
+const buildProjectedSupplyDetails = (rawApy: number): ProjectedYieldDetails | null => {
+  const currentVault = projectionEVault.value
+  if (!currentVault) return null
+  const supplyApyWithIntrinsic = combineApyWithIntrinsic(rawApy, intrinsicApy.value)
+  const after = getProjectedYieldState('supply-apy', {
+    supplyUsd: 1,
+    baseSupplyApy: rawApy,
+    intrinsicSupplyApy: supplyApyWithIntrinsic - rawApy,
+    supplyRewardApy: totalRewardsAPY.value,
+    borrowUsd: 0,
+    baseBorrowApy: 0,
+  })
+  if (!after) return null
+  return {
+    metric: 'supply-apy',
+    after,
+    rateLines: [{
+      id: `supply:${currentVault.address.toLowerCase()}`,
+      label: 'Lending APY',
+      symbol: currentVault.asset.symbol,
+      vaultAddress: currentVault.address,
+      before: getVaultSupplyApy(currentVault),
+      after: rawApy,
+    }],
+    rewards: mergeProjectedRewardCampaigns([], getSupplyRewardCampaigns(currentVault.address)
+      .map(campaign => ({ campaign, vaultAddress: currentVault.address }))),
+  }
+}
 
 // Vault warnings for lend context
 const lendWarnings = computed(() => {
   if (!eVault.value) return []
   return [
+    assessmentWarning.value,
     getHookDisabledWarning(eVault.value, OP_DEPOSIT),
     getUtilisationWarning(eVault.value, 'lend'),
     getSupplyCapWarning(eVault.value),
@@ -370,36 +429,19 @@ const lendWarnings = computed(() => {
 
 // Check if vault data is loaded
 const isVaultLoaded = computed(() => !!eVault.value || !!securitizeVault.value)
-
-// Check if vault is verified - both EVK and securitize vaults have verified field
-const isVaultVerified = computed(() => {
-  const address = eVault.value?.address ?? securitizeVault.value?.address
-  return address ? useVaultRegistry().isVerifiedVault(address) : true
-})
+useVaultOpeningNotice(() => isVaultLoaded.value ? [vaultAddress] : [])
 
 const load = async () => {
   isLoading.value = true
   try {
-    if (features.value.hasInterestRate && eVault.value) {
+    if (features.value.hasInterestRate && projectionEVault.value) {
       estimateSupplyAPY.value
-        = combineApyWithIntrinsic(getVaultSupplyApy(eVault.value), intrinsicApy.value)
+        = combineApyWithIntrinsic(getVaultSupplyApy(projectionEVault.value), intrinsicApy.value)
           + totalRewardsAPY.value
     }
     else {
       // For vaults without interest rate info, just use rewards
       estimateSupplyAPY.value = totalRewardsAPY.value + intrinsicApy.value
-    }
-
-    // Show warning modal for any unverified vault
-    if (!isVaultVerified.value) {
-      modal.open(VaultUnverifiedDisclaimerModal, {
-        isNotClosable: true,
-        props: {
-          cancelAction: () => {
-            router.replace('/')
-          },
-        },
-      })
     }
   }
   catch (e) {
@@ -440,47 +482,149 @@ const buildSwapSupplyPlanFromQuote = async (quote: SwapQuote, account = planAcco
   })
 }
 
+function createSupplyIntent(quote?: SwapQuote) {
+  if (quote) {
+    const inputAsset = selectedAsset.value
+    if (!inputAsset) throw new Error('No selected asset')
+    const inputAmount = valueToNano(amount.value || '0', inputAsset.decimals)
+    const isNative = isNativeCurrencyAddress(inputAsset.address)
+    const wrappedAddress = isNative ? resolveWrappedNativeAddress(chainId.value!) : null
+    if (isNative && !wrappedAddress) throw new Error('Wrapped native token not found')
+    return createIntent({
+      kind: 'deposit',
+      planner: 'deposit-with-swap',
+      args: {
+        swapQuote: quote,
+        amount: inputAmount,
+        tokenIn: (wrappedAddress || inputAsset.address) as Address,
+        enableCollateral: false,
+        wrappedNativeInfo: isNative && wrappedAddress
+          ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
+          : undefined,
+      },
+      source: 'lend',
+    })
+  }
+  const supplyAmount = valueToNano(amount.value || '0', asset.value.decimals)
+  const wrappedAddress = isNativeWrap.value ? resolveWrappedNativeAddress(chainId.value!) : null
+  return createIntent({
+    kind: 'deposit',
+    planner: 'deposit',
+    args: {
+      vaultAddress: vaultAddress as Address,
+      assetAddress: asset.value.address as Address,
+      amount: supplyAmount,
+      wrappedNativeInfo: isNativeWrap.value && wrappedAddress
+        ? { wrappedTokenAddress: wrappedAddress, nativeAmount: supplyAmount }
+        : undefined,
+    },
+    source: 'lend',
+  })
+}
+
 const submit = async () => {
   if (isOperationBlocked.value) return
   if (isPreparing.value || reviewSupplyDisabled.value) return
+  if (!asset.value?.address) return
+
+  const needsSwapSnapshot = needsSwap.value
+  const quote = needsSwapSnapshot ? swapEffectiveQuote.value ?? undefined : undefined
+  if (needsSwapSnapshot && !quote) return
+  const capturedAmount = amount.value
+  const capturedAsset = asset.value
+  const capturedChainId = chainId.value!
+  const inputAsset = needsSwapSnapshot ? selectedAsset.value : capturedAsset
+  if (!inputAsset) return
+  const inputAmount = valueToNano(capturedAmount || '0', inputAsset.decimals)
+  const isNative = isNativeCurrencyAddress(inputAsset.address)
+  const wrappedAddress = isNative ? resolveWrappedNativeAddress(capturedChainId) : null
+  if (isNative && !wrappedAddress) return
+  const directWrappedAddress = !needsSwapSnapshot && isNativeWrap.value
+    ? resolveWrappedNativeAddress(capturedChainId)
+    : null
+  const planAccountSnapshot = planAccount.value
+  const currentIntents = [createSupplyIntent(quote)]
+  const quoteIntents = quote && swapSelectedQuoteCard.value?.quote === quote
+    ? swapSelectedQuoteCard.value.intents
+    : undefined
+  const reviewType = needsSwapSnapshot ? 'swap-supply' as const : 'supply' as const
+  const reviewAsset = needsSwapSnapshot && isNative
+    ? (resolveWrappedNativeAsset(capturedChainId) || inputAsset)
+    : inputAsset
+  const reviewLaunch = captureReviewState(currentIntents, {
+    presentationKind: reviewType,
+    review: {
+      type: reviewType,
+      asset: reviewAsset,
+      amount: capturedAmount,
+      quoteFetchedAt: needsSwapSnapshot ? swapEffectiveQuoteFetchedAt.value : null,
+      swapToAsset: needsSwapSnapshot ? capturedAsset : undefined,
+      swapToAmount: needsSwapSnapshot ? swapEstimatedOutput.value : undefined,
+      swapMode: needsSwapSnapshot ? SwapperMode.EXACT_IN : undefined,
+      submittingLabel: 'Submitting...',
+    },
+    onSucceeded: async () => {
+      await updateEstimates()
+      setTimeout(() => {
+        router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
+      }, 400)
+    },
+    onFailed: (cause) => {
+      error('Transaction failed')
+      console.warn(cause)
+      void reportClientEvent({
+        event: 'tx_execute_failed',
+        flow: needsSwapSnapshot ? 'lend_swap_supply' : 'lend_supply',
+        phase: 'execute',
+        chainId: capturedChainId,
+        operationType: reviewType,
+        vaultAddress,
+        assetAddress: capturedAsset.address,
+        quoteProvider: needsSwapSnapshot ? swapRoutedVia.value ?? undefined : undefined,
+      }, cause)
+    },
+  }, quoteIntents)
   isPreparing.value = true
   clearSimulationError()
   try {
     await guardWithPriceImpact(async () => {
-      if (!asset.value?.address) {
-        return
-      }
-
       preparedPlan.value = null
       try {
-        if (needsSwap.value && swapEffectiveQuote.value) {
-          plan.value = await buildSwapSupplyPlanFromQuote(swapEffectiveQuote.value)
+        if (needsSwapSnapshot && quote) {
+          const args = {
+            swapQuote: quote,
+            amount: inputAmount,
+            tokenIn: (wrappedAddress || inputAsset.address) as Address,
+            enableCollateral: false,
+            wrappedNativeInfo: isNative && wrappedAddress
+              ? { wrappedTokenAddress: wrappedAddress, nativeAmount: inputAmount }
+              : undefined,
+          }
+          plan.value = await planDepositWithSwap({ ...args, account: planAccountSnapshot })
         }
         else {
-          const supplyAmount = valueToNano(amount.value || '0', asset.value.decimals)
-          const wrappedAddr = isNativeWrap.value ? resolveWrappedNativeAddress(chainId.value!) : null
-          plan.value = await planDeposit({
+          const args = {
             vaultAddress: vaultAddress as Address,
-            assetAddress: asset.value.address as Address,
-            amount: supplyAmount,
-            wrappedNativeInfo: isNativeWrap.value && wrappedAddr
-              ? { wrappedTokenAddress: wrappedAddr, nativeAmount: supplyAmount }
+            assetAddress: capturedAsset.address as Address,
+            amount: inputAmount,
+            wrappedNativeInfo: directWrappedAddress
+              ? { wrappedTokenAddress: directWrappedAddress, nativeAmount: inputAmount }
               : undefined,
-            account: planAccount.value,
-          })
+          }
+          plan.value = await planDeposit({ ...args, account: planAccountSnapshot })
         }
       }
       catch (e) {
         console.warn('[OperationReviewModal] failed to build plan', e)
         void reportClientEvent({
           event: 'tx_plan_build_failed',
-          flow: needsSwap.value ? 'lend_swap_supply' : 'lend_supply',
+          flow: needsSwapSnapshot ? 'lend_swap_supply' : 'lend_supply',
           phase: 'build',
-          chainId: chainId.value,
-          operationType: needsSwap.value ? 'swap-supply' : 'supply',
+          chainId: capturedChainId,
+          operationType: reviewType,
           vaultAddress,
-          assetAddress: asset.value.address,
-          quoteProvider: needsSwap.value ? swapRoutedVia.value ?? undefined : undefined,
+          assetAddress: capturedAsset.address,
+          quoteProvider: needsSwapSnapshot ? swapRoutedVia.value ?? undefined : undefined,
         }, e)
         plan.value = null
       }
@@ -488,53 +632,34 @@ const submit = async () => {
       if (plan.value) {
         try {
           preparedPlan.value = await prepareTransactionPlan(plan.value, {
-            account: planAccount.value,
+            account: planAccountSnapshot,
             prefetch: lendPluginPrefetch,
+            intents: reviewLaunch.intents,
           })
         }
         catch (e) {
           console.warn('[OperationReviewModal] failed to prepare plan', e)
           void reportClientEvent({
             event: 'tx_plan_prepare_failed',
-            flow: needsSwap.value ? 'lend_swap_supply' : 'lend_supply',
+            flow: needsSwapSnapshot ? 'lend_swap_supply' : 'lend_supply',
             phase: 'prepare',
-            chainId: chainId.value,
-            operationType: needsSwap.value ? 'swap-supply' : 'supply',
+            chainId: capturedChainId,
+            operationType: reviewType,
             vaultAddress,
-            assetAddress: asset.value.address,
-            quoteProvider: needsSwap.value ? swapRoutedVia.value ?? undefined : undefined,
+            assetAddress: capturedAsset.address,
+            quoteProvider: needsSwapSnapshot ? swapRoutedVia.value ?? undefined : undefined,
           }, e)
           simulationError.value = await getTxErrorMessage(e)
           return
         }
 
-        const ok = await runPreparedSimulation(preparedPlan.value, buildLendStateOverrideOptions())
+        const ok = await runPreparedSimulation(preparedPlan.value, buildLendStateOverrideOptions(), undefined, reviewLaunch.intents)
         if (!ok) {
           return
         }
       }
 
-      const isNativeSwap = needsSwap.value && selectedAsset.value && isNativeCurrencyAddress(selectedAsset.value.address)
-      const reviewAsset = isNativeSwap
-        ? (resolveWrappedNativeAsset(chainId.value!) || selectedAsset.value!)
-        : needsSwap.value && selectedAsset.value ? selectedAsset.value : asset.value
-      const reviewType = needsSwap.value ? 'swap-supply' as const : 'supply' as const
-      modal.open(OperationReviewModal, {
-        props: {
-          type: reviewType,
-          asset: reviewAsset,
-          amount: amount.value,
-          prepared: preparedPlan.value || undefined,
-          quoteFetchedAt: needsSwap.value ? swapEffectiveQuoteFetchedAt.value : null,
-          swapToAsset: needsSwap.value ? asset.value : undefined,
-          swapToAmount: needsSwap.value ? swapEstimatedOutput.value : undefined,
-          swapMode: needsSwap.value ? SwapperMode.EXACT_IN : undefined,
-          submittingLabel: 'Submitting...',
-          onConfirm: async () => {
-            await send()
-          },
-        },
-      })
+      await reviewLaunch.open()
     })
   }
   finally {
@@ -546,7 +671,9 @@ const submit = async () => {
 // active layer's simulated account inside useTxBatch, so a deposit added on top
 // of a previous batch step composes correctly. Direct (non-swap) deposits only.
 // A CoW swap quote can't be batched (mergePlans/simulate reject cowSwap items).
-const isCowSwapSelected = computed(() => isCowProviderOrQuote(swapSelectedProvider.value, swapSelectedQuote.value))
+const isCowSwapSelected = computed(() =>
+  needsSwap.value && isCowProviderOrQuote(swapSelectedProvider.value, swapSelectedQuote.value),
+)
 const canAddToBatch = computed(() => {
   if (isGeoBlocked.value || isSwapRestricted.value || isSourceAssetBlocked.value) return false
   if (!(+amount.value) || isNativeWrap.value) return false
@@ -566,19 +693,21 @@ const addToBatch = async () => {
       const swapAmount = amount.value
       const swapOutput = swapEstimatedOutput.value
       if (!swapAsset) return
+      const quoteIntents = swapSelectedQuoteCard.value?.quote === quote
+        ? swapSelectedQuoteCard.value.intents
+        : undefined
       await addBatchEntry({
         label: `Deposit ${asset.value.symbol}`,
-        buildPlan: account => buildSwapSupplyPlanFromQuote(quote, account, { selectedAsset: swapAsset, amount: swapAmount }),
+        intent: createSupplyIntent(quote),
+        preparedIntent: quoteIntents?.[0],
         subAccount: effectiveAddress.value as Address | undefined,
         review: { type: 'swap-supply', asset: swapAsset, amount: swapAmount, swapToAsset: asset.value, swapToAmount: swapOutput, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: swapEffectiveQuoteFetchedAt.value },
       })
     }
     else {
-      const assetAddr = asset.value.address as Address
-      const supplyAmount = valueToNano(amount.value, asset.value.decimals)
       await addBatchEntry({
         label: `Deposit ${amount.value} ${asset.value.symbol}`,
-        buildPlan: account => planDeposit({ vaultAddress: vaultAddress as Address, assetAddress: assetAddr, amount: supplyAmount, account }),
+        intent: createSupplyIntent(),
         subAccount: effectiveAddress.value as Address | undefined,
         review: { type: 'supply', asset: asset.value, amount: amount.value },
       })
@@ -588,80 +717,56 @@ const addToBatch = async () => {
   })
 }
 
-const send = async () => {
-  try {
-    isSubmitting.value = true
-    if (!preparedPlan.value) {
-      throw new Error('Prepared supply plan is unavailable')
-    }
-
-    await executePreparedPlan(preparedPlan.value)
-
-    modal.close()
-    await updateEstimates()
-    setTimeout(() => {
-      router.replace({ path: '/portfolio/saving', query: { network: route.query.network } })
-    }, 400)
-  }
-  catch (e) {
-    error('Transaction failed')
-    console.warn(e)
-    void reportClientEvent({
-      event: 'tx_execute_failed',
-      flow: needsSwap.value ? 'lend_swap_supply' : 'lend_supply',
-      phase: 'execute',
-      chainId: chainId.value,
-      operationType: needsSwap.value ? 'swap-supply' : 'supply',
-      vaultAddress,
-      assetAddress: asset.value?.address,
-      quoteProvider: needsSwap.value ? swapRoutedVia.value ?? undefined : undefined,
-    }, e)
-  }
-  finally {
-    isSubmitting.value = false
-  }
-}
-
 const estimatesGuard = createRaceGuard()
 
 const updateEstimates = useDebounceFn(async () => {
   if (!isVaultLoaded.value) return
   const gen = estimatesGuard.next()
+  projectedYieldDetails.value = null
   try {
-    if (features.value.hasInterestRate && eVault.value) {
+    const currentVault = projectionEVault.value
+    if (features.value.hasInterestRate && currentVault) {
       // When swapping, use the swap output amount (vault-asset denominated)
       const supplyNano = needsSwap.value
         ? BigInt(swapEffectiveQuote.value?.amountOut || 0)
-        : valueToNano(amount.value, eVault.value.shares.decimals)
+        : valueToNano(amount.value, currentVault.shares.decimals)
 
       if (needsSwap.value && !supplyNano) {
-        // No swap quote yet — skip projection, keep current rate
-        estimateSupplyAPY.value
-          = combineApyWithIntrinsic(getVaultSupplyApy(eVault.value), intrinsicApy.value)
-            + totalRewardsAPY.value
+        // The vault-asset amount is unknown until a quote resolves, so there is
+        // no honest projected utilization state to display yet.
+        estimateSupplyAPY.value = null
       }
       else {
         const projected = await getProjectedRates(
-          eVault.value.address,
-          eVault.value.totalCash,
-          eVault.value.totalBorrowed,
+          currentVault.address,
+          currentVault.totalCash,
+          currentVault.totalBorrowed,
           supplyNano,
           0n,
         )
         if (estimatesGuard.isStale(gen)) return
-        const rawAPY = projected ? nanoToValue(projected.supplyAPY, 25) : getVaultSupplyApy(eVault.value)
+        if (!projected) {
+          estimateSupplyAPY.value = null
+          projectedYieldDetails.value = null
+          return
+        }
+        const rawAPY = nanoToValue(projected.supplyAPY, 25)
         estimateSupplyAPY.value
           = combineApyWithIntrinsic(rawAPY, intrinsicApy.value)
             + totalRewardsAPY.value
+        projectedYieldDetails.value = buildProjectedSupplyDetails(rawAPY)
       }
     }
     else {
       estimateSupplyAPY.value = totalRewardsAPY.value + intrinsicApy.value
+      projectedYieldDetails.value = null
     }
   }
   catch (e) {
     if (estimatesGuard.isStale(gen)) return
     logWarn('lend-supply/estimates', e)
+    estimateSupplyAPY.value = null
+    projectedYieldDetails.value = null
   }
   finally {
     if (!estimatesGuard.isStale(gen)) {
@@ -670,12 +775,28 @@ const updateEstimates = useDebounceFn(async () => {
   }
 }, 500)
 
+const queueEstimates = () => {
+  estimatesGuard.next()
+  estimateSupplyAPY.value = null
+  projectedYieldDetails.value = null
+  if (!isVaultLoaded.value) {
+    isEstimatesLoading.value = false
+    return
+  }
+  if (needsSwap.value && !swapEffectiveQuote.value) {
+    isEstimatesLoading.value = false
+    return
+  }
+  isEstimatesLoading.value = true
+  updateEstimates()
+}
+
 const supplyApyModalData = computed(() => ({
   props: {
     mode: 'supply',
     lendingAPY: baseSupplyApy.value,
     intrinsicAPY: intrinsicApy.value,
-    intrinsicApyInfo: getVaultIntrinsicApyInfo(vault.value, enableIntrinsicApy.value),
+    intrinsicApyInfo: getVaultIntrinsicApyInfo(intrinsicApyVault.value, enableIntrinsicApy.value),
     campaigns: getSupplyRewardCampaigns(vaultAddress),
     rewardVaultAddress: vaultAddress,
   },
@@ -829,7 +950,7 @@ watch(
     }
     push(vaultAsset?.address)
     push(payWith?.address)
-    if (tokens.length) void primeSlotHintsFor(tokens)
+    if (tokens.length) void primeSlotHintsFor(tokens, { background: true })
   },
   { immediate: true },
 )
@@ -874,28 +995,28 @@ watch(swapSelectedQuote, () => {
 // Re-run estimates when swap quote resolves — supplyNano depends on amountOut
 watch(swapEffectiveQuote, () => {
   if (!needsSwap.value) return
-  if (swapEffectiveQuote.value) {
-    if (!isEstimatesLoading.value) {
-      isEstimatesLoading.value = true
-    }
-    updateEstimates()
-  }
-  else {
-    // quote was cleared (slippage change, manual refresh) — queue estimate so loading is always cleared
-    isEstimatesLoading.value = true
-    updateEstimates()
-  }
+  queueEstimates()
 })
 
 watch(amount, async () => {
   clearSimulationError()
   if (!isVaultLoaded.value) {
+    estimatesGuard.next()
+    estimateSupplyAPY.value = null
+    projectedYieldDetails.value = null
+    isEstimatesLoading.value = false
     return
   }
-  if (!isEstimatesLoading.value) {
-    isEstimatesLoading.value = true
-  }
-  updateEstimates()
+  queueEstimates()
+})
+
+watch([
+  rewardsVersion,
+  enableIntrinsicApy,
+  () => projectionEVault.value?.totalCash,
+  () => projectionEVault.value?.totalBorrowed,
+], () => {
+  queueEstimates()
 })
 </script>
 
@@ -1066,26 +1187,22 @@ watch(amount, async () => {
               />
             </template>
 
-            <UiAlert
+            <GeoBlockAlert
               v-if="isGeoBlocked"
-              title="Region restricted"
+              :vault-addresses="[vaultAddress]"
               description="This operation is not available in your region. You can still withdraw existing deposits."
-              variant="warning"
-              size="compact"
             />
-            <UiAlert
+            <GeoBlockAlert
               v-if="!isGeoBlocked && isSourceAssetBlocked"
+              :vault-addresses="[vaultAddress]"
               title="Asset restricted"
               description="Paying with this asset is not available in your region. Pick a different token."
-              variant="warning"
-              size="compact"
             />
-            <UiAlert
+            <GeoBlockAlert
               v-if="!isGeoBlocked && !isSourceAssetBlocked && isSwapRestricted"
+              :vault-addresses="[vaultAddress]"
               title="Swap restricted"
               description="Swapping into this vault is not available in your region. You can deposit the vault's underlying asset directly."
-              variant="warning"
-              size="compact"
             />
             <UiAlert
               v-show="errorText"
@@ -1117,13 +1234,12 @@ watch(amount, async () => {
               :loading="isEstimatesLoading"
               variant="card"
             >
-              <SummaryRow label="Supply APY">
-                <SummaryValue
-                  :after="estimateSupplyAPYDisplay"
-                  suffix="%"
-                  estimate-only
-                />
-              </SummaryRow>
+              <ProjectedYieldSummaryRow
+                label="Supply APY"
+                :after="estimateSupplyAPY"
+                :details="projectedYieldDetails"
+                estimate-only
+              />
             </VaultFormInfoBlock>
 
             <template #buttons>
@@ -1139,6 +1255,7 @@ watch(amount, async () => {
                 :disabled-reason-variant="disabledReasonInfo?.variant"
                 :loading="isSubmitting || isPreparing"
                 :can-add-to-batch="canAddToBatch"
+                :add-to-batch-disabled-reason="isCowSwapSelected ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
                 @add-to-batch="addToBatch"
               >
                 {{ reviewSupplyLabel }}

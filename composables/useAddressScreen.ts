@@ -3,7 +3,7 @@ import { useModal } from '~/components/ui/composables/useModal'
 import { BlockedAddressModal } from '#components'
 import { detectVpn, resetVpnCache } from '~/services/vpn'
 import { resetCountryCache } from '~/services/country'
-import { screenAddress } from '~/services/trm'
+import { screenAddress } from '~/services/screening'
 import { getDefaultPageRoute } from '~/entities/menu'
 
 // Module-scoped so every useAddressScreen() consumer sees the same screening
@@ -50,6 +50,7 @@ export const useAddressScreen = () => {
       const vpnIsUsed = await detectVpn()
       if (gen !== screeningGeneration) return false
 
+      // VPN usage is audit metadata; only the address-screening verdict gates access.
       const isRestricted = await screenAddress(address, vpnIsUsed)
       if (gen !== screeningGeneration) return false
 

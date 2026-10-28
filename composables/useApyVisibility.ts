@@ -8,12 +8,11 @@ import type { YieldApyBreakdown } from '@eulerxyz/euler-v2-sdk'
 //     toggles, so this lives Lite-side.
 export const useApyVisibility = () => {
   const { settings } = useUserSettings()
-  const { address: connectedAddress } = useWagmi()
-  const { spyAddress } = useSpyMode()
+  // Never falls back to the connected wallet while a spy candidate is still
+  // verifying — that would apply the wrong user's reward eligibility.
+  const { effectiveAddress } = useEffectiveAddress()
 
-  const viewer = computed<string | undefined>(() =>
-    spyAddress.value || connectedAddress.value || undefined,
-  )
+  const viewer = computed<string | undefined>(() => effectiveAddress.value || undefined)
 
   const visibleTotal = (breakdown: YieldApyBreakdown | undefined): number | undefined => {
     if (!breakdown) return undefined

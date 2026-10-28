@@ -10,10 +10,23 @@
  */
 import {
   readBrowserVaultSource,
-  readV3ApiUrl,
+  readDisableV3,
+  isV3BackendEnabled,
   V3_API_PROXY_URL,
 } from '~/utils/api-url-env'
 import { buildAnnouncementConfig } from '~/utils/announcement-config'
+import { edgeProvidesVpnEvidence, parseEdgeProvider } from '~/utils/edge-presets'
+import { escapeScriptJson } from '~/server/utils/escape-script-json'
+import { createV3ImagesBaseSource } from '~/server/utils/v3-images-base'
+
+export { escapeScriptJson }
+
+const BOOT_READ_WAIT_MS = 1_000
+
+const delay = (ms: number) => new Promise<void>((resolve) => {
+  const timer = setTimeout(resolve, ms)
+  timer.unref?.()
+})
 
 const DEFAULTS = {
   appTitle: 'Euler Lite',
@@ -29,18 +42,6 @@ function escapeHtml(str: string): string {
     .replace(/'/g, '&#39;')
 }
 
-// JSON.stringify does not escape `<`, so a config value containing `</script>`
-// would break out of the inline script context. Escaping `<` (and the U+2028 /
-// U+2029 line separators, which are invalid in JS string literals) as unicode
-// escapes keeps the payload inside the script tag while preserving identical
-// JSON/JS semantics — `<` parses back to `<` inside string values.
-export function escapeScriptJson(json: string): string {
-  return json
-    .replace(/</g, '\\u003c')
-    .replace(/\u2028/g, '\\u2028')
-    .replace(/\u2029/g, '\\u2029')
-}
-
 function env(key: string, ...fallbackKeys: string[]): string {
   for (const k of [key, ...fallbackKeys]) {
     if (process.env[k]) return process.env[k]!
@@ -54,17 +55,27 @@ function readAppConfig() {
     appDescription: env('APP_DESCRIPTION', 'NUXT_PUBLIC_CONFIG_APP_DESCRIPTION') || DEFAULTS.appDescription,
     logoUrl: env('LOGO_URL', 'NUXT_PUBLIC_CONFIG_LOGO_URL'),
     socialImageUrl: env('SOCIAL_IMAGE_URL', 'NUXT_PUBLIC_CONFIG_SOCIAL_IMAGE_URL'),
-    pythHermesUrl: env('PYTH_HERMES_URL', 'NUXT_PUBLIC_PYTH_HERMES_URL') ? 'proxy' : '',
+    pythHermesUrl: env('PYTH_API_KEY').trim() ? 'proxy' : '',
     appKitProjectId: env('APPKIT_PROJECT_ID', 'NUXT_PUBLIC_APP_KIT_PROJECT_ID'),
     appUrl: env('NUXT_PUBLIC_APP_URL'),
     v3ApiUrl: V3_API_PROXY_URL,
     // The client uses this to decide whether the SDK's "fast" instance routes
     // reads via /api/internal/v3 (v3 adapters) or falls back to direct on-chain reads.
-    enableV3Backend: !!readV3ApiUrl(),
+    enableV3Backend: isV3BackendEnabled(),
+    disableV3: readDisableV3(),
     // Adapter chain pinned for the browser's "fast" SDK instance. See
     // utils/api-url-env.ts:readBrowserVaultSource.
     browserVaultSource: readBrowserVaultSource(),
+    // Whether the deployment's edge provider measures VPN usage. The client
+    // uses this to skip the VPN probe (services/vpn.ts) on edges that carry
+    // no VPN evidence.
+    vpnDetection: edgeProvidesVpnEvidence(parseEdgeProvider(process.env.EDGE_PROVIDER)),
     swapApiUrl: env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL'),
+    eulerInterfacesBranch: env(
+      'EULER_SDK_EULER_INTERFACES_BRANCH',
+      'NUXT_PUBLIC_EULER_INTERFACES_BRANCH',
+      'NUXT_PUBLIC_CONFIG_EULER_INTERFACES_BRANCH',
+    ) || 'master',
     announcement: buildAnnouncementConfig({
       title: env('CONFIG_ANNOUNCEMENT_TITLE', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_TITLE'),
       body: env('CONFIG_ANNOUNCEMENT_BODY', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_BODY'),
@@ -126,10 +137,17 @@ function injectSocialImage(html: { head: string[] }, socialImageUrl: string) {
 
 export default defineNitroPlugin((nitroApp) => {
   const appConfig = readAppConfig()
-  const scriptTag = `<script>window.__APP_CONFIG__=${escapeScriptJson(JSON.stringify(appConfig))}</script>`
+  const v3ImagesBase = createV3ImagesBaseSource()
+  // Prerendered pages are static, so they must not bake in a value read at build time.
+  const bootRead = import.meta.prerender || appConfig.disableV3
+    ? Promise.resolve()
+    : Promise.race([v3ImagesBase.start(), delay(BOOT_READ_WAIT_MS)])
+  nitroApp.hooks.hook('close', () => v3ImagesBase.stop())
 
-  nitroApp.hooks.hook('render:html', (html) => {
-    html.head.push(scriptTag)
+  nitroApp.hooks.hook('render:html', async (html) => {
+    await bootRead
+    const config = { ...appConfig, v3ImagesUrl: v3ImagesBase.get() }
+    html.head.push(`<script>window.__APP_CONFIG__=${escapeScriptJson(JSON.stringify(config))}</script>`)
     patchMeta(html, appConfig)
     injectSocialImage(html, appConfig.socialImageUrl)
   })

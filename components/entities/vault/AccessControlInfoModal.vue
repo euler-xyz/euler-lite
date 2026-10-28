@@ -2,7 +2,7 @@
 defineEmits<{ close: [] }>()
 
 const bullets = [
-  'Access is granted by the vault manager — there is no self-service verification',
+  'Access is granted by the vault curator — there is no self-service verification',
   'If your address is not whitelisted, the gated operations will revert',
   'Which operations are gated depends on the vault\'s hook configuration',
 ]
@@ -11,7 +11,7 @@ const bullets = [
 <template>
   <UiInfoModal
     title="Access-controlled Vault"
-    icon="search-user"
+    icon="badge-access-control"
     headline="Permissioned Operations"
     body="This vault routes operations through an access-control hook. Only addresses on an on-chain allowlist can perform the gated operations."
     :bullets="bullets"

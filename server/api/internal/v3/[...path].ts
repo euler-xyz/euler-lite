@@ -9,7 +9,7 @@ import {
 } from 'h3'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { logger } from '~/server/utils/logger'
-import { safePathTemplate, urlHost } from '~/server/utils/observability'
+import { safeErrorLogFields, safePathTemplate, urlHost } from '~/server/utils/observability'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import {
   buildV3ProxyBackoffKey,
@@ -26,6 +26,8 @@ import {
   readForwardedV3ResponseHeaders,
   validateV3ProxyUrl,
 } from '~/server/utils/v3-proxy'
+import { isAbortError } from '~/utils/errorHandling'
+import { readDisableV3 } from '~/utils/api-url-env'
 
 const ALLOWED_METHODS = new Set(['GET', 'POST'])
 
@@ -36,6 +38,10 @@ const rateLimiter = createRateLimiter({
 })
 
 export default defineEventHandler(async (event) => {
+  if (readDisableV3()) {
+    setResponseHeader(event, 'Cache-Control', 'no-store')
+    throw createError({ statusCode: 503, statusMessage: 'V3 is disabled for this deployment' })
+  }
   const method = getMethod(event).toUpperCase()
   if (!ALLOWED_METHODS.has(method)) {
     logger.warn({ ctx: 'v3-proxy', method, reason: 'invalid-method' }, 'request rejected')
@@ -78,6 +84,7 @@ export default defineEventHandler(async (event) => {
     })
   }
   catch (err) {
+    const timedOut = isAbortError(err)
     logger.warn(
       {
         ctx: 'v3-proxy',
@@ -87,9 +94,12 @@ export default defineEventHandler(async (event) => {
         upstreamHost,
         bodyBytes: body?.length,
         durationMs: Date.now() - startedAt,
-        err,
+        reason: timedOut ? 'upstream-timeout' : 'upstream-error',
+        // Sanitized fields only — raw transport errors can embed request
+        // URLs (addresses, cursors) and abort text is client-controlled.
+        ...(!timedOut ? { err: safeErrorLogFields(err) } : {}),
       },
-      'upstream fetch failed',
+      timedOut ? 'upstream timed out' : 'upstream fetch failed',
     )
     recordV3ProxyBackoff(backoffKey)
     setResponseHeader(event, 'retry-after', Math.ceil(V3_PROXY_FAILURE_BACKOFF_MS / 1_000))

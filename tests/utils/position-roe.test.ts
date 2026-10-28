@@ -3,8 +3,10 @@ import type { EVault, PortfolioBorrowPosition, SecuritizeCollateralVault, VaultE
 import {
   areRoeCollateralVaultsCorrelatedWithBorrow,
   getPositionRoeCollateralVaults,
+  isRoeStateApplicable,
   mergeRoeCollateralVaults,
   resolvePositionRoeCollateralVaults,
+  resolveRoeCollateralVaultsByAddresses,
 } from '~/utils/position-roe'
 
 const USD_A = '0x0000000000000000000000000000000000000011'
@@ -114,5 +116,28 @@ describe('position ROE helpers', () => {
     const second = makeVault(VAULT_B, USD_B)
 
     expect(mergeRoeCollateralVaults([first, duplicate, second])).toEqual([duplicate, second])
+  })
+
+  it('evaluates current and projected ROE states independently', () => {
+    const ethCollateral = makeVault(VAULT_A, ETH_A)
+    const usdCollateral = makeVault(VAULT_B, USD_A)
+    const usdBorrow = makeVault(VAULT_C, USD_B)
+
+    expect(isRoeStateApplicable({ vaults: [ethCollateral], isComplete: true }, usdBorrow, getTags)).toBe(false)
+    expect(isRoeStateApplicable({ vaults: [usdCollateral], isComplete: true }, usdBorrow, getTags)).toBe(true)
+  })
+
+  it('requires every projected collateral address to resolve before showing ROE', () => {
+    const first = makeVault(VAULT_A, USD_A)
+    const second = makeVault(VAULT_B, USD_B)
+
+    expect(resolveRoeCollateralVaultsByAddresses([VAULT_B], [first, second])).toEqual({
+      vaults: [second],
+      isComplete: true,
+    })
+    expect(resolveRoeCollateralVaultsByAddresses([VAULT_B, VAULT_C], [first, second])).toEqual({
+      vaults: [second],
+      isComplete: false,
+    })
   })
 })

@@ -1,24 +1,28 @@
 <script setup lang="ts">
+import { getVaultGeoUnavailableReason } from '~/composables/useGeoBlock'
+import { captureSwapReview } from '~/utils/swapReview'
 import type { VaultAsset } from '~/types/asset'
 import type { SwapTokenSelectMeta } from '~/components/entities/asset/SwapTokenSelector.vue'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { getAssetOraclePrice, getCollateralOraclePrice, conservativePriceRatio } from '~/utils/sdk-prices'
 import type { SwapQuote, EVault } from '@eulerxyz/euler-v2-sdk'
-import { SwapperMode } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { nanoToValue } from '~/utils/crypto-utils'
 import { useCollateralForm } from '~/composables/position/useCollateralForm'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { decimalLtvToBps, getBorrowPositionEffectiveLiquidationLTV } from '~/utils/ltv'
 import { getAddress, type Address, zeroAddress, maxUint256 } from 'viem'
 import { FixedPoint } from '~/utils/fixed-point'
-import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
+import { getBorrowLtvWithdrawLimit, getBorrowLtvWithdrawNotice, getCashLimitedWithdrawAmount, validateCollateralWithdraw } from '~/utils/vault/withdraw'
+import { getPositionCollateralEdge } from '~/entities/account'
+import { collectPlannerVaultAddresses } from '~/features/reviewed-execution/planning/requirements'
 
-import { isCowProviderOrQuote } from '~/entities/cowswap'
+import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
 
 const positionIndex = usePositionIndex()
 const { address } = useWagmi()
 const { planWithdraw, planWithdrawAndSwap, planRedeem } = useEulerTx()
+const { create: createIntent } = useOperationIntentFactory()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: cachedAccount } = useFreshAccount()
@@ -27,7 +31,6 @@ const { eulerLensAddresses } = useEulerAddresses()
 // Page uses SwapTokenSelector — opt into full wallet-token balance fetch while mounted.
 useFullBalances()
 
-// Withdraw-specific state
 const selectedOutputAsset = ref<VaultAsset | undefined>()
 const isUnknownSwapToken = ref(false)
 
@@ -44,10 +47,26 @@ const needsSwap = computed(() => {
 const cashLimitedCollateralAssets = () =>
   getCashLimitedWithdrawAmount(form.collateralAssets.value, form.collateralVault.value)
 
+const borrowLtvWithdrawLimit = () => {
+  const collateralVault = form.collateralVault.value
+  if (!collateralVault) return undefined
+  return getBorrowLtvWithdrawLimit({
+    liquidity: form.controllerLiquidity.value,
+    collateralAddress: collateralVault.address,
+    collateralAssets: form.collateralAssets.value,
+  })
+}
+
+const withdrawableCollateralAssets = computed(() => {
+  const cashLimited = cashLimitedCollateralAssets()
+  const borrowLimit = borrowLtvWithdrawLimit()
+  return borrowLimit !== undefined && borrowLimit < cashLimited ? borrowLimit : cashLimited
+})
+
 const form = useCollateralForm({
   mode: 'withdraw',
   needsSwap,
-  effectiveBalance: computed(() => cashLimitedCollateralAssets()),
+  effectiveBalance: withdrawableCollateralAssets,
   effectiveAsset: computed(() => form.asset.value),
 
   computePriceFixed: (_pos, borrowVault, collateralVault) => {
@@ -70,21 +89,15 @@ const form = useCollateralForm({
     return ratio / health
   },
 
-  validateEstimate: ({ suppliedFixed, amountFixed, userLtvFixed }) => {
-    if (suppliedFixed.lte(amountFixed)) {
-      throw new Error('Not enough liquidity in your position')
-    }
+  validateEstimate: ({ suppliedFixed, amountFixed, hasLiquidationLiquidity }) => {
     if (!form.position.value) return
-    const effectiveLiquidationLtv = getBorrowPositionEffectiveLiquidationLTV(form.position.value)
-    if (effectiveLiquidationLtv === undefined) {
-      throw new Error('Liquidation LTV unavailable')
-    }
-    if (userLtvFixed.gte(FixedPoint.fromValue(decimalLtvToBps(effectiveLiquidationLtv), 2))) {
-      throw new Error('Not enough liquidity for the vault, LTV is too large')
-    }
-    if (cashLimitedCollateralAssets() < amountFixed.value) {
-      throw new Error('Not enough liquidity in vault')
-    }
+    validateCollateralWithdraw({
+      amount: amountFixed.value,
+      collateralAssets: suppliedFixed.value,
+      borrowLimit: borrowLtvWithdrawLimit(),
+      cashLimit: cashLimitedCollateralAssets(),
+      hasLiquidationLiquidity,
+    })
   },
 
   buildDirectPlan: async ({ vaultAddress, amountNano, subAccount, account }) => {
@@ -120,6 +133,33 @@ const form = useCollateralForm({
     })
   },
 
+  createReviewIntent: (quote?: SwapQuote) => {
+    const vault = form.collateralVault.value
+    const asset = form.asset.value
+    const owner = (form.position.value?.subAccount ?? address.value) as Address | undefined
+    if (!vault || !asset || !owner) throw new Error('Position is not loaded')
+    const assets = valueToNano(form.amount.value || '0', asset.decimals)
+    if (quote) {
+      return createIntent({
+        kind: 'withdraw',
+        planner: 'withdraw-and-swap',
+        args: { swapQuote: quote, vaultAddress: vault.address as Address, assets, owner },
+        source: 'position/withdraw:review',
+        subAccounts: [owner],
+      })
+    }
+    const full = isFullCollateralWithdraw(assets)
+    return createIntent({
+      kind: 'withdraw',
+      planner: full ? 'redeem' : 'withdraw',
+      args: full
+        ? { vaultAddress: vault.address as Address, shares: maxUint256, owner }
+        : { vaultAddress: vault.address as Address, assets, owner },
+      source: 'position/withdraw:review',
+      subAccounts: [owner],
+    })
+  },
+
   requestSwapQuoteParams: ({ userAddr, subAccountAddr, amountNano, slippage, asset, vaultAddress }) => {
     if (!selectedOutputAsset.value) return null
     return {
@@ -152,21 +192,19 @@ const form = useCollateralForm({
   },
   usePreparedPipeline: true,
 })
-useOperationGuard(computed(() => [form.collateralVault.value?.address, form.borrowVault.value?.address].filter(Boolean)))
-const withdrawableCollateralAssets = computed(() => cashLimitedCollateralAssets())
+useOperationGuard(computed(() => collectPlannerVaultAddresses({
+  vaultAddress: form.collateralVault.value?.address,
+  swapQuote: needsSwap.value ? form.swapSelectedQuote.value : undefined,
+})), { acquiresExposure: false })
 
-// True when the requested amount covers the entire collateral balance. The Max
-// button fills the exact full-precision balance, so this is an exact match when
-// the position isn't cash-limited. A full withdraw must redeem ALL shares
-// (maxUint256) rather than a fixed asset amount — otherwise share-price rounding
-// and interest accrued since the snapshot leave dust behind.
 const isFullCollateralWithdraw = (assetsNano: bigint) => {
   const full = form.collateralAssets.value
   return full > 0n && assetsNano >= full
 }
 
-// Add this collateral withdrawal to the batch — direct or non-CoW swap-out.
-const isCowSwapSelected = computed(() => isCowProviderOrQuote(form.swapSelectedProvider.value, form.swapSelectedQuote.value))
+const isCowSwapSelected = computed(() =>
+  needsSwap.value && isCowProviderOrQuote(form.swapSelectedProvider.value, form.swapSelectedQuote.value),
+)
 const canAddToBatch = computed(() => {
   if (form.isGeoBlocked.value || form.isSwapRestricted.value || form.isOutputAssetBlocked.value || form.isOutputAssetRestricted.value) return false
   if (!(+form.amount.value) || !form.collateralVault.value?.address || !form.position.value) return false
@@ -194,17 +232,32 @@ const addToBatch = async () => {
     if (needsSwap.value) {
       const quote = form.swapEffectiveQuote.value
       if (!quote) return
+      const quoteIntents = form.swapQuoteCardsSorted.value.find(card => card.quote === quote)?.intents
+      const intent = createIntent({
+        kind: 'withdraw',
+        planner: 'withdraw-and-swap',
+        args: { swapQuote: quote, vaultAddress, assets, owner },
+        source: 'position/withdraw:add-to-batch',
+        subAccounts: [owner],
+      })
       await addBatchEntry({
         label: `Withdraw-swap ${form.amount.value} ${a.symbol} → ${selectedOutputAsset.value?.symbol ?? ''}`,
-        buildPlan: account => planWithdrawAndSwap({ swapQuote: quote, vaultAddress, assets, owner, account }),
+        intent,
+        preparedIntent: quoteIntents?.[0],
         subAccount: pos.subAccount as Address,
-        review: { type: 'swap-withdraw', asset: a, amount: form.amount.value, swapToAsset: selectedOutputAsset.value, quoteFetchedAt: form.swapEffectiveQuoteFetchedAt.value },
+        review: { type: 'swap-withdraw', asset: a, amount: form.amount.value, ...captureSwapReview(quote, SwapperMode.EXACT_IN), quoteFetchedAt: form.swapEffectiveQuoteFetchedAt.value },
       })
     }
     else if (isFullCollateralWithdraw(assets)) {
       await addBatchEntry({
         label: `Withdraw ${form.amount.value} ${a.symbol}`,
-        buildPlan: account => planRedeem({ vaultAddress, shares: maxUint256, owner, account }),
+        intent: createIntent({
+          kind: 'withdraw',
+          planner: 'redeem',
+          args: { vaultAddress, shares: maxUint256, owner },
+          source: 'position/withdraw:add-to-batch',
+          subAccounts: [owner],
+        }),
         subAccount: pos.subAccount as Address,
         review: { type: 'withdraw', asset: a, amount: form.amount.value },
       })
@@ -212,7 +265,13 @@ const addToBatch = async () => {
     else {
       await addBatchEntry({
         label: `Withdraw ${form.amount.value} ${a.symbol}`,
-        buildPlan: account => planWithdraw({ vaultAddress, assets, owner, account }),
+        intent: createIntent({
+          kind: 'withdraw',
+          planner: 'withdraw',
+          args: { vaultAddress, assets, owner },
+          source: 'position/withdraw:add-to-batch',
+          subAccounts: [owner],
+        }),
         subAccount: pos.subAccount as Address,
         review: { type: 'withdraw', asset: a, amount: form.amount.value },
       })
@@ -223,7 +282,7 @@ const addToBatch = async () => {
 }
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (form.isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (form.isGeoBlocked.value) return { message: getVaultGeoUnavailableReason(form.borrowVault.value?.address, form.collateralVault.value?.address) || 'This operation is not available in your region', variant: 'warning' }
   if (form.isOutputAssetBlocked.value || form.isOutputAssetRestricted.value) return { message: 'Receiving this asset is not available in your region', variant: 'warning' }
   if (form.isSwapRestricted.value) return { message: 'Swapping from this vault is not available in your region', variant: 'warning' }
   if (form.estimatesError.value) return { message: form.estimatesError.value, variant: 'error' }
@@ -234,12 +293,26 @@ const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
 })
 const pairAssetsLabel = usePositionPairLabel(form.position)
 
-// Withdraw-specific computeds
+const borrowLtvNotice = computed(() => {
+  const collateralVault = form.collateralVault.value
+  const asset = form.asset.value
+  if (!collateralVault || !asset) return null
+  return getBorrowLtvWithdrawNotice({
+    liquidity: form.controllerLiquidity.value,
+    collateralAddress: collateralVault.address,
+    collateralBorrowLTV: getPositionCollateralEdge(form.borrowVault.value, collateralVault.address)?.borrowLTV,
+    symbol: asset.symbol,
+  })
+})
+
 const withdrawWarnings = computed(() => {
-  if (!form.borrowVault.value) return []
+  const collateralVault = form.collateralVault.value
   return [
+    borrowLtvNotice.value,
     form.hookWarning.value,
-    getUtilisationWarning(form.borrowVault.value, 'borrow'),
+    collateralVault && isEVault(collateralVault)
+      ? getUtilisationWarning(collateralVault, 'lend')
+      : null,
   ]
 })
 
@@ -258,7 +331,6 @@ const openSwapTokenSelector = () => {
   )
 }
 
-// Withdraw-specific watchers
 watch(address, async () => {
   if (form.isPositionLoaded.value) {
     await form.loadSelectedCollateral()
@@ -306,10 +378,9 @@ watch(selectedOutputAsset, () => {
               :asset="form.asset.value"
               :vault="(form.collateralVault.value as EVault)"
               :balance="withdrawableCollateralAssets"
-              maxable
+              :maxable="borrowLtvWithdrawLimit() !== undefined && withdrawableCollateralAssets > 0n"
             />
 
-            <!-- Receive as token selector -->
             <div class="flex items-center gap-8">
               <span class="text-p3 text-content-tertiary">Receive as</span>
               <button
@@ -329,7 +400,6 @@ watch(selectedOutputAsset, () => {
               </button>
             </div>
 
-            <!-- Swap info block -->
             <template v-if="needsSwap && selectedOutputAsset">
               <SwapRouteSelector
                 :items="form.swapRouteItems.value"
@@ -374,6 +444,7 @@ watch(selectedOutputAsset, () => {
             />
 
             <FormAlertStack
+              :vault-addresses="[form.borrowVault.value?.address, form.collateralVault.value?.address]"
               :is-geo-blocked="form.isGeoBlocked.value"
               :asset-restricted="!form.isGeoBlocked.value && (form.isOutputAssetBlocked.value || form.isOutputAssetRestricted.value)"
               asset-restricted-description="Receiving this asset is not available in your region. Pick a different token."
@@ -399,6 +470,7 @@ watch(selectedOutputAsset, () => {
             :disabled-reason="disabledReasonInfo?.message"
             :disabled-reason-variant="disabledReasonInfo?.variant"
             :can-add-to-batch="canAddToBatch"
+            :add-to-batch-disabled-reason="isCowSwapSelected ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
             @add-to-batch="addToBatch"
           >
             {{ form.submitLabel }}

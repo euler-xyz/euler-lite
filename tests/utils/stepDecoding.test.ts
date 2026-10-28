@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { encodeAbiParameters, encodeFunctionData, parseAbi, type Address, type Hex } from 'viem'
 import { SwapperMode, type EVCBatchItem, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 
+import { captureSwapReview } from '~/utils/swapReview'
+import { makeSwapQuote } from '../reviewed-execution/swap-quote.test-fixture'
+
 import { buildTransactionPlanDisplaySteps, type StepDecodingContext, type VaultLookup } from '~/utils/stepDecoding'
 
 const verifier = '0x0000000000000000000000000000000000000001' as Address
@@ -72,6 +75,9 @@ const aavePoolAbi = parseAbi([
 const aaveAuthAbi = parseAbi([
   'function delegationWithSig(address delegator,address delegatee,uint256 value,uint256 deadline,uint8 v,bytes32 r,bytes32 s)',
   'function permit(address owner,address spender,uint256 value,uint256 deadline,uint8 v,bytes32 r,bytes32 s)',
+])
+const reulAbi = parseAbi([
+  'function withdrawToByLockTimestamp(address account,uint256 lockTimestamp,bool allowRemainderLoss)',
 ])
 
 const ctx: StepDecodingContext = {
@@ -260,6 +266,82 @@ const disableController = () => encodeFunctionData({
   args: [],
 })
 
+describe('buildTransactionPlanDisplaySteps approval rows', () => {
+  it('names the vault on a direct approval that has no permit2 signature beside it', () => {
+    const plan: TransactionPlan = [{
+      type: 'requiredApproval',
+      token: wethAsset,
+      owner: account,
+      spender: wethVault,
+      amount: 1n,
+      resolved: [{ type: 'approve', token: wethAsset, owner: account, spender: wethVault, amount: 1n, data: '0x' }],
+    }]
+    const steps = buildTransactionPlanDisplaySteps(plan, {
+      type: 'borrow',
+      asset: { symbol: 'USDC', address: usdcAsset, decimals: 6 },
+      amount: '1',
+      supplyingAssetForBorrow: { symbol: 'WETH', address: wethAsset, decimals: 18 },
+      supplyingAmount: '2',
+    }, getVault, (address: string, symbol: string) => `logo:${address}:${symbol}`)
+    expect(steps[0]).toMatchObject({ label: 'Approve', labelSuffix: 'for vault', isSeparateTx: true })
+  })
+
+  it('uses the approved token for the label and icon without adding approval details', () => {
+    const collateralAmount = 2n * 10n ** 18n
+    const plan: TransactionPlan = [{
+      type: 'requiredApproval',
+      token: wethAsset,
+      owner: account,
+      spender: wethVault,
+      amount: collateralAmount,
+      resolved: [{
+        type: 'approve',
+        token: wethAsset,
+        owner: account,
+        spender: wethVault,
+        amount: collateralAmount,
+        data: '0x',
+      }, {
+        type: 'permit2',
+        token: wethAsset,
+        owner: account,
+        spender: wethVault,
+        amount: collateralAmount,
+      }],
+    }]
+    const approvalLogoUrl = (address: string, symbol: string) => `logo:${address}:${symbol}`
+
+    const steps = buildTransactionPlanDisplaySteps(plan, {
+      type: 'borrow',
+      asset: { symbol: 'USDC', address: usdcAsset, decimals: 6 },
+      amount: '1',
+      supplyingAssetForBorrow: { symbol: 'WETH', address: wethAsset, decimals: 18 },
+      supplyingAmount: '2',
+    }, getVault, approvalLogoUrl)
+
+    expect(steps).toEqual([{
+      index: 1,
+      label: 'Approve',
+      labelSuffix: 'for Permit2',
+      isSeparateTx: true,
+      assetInfo: {
+        symbol: 'WETH',
+        address: wethAsset,
+        iconUrl: approvalLogoUrl(wethAsset, 'WETH'),
+      },
+    }, {
+      index: 2,
+      label: 'Sign permit2 message',
+      isSeparateTx: false,
+      assetInfo: {
+        symbol: 'WETH',
+        address: wethAsset,
+        iconUrl: approvalLogoUrl(wethAsset, 'WETH'),
+      },
+    }])
+  })
+})
+
 const swapperMulticall = (calls: Hex[]) => encodeFunctionData({
   abi: swapperAbi,
   functionName: 'multicall',
@@ -335,7 +417,8 @@ describe('buildTransactionPlanDisplaySteps swap verifier rows', () => {
     })
   })
 
-  it('keeps quoted swap output separate from the verifier minimum', () => {
+  it.each(['borrow', 'repay', 'swap-borrow', 'swap-supply', 'swap-withdraw', 'swap'] as const)('keeps captured %s output separate from the verifier minimum', (type) => {
+    const quote = { ...makeSwapQuote(), amountOut: '99000000', amountOutMin: '98765432', tokenOut: { ...makeSwapQuote().tokenOut, address: daiAsset, symbol: 'DAI', decimals: 6 } }
     const steps = buildTransactionPlanDisplaySteps(
       [{
         type: 'evcBatch',
@@ -352,7 +435,7 @@ describe('buildTransactionPlanDisplaySteps swap verifier rows', () => {
           })),
         ],
       }] satisfies TransactionPlan,
-      ctx,
+      { ...ctx, type, swapToAmount: undefined, ...captureSwapReview(quote, SwapperMode.EXACT_IN) },
       getVault,
       getLogoUrl,
     )
@@ -363,6 +446,7 @@ describe('buildTransactionPlanDisplaySteps swap verifier rows', () => {
         symbol: 'DAI',
         address: daiAsset,
         amount: '99',
+        estimated: true,
       },
     })
     expect(steps[1]).toMatchObject({
@@ -531,6 +615,41 @@ describe('buildTransactionPlanDisplaySteps generic-handler redeem outside migrat
     })))
 
     expect(steps[0]?.label).toBe('Withdraw')
+  })
+})
+
+describe('buildTransactionPlanDisplaySteps rEUL unlock rows', () => {
+  it('labels the SDK unlock batch item and shows the reviewed EUL amount', () => {
+    const steps = buildTransactionPlanDisplaySteps(
+      [{
+        type: 'evcBatch',
+        items: [{
+          type: 'operation',
+          name: 'Unlock rEUL',
+          items: [batchItem(encodeFunctionData({
+            abi: reulAbi,
+            functionName: 'withdrawToByLockTimestamp',
+            args: [account, 123n, true],
+          }))],
+        }],
+      }] satisfies TransactionPlan,
+      {
+        type: 'reul-unlock',
+        asset: { symbol: 'EUL', address: usdcAsset, decimals: 18 },
+        amount: '1.2345',
+      },
+      getVault,
+      getLogoUrl,
+    )
+
+    expect(steps).toMatchObject([{
+      label: 'Unlock',
+      assetInfo: {
+        symbol: 'EUL',
+        address: usdcAsset,
+        amount: '1.2345',
+      },
+    }])
   })
 })
 

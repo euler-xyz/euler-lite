@@ -5,7 +5,7 @@ import { getAddress } from 'viem'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { getAssetUsdValue, formatAssetValue } from '~/utils/sdk-prices'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
-import { isVaultDeprecated, getVaultNotice } from '~/utils/eulerLabelsUtils'
+import { getVaultNotice } from '~/utils/eulerLabelsUtils'
 import { formatNumber, formatCompactUsdValue, formatSmartAmount, formatExactAmount } from '~/utils/string-utils'
 import { nanoToValue, roundAndCompactTokens } from '~/utils/crypto-utils'
 import { VaultOverviewModal, VaultApyModal, UiModalPreviewTrigger } from '#components'
@@ -15,9 +15,11 @@ import { getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 const { position } = defineProps<{ position: PortfolioSavingsPosition<VaultEntity> }>()
 const modal = useModal()
 
-const { address } = useWagmi()
 const { portfolioAddress } = useEulerAccount()
-const ownerAddress = computed(() => portfolioAddress.value || address.value || '')
+// portfolioAddress is already the spy-safe acting address; a wallet
+// fallback here would compute wrong position indices while a spy
+// candidate is still verifying.
+const ownerAddress = computed(() => portfolioAddress.value)
 const subAccountIndex = computed(() => {
   if (!ownerAddress.value || !position.subAccount) return 0
   return getSubAccountIndex(getAddress(ownerAddress.value), getAddress(position.subAccount))
@@ -53,7 +55,6 @@ const visibleApyBreakdown = computed(() => visibleBreakdown(apyBreakdown.value))
 
 const product = useEulerProductOfVault(computed(() => vault.value.address))
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.value.address))
-const isDeprecated = computed(() => isVaultDeprecated(vault.value.address))
 const isEscrow = computed(() => getVaultCategory(vault.value.address) === 'escrow')
 const isUnverified = computed(() => !isVerifiedVault(vault.value.address))
 const vaultNotice = computed(() => getVaultNotice(vault.value.address))
@@ -161,36 +162,21 @@ const onClick = () => {
               <VaultDisplayName
                 :name="displayName"
                 :is-unverified="isUnverified"
+                :addresses="[vault.address]"
               />
-              <UiHoverPreviewTooltip
+              <VaultAssessmentWarning
+                :address="vault.address"
+                :family="isSecuritize ? null : 'evk'"
+                hide-deprecated
+              />
+              <RestrictedBadge
                 v-if="isGeoBlocked"
-                title="Region restricted"
-                text="This vault is not available in your region"
-                placement="top-start"
-              >
-                <span class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5">
-                  <SvgIcon
-                    name="warning"
-                    class="!w-14 !h-14"
-                  />
-                  Restricted
-                </span>
-              </UiHoverPreviewTooltip>
-              <UiHoverPreviewTooltip
-                v-if="isDeprecated"
-                title="Deprecated"
-                text="This vault has been deprecated."
-                placement="top-start"
-              >
-                <span class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5">
-                  <SvgIcon
-                    name="warning"
-                    class="!w-14 !h-14"
-                  />
-                  Deprecated
-                </span>
-              </UiHoverPreviewTooltip>
+                :vault-addresses="[vault.address]"
+                :chain-id="position.vault?.chainId"
+              />
+              <VaultDeprecatedBadge :addresses="[vault.address]" />
             </div>
+            <VaultVisibilityNotice :address="vault.address" />
             <div
               class="text-h5 text-content-primary"
               data-id="data-point"
@@ -340,36 +326,22 @@ const onClick = () => {
               <VaultDisplayName
                 :name="displayName"
                 :is-unverified="isUnverified"
+                :addresses="[vault.address]"
               />
-              <UiHoverPreviewTooltip
+              <VaultAssessmentWarning
+                :address="vault.address"
+                :family="isSecuritize ? null : 'evk'"
+                hide-deprecated
+              />
+              <RestrictedBadge
                 v-if="isGeoBlocked"
-                title="Region restricted"
-                text="This vault is not available in your region"
-                placement="top-start"
-              >
-                <span class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5">
-                  <SvgIcon
-                    name="warning"
-                    class="!w-14 !h-14"
-                  />
-                  Restricted
-                </span>
-              </UiHoverPreviewTooltip>
-              <UiHoverPreviewTooltip
-                v-if="isDeprecated"
-                title="Deprecated"
-                text="This vault has been deprecated."
-                placement="top-start"
-              >
-                <span class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5">
-                  <SvgIcon
-                    name="warning"
-                    class="!w-14 !h-14"
-                  />
-                  Deprecated
-                </span>
-              </UiHoverPreviewTooltip>
+                :vault-addresses="[vault.address]"
+                :chain-id="position.vault?.chainId"
+              />
+              <VaultDeprecatedBadge :addresses="[vault.address]" />
+              <LiquidationCoverageBadge :vault="vault" />
             </div>
+            <VaultVisibilityNotice :address="vault.address" />
             <div
               class="text-h5 text-content-primary"
               data-id="data-point"

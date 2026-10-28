@@ -1,9 +1,13 @@
 <script setup lang="ts">
+import { isEulerEarn, isSecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import type { MarketGroup, MiniDiagramData } from '~/entities/lend-discovery'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
-import { isVaultDeprecated, isVaultKeyring, isVaultCyclicalNote } from '~/utils/eulerLabelsUtils'
+import { getVaultDeprecation, isVaultDeprecated, isVaultKeyring, isVaultCyclicalNote, isVaultNotExplorable } from '~/utils/eulerLabelsUtils'
+import { isDeprecationWarning } from '~/utils/vault-assessment/flagged'
+import { hasResolvedGovernorAdmin } from '~/utils/vault/governor-verification'
 import { stringToColor } from '~/utils/string-utils'
-import { getEnlargedDiagram, getArrow, getLabelPosition, getGraphConnectedAddresses, isNodeRampingDown, isExternalCollateral } from '~/utils/discoveryCalculations'
+import { getEnlargedDiagram, getArrow, getLabelPosition, getGraphConnectedAddresses, isNodeRampingDown, isExternalCollateral, findVault } from '~/utils/discoveryCalculations'
+import { useDiscoveryVaultWarningDetails } from '~/composables/useDiscoveryVaultWarningDetails'
 
 const props = defineProps<{
   market: MarketGroup
@@ -35,6 +39,45 @@ const isGraphEdgeHighlighted = (fromAddr: string, toAddr: string): boolean => {
 
 const isNodeCyclicalNote = (address: string): boolean => {
   return isVaultCyclicalNote(address)
+}
+
+const { isVaultGovernorVerified, isSecuritizeGovernorVerified, isEarnVaultOwnerVerified } = useVaults()
+const { isReady, source, visibility } = useEulerLabels()
+const { getWarningText, loadWarningDetails, isAcceptedOnlyWarning } = useDiscoveryVaultWarningDetails()
+const getNodeWarning = (address: string) => {
+  if (!isReady.value || source.value !== 'v3') return null
+  const verdict = visibility.value?.[address.toLowerCase()]
+  if (verdict?.status === 'warning' && verdict.decidedBy === 'advisories'
+    && isAcceptedOnlyWarning(findVault(props.market, address))) return null
+  if (isDeprecationWarning(verdict, isVaultDeprecated(address))) return null
+  return verdict?.status === 'warning' || verdict?.status === 'hidden' ? verdict : null
+}
+const getNodeDeprecationReason = (address: string): string => {
+  const deprecation = getVaultDeprecation(address)
+  const verdict = isReady.value && source.value === 'v3'
+    ? visibility.value?.[address.toLowerCase()]
+    : undefined
+  return (isDeprecationWarning(verdict, deprecation.deprecated) ? verdict?.reason?.trim() : '') || deprecation.reason
+}
+const getNodeWarningText = (address: string) =>
+  getWarningText(findVault(props.market, address), getNodeWarning(address)?.reason)
+const loadNodeWarningDetails = (address: string) =>
+  loadWarningDetails(findVault(props.market, address))
+
+// Same signal as the per-pair "Unknown" curator pill: the vault resolved,
+// but its governor/owner isn't part of any declared product entity. Applies to
+// group members too — the curator's label attests membership, not that the
+// declared entity actually holds the governor keys.
+const isNodeCuratorUnknown = (address: string): boolean => {
+  const vault = findVault(props.market, address)
+  if (!vault) return false
+  if (isEulerEarn(vault)) return !isEarnVaultOwnerVerified(vault)
+  if (isSecuritizeCollateralVault(vault)) return !isSecuritizeGovernorVerified(vault)
+  // Governance can be unresolved on lazily-hydrated collateral vaults — the
+  // guard is VALUE-based because SDK EVault instances always own the
+  // property. Don't flag what simply hasn't been fetched yet.
+  if (!hasResolvedGovernorAdmin(vault)) return false
+  return !isVaultGovernorVerified(vault)
 }
 </script>
 
@@ -238,8 +281,10 @@ const isNodeCyclicalNote = (address: string): boolean => {
           >
             {{ node.assetSymbol.slice(0, 2) }}
           </text>
-          <!-- Unknown collateral badge: governor not in any declared product entity, or vault truly missing -->
-          <g v-if="node.isUnknown">
+          <!-- Unknown curator badge: governor/owner not in any declared
+               product entity (members and externals alike — same signal as the
+               per-pair "Unknown" pill), or vault truly missing -->
+          <g v-if="node.isUnknown || isNodeCuratorUnknown(node.address)">
             <circle
               :cx="node.x + 9"
               :cy="node.y - 9"
@@ -257,25 +302,43 @@ const isNodeCyclicalNote = (address: string): boolean => {
               !
             </text>
           </g>
-          <!-- Deprecated badge -->
-          <g v-else-if="isVaultDeprecated(node.address)">
-            <circle
-              :cx="node.x + 9"
-              :cy="node.y - 9"
-              r="6"
-              style="fill: var(--warning-500)"
-            />
-            <text
-              :x="node.x + 9"
-              :y="node.y - 5.5"
-              text-anchor="middle"
-              fill="white"
-              font-size="9"
-              font-weight="700"
+          <foreignObject
+            v-else-if="getNodeWarning(node.address)"
+            :x="node.x + 1"
+            :y="node.y - 17"
+            width="16"
+            height="16"
+          >
+            <UiHoverPreviewTooltip
+              title="Vault checks"
+              :text="getNodeWarningText(node.address)"
+              :aria-label="`Vault checks for ${node.assetSymbol}`"
+              placement="top"
+              class="!flex !w-16 !h-16"
+              @mouseenter="loadNodeWarningDetails(node.address)"
+              @focusin="loadNodeWarningDetails(node.address)"
+              @pointerdown="loadNodeWarningDetails(node.address)"
             >
-              !
-            </text>
-          </g>
+              <span class="flex h-12 w-12 items-center justify-center rounded-full bg-warning-500 text-[9px] font-bold text-white">!</span>
+            </UiHoverPreviewTooltip>
+          </foreignObject>
+          <foreignObject
+            v-else-if="isVaultDeprecated(node.address)"
+            :x="node.x + 1"
+            :y="node.y - 17"
+            width="16"
+            height="16"
+          >
+            <UiHoverPreviewTooltip
+              title="Deprecated"
+              :text="getNodeDeprecationReason(node.address)"
+              :aria-label="`${node.assetSymbol} vault is deprecated`"
+              placement="top"
+              class="!flex !w-16 !h-16"
+            >
+              <span class="flex h-12 w-12 items-center justify-center rounded-full bg-warning-500 text-[9px] font-bold text-white">!</span>
+            </UiHoverPreviewTooltip>
+          </foreignObject>
           <!-- Ramping down badge -->
           <g v-else-if="isNodeRampingDown(market, node.address)">
             <circle
@@ -293,6 +356,23 @@ const isNodeCyclicalNote = (address: string): boolean => {
               stroke-linejoin="round"
             />
           </g>
+          <foreignObject
+            v-else-if="isVaultNotExplorable(node.address)"
+            :x="node.x + 1"
+            :y="node.y - 17"
+            width="16"
+            height="16"
+          >
+            <UiHoverPreviewTooltip
+              title="Unlisted"
+              text="Hidden from the lend and borrow tables."
+              :aria-label="`${node.assetSymbol} vault is unlisted`"
+              placement="top"
+              class="!flex !w-16 !h-16"
+            >
+              <span class="flex h-12 w-12 items-center justify-center rounded-full bg-content-muted text-[9px] font-bold text-white">–</span>
+            </UiHoverPreviewTooltip>
+          </foreignObject>
           <!-- Keyring (private vault) badge -->
           <g v-else-if="isVaultKeyring(node.address)">
             <circle

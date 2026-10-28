@@ -1,10 +1,17 @@
+import { getEulerLabelsSourceData } from '~/composables/useEulerLabels'
+import { getLabelVaultCandidates } from '~/utils/public-labels'
+import { isLabelsSnapshotUsable } from '~/utils/labels-freshness'
+import { getHostedEntityKeys, isVaultGovernorVerified, isEarnVaultOwnerVerified } from '~/utils/vault/governor-verification'
 import type { EulerEarn, SecuritizeCollateralVault, EVault, VaultEntity } from '@eulerxyz/euler-v2-sdk'
+import { resolveEVaultCategory } from '~/utils/vault/escrow-category'
 import { fetchVaultCategory } from '~/utils/vault/categories'
 import { getAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { normalizeAddress } from '~/utils/normalizeAddress'
-import { isVaultNotExplorable } from '~/utils/eulerLabelsUtils'
+import { isVaultNotExplorable, isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
 import { liteSecuritizeVaultFetchOptions, liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
+import { resolveEulerRouterGovernors } from '~/utils/vault/euler-router-governance'
+import { governableGovernorAbi } from '~/abis/oracle'
 
 // Vault type enum - 3 types (escrow is a category of evk, not a separate type)
 export type VaultType = 'evk' | 'earn' | 'securitize'
@@ -25,6 +32,7 @@ export interface AnyVault {
   asset: RegistryToken
   totalShares: bigint
   totalAssets: bigint
+  isEscrow?: boolean | null
 }
 
 // Registry entry containing vault and its type
@@ -32,34 +40,73 @@ export interface VaultEntry {
   vault: AnyVault
   type: VaultType
   verified: boolean
+  /** Held metadata is available to lookups without entering discovery. */
+  portfolioOnly?: boolean
   vaultCategory?: 'standard' | 'escrow'
 }
 
 interface VaultEntryMetadata {
   verified?: boolean
-  vaultCategory?: 'standard' | 'escrow'
+  portfolioOnly?: boolean
 }
 
 // Registry state
 const registry: Ref<Map<string, VaultEntry>> = shallowRef(new Map())
 const isLoading = ref(false)
 const registryVersion = ref(0)
+const resolutionGenerations = new Map<number, number>()
+
+const getActiveChainId = (): number | undefined => {
+  try {
+    return useEulerAddresses().chainId.value
+  }
+  catch {
+    return undefined
+  }
+}
+
+const registryKey = (chainId: number, address: string): string =>
+  `${chainId}:${normalizeAddress(address)}`
+
+const getForChain = (chainId: number, address: string): VaultEntry | undefined =>
+  registry.value.get(registryKey(chainId, address))
+
+const activeEntries = (): VaultEntry[] => {
+  const chainId = getActiveChainId()
+  if (!chainId) return []
+  return [...registry.value.entries()]
+    .filter(([key]) => key.startsWith(`${chainId}:`))
+    .map(([, entry]) => entry)
+}
+
+const getResolutionGeneration = (chainId: number): number =>
+  resolutionGenerations.get(chainId) ?? 0
+
+const isCurrentResolution = (chainId: number, generation: number): boolean =>
+  getActiveChainId() === chainId && getResolutionGeneration(chainId) === generation
 
 // In-flight resolution promises — deduplicates concurrent getOrFetch() calls for the same vault
 const pendingResolutions = new Map<string, Promise<VaultEntity | undefined>>()
 
 // Escrow address set - populated early, before full vault info is loaded
 // Used for O(1) lookups to determine if an address is an escrow vault
-const escrowAddresses: Ref<Set<string>> = shallowRef(new Set())
+const escrowAddressesByChain = new Map<number, Set<string>>()
+const escrowVersion = ref(0)
+const escrowAddresses = computed(() => {
+  void escrowVersion.value
+  const chainId = getActiveChainId()
+  return chainId ? (escrowAddressesByChain.get(chainId) ?? new Set<string>()) : new Set<string>()
+})
 
 // Get vault entry from registry
 const get = (address: string): VaultEntry | undefined => {
-  return registry.value.get(normalizeAddress(address))
+  const chainId = getActiveChainId()
+  return chainId ? getForChain(chainId, address) : undefined
 }
 
 // Check if vault exists in registry
 const has = (address: string): boolean => {
-  return registry.value.has(normalizeAddress(address))
+  return get(address) !== undefined
 }
 
 // Get just the vault (for backward compatibility)
@@ -73,40 +120,49 @@ const getType = (address: string): VaultType | undefined => {
 }
 
 // Register a vault
-const inferEntryMetadata = (_vault: AnyVault, _type: VaultType, metadata?: VaultEntryMetadata): VaultEntryMetadata => ({
-  verified: metadata?.verified,
-  vaultCategory: metadata?.vaultCategory,
-})
-
-const set = (address: string, vault: AnyVault, type: VaultType, metadata?: VaultEntryMetadata): void => {
-  const normalized = normalizeAddress(address)
-  // Preserve existing verification/category when the caller doesn't supply it.
+const set = (
+  address: string,
+  vault: AnyVault,
+  type: VaultType,
+  metadata?: VaultEntryMetadata,
+  targetChainId = getActiveChainId(),
+): void => {
+  if (!targetChainId) throw new Error('Cannot register a vault without a chain')
+  const key = registryKey(targetChainId, address)
+  // Preserve verification when refresh callers omit it; classification always comes from the SDK.
   // Refresh paths (updateVault, getBorrowVaultPair fallbacks) re-set a vault
   // with no metadata; without this they'd downgrade an already-verified vault
   // to verified:false, dropping it from getVerifiedEVaults() and the lists.
-  const existing = registry.value.get(normalized)
-  const entryMetadata = inferEntryMetadata(vault, type, metadata)
-  const verified = entryMetadata.verified ?? existing?.verified ?? false
-  const vaultCategory = entryMetadata.vaultCategory ?? existing?.vaultCategory
-  registry.value.set(normalized, {
+  const existing = registry.value.get(key)
+  // Discovery may finish while a held-vault fallback is awaiting the SDK.
+  if (metadata?.portfolioOnly && existing && !existing.portfolioOnly) return
+  const verified = metadata?.verified ?? existing?.verified ?? false
+  const vaultCategory = type === 'evk' ? resolveEVaultCategory(vault) : undefined
+  registry.value.set(key, {
     vault,
     type,
     verified,
+    ...((metadata?.portfolioOnly ?? existing?.portfolioOnly) ? { portfolioOnly: true } : {}),
     ...(vaultCategory ? { vaultCategory } : {}),
   })
   registry.value = new Map(registry.value) // Trigger reactivity
   registryVersion.value++
 }
 
-// Register multiple vaults
-const setMany = (entries: Array<{ address: string, vault: AnyVault, type: VaultType } & VaultEntryMetadata>): void => {
-  entries.forEach(({ address, vault, type, verified, vaultCategory }) => {
-    const entryMetadata = inferEntryMetadata(vault, type, { verified, vaultCategory })
-    registry.value.set(normalizeAddress(address), {
+// Bulk discovery loads promote held-only entries. Refreshes use discovery entries only.
+const setMany = (
+  entries: Array<{ address: string, vault: AnyVault, type: VaultType } & VaultEntryMetadata>,
+  targetChainId = getActiveChainId(),
+): void => {
+  if (!targetChainId) throw new Error('Cannot register vaults without a chain')
+  entries.forEach(({ address, vault, type, verified, portfolioOnly }) => {
+    const vaultCategory = type === 'evk' ? resolveEVaultCategory(vault) : undefined
+    registry.value.set(registryKey(targetChainId, address), {
       vault,
       type,
-      verified: entryMetadata.verified ?? false,
-      ...(entryMetadata.vaultCategory ? { vaultCategory: entryMetadata.vaultCategory } : {}),
+      verified: verified ?? false,
+      ...(portfolioOnly ? { portfolioOnly: true } : {}),
+      ...(vaultCategory ? { vaultCategory } : {}),
     })
   })
   registry.value = new Map(registry.value) // Trigger reactivity
@@ -115,16 +171,35 @@ const setMany = (entries: Array<{ address: string, vault: AnyVault, type: VaultT
 
 // Clear registry (for chain switching)
 const clear = (): void => {
-  registry.value = new Map()
-  escrowAddresses.value = new Set()
-  pendingResolutions.clear()
+  const chainId = getActiveChainId()
+  if (!chainId) {
+    registry.value = new Map()
+    escrowAddressesByChain.clear()
+    escrowVersion.value++
+    pendingResolutions.clear()
+    resolutionGenerations.clear()
+    registryVersion.value++
+    return
+  }
+
+  registry.value = new Map(
+    [...registry.value.entries()].filter(([key]) => !key.startsWith(`${chainId}:`)),
+  )
+  escrowAddressesByChain.delete(chainId)
+  escrowVersion.value++
+  resolutionGenerations.set(chainId, getResolutionGeneration(chainId) + 1)
+  for (const key of pendingResolutions.keys()) {
+    if (key.startsWith(`${chainId}:`)) pendingResolutions.delete(key)
+  }
   registryVersion.value++
 }
 
 // Set escrow addresses (populated early, before vault info is loaded)
-const setEscrowAddresses = (addresses: string[]): void => {
+const setEscrowAddresses = (addresses: string[], targetChainId = getActiveChainId()): void => {
+  if (!targetChainId) return
   const normalizedSet = new Set(addresses.map(addr => normalizeAddress(addr)))
-  escrowAddresses.value = normalizedSet
+  escrowAddressesByChain.set(targetChainId, normalizedSet)
+  escrowVersion.value++
 }
 
 // Check if an address is a known escrow address (O(1) lookup)
@@ -134,19 +209,19 @@ const isKnownEscrowAddress = (address: string): boolean => {
 
 // Get all vaults of a specific type
 const getByType = (type: VaultType): AnyVault[] => {
-  return [...registry.value.values()]
+  return activeEntries()
     .filter(entry => entry.type === type)
     .map(entry => entry.vault)
 }
 
 // Get all entries
 const getAll = (): VaultEntry[] => {
-  return [...registry.value.values()]
+  return activeEntries()
 }
 
 // Get vaults matching multiple types (e.g., ['evk', 'escrow'] for combined lookups)
 const getByTypes = (types: VaultType[]): AnyVault[] => {
-  return [...registry.value.values()]
+  return activeEntries()
     .filter(entry => types.includes(entry.type))
     .map(entry => entry.vault)
 }
@@ -158,24 +233,26 @@ const getSecuritizeVaults = (): SecuritizeCollateralVault[] => getByType('securi
 
 // Escrow vaults are EVaults with vaultCategory: 'escrow'
 const getEscrowVaults = (): EVault[] => {
-  return [...registry.value.values()]
-    .filter(entry => entry.type === 'evk' && entry.vaultCategory === 'escrow')
+  return activeEntries()
+    .filter(entry => entry.type === 'evk' && entry.vaultCategory === 'escrow' && !entry.portfolioOnly)
     .map(entry => entry.vault) as EVault[]
 }
 
 // Standard EVaults (non-escrow)
 const getStandardEVaults = (): EVault[] => {
-  return [...registry.value.values()]
-    .filter(entry => entry.type === 'evk' && entry.vaultCategory !== 'escrow')
+  return activeEntries()
+    .filter(entry => entry.type === 'evk' && entry.vaultCategory === 'standard')
     .map(entry => entry.vault) as EVault[]
 }
 
 // Verified EVaults (for display in tables) - excludes dynamically fetched unknown vaults
 const getVerifiedEVaults = (includeNotExplorable = false): EVault[] => {
-  return [...registry.value.values()]
+  return activeEntries()
     .filter(entry =>
       entry.type === 'evk'
-      && entry.verified === true
+      && !entry.portfolioOnly
+      && isVerifiedVault(entry.vault.address)
+      && isVaultSelectedByTag(entry.vault.address)
       && (includeNotExplorable || !isVaultNotExplorable(entry.vault.address)),
     )
     .map(entry => entry.vault) as EVault[]
@@ -196,30 +273,61 @@ const isEarnVault = (address: string): boolean => getType(address) === 'earn'
 const isSecuritizeVault = (address: string): boolean => getType(address) === 'securitize'
 const isEVaultAddress = (address: string): boolean => getType(address) === 'evk'
 const isVerifiedVault = (address: string): boolean => {
-  const { verifiedVaultAddresses, earnVaults } = useEulerLabels()
+  const { verifiedVaultAddresses, earnVaults, visibility, isReady } = useEulerLabels()
   const normalized = normalizeAddress(address)
-  return get(normalized)?.verified === true
-    || escrowAddresses.value.has(normalized)
+  const labels = getEulerLabelsSourceData()
+  if (labels.source === 'v3-metadata') {
+    if (isKnownEscrowAddress(normalized)) return true
+    if (!isReady.value || !isLabelsSnapshotUsable(labels.sourceFetchedAt)) return false
+    const entry = get(normalized)
+    const candidates = getLabelVaultCandidates(labels)
+    if (!entry || ![...candidates.vaults, ...candidates.earn].some(addr => normalizeAddress(addr) === normalized)) return false
+    const verificationLabels = {
+      getDeclaredEntityKeys: (addr: string) => getHostedEntityKeys(labels, addr),
+      hasEntityAddress: (key: string, addr: Address) => Object.keys(labels.entities[key]?.addresses ?? {})
+        .some(candidate => normalizeAddress(candidate) === normalizeAddress(addr)),
+    }
+    // Re-evaluate against current membership and entity addresses, never the cached positive flag.
+    return entry.type === 'earn'
+      ? isEarnVaultOwnerVerified(Object.assign({}, entry.vault as EulerEarn, { verified: true }), verificationLabels)
+      : isVaultGovernorVerified(Object.assign({}, entry.vault as EVault | SecuritizeCollateralVault, { verified: true }), verificationLabels)
+  }
+  if (labels.source === 'v3') {
+    // Retain labels for display, but expire their verification verdict.
+    if (!isReady.value) return isKnownEscrowAddress(normalized)
+    return isKnownEscrowAddress(normalized)
+      || verifiedVaultAddresses.value.some(vault => normalizeAddress(vault) === normalized)
+      || earnVaults.value.some(vault => normalizeAddress(vault) === normalized)
+  }
+  // Registry metadata describes the fetch that created the entry. Current
+  // labels must be able to revoke that earlier positive verification.
+  return isKnownEscrowAddress(normalized)
+    || (visibility?.value === undefined && get(normalized)?.verified === true)
     || verifiedVaultAddresses.value.some(vault => normalizeAddress(vault) === normalized)
     || earnVaults.value.some(vault => normalizeAddress(vault) === normalized)
 }
 const getVaultCategory = (address: string): 'standard' | 'escrow' | undefined => {
-  return get(address)?.vaultCategory ?? (isKnownEscrowAddress(address) ? 'escrow' : undefined)
+  const entry = get(address)
+  return entry ? entry.vaultCategory : (isKnownEscrowAddress(address) ? 'escrow' : undefined)
 }
 
 // Reactive size for watchers
-const size = computed(() => registry.value.size)
+const size = computed(() => {
+  void registryVersion.value
+  return activeEntries().length
+})
 
 /**
  * Fetch vault using the appropriate SDK service based on type.
  * Escrow vaults are an EVault category, so they use the EVault service.
  */
-const fetchVaultByType = async (address: string, type: VaultType): Promise<VaultEntity> => {
-  const { chainId } = useEulerAddresses()
+const fetchVaultByType = async (
+  address: string,
+  type: VaultType,
+  targetChainId = getActiveChainId(),
+): Promise<VaultEntity> => {
+  if (!targetChainId) throw new Error('Cannot fetch a vault without an active chain')
   const { getEulerSdkForChain } = useEulerSdk()
-  // Capture the chain id once so the SDK backend selection and the fetches
-  // can't diverge if the user switches chains mid-await.
-  const targetChainId = chainId.value
   const sdk = await getEulerSdkForChain(targetChainId)
   const vaultAddress = getAddress(address) as Address
   switch (type) {
@@ -237,6 +345,15 @@ const fetchVaultByType = async (address: string, type: VaultType): Promise<Vault
     default: {
       const { result } = await sdk.eVaultService.fetchVault(targetChainId, vaultAddress, liteVaultFetchOptions)
       if (!result) throw new Error(`EVault not found for ${address}`)
+      await resolveEulerRouterGovernors([result], (router) => {
+        const provider = sdk.providerService.getProvider(targetChainId)
+        return provider.readContract({
+          address: router,
+          abi: governableGovernorAbi,
+          functionName: 'governor',
+          authorizationList: undefined,
+        })
+      })
       return result
     }
   }
@@ -244,12 +361,19 @@ const fetchVaultByType = async (address: string, type: VaultType): Promise<Vault
 
 /**
  * Resolve an unknown vault using SDK vault metadata, fetch with the appropriate
- * SDK service, and cache in the registry. Escrow category comes from the SDK
- * verified-array read, so no separate local perspective probe is needed.
+ * SDK service, and cache in the registry. The fetched SDK escrow flag takes
+ * precedence over the category discovered through the verified-array read.
  */
-const resolveUnknown = async (address: string): Promise<VaultEntry> => {
+const resolveUnknown = async (
+  address: string,
+  targetChainId = getActiveChainId(),
+  generation = targetChainId ? getResolutionGeneration(targetChainId) : 0,
+  metadata?: VaultEntryMetadata,
+): Promise<VaultEntry | undefined> => {
+  if (!targetChainId) return undefined
   const normalized = normalizeAddress(address)
-  const category = await fetchVaultCategory(normalized)
+  const category = await fetchVaultCategory(normalized, targetChainId)
+  if (!isCurrentResolution(targetChainId, generation)) return undefined
 
   let type: VaultType
   if (category === 'earn') {
@@ -267,9 +391,10 @@ const resolveUnknown = async (address: string): Promise<VaultEntry> => {
     // EVault.
     logWarn('resolveUnknown', `Category not found for ${address}, trying fetch methods`)
     try {
-      const vault = await fetchVaultByType(normalized, 'securitize')
-      set(normalized, vault, 'securitize')
-      return get(normalized)!
+      const vault = await fetchVaultByType(normalized, 'securitize', targetChainId)
+      if (!isCurrentResolution(targetChainId, generation)) return undefined
+      set(normalized, vault, 'securitize', metadata, targetChainId)
+      return getForChain(targetChainId, normalized)
     }
     catch {
       type = 'evk'
@@ -277,47 +402,55 @@ const resolveUnknown = async (address: string): Promise<VaultEntry> => {
   }
 
   if (type === 'evk' && category === 'escrow') {
-    const vault = await fetchVaultByType(normalized, 'evk')
-    set(normalized, vault, 'evk', { verified: true, vaultCategory: 'escrow' })
-    return get(normalized)!
+    const vault = await fetchVaultByType(normalized, 'evk', targetChainId)
+    if (!isCurrentResolution(targetChainId, generation)) return undefined
+    set(normalized, vault, 'evk', { verified: true, ...metadata }, targetChainId)
+    return getForChain(targetChainId, normalized)
   }
 
-  const vault = await fetchVaultByType(normalized, type)
-  set(normalized, vault, type)
-  return get(normalized)!
+  const vault = await fetchVaultByType(normalized, type, targetChainId)
+  if (!isCurrentResolution(targetChainId, generation)) return undefined
+  set(normalized, vault, type, metadata, targetChainId)
+  return getForChain(targetChainId, normalized)
 }
 
 /**
  * Get vault from registry, or fetch and cache if not found.
  * Primary method for vault resolution. After calling, use getType(address) if you need the type.
  */
-const getOrFetch = async (address: string): Promise<VaultEntity | undefined> => {
+const getOrFetch = async (address: string, options?: { portfolioOnly?: boolean }): Promise<VaultEntity | undefined> => {
+  const targetChainId = getActiveChainId()
+  if (!targetChainId) return undefined
   // Check registry first
-  const existing = get(address)
+  const existing = getForChain(targetChainId, address)
   if (existing) {
     return existing.vault as VaultEntity
   }
 
   const normalized = normalizeAddress(address)
+  const key = registryKey(targetChainId, normalized)
+  const generation = getResolutionGeneration(targetChainId)
 
   // Return existing in-flight promise if one exists (deduplicates concurrent calls)
-  const pending = pendingResolutions.get(normalized)
+  const pending = pendingResolutions.get(key)
   if (pending) {
     return pending
   }
 
   // Create and track new resolution promise
-  const resolution = resolveUnknown(address)
-    .then(entry => entry.vault as VaultEntity)
+  const resolution = resolveUnknown(address, targetChainId, generation, options?.portfolioOnly ? { portfolioOnly: true, verified: false } : undefined)
+    .then(entry => entry?.vault as VaultEntity | undefined)
     .catch((e) => {
       logWarn('vaultRegistry/resolve', e)
       return undefined
     })
     .finally(() => {
-      pendingResolutions.delete(normalized)
+      if (pendingResolutions.get(key) === resolution) {
+        pendingResolutions.delete(key)
+      }
     })
 
-  pendingResolutions.set(normalized, resolution)
+  pendingResolutions.set(key, resolution)
   return resolution
 }
 

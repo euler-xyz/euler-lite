@@ -1,7 +1,8 @@
 import { useAccount, useDisconnect, useSwitchChain, useEnsName, useConfig } from '@wagmi/vue'
 import { connect as connectWallet, getConnectors } from '@wagmi/vue/actions'
-import { getAddress, isAddress, type Address } from 'viem'
+import type { Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
+import { normalizeAddress } from '~/utils/normalizeAddress'
 import { truncate } from '~/utils/string-utils'
 import { useAddressScreen } from '~/composables/useAddressScreen'
 import { parseChainId } from '~/entities/chainRegistry'
@@ -122,21 +123,22 @@ export const useWagmi = () => {
   // Fail closed: a connected address only becomes user-visible once screening
   // returns a non-restricted verdict. Consumers that read `address`/`isConnected`
   // automatically see the gated state without each having to import useAddressScreen.
-  const address: ComputedRef<Address | undefined> = computed(() =>
-    isAddressScreened(wagmiAddress.value) ? (wagmiAddress.value || undefined) : undefined,
-  )
+  //
+  // Always exposed in EIP-55 checksummed form: connectors are not guaranteed
+  // to report checksummed casing (AppKit's WalletConnect connector passes the
+  // wallet's session string through verbatim, and wallets may emit lowercase),
+  // while consumers key caches and compare against this value. Normalizing at
+  // this single choke point gives every consumer canonical casing.
+  const address: ComputedRef<Address | undefined> = computed(() => {
+    const raw = wagmiAddress.value
+    if (!raw || !isAddressScreened(raw)) return undefined
+    return normalizeAddress(raw)
+  })
   const isConnected = computed(() => Boolean(wagmiIsConnected.value && isAddressScreened(wagmiAddress.value)))
   const chain = computed(() => wagmiChain.value)
   const chainId = computed(() => wagmiChain.value?.id)
 
-  const checksummedAddress = computed(() => {
-    try {
-      return address.value && isAddress(address.value) ? getAddress(address.value) : ''
-    }
-    catch {
-      return address.value
-    }
-  })
+  const checksummedAddress = computed(() => address.value ?? '')
 
   const friendlyAddress = computed(() => checksummedAddress.value)
   const shortAddress = computed(() => address.value ? truncate(address.value) : '')

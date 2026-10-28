@@ -34,12 +34,14 @@ const {
 }>()
 
 const { isEscrowVault } = useVaultRegistry()
-const { address } = useWagmi()
 const { portfolioAddress } = useEulerAccount()
 
 const searchQuery = ref('')
 const selectedIdx = ref(selected)
-const ownerAddress = computed(() => portfolioAddress.value || address.value || '')
+// portfolioAddress is already the spy-safe acting address; a wallet
+// fallback here would compute wrong position indices while a spy
+// candidate is still verifying.
+const ownerAddress = computed(() => portfolioAddress.value)
 const getOptionLabel = (option: CollateralOption) => {
   if (option.vaultAddress && isEscrowVault(option.vaultAddress)) return 'Escrowed collateral'
   if (option.label) return option.label

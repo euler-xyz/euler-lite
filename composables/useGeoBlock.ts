@@ -11,7 +11,8 @@ import {
   patternRuleMatches,
   isWrapPair,
 } from '~/utils/eulerLabelsUtils'
-import { getEulerLabelsVersion } from '~/composables/useEulerLabels'
+import { matchesHostedGeo } from '~/utils/geo-policies'
+import { getEulerGeoContext, getEulerLabelsVersion } from '~/composables/useEulerLabels'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { SANCTIONED_COUNTRIES, COUNTRY_GROUPS } from '~/entities/constants'
 
@@ -35,7 +36,11 @@ export const useGeoBlock = () => {
     }
   }
 
-  return { country, loadCountry }
+  const isPolicyAvailable = computed(() => {
+    const hosted = getEulerGeoContext()
+    return !hosted || hosted.policies !== undefined
+  })
+  return { country, loadCountry, isPolicyAvailable }
 }
 
 const isCountryInList = (codes: readonly string[]): boolean => {
@@ -54,6 +59,17 @@ const expandBlockList = (codes: readonly string[]): string[] => {
  *   pattern matching in addition to the address lookup.
  */
 export type AssetLike = string | { address?: string, symbol?: string, name?: string } | undefined
+
+/** Resolved SDK vaults carry the chain that gives their asset metadata meaning. */
+export type VaultGeoInput = string | { address: string, chainId: number, asset?: AssetLike }
+export type VaultGeoBlockReason = 'region' | 'country-unavailable' | 'policy-unavailable' | 'asset-unavailable' | 'chain-mismatch'
+
+export interface VaultGeoPolicyOptions {
+  /** Prefer the caller's already-resolved, chain-scoped vault asset. */
+  asset?: AssetLike
+  /** Asset on the other side of a wrap/acquisition check. */
+  counterpart?: AssetLike
+}
 
 // Normalize an AssetLike into the three fields we consult. Returns undefined
 // when nothing is available (keeps callers' guards simple).
@@ -116,8 +132,10 @@ const getVaultUnderlyingAsset = (vaultAddress: string): { address: string, symbo
 export const isAssetBlockedByCountry = (asset: AssetLike): boolean => {
   const fields = toAssetFields(asset)
   if (!fields) return false
-  if (country.value === undefined) return false // still loading
+  if (country.value === undefined) return true // unresolved policy must fail closed
   if (country.value === null) return true // loaded, country unknown
+  const hostedContext = getEulerGeoContext()
+  if (hostedContext && hostedContext.policies === undefined) return true
 
   const cacheKey = makeAssetCacheKey(fields)
   const cached = assetBlockCache.get(cacheKey)
@@ -125,6 +143,9 @@ export const isAssetBlockedByCountry = (asset: AssetLike): boolean => {
 
   // Sanctioned countries are always blocked
   if (isCountryInList(SANCTIONED_COUNTRIES)) return cacheSet(assetBlockCache, cacheKey, true)
+
+  const hosted = getEulerGeoContext()
+  if (hosted) return cacheSet(assetBlockCache, cacheKey, matchesHostedGeo(hosted, country.value, 'block', fields))
 
   if (fields.address) {
     const assetBlock = getAssetBlock(fields.address)
@@ -155,10 +176,15 @@ export const isAssetRestrictedByCountry = (
   asset: AssetLike,
   opts?: { counterpart?: AssetLike },
 ): boolean => {
+  const hosted = getEulerGeoContext()
+  if (hosted && hosted.policies === undefined) return true
   const fields = toAssetFields(asset)
   if (!fields) return false
-  if (country.value === undefined) return false // still loading
+  if (country.value === undefined) return true // unresolved policy must fail closed
   if (country.value === null) return true // loaded, country unknown
+
+  // Global/chain rules cannot be exempted by a wrap or same-asset transfer.
+  if (hosted && matchesHostedGeo(hosted, country.value, 'restrict', fields, undefined, 'non-asset')) return true
 
   const cacheKey = makeAssetCacheKey(fields)
   const cached = assetRestrictedCache.get(cacheKey)
@@ -181,6 +207,9 @@ const computeAssetRestricted = (
   fields: { address?: string, symbol?: string, name?: string },
   cacheKey: string,
 ): boolean => {
+  const hosted = getEulerGeoContext()
+  if (hosted) return cacheSet(assetRestrictedCache, cacheKey, matchesHostedGeo(hosted, country.value!, 'restrict', fields, undefined, 'asset'))
+
   if (fields.address) {
     const assetRestricted = getAssetRestricted(fields.address)
     if (assetRestricted?.length && isCountryInList(expandBlockList(assetRestricted))) {
@@ -203,36 +232,90 @@ const computeAssetRestricted = (
   return cacheSet(assetRestrictedCache, cacheKey, false)
 }
 
-export const isVaultBlockedByCountry = (vaultAddress: string): boolean => {
-  if (country.value === undefined) return false // still loading
-  if (country.value === null) return true // loaded, country unknown
-
-  // Sanctioned countries are always blocked
-  if (isCountryInList(SANCTIONED_COUNTRIES)) return true
-
-  const productBlock = getVaultBlock(vaultAddress)
-  if (productBlock?.length && isCountryInList(expandBlockList(productBlock))) return true
-
-  const earnBlock = getEarnVaultBlock(vaultAddress)
-  if (earnBlock?.length && isCountryInList(expandBlockList(earnBlock))) return true
-
-  // Asset-level block: a vault is blocked whenever its underlying asset is blocked.
-  // Pass the full asset so pattern rules (symbol/name) also apply.
-  if (isAssetBlockedByCountry(getVaultUnderlyingAsset(vaultAddress))) return true
-
-  return false
+const isStaleVaultGeoInput = (vault: VaultGeoInput): boolean => {
+  const activeChainId = useEulerAddresses().chainId.value
+  const hosted = getEulerGeoContext()
+  return (typeof vault !== 'string' && vault.chainId !== activeChainId)
+    || (hosted?.chainId != null && hosted.chainId !== activeChainId)
 }
 
-export const isAnyVaultBlockedByCountry = (...addresses: string[]): boolean => {
-  return addresses.some(addr => isVaultBlockedByCountry(addr))
+const resolveVaultGeoInput = (vault: VaultGeoInput, opts?: Pick<VaultGeoPolicyOptions, 'asset'>) => {
+  const address = typeof vault === 'string' ? vault : vault.address
+  const asset = opts?.asset ?? (typeof vault === 'string' ? undefined : vault.asset) ?? getVaultUnderlyingAsset(address)
+  return { address, asset }
+}
+
+/** Only `region` is affirmative geographic evidence; other reasons describe missing context. */
+export const getVaultGeoBlockReason = (
+  vault: VaultGeoInput,
+  opts?: Pick<VaultGeoPolicyOptions, 'asset'>,
+): VaultGeoBlockReason | undefined => {
+  if (country.value == null) return 'country-unavailable'
+  if (isCountryInList(SANCTIONED_COUNTRIES)) return 'region'
+  if (isStaleVaultGeoInput(vault)) return 'chain-mismatch'
+  const { address, asset } = resolveVaultGeoInput(vault, opts)
+  if (!address) return undefined
+
+  const hosted = getEulerGeoContext()
+  if (hosted) {
+    if (hosted.policies === undefined) return 'policy-unavailable'
+    const fields = toAssetFields(asset)
+    if (matchesHostedGeo(hosted, country.value, 'block', fields, address)) return 'region'
+    return fields ? undefined : 'asset-unavailable'
+  }
+
+  const productBlock = getVaultBlock(address)
+  if (productBlock?.length && isCountryInList(expandBlockList(productBlock))) return 'region'
+  const earnBlock = getEarnVaultBlock(address)
+  if (earnBlock?.length && isCountryInList(expandBlockList(earnBlock))) return 'region'
+  if (!toAssetFields(asset)) return 'asset-unavailable'
+  return isAssetBlockedByCountry(asset) ? 'region' : undefined
+}
+
+/** Explain unavailable evidence without asserting that a geographic rule matched. */
+export const getVaultGeoUnavailableReason = (...vaults: (VaultGeoInput | undefined)[]): string | undefined => {
+  const reasons = vaults.filter(vault => vault !== undefined).map(vault => getVaultGeoBlockReason(vault))
+  if (reasons.includes('region')) return undefined
+  if (reasons.includes('country-unavailable')) return 'Your country could not be determined. Please retry.'
+  if (reasons.includes('policy-unavailable')) return 'Compliance data unavailable. Please retry.'
+  if (reasons.includes('chain-mismatch') || reasons.includes('asset-unavailable')) return 'Vault data is unavailable for this network. Please retry.'
+  return undefined
+}
+
+export const isVaultBlockedByCountry = (
+  vault: VaultGeoInput,
+  opts?: Pick<VaultGeoPolicyOptions, 'asset'>,
+): boolean => {
+  const reason = getVaultGeoBlockReason(vault, opts)
+  // Policy availability separately gates new exposure; preserve simple exits.
+  return reason !== undefined && reason !== 'policy-unavailable'
+}
+
+export const isAnyVaultBlockedByCountry = (...vaults: (VaultGeoInput | undefined)[]): boolean => {
+  return vaults.some(vault => vault !== undefined && isVaultBlockedByCountry(vault))
 }
 
 export const isVaultRestrictedByCountry = (
-  vaultAddress: string,
-  opts?: { counterpart?: AssetLike },
+  vault: VaultGeoInput,
+  opts?: VaultGeoPolicyOptions,
 ): boolean => {
-  if (country.value === undefined) return false // still loading
+  if (country.value === undefined) return true // unresolved policy must fail closed
   if (country.value === null) return true // loaded, country unknown
+  if (isStaleVaultGeoInput(vault)) return true
+  const { address: vaultAddress, asset: resolvedAsset } = resolveVaultGeoInput(vault, opts)
+  if (!vaultAddress) return false
+
+  const hosted = getEulerGeoContext()
+  if (hosted) {
+    if (hosted.policies === undefined) return true
+    const asset = toAssetFields(resolvedAsset)
+    if (matchesHostedGeo(hosted, country.value, 'restrict', asset, vaultAddress, 'non-asset')) return true
+    if (!asset) return true
+    if (!matchesHostedGeo(hosted, country.value, 'restrict', asset, vaultAddress, 'asset')) return false
+    const counterpart = toAssetFields(opts?.counterpart)
+    return !(asset.address && counterpart?.address
+      && (asset.address.toLowerCase() === counterpart.address.toLowerCase() || isWrapPair(asset.address, counterpart.address)))
+  }
 
   const vaultRestricted = getVaultRestricted(vaultAddress)
   if (vaultRestricted?.length && isCountryInList(expandBlockList(vaultRestricted))) return true
@@ -240,33 +323,37 @@ export const isVaultRestrictedByCountry = (
   const earnRestricted = getEarnVaultRestricted(vaultAddress)
   if (earnRestricted?.length && isCountryInList(expandBlockList(earnRestricted))) return true
 
-  // Asset-level restriction: a vault is restricted whenever its underlying asset is restricted.
-  if (isAssetRestrictedByCountry(getVaultUnderlyingAsset(vaultAddress), opts)) return true
+  const asset = resolvedAsset
+  if (!toAssetFields(asset)) return true
+  if (isAssetRestrictedByCountry(asset, { counterpart: opts?.counterpart })) return true
 
   return false
 }
 
-export const isAnyVaultRestrictedByCountry = (...addresses: string[]): boolean => {
-  return addresses.some(addr => isVaultRestrictedByCountry(addr))
+export const isAnyVaultRestrictedByCountry = (...vaults: VaultGeoInput[]): boolean => {
+  return vaults.some(vault => isVaultRestrictedByCountry(vault))
 }
 
 export type VaultTagContext = 'browse' | 'swap-target' | 'supply-source'
 
 export const getVaultTags = (
-  vaultAddress: string,
+  vaultAddress: VaultGeoInput,
   context: VaultTagContext = 'browse',
 ): { tags: string[], disabled: boolean } => {
   const tags: string[] = []
-  const blocked = isVaultBlockedByCountry(vaultAddress)
+  const reason = getVaultGeoBlockReason(vaultAddress)
+  const policyResolved = reason === undefined
+  const blocked = reason !== undefined && reason !== 'policy-unavailable'
+  const address = typeof vaultAddress === 'string' ? vaultAddress : vaultAddress.address
   const restricted = !blocked && isVaultRestrictedByCountry(vaultAddress)
 
-  if (blocked) tags.push('Restricted')
+  if (reason === 'region') tags.push('Restricted')
   // Soft-restricted: only show tag when the context involves acquiring more exposure
-  if (restricted && context === 'swap-target') tags.push('Restricted')
-  if (isVaultDeprecated(vaultAddress)) tags.push('Deprecated')
+  if (restricted && context === 'swap-target' && policyResolved) tags.push('Restricted')
+  if (isVaultDeprecated(address)) tags.push('Deprecated')
 
   const disabled = blocked
-    || isVaultDeprecated(vaultAddress)
+    || isVaultDeprecated(address)
     || (restricted && context === 'swap-target')
 
   return { tags, disabled }

@@ -1,19 +1,23 @@
 import type { LocationQueryRaw } from 'vue-router'
 import type { Ref } from 'vue'
+import { resolveUrlQueryValue } from '~/utils/url-query-alias'
 
 interface UrlSyncParam {
   ref: Ref<string> | Ref<string[]>
   default: string | string[]
   queryKey: string
+  /** Former names of the parameter, still read from saved links; only `queryKey` is written. */
+  legacyKeys?: string[]
 }
 
 export function useUrlQuerySync(params: UrlSyncParam[]): void {
   const route = useRoute()
   const router = useRouter()
 
-  const managedKeys = new Set(params.map(p => p.queryKey))
+  const managedKeys = new Set(params.flatMap(p => [p.queryKey, ...(p.legacyKeys ?? [])]))
   let isSyncing = false
   const isActive = ref(true)
+  let legacyKeyInUrl = false
 
   onActivated(() => {
     isActive.value = true
@@ -24,7 +28,8 @@ export function useUrlQuerySync(params: UrlSyncParam[]): void {
 
   // Read URL → refs on init
   for (const param of params) {
-    const queryValue = route.query[param.queryKey]
+    const { legacyPresent, value: queryValue } = resolveUrlQueryValue(route.query, param.queryKey, param.legacyKeys)
+    if (legacyPresent) legacyKeyInUrl = true
     if (queryValue === undefined) continue
 
     if (Array.isArray(param.default)) {
@@ -72,6 +77,9 @@ export function useUrlQuerySync(params: UrlSyncParam[]): void {
     }
   }
 
+  // A link that carries a former parameter name is rewritten without it.
+  if (legacyKeyInUrl) nextTick(syncRefsToUrl)
+
   // Watch refs → update URL
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -101,7 +109,8 @@ export function useUrlQuerySync(params: UrlSyncParam[]): void {
 
       // Check if any managed param in the URL doesn't match its ref
       const needsSync = params.some((param) => {
-        const queryValue = route.query[param.queryKey]
+        const { legacyPresent, value: queryValue } = resolveUrlQueryValue(route.query, param.queryKey, param.legacyKeys)
+        if (legacyPresent) return true
         const refValue = param.ref.value
 
         if (Array.isArray(param.default)) {

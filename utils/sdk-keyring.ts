@@ -3,10 +3,19 @@ import type { CredentialData } from '@keyringnetwork/keyring-connect-sdk'
 import type { KeyringCredentialData, KeyringPluginConfig } from '@eulerxyz/euler-v2-sdk'
 import { isVaultKeyring } from '~/utils/eulerLabelsUtils'
 import { getVaultHookTarget } from '~/utils/vault-hooks'
+import { getPublicClient } from '~/utils/public-client'
+import { resolveKeyringContractAddress } from '~/utils/keyring-hook-target'
+import { logWarn } from '~/utils/errorHandling'
 
 type CredentialKey = `${number}:${string}:${string}:${number}`
 
-const credentials = new Map<CredentialKey, KeyringCredentialData>()
+interface CachedCredential {
+  credential: KeyringCredentialData
+  keyringContractAddress: Address
+  rpcUrl: string
+}
+
+const credentials = new Map<CredentialKey, CachedCredential>()
 
 const keyFor = (chainId: number, account: Address, hookTarget: Address, policyId: number): CredentialKey =>
   `${chainId}:${getAddress(account).toLowerCase()}:${getAddress(hookTarget).toLowerCase()}:${policyId}`
@@ -27,9 +36,15 @@ export const setSdkKeyringCredential = (args: {
   account: Address
   hookTarget: Address
   policyId: number
+  keyringContractAddress: Address
+  rpcUrl: string
   credential: CredentialData
 }) => {
-  credentials.set(keyFor(args.chainId, args.account, args.hookTarget, args.policyId), toSdkCredential(args.credential))
+  credentials.set(keyFor(args.chainId, args.account, args.hookTarget, args.policyId), {
+    credential: toSdkCredential(args.credential),
+    keyringContractAddress: getAddress(args.keyringContractAddress),
+    rpcUrl: args.rpcUrl,
+  })
 }
 
 export const clearSdkKeyringCredential = (args: {
@@ -46,7 +61,23 @@ export const getSdkKeyringCredential: KeyringPluginConfig['getCredentialData'] =
   account,
   hookTarget,
   policyId,
-}) => credentials.get(keyFor(chainId, account, hookTarget, policyId)) ?? null
+}) => {
+  const cached = credentials.get(keyFor(chainId, account, hookTarget, policyId))
+  if (!cached || cached.credential.validUntil <= Math.floor(Date.now() / 1000)) return null
+
+  try {
+    const currentKeyringAddress = await resolveKeyringContractAddress(
+      getPublicClient(cached.rpcUrl),
+      hookTarget,
+    )
+    if (currentKeyringAddress !== cached.keyringContractAddress) return null
+    return cached.credential
+  }
+  catch (error) {
+    logWarn('sdkKeyring/resolveKeyringContractAddress', error)
+    return null
+  }
+}
 
 export const buildSdkKeyringHookTargets = (): Record<number, Address[]> => {
   const { chainId } = useEulerAddresses()

@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import { getVaultGeoUnavailableReason } from '~/composables/useGeoBlock'
+import { captureSwapReview } from '~/utils/swapReview'
 import type { SecuritizeCollateralVault, EVault, SwapQuote, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
-import { getSubAccountAddress, SwapperMode } from '@eulerxyz/euler-v2-sdk'
+import { getSubAccountAddress, isEVault, SwapperMode } from '@eulerxyz/euler-v2-sdk'
 import { isSecuritizeVault } from '~/utils/vault/categories'
 import { useSwapCollateralOptions } from '~/composables/useSwapCollateralOptions'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
-import { formatNumber, formatSmartAmount } from '~/utils/string-utils'
+import { formatSmartAmount } from '~/utils/string-utils'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
 import type { SwapQuotePlanContext } from '~/composables/useSwapQuotesParallel'
@@ -12,18 +14,33 @@ import { normalizeAddress } from '~/utils/normalizeAddress'
 import { isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { getAddress, type Address, zeroAddress, isAddress } from 'viem'
-import { isCowProvider } from '~/entities/cowswap'
+import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
 import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
+import { getProjectedRatesBatch } from '~/utils/vault/apy'
+import { nanoToValue } from '~/utils/crypto-utils'
+import { createRaceGuard } from '~/utils/race-guard'
+import {
+  getProjectedYieldState,
+  mergeProjectedRewardCampaigns,
+  type ProjectedYieldDetails,
+} from '~/utils/projected-yield'
+import { buildLendSwapProjectionPlan, resolveLendSwapProjectedRates } from '~/utils/lend-swap-apy'
+import { getLayeredVault } from '~/composables/useLayeredVaults'
 
 const route = useRoute()
 const { getVault, getSecuritizeVault } = useVaults()
 const { effectiveAddress } = useEffectiveAddress()
 const { depositPositions } = useEulerAccount()
 const { planCollateralChange } = useEulerTx()
+const { create: createIntent } = useOperationIntentFactory()
 const { account: planAccount } = usePlanAccount()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
-const { getSupplyRewardApy } = useRewardsApy()
+const {
+  version: rewardsVersion,
+  getSupplyRewardApy,
+  getSupplyRewardCampaigns,
+} = useRewardsApy()
 
 const subAccountIndex = Number(route.params.subAccount)
 const subAccount = computed(() => {
@@ -35,7 +52,17 @@ const subAccount = computed(() => {
 // ── Vaults ───────────────────────────────────────────────────────────────
 const fromVault: Ref<EVault | SecuritizeCollateralVault | undefined> = ref()
 const toVault: Ref<EVault | undefined> = ref()
-useOperationGuard(computed(() => [fromVault.value?.address, toVault.value?.address].filter(Boolean)))
+const projectionFromVault = computed(() => {
+  const fallback = fromVault.value
+  return fallback ? getLayeredVault(fallback.address, fallback) : undefined
+})
+const projectionToVault = computed(() => {
+  const fallback = toVault.value
+  return fallback ? getLayeredVault(fallback.address, fallback) : undefined
+})
+useOperationGuard(computed(() => [fromVault.value?.address, toVault.value?.address].filter(Boolean)), {
+  depositedVaultAddresses: computed(() => [toVault.value?.address].filter(Boolean)),
+})
 
 const fromVaultAsRegular = computed(() => fromVault.value as EVault | undefined)
 const { collateralOptions, collateralVaults } = useSwapCollateralOptions({ currentVault: fromVaultAsRegular })
@@ -65,20 +92,67 @@ const savingPosition = computed(() => {
 const assetsBalance = computed(() => savingPosition.value?.assets || 0n)
 const balance = computed(() => getCashLimitedWithdrawAmount(
   assetsBalance.value,
-  fromVault.value,
+  projectionFromVault.value,
 ))
 
 // ── Supply APY ───────────────────────────────────────────────────────────
 const fromSupplyApy = computed(() => {
-  if (!fromVault.value) return null
-  const base = getVaultSupplyApy(fromVault.value)
-  return withVaultIntrinsicApy(base, fromVault.value, enableIntrinsicApy.value) + getSupplyRewardApy(fromVault.value.address)
+  const vault = projectionFromVault.value
+  if (!vault) return null
+  const base = getVaultSupplyApy(vault)
+  return withVaultIntrinsicApy(base, vault, enableIntrinsicApy.value) + getSupplyRewardApy(vault.address)
 })
 const toSupplyApy = computed(() => {
-  if (!toVault.value) return null
-  const base = getVaultSupplyApy(toVault.value)
-  return withVaultIntrinsicApy(base, toVault.value, enableIntrinsicApy.value) + getSupplyRewardApy(toVault.value.address)
+  const vault = projectionToVault.value
+  if (!vault) return null
+  const base = getVaultSupplyApy(vault)
+  return withVaultIntrinsicApy(base, vault, enableIntrinsicApy.value) + getSupplyRewardApy(vault.address)
 })
+const projectedFromSupplyApy = ref<number | null>(null)
+const projectedToSupplyApy = ref<number | null>(null)
+const fromProjectedYieldDetails = ref<ProjectedYieldDetails | null>(null)
+const toProjectedYieldDetails = ref<ProjectedYieldDetails | null>(null)
+const isYieldEstimateLoading = ref(false)
+
+const buildProjectedSupplyDetails = (vault: EVault, projectedRaw: number): ProjectedYieldDetails | null => {
+  const currentRaw = getVaultSupplyApy(vault)
+  const currentWithIntrinsic = withVaultIntrinsicApy(currentRaw, vault, enableIntrinsicApy.value)
+  const projectedWithIntrinsic = withVaultIntrinsicApy(projectedRaw, vault, enableIntrinsicApy.value)
+  const rewardApy = getSupplyRewardApy(vault.address)
+  const before = getProjectedYieldState('supply-apy', {
+    supplyUsd: 1,
+    baseSupplyApy: currentRaw,
+    intrinsicSupplyApy: currentWithIntrinsic - currentRaw,
+    supplyRewardApy: rewardApy,
+    borrowUsd: 0,
+    baseBorrowApy: 0,
+  })
+  const after = getProjectedYieldState('supply-apy', {
+    supplyUsd: 1,
+    baseSupplyApy: projectedRaw,
+    intrinsicSupplyApy: projectedWithIntrinsic - projectedRaw,
+    supplyRewardApy: rewardApy,
+    borrowUsd: 0,
+    baseBorrowApy: 0,
+  })
+  if (!after) return null
+  const campaigns = getSupplyRewardCampaigns(vault.address)
+    .map(campaign => ({ campaign, vaultAddress: vault.address }))
+  return {
+    metric: 'supply-apy',
+    before,
+    after,
+    rateLines: [{
+      id: `supply:${vault.address.toLowerCase()}`,
+      label: 'Lending APY',
+      symbol: vault.asset.symbol,
+      vaultAddress: vault.address,
+      before: currentRaw,
+      after: projectedRaw,
+    }],
+    rewards: mergeProjectedRewardCampaigns(campaigns, campaigns),
+  }
+}
 
 // ── Shared swap logic ────────────────────────────────────────────────────
 const swap = useSwapPageLogic({
@@ -137,12 +211,45 @@ const swap = useSwapPageLogic({
     })
   },
 
+  createReviewIntent(quote?: SwapQuote) {
+    const from = fromVault.value
+    const to = toVault.value
+    const positionAccount = subAccount.value ?? effectiveAddress.value
+    if (!from || !to || !positionAccount) throw new Error('Position is not loaded')
+    const amount = valueToNano(fromAmount.value, from.asset.decimals)
+    const isMax = assetsBalance.value > 0n && amount >= assetsBalance.value
+    if (quote) {
+      return createIntent({
+        kind: 'collateral',
+        planner: 'swap-collateral',
+        args: { swapQuote: quote, swapperMode: SwapperMode.EXACT_IN },
+        source: 'lend/swap:review',
+        subAccounts: [positionAccount as Address],
+      })
+    }
+    return createIntent({
+      kind: 'refinance',
+      planner: 'migrate-same-asset-collateral',
+      args: {
+        fromVault: from.address as Address,
+        toVault: to.address as Address,
+        amount,
+        positionAccount: positionAccount as Address,
+        toAsset: to.asset.address as Address,
+        isMax,
+        maxShares: isMax ? savingPosition.value?.shares : undefined,
+      },
+      source: 'lend/swap:review',
+      subAccounts: [positionAccount as Address],
+    })
+  },
+
   getBalanceError: (amountNano) => {
     if (assetsBalance.value < amountNano) return 'Not enough balance'
     if (balance.value < amountNano) return 'Not enough liquidity in vault'
     return null
   },
-  getGeoBlockedAddresses: () => [getVaultAddress()],
+  getGeoBlockedAddresses: () => [fromVault.value?.address, toVault.value?.address].filter((address): address is Address => Boolean(address)),
 })
 
 const {
@@ -150,18 +257,101 @@ const {
   isSameAsset, sameVaultError, errorText,
   isGeoBlocked, reviewSwapDisabled, reviewSwapLabel, simulationError,
   isQuoteLoading, quoteError, quotesStatusLabel, selectedProvider, selectedQuote,
-  effectiveQuoteFetchedAt,
+  quoteCardsSorted, effectiveQuoteFetchedAt,
   fromProduct, toProduct, currentPrice, swapSummary, priceImpact, routedVia,
   swapRouteItems, swapRouteEmptyMessage,
   selectProvider, onFromInput, onToVaultChange, onRefreshQuotes, submit, openSlippageSettings,
 } = swap
+
+const yieldEstimateGuard = createRaceGuard()
+const updateYieldEstimates = useDebounceFn(async (gen: number) => {
+  if (yieldEstimateGuard.isStale(gen)) return
+  const source = projectionFromVault.value
+  const target = projectionToVault.value
+  const sourceAmount = fromAmount.value
+  const sameAsset = isSameAsset.value
+  const quote = selectedQuote.value
+  projectedFromSupplyApy.value = null
+  projectedToSupplyApy.value = null
+  fromProjectedYieldDetails.value = null
+  toProjectedYieldDetails.value = null
+  if (!source || !target || !(+sourceAmount > 0)) {
+    isYieldEstimateLoading.value = false
+    return
+  }
+  if (normalizeAddress(source.address) === normalizeAddress(target.address) || (!sameAsset && !quote)) {
+    isYieldEstimateLoading.value = false
+    return
+  }
+
+  try {
+    const sourceAmountNano = valueToNano(sourceAmount, source.asset.decimals)
+    const targetAmountNano = sameAsset
+      ? sourceAmountNano
+      : BigInt(quote?.amountOut || 0)
+    if (targetAmountNano <= 0n) {
+      isYieldEstimateLoading.value = false
+      return
+    }
+
+    const plan = buildLendSwapProjectionPlan(
+      isEVault(source) ? source : null,
+      target,
+      sourceAmountNano,
+      targetAmountNano,
+    )
+    const projectedRates = await getProjectedRatesBatch(plan.requests)
+    if (yieldEstimateGuard.isStale(gen)) return
+    const resolvedRates = resolveLendSwapProjectedRates(plan, projectedRates)
+    if (!resolvedRates) return
+
+    if (resolvedRates.source && isEVault(source)) {
+      const sourceRaw = nanoToValue(resolvedRates.source.supplyAPY, 25)
+      const details = buildProjectedSupplyDetails(source, sourceRaw)
+      projectedFromSupplyApy.value = details?.after.total ?? null
+      fromProjectedYieldDetails.value = details
+    }
+    const targetRaw = nanoToValue(resolvedRates.target.supplyAPY, 25)
+    const targetDetails = buildProjectedSupplyDetails(target, targetRaw)
+    projectedToSupplyApy.value = targetDetails?.after.total ?? null
+    toProjectedYieldDetails.value = targetDetails
+  }
+  catch (error) {
+    if (yieldEstimateGuard.isStale(gen)) return
+    console.warn('[lend swap] failed to project supply APYs', error)
+  }
+  finally {
+    if (!yieldEstimateGuard.isStale(gen)) isYieldEstimateLoading.value = false
+  }
+}, 500)
+
+const queueYieldEstimates = () => {
+  const gen = yieldEstimateGuard.next()
+  projectedFromSupplyApy.value = null
+  projectedToSupplyApy.value = null
+  fromProjectedYieldDetails.value = null
+  toProjectedYieldDetails.value = null
+  const canProject = !!fromVault.value
+    && !!toVault.value
+    && +fromAmount.value > 0
+    && normalizeAddress(fromVault.value.address) !== normalizeAddress(toVault.value.address)
+    && (isSameAsset.value || !!selectedQuote.value)
+  if (!canProject) {
+    isYieldEstimateLoading.value = false
+    return
+  }
+  isYieldEstimateLoading.value = true
+  updateYieldEstimates(gen)
+}
 
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 
 // Add this earn-position swap (or same-asset migration) to the batch. CoW
 // orders can't be merged into an EVC batch, so they're excluded.
-const isCowSwapSelected = computed(() => isCowProvider(selectedProvider.value))
+const isCowSwapSelected = computed(() =>
+  !isSameAsset.value && isCowProviderOrQuote(selectedProvider.value, selectedQuote.value),
+)
 const canAddToBatch = computed(() => {
   if (isGeoBlocked.value) return false
   if (!fromVault.value || !toVault.value || !(+fromAmount.value)) return false
@@ -192,25 +382,27 @@ const addToBatch = async () => {
     const maxShares = isMax ? savingPosition.value?.shares : undefined
     const sameAsset = isSameAsset.value
     const swapQuote = sameAsset ? undefined : selectedQuote.value ?? undefined
+    const quoteIntents = swapQuote
+      ? quoteCardsSorted.value.find(card => card.quote === swapQuote)?.intents
+      : undefined
     const label = sameAsset
       ? `Migrate ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
       : `Swap ${fromAmount.value} ${from.asset.symbol} → ${to.asset.symbol}`
+    const intent = createIntent({
+      kind: sameAsset ? 'refinance' : 'collateral',
+      planner: sameAsset ? 'migrate-same-asset-collateral' : 'swap-collateral',
+      args: sameAsset
+        ? { fromVault: fromAddr, toVault: toAddr, amount, positionAccount, toAsset: toAssetAddr, isMax, maxShares }
+        : { swapQuote, swapperMode: SwapperMode.EXACT_IN },
+      source: 'lend/swap:add-to-batch',
+      subAccounts: [positionAccount],
+    })
     await addBatchEntry({
       label,
-      buildPlan: account => planCollateralChange({
-        fromVault: fromAddr,
-        toVault: toAddr,
-        amount,
-        positionAccount,
-        toAsset: toAssetAddr,
-        isMax,
-        maxShares,
-        swapQuote,
-        swapperMode: SwapperMode.EXACT_IN,
-        account,
-      }),
+      intent,
+      preparedIntent: quoteIntents?.[0],
       subAccount: positionAccount,
-      review: { type: 'swap', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, swapMode: SwapperMode.EXACT_IN, quoteFetchedAt: sameAsset ? null : effectiveQuoteFetchedAt.value },
+      review: { type: 'swap', asset: from.asset, amount: fromAmount.value, swapToAsset: to.asset, ...captureSwapReview(swapQuote, SwapperMode.EXACT_IN), quoteFetchedAt: sameAsset ? null : effectiveQuoteFetchedAt.value },
     })
     fromAmount.value = ''
     redirectAfterAdd('/portfolio/saving', { subAccount: positionAccount, vault: toAddr })
@@ -218,7 +410,7 @@ const addToBatch = async () => {
 }
 
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
-  if (isGeoBlocked.value) return { message: 'This operation is not available in your region', variant: 'warning' }
+  if (isGeoBlocked.value) return { message: getVaultGeoUnavailableReason(fromVault.value?.address, toVault.value?.address) || 'This operation is not available in your region', variant: 'warning' }
   if (sameVaultError.value) return { message: sameVaultError.value, variant: 'error' }
   if (errorText.value) return { message: errorText.value, variant: 'error' }
   if (quoteError.value) return { message: quoteError.value, variant: 'warning' }
@@ -264,6 +456,23 @@ loadVaults()
 watch([() => route.params.vault, () => route.query.to], () => {
   loadVaults()
 })
+
+watch(
+  [
+    fromAmount,
+    fromVault,
+    toVault,
+    isSameAsset,
+    selectedQuote,
+    rewardsVersion,
+    enableIntrinsicApy,
+    () => isEVault(projectionFromVault.value) ? projectionFromVault.value.totalCash : undefined,
+    () => isEVault(projectionFromVault.value) ? projectionFromVault.value.totalBorrowed : undefined,
+    () => projectionToVault.value?.totalCash,
+    () => projectionToVault.value?.totalBorrowed,
+  ],
+  queueYieldEstimates,
+)
 </script>
 
 <template>
@@ -330,12 +539,10 @@ watch([() => route.params.vault, () => route.query.to], () => {
               No asset swap options available
             </div>
 
-            <UiAlert
+            <GeoBlockAlert
               v-if="isGeoBlocked"
-              title="Region restricted"
+              :vault-addresses="[fromVault?.address, toVault?.address]"
               description="This operation is not available in your region. You can still withdraw existing deposits."
-              variant="warning"
-              size="compact"
             />
             <UiAlert
               v-show="errorText"
@@ -369,20 +576,22 @@ watch([() => route.params.vault, () => route.query.to], () => {
           </div>
 
           <VaultFormInfoBlock
-            :loading="!isSameAsset && isQuoteLoading"
+            :loading="(!isSameAsset && isQuoteLoading) || isYieldEstimateLoading"
             variant="card"
             class="w-full laptop:max-w-[360px]"
           >
-            <SummaryRow :label="`${fromVault.asset.symbol || 'Token1'} supply APY`">
-              <p class="text-p2">
-                {{ fromSupplyApy !== null ? `${formatNumber(fromSupplyApy)}%` : '-' }}
-              </p>
-            </SummaryRow>
-            <SummaryRow :label="`${toVault?.asset?.symbol || 'Token2'} supply APY`">
-              <p class="text-p2">
-                {{ toSupplyApy !== null ? `${formatNumber(toSupplyApy)}%` : '-' }}
-              </p>
-            </SummaryRow>
+            <ProjectedYieldSummaryRow
+              :label="`${fromVault.asset.symbol || 'Token1'} supply APY`"
+              :before="fromSupplyApy"
+              :after="projectedFromSupplyApy"
+              :details="fromProjectedYieldDetails"
+            />
+            <ProjectedYieldSummaryRow
+              :label="`${toVault?.asset?.symbol || 'Token2'} supply APY`"
+              :before="toSupplyApy"
+              :after="projectedToSupplyApy"
+              :details="toProjectedYieldDetails"
+            />
             <template v-if="!isSameAsset">
               <SummaryRow
                 label="Swap price"
@@ -420,6 +629,7 @@ watch([() => route.params.vault, () => route.query.to], () => {
               :disabled-reason-variant="disabledReasonInfo?.variant"
               :loading="isSubmitting || isPreparing"
               :can-add-to-batch="canAddToBatch"
+              :add-to-batch-disabled-reason="isCowSwapSelected ? COWSWAP_BATCH_UNSUPPORTED_REASON : undefined"
               @add-to-batch="addToBatch"
             >
               {{ reviewSwapLabel }}

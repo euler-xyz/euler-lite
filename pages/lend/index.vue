@@ -5,12 +5,13 @@ import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 
-import { getAssetUsdValueOrZero } from '~/utils/sdk-prices'
+import { getAssetUsdValueForEstimate } from '~/utils/sdk-prices'
 import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultRecentlyAdded, isVaultDeprecated, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
 import { isOpDisabled, OP_DEPOSIT } from '~/utils/vault-hooks'
+import { hasBorrowTablePair, isBorrowTableCollateral } from '~/utils/vault/borrow-table'
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
@@ -27,7 +28,8 @@ const showAllLabelEntries = useShowAllLabelEntries()
 const list = computed(() => getVerifiedEVaults(showAllLabelEntries.value))
 
 const isPricesReady = ref(false)
-const { entities, isReady: labelsReady } = useEulerLabels()
+const { entities, isReady: labelsReady, loadError: labelsError } = useEulerLabels()
+const labelsUnavailable = computed(() => !labelsReady.value && Boolean(labelsError.value))
 const isLoading = computed(() => isEVaultUpdating.value || !labelsReady.value || !isPricesReady.value)
 const { isSlow } = useSlowLoading(isLoading)
 const { settings } = useUserSettings()
@@ -53,7 +55,7 @@ const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<EVault>((vaul
 
 const selectedCollateral = ref<string[]>([])
 const selectedMarkets = ref<string[]>([])
-const selectedRiskManagers = ref<string[]>([])
+const selectedCurators = ref<string[]>([])
 const sortBy = ref<string>('Total Supply')
 const sortDir = ref<'desc' | 'asc'>('desc')
 
@@ -63,7 +65,7 @@ useUrlQuerySync([
   { ref: sortDir, default: 'desc', queryKey: 'dir' },
   { ref: selectedCollateral, default: [], queryKey: 'vault' },
   { ref: selectedMarkets, default: [], queryKey: 'market' },
-  { ref: selectedRiskManagers, default: [], queryKey: 'riskManager' },
+  { ref: selectedCurators, default: [], queryKey: 'curator', legacyKeys: ['riskManager'] },
 ])
 
 // Cache for USD values used in sorting and filtering (keyed by vault address)
@@ -93,9 +95,9 @@ const {
   ],
   (vault, metric) => {
     switch (metric) {
-      case 'totalSupply': return vaultUsdValues.value.get(vault.address) ?? 0
-      case 'liquidity': return vaultLiquidityUsd.value.get(vault.address) ?? 0
-      case 'inWallet': return vaultWalletUsd.value.get(vault.address) ?? 0
+      case 'totalSupply': return vaultUsdValues.value.get(vault.address)
+      case 'liquidity': return vaultLiquidityUsd.value.get(vault.address)
+      case 'inWallet': return vaultWalletUsd.value.get(vault.address)
       case 'supplyApy': return getDisplayedVaultSupplyApy(vault)
       case 'utilization': return vault.utilization
       default: return 0
@@ -108,7 +110,7 @@ watch(chainId, (newChainId, oldChainId) => {
     clearSearch()
     selectedCollateral.value = []
     selectedMarkets.value = []
-    selectedRiskManagers.value = []
+    selectedCurators.value = []
     clearCustomFilters()
   }
 })
@@ -118,7 +120,7 @@ watch(chainId, (newChainId, oldChainId) => {
 const borrowableVaults = computed(() => {
   return list.value.filter(vault =>
     (showAllLabelEntries.value || !isVaultNotExplorableLend(vault.address))
-    && borrowList.value.some(pair => pair.borrow.address === vault.address)
+    && hasBorrowTablePair(vault.address, borrowList.value, address => isBorrowTableCollateral(address, showAllLabelEntries.value))
     && !isOpDisabled(vault, OP_DEPOSIT),
   )
 })
@@ -146,13 +148,13 @@ const fetchLendPrices = useDebounceFn(async () => {
         const walletBalance = getBalance(vault.asset.address as `0x${string}`)
         const liquidity = vault.availableLiquidity
         const [totalSupply, liquidityUsd, wallet] = await Promise.all([
-          getAssetUsdValueOrZero(vault.totalAssets, vault, 'off-chain'),
-          getAssetUsdValueOrZero(liquidity, vault, 'off-chain'),
-          walletBalance > 0n ? getAssetUsdValueOrZero(walletBalance, vault, 'off-chain') : Promise.resolve(0),
+          getAssetUsdValueForEstimate(vault.totalAssets, vault, 'off-chain'),
+          getAssetUsdValueForEstimate(liquidity, vault, 'off-chain'),
+          getAssetUsdValueForEstimate(walletBalance, vault, 'off-chain'),
         ])
-        supplyValues.set(vault.address, totalSupply)
-        liquidityValues.set(vault.address, liquidityUsd)
-        walletValues.set(vault.address, wallet)
+        if (totalSupply !== undefined) supplyValues.set(vault.address, totalSupply)
+        if (liquidityUsd !== undefined) liquidityValues.set(vault.address, liquidityUsd)
+        if (wallet !== undefined) walletValues.set(vault.address, wallet)
       }),
     )
 
@@ -196,7 +198,7 @@ const marketOptions = computed(() => {
     if (!market.name) return []
     const entityName = Array.isArray(market?.entity) ? market?.entity[0] : market?.entity
     const entityObj = entityName ? entities[entityName] : null
-    return [{ key: market.name, label: market.name, tvl: vaultUsdValues.value.get(vault.address) ?? 0, icon: entityObj?.logo ? `/entities/${entityObj.logo}` : undefined, iconFallback: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined }]
+    return [{ key: market.name, label: market.name, tvl: vaultUsdValues.value.get(vault.address) ?? 0, icon: entityObj?.logo ? getEulerLabelEntityLogo(entityObj.logo) : undefined }]
   }))
 })
 
@@ -212,11 +214,11 @@ const assetOptions = computed(() => {
     )
 })
 
-const riskManagerOptions = computed(() => {
+const curatorOptions = computed(() => {
   return buildTvlSortedOptions(borrowableVaults.value.flatMap((vault) => {
     const tvl = vaultUsdValues.value.get(vault.address) ?? 0
     return getEntitiesByVault(vault).map(entity => ({
-      key: entity.name, label: entity.name, tvl, icon: entity.logo ? `/entities/${entity.logo}` : undefined, iconFallback: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined,
+      key: entity.name, label: entity.name, tvl, icon: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined,
     }))
   }))
 })
@@ -226,8 +228,8 @@ const filteredList = computed(() => {
     .filter(matchesSearch)
     .filter(vault => selectedCollateral.value.length ? selectedCollateral.value.includes(vault.asset.address) : true)
     .filter(vault => selectedMarkets.value.length ? selectedMarkets.value.includes(getProductByVault(vault.address).name) : true)
-    .filter(vault => selectedRiskManagers.value.length
-      ? getEntitiesByVault(vault).some(e => selectedRiskManagers.value.includes(e.name))
+    .filter(vault => selectedCurators.value.length
+      ? getEntitiesByVault(vault).some(e => selectedCurators.value.includes(e.name))
       : true)
     .filter(matchesCustomFilters)
 })
@@ -282,7 +284,7 @@ const hasActiveFilters = computed(() =>
   searchQuery.value.trim().length > 0
   || selectedCollateral.value.length > 0
   || selectedMarkets.value.length > 0
-  || selectedRiskManagers.value.length > 0
+  || selectedCurators.value.length > 0
   || customFilters.value.length > 0,
 )
 const hasLendMarkets = computed(() => borrowableVaults.value.length > 0)
@@ -298,7 +300,7 @@ const clearLendFilters = () => {
   clearSearch()
   selectedCollateral.value = []
   selectedMarkets.value = []
-  selectedRiskManagers.value = []
+  selectedCurators.value = []
   clearCustomFilters()
 }
 </script>
@@ -309,10 +311,13 @@ const clearLendFilters = () => {
       title="Lend"
       description="Supply assets to isolated lending markets. Earn yield from borrower demand."
       class="mb-16"
-      arrow-down
+      icon="nav-lend"
     />
 
-    <div class="mb-16 -mx-16">
+    <div
+      v-if="!labelsUnavailable"
+      class="mb-16 -mx-16"
+    >
       <div class="flex items-center flex-wrap gap-8 px-16">
         <UiInput
           v-model="searchQuery"
@@ -326,21 +331,22 @@ const clearLendFilters = () => {
           v-model="sortBy"
           v-model:dir="sortDir"
           :options="[
-            { label: 'Total Supply', icon: 'lend-outline' },
-            { label: 'Utilization', icon: 'pulse' },
-            { label: 'Supply APY', icon: 'percent' },
+            { label: 'Total Supply', icon: 'sort-total-supply' },
+            { label: 'Utilization', icon: 'sort-utilization' },
+            { label: 'Supply APY', icon: 'sort-apy' },
           ]"
           title="Sorting type"
         />
         <UiSelect
           v-if="enableEntityBranding"
-          :key="`risk-managers-${chainId}`"
-          v-model="selectedRiskManagers"
-          :options="riskManagerOptions"
-          placeholder="Risk manager"
-          title="Risk manager"
-          modal-input-placeholder="Search risk manager"
-          icon="shield"
+          :key="`curators-${chainId}`"
+          v-model="selectedCurators"
+          :options="curatorOptions"
+          placeholder="Curator"
+          title="Curator"
+          modal-input-placeholder="Search curator"
+          icon="filter-curator"
+          active-icon="filter-curator-filled"
         />
         <UiSelect
           v-if="enableEntityBranding"
@@ -350,7 +356,8 @@ const clearLendFilters = () => {
           placeholder="Market"
           title="Market"
           modal-input-placeholder="Search market"
-          icon="bank"
+          icon="market"
+          active-icon="market-filled"
         />
         <UiSelect
           :key="`collateral-${chainId}`"
@@ -359,7 +366,8 @@ const clearLendFilters = () => {
           placeholder="Asset"
           title="Asset"
           modal-input-placeholder="Search asset"
-          icon="wallet"
+          icon="filter-asset"
+          active-icon="filter-asset-filled"
         />
         <UiCustomFilterChips
           :filters="customFilters"
@@ -370,8 +378,14 @@ const clearLendFilters = () => {
     </div>
 
     <div class="flex flex-col flex-1">
+      <LabelsUnavailableState
+        v-if="labelsUnavailable"
+        class="flex-1"
+        title="Lending vaults unavailable"
+        description="Published vault verification could not be loaded. Lending listings are unavailable until it returns."
+      />
       <div
-        v-if="isLoading"
+        v-else-if="isLoading"
         class="flex flex-col flex-1 items-center justify-center gap-12"
       >
         <UiLoader />
@@ -390,7 +404,7 @@ const clearLendFilters = () => {
       <UiEmptyState
         v-else
         class="flex-1"
-        icon="lend-outline"
+        icon="nav-lend"
         :title="emptyStateTitle"
         :description="emptyStateDescription"
       >

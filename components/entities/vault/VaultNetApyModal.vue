@@ -159,7 +159,10 @@ const handleClose = () => {
                   class="w-14 h-14 inline-block align-middle mr-2 bg-white rounded-sm p-1"
                   :alt="PROVIDER_LABELS[reward.source]"
                 >{{ PROVIDER_LABELS[reward.source] || reward.source }}
-              </template>{{ reward.endDate ? `, ends ${reward.endDate.toFormat('MMMM dd, yyyy')}` : '' }})
+              </template><RewardEligibilityNotice
+                :label="reward.eligibilityLabel"
+                :source-url="reward.sourceUrl"
+              />{{ reward.endDate ? `, ends ${reward.endDate.toFormat('MMMM dd, yyyy')}` : '' }})
             </p>
           </div>
           <div class="text-p2">
@@ -291,7 +294,10 @@ const handleClose = () => {
                   class="w-14 h-14 inline-block align-middle mr-2 bg-white rounded-sm p-1"
                   :alt="PROVIDER_LABELS[reward.source]"
                 >{{ PROVIDER_LABELS[reward.source] || reward.source }}
-              </template>{{ reward.endDate ? `, ends ${reward.endDate.toFormat('MMMM dd, yyyy')}` : '' }})
+              </template><RewardEligibilityNotice
+                :label="reward.eligibilityLabel"
+                :source-url="reward.sourceUrl"
+              />{{ reward.endDate ? `, ends ${reward.endDate.toFormat('MMMM dd, yyyy')}` : '' }})
             </p>
           </div>
           <div class="text-p2">
@@ -381,7 +387,10 @@ const handleClose = () => {
                   class="w-14 h-14 inline-block align-middle mr-2 bg-white rounded-sm p-1"
                   :alt="PROVIDER_LABELS[reward.source]"
                 >{{ PROVIDER_LABELS[reward.source] || reward.source }}
-              </template>{{ reward.endDate ? `, ends ${reward.endDate.toFormat('MMMM dd, yyyy')}` : '' }})
+              </template><RewardEligibilityNotice
+                :label="reward.eligibilityLabel"
+                :source-url="reward.sourceUrl"
+              />{{ reward.endDate ? `, ends ${reward.endDate.toFormat('MMMM dd, yyyy')}` : '' }})
             </p>
           </div>
           <div class="text-p2">
@@ -446,7 +455,10 @@ const handleClose = () => {
                     class="w-14 h-14 inline-block align-middle mr-2 bg-white rounded-sm p-1"
                     :alt="PROVIDER_LABELS[reward.source]"
                   >{{ PROVIDER_LABELS[reward.source] || reward.source }}
-                </template>{{ reward.endDate ? `, ends ${reward.endDate.toFormat('MMMM dd, yyyy')}` : '' }})
+                </template><RewardEligibilityNotice
+                  :label="reward.eligibilityLabel"
+                  :source-url="reward.sourceUrl"
+                />{{ reward.endDate ? `, ends ${reward.endDate.toFormat('MMMM dd, yyyy')}` : '' }})
               </p>
             </div>
             <div class="text-p2">

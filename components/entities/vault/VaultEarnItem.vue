@@ -4,7 +4,6 @@ import { computeSupplyApyBreakdown, isEVault, type EVault, type EulerEarn, type 
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerProductOfVault, useEulerEntitiesOfEarnVault } from '~/composables/useEulerLabels'
 import { getEarnVaultDescription, isVaultRecentlyAdded } from '~/utils/eulerLabelsUtils'
-import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { isVaultBlockedByCountry } from '~/composables/useGeoBlock'
 import { logWarn } from '~/utils/errorHandling'
@@ -42,10 +41,6 @@ const entityName = computed(() => {
   if (entities.length === 1) return entities[0].name
   if (entities.length === 2) return `${entities[0].name} & ${entities[1].name}`
   return `${entities[0].name} & others`
-})
-const entityLogos = computed(() => {
-  if (!entityName.value || entities.length === 0) return []
-  return entities.map(e => getEulerLabelEntityLogo(e.logo))
 })
 const { getBalance, isLoading: isBalancesLoading } = useWallets()
 const { settings } = useUserSettings()
@@ -173,6 +168,7 @@ const prices = ref<{ totalSupply: string, liquidity: string, walletBalance: stri
   liquidity: '-',
   walletBalance: '-',
 })
+const isSupplyUnpriced = ref(false)
 
 watchEffect(async () => {
   const walletBal = balance.value
@@ -186,6 +182,7 @@ watchEffect(async () => {
     liquidity: liquidityResult.hasPrice ? formatCompactUsdValue(liquidityResult.usdValue) : liquidityResult.display,
     walletBalance: walletResult.hasPrice ? formatCompactUsdValue(walletResult.usdValue) : walletResult.display,
   }
+  isSupplyUnpriced.value = !supplyResult.hasPrice
 })
 
 const statsGridCols = computed(() => {
@@ -237,11 +234,22 @@ const supplyApyModalData = computed(() => ({
           <VaultDisplayName
             :name="displayName"
             :is-unverified="isUnverified"
+            :addresses="[vault.address]"
           />
           <RecentlyAddedBadge
             v-if="isRecentlyAdded"
           />
-          <RestrictedBadge v-if="isGeoBlocked" />
+          <RestrictedBadge
+            v-if="isGeoBlocked"
+            :vault-addresses="[vault.address]"
+            :chain-id="vault.chainId"
+          />
+          <VaultDeprecatedBadge :addresses="[vault.address]" />
+          <VaultAssessmentWarning
+            :address="vault.address"
+            family="earn"
+            hide-deprecated
+          />
         </div>
         <div
           class="text-h5 text-content-primary"
@@ -312,7 +320,7 @@ const supplyApyModalData = computed(() => ({
         v-if="enableEntityBranding"
         class="flex-1 mobile:!hidden"
       >
-        <div class="text-content-tertiary text-p3 mb-4">Capital allocator</div>
+        <div class="text-content-tertiary text-p3 mb-4">Curator</div>
         <div
           v-if="!isOwnerVerified"
           class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
@@ -327,18 +335,16 @@ const supplyApyModalData = computed(() => ({
           v-else-if="entityName"
           class="flex items-center gap-6"
         >
-          <BaseAvatar
-            class="icon--20"
-            :label="entityName"
-            :src="entityLogos"
-          />
-          <span
-            class="text-p2 text-content-primary truncate"
-            data-id="data-point"
-            :data-key="vault.address.toLowerCase()"
-            data-field="capital-allocator"
-            :data-value="entityName"
-          >{{ entityName }}</span>
+          <VaultEntityDisclosureTooltip :entities="entities">
+            <CuratorEntityLink
+              :entities="entities"
+              :label="entityName"
+              span-link
+              text-class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors truncate"
+              :data-key="vault.address.toLowerCase()"
+              data-field="curator"
+            />
+          </VaultEntityDisclosureTooltip>
         </div>
         <div
           v-else
@@ -346,7 +352,13 @@ const supplyApyModalData = computed(() => ({
         >-</div>
       </div>
       <div class="flex-1 flex flex-col items-center mobile:items-start">
-        <div class="text-content-tertiary text-p3 mb-4">Total supply</div>
+        <div class="text-content-tertiary text-p3 mb-4 flex items-center gap-4">
+          Total supply
+          <VaultNoUsdPriceHint
+            v-if="isSupplyUnpriced"
+            placement="top-start"
+          />
+        </div>
         <div
           class="text-p2 text-content-primary"
           data-id="data-point"
@@ -419,7 +431,7 @@ const supplyApyModalData = computed(() => ({
         class="flex w-full justify-between"
       >
         <div class="flex-1">
-          <div class="text-content-tertiary text-p3">Capital allocator</div>
+          <div class="text-content-tertiary text-p3">Curator</div>
         </div>
         <div class="flex gap-8 justify-end items-center text-right flex-1">
           <div
@@ -432,14 +444,13 @@ const supplyApyModalData = computed(() => ({
             />
             Unknown
           </div>
-          <template v-else-if="entityName">
-            <BaseAvatar
-              class="icon--20"
-              :label="entityName"
-              :src="entityLogos"
-            />
-            <span class="text-p2 text-content-primary truncate">{{ entityName }}</span>
-          </template>
+          <CuratorEntityLink
+            v-else-if="entityName"
+            :entities="entities"
+            :label="entityName"
+            span-link
+            text-class="text-p2 text-content-primary hover:text-accent-600 underline transition-colors truncate"
+          />
           <div
             v-else
             class="text-p2 text-content-primary"

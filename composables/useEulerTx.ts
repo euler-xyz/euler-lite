@@ -1,4 +1,4 @@
-import { getAddress, type Address, type Hash, type Hex, type TransactionReceipt } from 'viem'
+import { getAddress, type Address, type Hex, type StateOverride } from 'viem'
 import type {
   Account,
   CollateralShareSource,
@@ -36,21 +36,23 @@ import type {
   PlanTransferArgs,
   SwapperMode,
   TransactionPlan,
-  TransactionPlanExecutionProgress,
   TransactionPlanPrepared,
   WrappedNativeInfo, SwapQuote,
 } from '@eulerxyz/euler-v2-sdk'
-import { useConfig, useSendTransaction, useSignTypedData } from '@wagmi/vue'
-import { getAccount } from '@wagmi/vue/actions'
-import { getEulerSdkForChain, getEulerSdkFresh, buildSubgraphProxyApiPath } from '~/composables/useEulerSdk'
+import { getEulerSdkForChain, getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { logWarn } from '~/utils/errorHandling'
-import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
-import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
-import { waitForSubgraphBlock } from '~/utils/subgraph'
 import { profAsync } from '~/utils/profiler'
+import type { OperationIntent } from '~/features/reviewed-execution/domain/intents'
+import {
+  cachePreviewPlan,
+  cachePreviewPluginData,
+  cachePreparedPreview,
+  cachePreviewSimulation,
+} from '~/features/reviewed-execution/planning/preview-cache'
+import { serializePluginPrefetch } from '~/features/reviewed-execution/planning/plugin-data'
+import { projectEulerSimulation } from '~/features/reviewed-execution/simulation/euler-projection'
+import { toCanonicalValue } from '~/features/reviewed-execution/domain/canonical'
 
-const OKX_POST_APPROVE_DELAY_MS = 3000
-const ERC20_APPROVE_SELECTOR = '0x095ea7b3'
 const PLACEHOLDER_AUTHORIZATION_SIGNATURE = `0x${'00'.repeat(65)}` as Hex
 const SUB_ACCOUNT_SNAPSHOT_FETCH_OPTIONS = {
   populateVaults: false,
@@ -58,24 +60,6 @@ const SUB_ACCOUNT_SNAPSHOT_FETCH_OPTIONS = {
   populateUserRewards: false,
 } as const
 type PrefetchPluginAccount = Account<IHasVaultAddress> | Address
-
-const isOkxWallet = async (connector?: { id?: string, name?: string, getProvider?: () => Promise<unknown> }) => {
-  if (!connector) return false
-  const id = connector.id?.toLowerCase() ?? ''
-  const name = connector.name?.toLowerCase() ?? ''
-  if (id === 'okx' || name.includes('okx')) return true
-  if (id === 'walletconnect' && connector.getProvider) {
-    try {
-      const provider = await connector.getProvider() as { session?: { peer?: { metadata?: { name?: string } } } }
-      const peerName = provider?.session?.peer?.metadata?.name?.toLowerCase() ?? ''
-      return peerName.includes('okx')
-    }
-    catch {
-      return false
-    }
-  }
-  return false
-}
 
 export interface PlanDepositInput {
   vaultAddress: Address
@@ -109,6 +93,8 @@ export type PlanRedeemInput = {
 
 export interface PlanBorrowInput {
   vaultAddress: Address
+  /** Underlying asset bound into the reviewed execution outcome; not forwarded to the SDK planner. */
+  assetAddress: Address
   amount: bigint
   borrowAccount: Address
   receiver?: Address
@@ -134,6 +120,8 @@ export interface PlanBorrowInput {
 
 export interface PlanRepayFromWalletInput {
   liabilityVault: Address
+  /** Underlying liability asset bound into the reviewed execution outcome. */
+  liabilityAsset: Address
   liabilityAmount: bigint
   receiver: Address
   cleanupOnMax?: boolean
@@ -143,6 +131,8 @@ export interface PlanRepayFromWalletInput {
 
 export interface PlanRepayFromDepositInput {
   liabilityVault: Address
+  /** Underlying liability asset bound into the reviewed execution outcome. */
+  liabilityAsset: Address
   liabilityAmount: bigint
   receiver: Address
   fromVault: Address
@@ -350,6 +340,7 @@ export interface PlanRepayFromSourceInput {
   // Same-asset path (used when swapQuote is absent). For the swap path these
   // are encoded in the quote and ignored here.
   liabilityVault: Address
+  liabilityAsset: Address
   liabilityAmount: bigint
   receiver: Address
   fromVault: Address
@@ -424,11 +415,7 @@ export interface PlanWithdrawOrRedeemInput {
 export const useEulerTx = () => {
   const { address: walletAddress, chainId: wagmiChainId } = useWagmi()
   const { isSpyMode, spyAddress } = useSpyMode()
-  const { permit2Enabled } = usePermit2Preference()
-  const { sendTransactionAsync } = useSendTransaction()
-  const { signTypedDataAsync } = useSignTypedData()
-  const config = useConfig()
-  const { triggerPortfolioRefresh } = usePortfolioRefresh()
+  const { signaturesEnabled } = useSignaturePreference()
   const { chainId: addressesChainId } = useEulerAddresses()
 
   const address = computed(() => (isSpyMode.value ? (spyAddress.value as Address | undefined) : walletAddress.value as Address | undefined))
@@ -448,13 +435,22 @@ export const useEulerTx = () => {
   /**
    * Resolve a plan-time SDK + Account pair.
    *
-   * Uses the "fresh" SDK (always on-chain adapters, zero stale time on
-   * plan-critical reads). When the caller provides a pre-fetched Account
-   * (typically from `useFreshAccount`'s race-replace cache), it's reused
-   * verbatim — no plan-time `fetchAccount` round-trip. Otherwise the Account
-   * is fetched live so totalShares/totalAssets for asset/share conversion,
-   * sub-account positions for `getPosition`, controller flags for
-   * `isControllerEnabled`, etc. reflect the latest block.
+   * Uses the "fresh" SDK (always on-chain adapters, short `FORM_STALE_TIMES`
+   * windows on plan-critical reads). When the caller provides a pre-fetched
+   * Account (typically from `useFreshAccount`'s race-replace cache), it's
+   * reused verbatim — no plan-time `fetchAccount` round-trip. Otherwise the
+   * Account is fetched here for totalShares/totalAssets asset/share
+   * conversion, sub-account positions for `getPosition`, controller flags for
+   * `isControllerEnabled`, etc.
+   *
+   * That fetch is on-chain-backed but is not a forced refetch: it resolves
+   * through the shared QueryClient at each row's form stale time (a minute for
+   * `queryAccountVaults`), so a recent snapshot is reused rather than re-read
+   * from the latest block. Post-tx `invalidateAfterTx` invalidation marks
+   * those rows stale so a later idle read re-fetches after the user's own
+   * state changes. It does not run after standalone migration grant/revoke
+   * receipts, and it does not cancel an in-flight `fetchQuery` for the same
+   * key — that pending result can still land.
    *
    * Cheap reads in this fetch path (labels, ABIs, deployments, prices) still
    * hit the QueryClient cache shared with the fast SDK, so the extra RPC
@@ -761,7 +757,8 @@ export const useEulerTx = () => {
         swapperMode: input.swapperMode,
         skipCleanup: input.skipCleanup,
       }
-      return profAsync('sdk', 'planMultiplyWithSwap.sdkCall', async () => sdk.executionService.planMultiplyWithSwap(args))
+      const plan = await profAsync('sdk', 'planMultiplyWithSwap.sdkCall', async () => sdk.executionService.planMultiplyWithSwap(args))
+      return plan
     })
   }
 
@@ -856,6 +853,7 @@ export const useEulerTx = () => {
     }
     return planRepayFromDeposit({
       liabilityVault: input.liabilityVault,
+      liabilityAsset: input.liabilityAsset,
       liabilityAmount: input.liabilityAmount,
       receiver: input.receiver,
       fromVault: input.fromVault,
@@ -918,49 +916,47 @@ export const useEulerTx = () => {
     const plans: TransactionPlan[] = []
 
     if (input.collateral) {
-      plans.push(
-        input.collateral.swapQuote
-          ? sdk.executionService.planSwapCollateral({
-              account,
-              swapQuote: input.collateral.swapQuote,
-              swapperMode: input.collateral.swapperMode,
-            })
-          : sdk.executionService.planMigrateSameAssetCollateral({
-              account,
-              fromVault: input.collateral.fromVault,
-              toVault: input.collateral.toVault,
-              amount: input.collateral.amount,
-              positionAccount: input.collateral.positionAccount,
-              fromAsset: input.collateral.fromAsset,
-              toAsset: input.collateral.toAsset,
-              isMax: input.collateral.isMax,
-              maxShares: input.collateral.maxShares,
-              enableCollateralTo: input.collateral.enableCollateralTo,
-              disableCollateralFrom: input.collateral.disableCollateralFrom,
-            }),
-      )
+      const collateralPlan = input.collateral.swapQuote
+        ? sdk.executionService.planSwapCollateral({
+            account,
+            swapQuote: input.collateral.swapQuote,
+            swapperMode: input.collateral.swapperMode,
+          })
+        : sdk.executionService.planMigrateSameAssetCollateral({
+            account,
+            fromVault: input.collateral.fromVault,
+            toVault: input.collateral.toVault,
+            amount: input.collateral.amount,
+            positionAccount: input.collateral.positionAccount,
+            fromAsset: input.collateral.fromAsset,
+            toAsset: input.collateral.toAsset,
+            isMax: input.collateral.isMax,
+            maxShares: input.collateral.maxShares,
+            enableCollateralTo: input.collateral.enableCollateralTo,
+            disableCollateralFrom: input.collateral.disableCollateralFrom,
+          })
+      plans.push(collateralPlan)
     }
 
     if (input.debt) {
-      plans.push(
-        input.debt.swapQuote
-          ? sdk.executionService.planSwapDebt({
-              account,
-              swapQuote: input.debt.swapQuote,
-              swapperMode: input.debt.swapperMode,
-            })
-          : sdk.executionService.planMigrateSameAssetDebt({
-              account,
-              oldLiabilityVault: input.debt.oldLiabilityVault,
-              newLiabilityVault: input.debt.newLiabilityVault,
-              liabilityAccount: input.debt.liabilityAccount,
-              liabilityAmount: input.debt.liabilityAmount,
-              oldLiabilityAsset: input.debt.oldLiabilityAsset,
-              newLiabilityAsset: input.debt.newLiabilityAsset,
-              sweepExcess: input.debt.sweepExcess,
-              transferRemainingSharesToOwner: input.debt.transferRemainingSharesToOwner,
-            }),
-      )
+      const debtPlan = input.debt.swapQuote
+        ? sdk.executionService.planSwapDebt({
+            account,
+            swapQuote: input.debt.swapQuote,
+            swapperMode: input.debt.swapperMode,
+          })
+        : sdk.executionService.planMigrateSameAssetDebt({
+            account,
+            oldLiabilityVault: input.debt.oldLiabilityVault,
+            newLiabilityVault: input.debt.newLiabilityVault,
+            liabilityAccount: input.debt.liabilityAccount,
+            liabilityAmount: input.debt.liabilityAmount,
+            oldLiabilityAsset: input.debt.oldLiabilityAsset,
+            newLiabilityAsset: input.debt.newLiabilityAsset,
+            sweepExcess: input.debt.sweepExcess,
+            transferRemainingSharesToOwner: input.debt.transferRemainingSharesToOwner,
+          })
+      plans.push(debtPlan)
     }
 
     return sdk.executionService.mergePlans(plans)
@@ -979,26 +975,6 @@ export const useEulerTx = () => {
   const listMigrationTargets = async (input: ListMigrationTargetsArgs): Promise<MigrationTarget[]> => {
     const sdk = await getEulerSdkFresh()
     return sdk.positionMigrationService.listTargets(input)
-  }
-
-  const signMigrationAuthorization = async (
-    request: MigrationAuthorizationRequest,
-  ): Promise<SignedMigrationAuthorization> => {
-    if (isSpyMode.value) {
-      throw new Error('Authorization signatures are disabled in spy mode')
-    }
-    if (request.kind !== 'typedData') {
-      throw new Error('Transaction-based migration authorization is not supported in this flow')
-    }
-    const signature = await signTypedDataAsync(request.typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
-    const postMigrationAuthorization = request.postMigrationAuthorization
-      ? await signMigrationAuthorization(request.postMigrationAuthorization)
-      : undefined
-    return {
-      request,
-      signature: signature as Hex,
-      ...(postMigrationAuthorization ? { postMigrationAuthorization } : {}),
-    }
   }
 
   const buildPlaceholderMigrationAuthorization = (
@@ -1107,19 +1083,27 @@ export const useEulerTx = () => {
       account?: PrefetchPluginAccount
       chainId?: number
       prefetch?: PluginPrefetchData
+      usePermit2?: boolean
+      intents?: readonly OperationIntent[]
     },
   ): Promise<TransactionPlanPrepared> => {
     return profAsync('sdk', 'prepareTransactionPlan', async () => {
       const owner = requireOwner()
       const cid = options?.chainId ?? requireChainId()
       const sdk = await getEulerSdkForChain(cid)
-      return sdk.executionService.prepareTransactionPlan({
+      if (options?.intents) cachePreviewPlan(options.intents, plan)
+      if (options?.prefetch && options.intents) {
+        cachePreviewPluginData(options.intents, plan, serializePluginPrefetch(options.prefetch))
+      }
+      const prepared = await sdk.executionService.prepareTransactionPlan({
         plan,
         chainId: cid,
         account: options?.account ?? owner,
-        usePermit2: permit2Enabled.value,
+        usePermit2: options?.usePermit2 ?? signaturesEnabled.value,
         prefetch: options?.prefetch,
       })
+      if (options?.intents) cachePreparedPreview(options.intents, plan, prepared)
+      return prepared
     })
   }
 
@@ -1140,132 +1124,48 @@ export const useEulerTx = () => {
    */
   const prefetchPluginData = async (
     plan: TransactionPlan,
-    options?: { account?: PrefetchPluginAccount },
+    options?: { account?: PrefetchPluginAccount, intents?: readonly OperationIntent[] },
   ): Promise<PluginPrefetchData> => {
     return profAsync('sdk', 'prefetchPluginData', async () => {
       const owner = requireOwner()
       const cid = requireChainId()
       const sdk = await getEulerSdkForChain(cid)
-      return sdk.executionService.prefetchPluginDataForPlan(
+      const prefetched = await sdk.executionService.prefetchPluginDataForPlan(
         plan,
         options?.account ?? owner,
         cid,
       )
+      if (options?.intents) {
+        cachePreviewPluginData(options.intents, plan, serializePluginPrefetch(prefetched))
+      }
+      return prefetched
     })
   }
 
-  const simulatePreparedPlan = async (prepared: TransactionPlanPrepared, stateOverrideOptions?: SimulationStateOverrideOptions) => {
+  const simulatePreparedPlan = async (
+    prepared: TransactionPlanPrepared,
+    stateOverrideOptions?: SimulationStateOverrideOptions,
+    extraStateOverrides?: StateOverride,
+    intents?: readonly OperationIntent[],
+  ) => {
     return profAsync('sdk', 'simulatePreparedTransactionPlan', async () => {
       const sdk = await getEulerSdkForChain(prepared.chainId)
-      return sdk.executionService.simulatePreparedTransactionPlan(prepared, {
+      const result = await sdk.executionService.simulatePreparedTransactionPlan(prepared, {
         stateOverrides: true,
         stateOverrideOptions,
+        // Caller-supplied overrides for state the plan assumes but which is
+        // not on-chain yet (e.g. migration authorizations that will be
+        // granted inside the same Safe bundle).
+        ...(extraStateOverrides?.length ? { extraStateOverrides } : {}),
       })
-    })
-  }
-
-  const buildSendTransaction = (isOkx: boolean) => {
-    let okxDelayPending = false
-    const send = async ({ to, data, value }: { to: Address, data: Hex, value?: bigint }) => {
-      if (okxDelayPending) {
-        await new Promise(r => setTimeout(r, OKX_POST_APPROVE_DELAY_MS))
-        okxDelayPending = false
+      if (!extraStateOverrides?.length) {
+        const projection = projectEulerSimulation(result)
+        if (projection.canExecute && intents) {
+          cachePreviewSimulation(intents, prepared, toCanonicalValue(projection))
+        }
       }
-      const hash = await sendTransactionAsync({
-        to,
-        data: data as Hex,
-        value: value ?? 0n,
-      })
-      if (isOkx && (data as Hex).toLowerCase().startsWith(ERC20_APPROVE_SELECTOR)) {
-        okxDelayPending = true
-      }
-      return hash as Hash
-    }
-    return send
-  }
-
-  const runPostTxSubgraphSync = async (cid: number, targetBlock: bigint) => {
-    // Poll the SDK's subgraph proxy (not a separately-resolved upstream) so the
-    // head we wait on is the same one serving queryAccountVaults.
-    const caughtUp = await waitForSubgraphBlock(buildSubgraphProxyApiPath(cid), targetBlock)
-    if (!caughtUp) {
-      logWarn('useEulerTx/subgraphPoll', new Error(`subgraph did not catch up to block ${targetBlock} in time`))
-      return
-    }
-    void invalidateSdkQueries([...INVALIDATE_AFTER_TX])
-    triggerPortfolioRefresh()
-  }
-
-  const finalizeExecution = (result: { receipts: TransactionReceipt[] }) => {
-    let lastReceipt: TransactionReceipt | undefined
-    if (result.receipts.length) {
-      lastReceipt = result.receipts[result.receipts.length - 1]
-    }
-    // Mark plan-critical queries stale so the next Review-click after this tx
-    // pulls fresh vault/account/factory state. The bumped 5-min staleTime
-    // would otherwise serve cached pre-tx state into the new plan.
-    // `triggerPortfolioRefresh` re-drives the rich portfolio data that the
-    // portfolio page renders; the two are complementary.
-    void invalidateSdkQueries([...INVALIDATE_AFTER_TX])
-    triggerPortfolioRefresh()
-    const cid = chainId.value
-    if (lastReceipt && cid) {
-      void runPostTxSubgraphSync(cid, lastReceipt.blockNumber)
-        .catch(err => logWarn('useEulerTx/subgraphPoll', err))
-    }
-  }
-
-  const executePlan = async (plan: TransactionPlan) => {
-    if (isSpyMode.value) {
-      throw new Error('Transactions are disabled in spy mode')
-    }
-    const owner = requireOwner()
-    const cid = requireChainId()
-    // Execute via the fresh SDK so the in-flight allowance / Permit2 reads
-    // and post-tx wait-for-receipts use the on-chain path.
-    // executeTransactionPlan runs processPlanPlugins internally for TOS/Keyring.
-    const sdk = await getEulerSdkFresh()
-
-    const isOkx = await isOkxWallet(getAccount(config).connector)
-    const sendTransaction = buildSendTransaction(isOkx)
-
-    const result = await sdk.executionService.executeTransactionPlan({
-      plan,
-      chainId: cid,
-      account: owner,
-      usePermit2: permit2Enabled.value,
-      sendTransaction,
-      signTypedData: async (typedData) => {
-        const signature = await signTypedDataAsync(typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
-        return signature as Hex
-      },
-      onProgress: (_progress: TransactionPlanExecutionProgress) => {},
+      return result
     })
-
-    finalizeExecution(result)
-    return result
-  }
-
-  const executePreparedPlan = async (prepared: TransactionPlanPrepared) => {
-    if (isSpyMode.value) {
-      throw new Error('Transactions are disabled in spy mode')
-    }
-    const sdk = await getEulerSdkFresh()
-    const isOkx = await isOkxWallet(getAccount(config).connector)
-    const sendTransaction = buildSendTransaction(isOkx)
-
-    const result = await sdk.executionService.executePreparedTransactionPlan({
-      prepared,
-      sendTransaction,
-      signTypedData: async (typedData) => {
-        const signature = await signTypedDataAsync(typedData as unknown as Parameters<typeof signTypedDataAsync>[0])
-        return signature as Hex
-      },
-      onProgress: (_progress: TransactionPlanExecutionProgress) => {},
-    })
-
-    finalizeExecution(result)
-    return result
   }
 
   /**
@@ -1315,7 +1215,6 @@ export const useEulerTx = () => {
     getMigrationPosition,
     listMigrationTargets,
     getMigrationAuthorization,
-    signMigrationAuthorization,
     buildPlaceholderMigrationAuthorization,
     planCrossProtocolMigration,
     planCrossProtocolMigrationSimulation,
@@ -1325,7 +1224,5 @@ export const useEulerTx = () => {
     estimateGasForPlan,
     prefetchPluginData,
     simulatePreparedPlan,
-    executePlan,
-    executePreparedPlan,
   }
 }

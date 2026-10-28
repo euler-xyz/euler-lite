@@ -1,0 +1,464 @@
+<script setup lang="ts">
+import type {
+  ActivityCategory,
+} from '@eulerxyz/euler-v2-sdk'
+import type { ActivityFeedScope } from '~/composables/useActivityFeed'
+import { getExplorerLink } from '~/utils/block-explorer'
+import {
+  formatActivityRelativeTimestamp,
+  formatActivityTimestamp,
+  getActivityCategoryLabel,
+  getActivityTransactionGroupLabel,
+  groupActivityEventsByTransaction,
+  isActivityScopeUnsupported,
+  resolveActivityFilterCategories,
+  type ActivityFilterOption,
+} from '~/utils/activity-display'
+
+const props = withDefaults(defineProps<{
+  scope: ActivityFeedScope
+  enabled: boolean
+  categoryOptions: readonly ActivityFilterOption[]
+  /** Filter selected when the feed is first mounted. */
+  defaultFilter?: string
+  /** Categories queried when no filter chip is selected — defaults to the union of the option categories. */
+  unfilteredCategories?: readonly ActivityCategory[]
+  subject?: 'account' | 'vault'
+}>(), {
+  subject: 'vault',
+})
+const emit = defineEmits<{
+  'settled': []
+  'update:unsupported': [unsupported: boolean]
+}>()
+
+const selectedFilters = ref<string[]>(props.defaultFilter ? [props.defaultFilter] : [])
+const selectedCategories = computed<ActivityCategory[]>(() =>
+  selectedFilters.value.length === 0 && props.unfilteredCategories
+    ? [...props.unfilteredCategories].sort()
+    : resolveActivityFilterCategories(props.categoryOptions, selectedFilters.value),
+)
+const activityNowMs = useActivityNowMs()
+const scopeLabel = computed(() => props.subject === 'account' ? 'account' : 'vault')
+// Coverage is complete here — the account/vault genuinely has no events, so
+// don't blame indexing. Accounts mention the network since switching chains
+// is the usual reason a wallet's history looks empty.
+const emptyMessage = computed(() => props.subject === 'account'
+  ? 'No activity for this account on this network yet.'
+  : 'No activity for this vault yet.')
+const feed = useActivityFeed({
+  scope: () => props.scope,
+  enabled: () => props.enabled,
+  categories: selectedCategories,
+})
+// Joins displayed liquidation events with their historical valuations
+// (event-time USD amounts, underlying collateral units, liquidator bonus).
+const { getLiquidationDetails } = useActivityLiquidationDetails({
+  events: () => feed.events.value,
+  enabled: () => props.enabled,
+})
+
+// A dedicated bounded query keeps the liquidation chip count honest — the
+// main feed only knows about the pages loaded so far.
+const LIQUIDATION_COUNT_LIMIT = 100
+const liquidationCountFeed = useActivityFeed({
+  scope: () => props.scope,
+  enabled: () => props.enabled && props.subject === 'account',
+  categories: () => ['liquidations'],
+  limit: LIQUIDATION_COUNT_LIMIT,
+})
+const liquidationCount = computed<number | string | undefined>(() => {
+  if (
+    props.subject !== 'account'
+    || !liquidationCountFeed.hasLoaded.value
+    || liquidationCountFeed.error.value
+  ) return undefined
+  const count = liquidationCountFeed.events.value.length
+  return liquidationCountFeed.hasMore.value ? `${count}+` : count
+})
+const displayCategoryOptions = computed(() => props.categoryOptions.map(option =>
+  option.value === 'liquidations' && liquidationCount.value !== undefined
+    ? { ...option, count: liquidationCount.value }
+    : option,
+))
+
+const missingCategoryLabels = computed(() =>
+  feed.coverage.value?.missingCategories
+    ?.map(getActivityCategoryLabel)
+    .join(', '),
+)
+const partialMessage = computed(() => missingCategoryLabels.value
+  ? `${missingCategoryLabels.value} activity may be incomplete.`
+  : undefined)
+const scopeUnsupported = computed(() =>
+  isActivityScopeUnsupported(feed.coverage.value?.status, selectedFilters.value),
+)
+// When the active filter narrows the feed to a single category, the rows'
+// category label would just restate the selected chip.
+const impliedCategory = computed(() =>
+  selectedCategories.value.length === 1 ? selectedCategories.value[0] : undefined,
+)
+const COLLAPSED_GROUP_EVENT_COUNT = 3
+const expandedGroupIds = ref(new Set<string>())
+const eventGroups = computed(() => props.subject === 'account'
+  ? groupActivityEventsByTransaction(feed.events.value)
+  : feed.events.value.map(event => ({
+      id: event.id,
+      chainId: event.chainId,
+      txHash: event.txHash,
+      timestamp: event.timestamp,
+      events: [event],
+    })),
+)
+const isGroupExpanded = (groupId: string) => expandedGroupIds.value.has(groupId)
+const visibleGroupEvents = (group: (typeof eventGroups.value)[number]) =>
+  group.events.length > COLLAPSED_GROUP_EVENT_COUNT && !isGroupExpanded(group.id)
+    ? group.events.slice(0, COLLAPSED_GROUP_EVENT_COUNT)
+    : group.events
+const toggleGroup = (groupId: string) => {
+  const next = new Set(expandedGroupIds.value)
+  if (next.has(groupId)) next.delete(groupId)
+  else next.add(groupId)
+  expandedGroupIds.value = next
+}
+const bodyElement = ref<HTMLElement | null>(null)
+const loadingBodyHeight = ref(232)
+const bodyStyle = computed(() => feed.isLoading.value
+  ? { minHeight: `${loadingBodyHeight.value}px` }
+  : undefined)
+
+watch(feed.isLoading, (isLoading) => {
+  if (!isLoading || !bodyElement.value) return
+  loadingBodyHeight.value = Math.max(
+    232,
+    Math.ceil(bodyElement.value.getBoundingClientRect().height),
+  )
+})
+
+watch(
+  () => props.categoryOptions.map(option => option.value),
+  (available) => {
+    selectedFilters.value = selectedFilters.value.filter(filter => available.includes(filter))
+  },
+)
+
+watch(scopeUnsupported, unsupported => emit('update:unsupported', unsupported), {
+  immediate: true,
+})
+
+watch(feed.hasLoaded, (hasLoaded) => {
+  if (hasLoaded) emit('settled')
+})
+</script>
+
+<template>
+  <div class="activity-feed flex flex-col gap-16">
+    <ActivityCategoryFilters
+      v-if="categoryOptions.length > 0"
+      v-model="selectedFilters"
+      :options="displayCategoryOptions"
+    />
+
+    <div
+      v-if="feed.isPartial.value && partialMessage"
+      class="flex items-start gap-8 rounded-12 bg-warning-100 p-12 text-p4 text-warning-500"
+    >
+      <SvgIcon
+        name="warning"
+        class="!h-18 !w-18 shrink-0"
+        aria-hidden="true"
+      />
+      <span>{{ partialMessage }}</span>
+    </div>
+
+    <div
+      v-if="feed.hasStaleError.value"
+      class="flex items-center gap-8 rounded-12 bg-warning-100 p-12 text-p4 text-warning-500"
+    >
+      <SvgIcon
+        name="warning"
+        class="!h-18 !w-18 shrink-0"
+        aria-hidden="true"
+      />
+      <span class="flex-1">Activity could not be refreshed. Showing the last loaded events.</span>
+      <button
+        type="button"
+        class="font-medium underline hover:no-underline"
+        :disabled="feed.isRefreshing.value"
+        @click="feed.refresh"
+      >
+        Retry
+      </button>
+    </div>
+
+    <div
+      ref="bodyElement"
+      class="activity-feed__body"
+      :style="bodyStyle"
+    >
+      <div
+        v-if="feed.isLoading.value"
+        class="flex flex-col gap-8"
+        aria-label="Loading activity"
+      >
+        <div
+          v-for="index in 3"
+          :key="index"
+          class="h-72 animate-pulse rounded-12 bg-surface"
+        />
+      </div>
+
+      <div
+        v-else-if="feed.hasColdError.value"
+        class="flex flex-col items-center gap-12 rounded-12 border border-line-subtle bg-surface p-24 text-center"
+      >
+        <div class="text-p3 text-content-primary">
+          Activity could not be loaded right now.
+        </div>
+        <button
+          type="button"
+          class="ui-button ui-button--medium ui-button--secondary"
+          @click="feed.refresh"
+        >
+          Retry
+        </button>
+      </div>
+
+      <div
+        v-else-if="feed.isUnsupported.value"
+        class="rounded-12 border border-line-subtle bg-surface p-16 text-p3 text-content-secondary"
+      >
+        {{ selectedFilters.length ? 'Activity is not available for the selected categories.' : `Activity is not available for this ${scopeLabel}.` }}
+      </div>
+
+      <div
+        v-else-if="feed.isSyncing.value && feed.events.value.length === 0"
+        class="flex flex-col items-center gap-12 rounded-12 border border-line-subtle bg-surface p-16 text-center text-p3 text-content-secondary"
+      >
+        <div>Activity is still indexing. Events will appear here shortly.</div>
+        <button
+          v-if="feed.hasMore.value"
+          type="button"
+          class="ui-button ui-button--medium ui-button--secondary"
+          :disabled="feed.isLoadingMore.value"
+          @click="feed.loadMore"
+        >
+          {{ feed.isLoadingMore.value ? 'Loading…' : 'Load older' }}
+        </button>
+      </div>
+
+      <div
+        v-else-if="feed.isPartial.value && feed.events.value.length === 0"
+        class="flex flex-col items-center gap-12 rounded-12 border border-line-subtle bg-surface p-16 text-center text-p3 text-content-secondary"
+      >
+        <div>No activity is available from the indexed sources. This history may be incomplete.</div>
+        <button
+          v-if="feed.hasMore.value"
+          type="button"
+          class="ui-button ui-button--medium ui-button--secondary"
+          :disabled="feed.isLoadingMore.value"
+          @click="feed.loadMore"
+        >
+          {{ feed.isLoadingMore.value ? 'Loading…' : 'Load older' }}
+        </button>
+      </div>
+
+      <div
+        v-else-if="feed.isEmpty.value"
+        :class="subject === 'account' ? 'flex min-h-160 flex-1 items-center justify-center' : 'rounded-12 border border-line-subtle bg-surface p-16 text-p3 text-content-secondary'"
+      >
+        <PortfolioEmptyState
+          v-if="subject === 'account'"
+          :active="true"
+          :active-text="selectedFilters.length ? 'No activity matches the selected categories' : emptyMessage"
+          inactive-text="Connect your wallet to see your activity"
+        />
+        <template v-else>
+          {{ selectedFilters.length ? 'No activity matches the selected categories.' : emptyMessage }}
+        </template>
+      </div>
+
+      <div
+        v-else-if="feed.hasLoaded.value && feed.events.value.length === 0 && feed.hasMore.value"
+        class="flex flex-col items-center gap-12 rounded-12 border border-line-subtle bg-surface p-16 text-center"
+      >
+        <div class="text-p3 text-content-secondary">
+          Nothing to show in the most recent history — older activity is available.
+        </div>
+        <button
+          type="button"
+          class="ui-button ui-button--medium ui-button--secondary"
+          :disabled="feed.isLoadingMore.value"
+          @click="feed.loadMore"
+        >
+          {{ feed.isLoadingMore.value ? 'Loading…' : 'Load older' }}
+        </button>
+      </div>
+
+      <template v-else-if="feed.events.value.length">
+        <div
+          class="transition-opacity"
+          :class="{ 'opacity-60': feed.isRefreshing.value }"
+        >
+          <div
+            class="activity-feed__header hidden gap-16 border-b border-line-subtle pb-8 text-p4 text-content-tertiary"
+            :class="{ 'activity-feed__header--portfolio': subject === 'account' }"
+          >
+            <span class="activity-feed__header-event">Event</span>
+            <span>Amount / change</span>
+            <span class="sr-only">Transaction</span>
+          </div>
+          <div>
+            <section
+              v-for="group in eventGroups"
+              :key="group.id"
+              :class="subject === 'account' ? '-mx-12 my-8 overflow-hidden rounded-12 border border-line-default bg-card px-12 shadow-card' : 'activity-feed__flat-event'"
+            >
+              <div
+                v-if="group.events.length > 1"
+                class="flex items-center justify-between gap-12 border-b border-line-subtle py-10 text-p4 text-content-tertiary"
+              >
+                <div class="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2">
+                  <span class="font-medium text-content-secondary">
+                    {{ getActivityTransactionGroupLabel(group) }}
+                  </span>
+                  <span aria-hidden="true">&middot;</span>
+                  <time
+                    :datetime="group.timestamp"
+                    :title="formatActivityTimestamp(group.timestamp)"
+                  >{{ formatActivityRelativeTimestamp(group.timestamp, activityNowMs) }}</time>
+                  <span aria-hidden="true">&middot;</span>
+                  <span>{{ group.events.length }} events</span>
+                </div>
+                <a
+                  :href="getExplorerLink(group.txHash, group.chainId)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="inline-flex h-32 w-32 items-center justify-center rounded-8 text-content-secondary transition-colors hover:bg-card-hover hover:text-accent-500"
+                  aria-label="View grouped transaction"
+                  title="View transaction"
+                >
+                  <SvgIcon
+                    name="arrow-top-right"
+                    class="!h-16 !w-16"
+                    aria-hidden="true"
+                  />
+                </a>
+              </div>
+              <ul>
+                <ActivityEventRow
+                  v-for="event in visibleGroupEvents(group)"
+                  :key="event.id"
+                  :event="event"
+                  :show-vault="subject === 'account'"
+                  :hide-category="subject === 'account'"
+                  :hide-timestamp="group.events.length > 1"
+                  :grouped="group.events.length > 1"
+                  :hidden-category="impliedCategory"
+                  :show-transaction-link="group.events.length === 1"
+                  :now-ms="activityNowMs"
+                  :liquidation-details="getLiquidationDetails(event)"
+                />
+              </ul>
+              <button
+                v-if="group.events.length > COLLAPSED_GROUP_EVENT_COUNT"
+                type="button"
+                class="flex w-full items-center justify-center gap-4 border-t border-line-subtle py-10 text-p4 font-medium text-content-secondary transition-colors hover:text-content-primary"
+                :aria-expanded="isGroupExpanded(group.id)"
+                @click="toggleGroup(group.id)"
+              >
+                <span>
+                  {{ isGroupExpanded(group.id)
+                    ? 'Show fewer events'
+                    : `Show ${group.events.length - COLLAPSED_GROUP_EVENT_COUNT} more events` }}
+                </span>
+                <SvgIcon
+                  name="arrow-down"
+                  class="!h-12 !w-12 transition-transform"
+                  :class="{ 'rotate-180': isGroupExpanded(group.id) }"
+                  aria-hidden="true"
+                />
+              </button>
+            </section>
+          </div>
+        </div>
+
+        <div
+          v-if="feed.loadMoreError.value"
+          class="flex items-center gap-8 rounded-12 bg-warning-100 p-12 text-p4 text-warning-500"
+        >
+          <span class="flex-1">Older activity could not be loaded.</span>
+          <button
+            type="button"
+            class="font-medium underline hover:no-underline"
+            @click="feed.loadMore"
+          >
+            Retry
+          </button>
+        </div>
+
+        <div
+          v-if="feed.hasMore.value"
+          class="flex justify-center"
+        >
+          <button
+            type="button"
+            class="ui-button ui-button--medium ui-button--secondary"
+            :disabled="feed.isLoadingMore.value"
+            @click="feed.loadMore"
+          >
+            {{ feed.isLoadingMore.value ? 'Loading…' : 'Load older' }}
+          </button>
+        </div>
+      </template>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+/* Flat vault feeds render each event as its own section — the separator has
+   to live between the sections. Same rule the portfolio transaction bundles
+   use between their rows. */
+.activity-feed__flat-event + .activity-feed__flat-event {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.activity-feed {
+  container-name: activity-feed;
+  container-type: inline-size;
+}
+
+.activity-feed__body {
+  transition: min-height 150ms ease;
+}
+
+@container activity-feed (min-width: 900px) {
+  .activity-feed__header {
+    display: grid;
+    grid-template-columns:
+      32px
+      minmax(320px, 1.4fr)
+      minmax(280px, 1fr)
+      44px;
+  }
+
+  /* Skip the icon column so the label aligns with the event titles. */
+  .activity-feed__header-event {
+    grid-column: 2;
+  }
+
+  /* Portfolio rows drop the icon column and lead with the vault identity —
+     mirror their grid so both header labels sit over their columns. */
+  .activity-feed__header--portfolio {
+    grid-template-columns:
+      minmax(320px, 1.4fr)
+      minmax(280px, 1fr)
+      44px;
+  }
+
+  .activity-feed__header--portfolio .activity-feed__header-event {
+    grid-column: 1;
+    padding-left: 42px;
+  }
+}
+</style>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { SecuritizeCollateralVault, EVault, EulerEarn } from '@eulerxyz/euler-v2-sdk'
+import { isEulerEarn, isSecuritizeCollateralVault, type SecuritizeCollateralVault, type EVault, type EulerEarn } from '@eulerxyz/euler-v2-sdk'
 import type { VaultAsset } from '~/types/asset'
 import { useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
@@ -8,7 +8,8 @@ import { getAddress } from 'viem'
 const { vault, assets, size, assetsLabel, pairVault, back, backFallback } = defineProps<{
   vault?: EVault | EulerEarn | SecuritizeCollateralVault
   assets: VaultAsset[]
-  size?: 'large'
+  /** `small` renders a compact identity for list contexts (e.g. activity rows) where surrounding content carries the emphasis. */
+  size?: 'large' | 'small'
   assetsLabel?: string
   pairVault?: EVault
   back?: boolean
@@ -38,16 +39,6 @@ const displayName = computed(() => {
 const pairVaultAddress = computed(() => pairVault ? normalizeAddress(pairVault.address) : '')
 const pairProduct = useEulerProductOfVault(pairVaultAddress)
 
-const isVaultDeprecated = computed(() => {
-  const addr = vaultAddress.value
-  return product.deprecatedVaults?.includes(addr) ?? false
-})
-const isPairVaultDeprecated = computed(() => {
-  if (!pairVault) return false
-  const addr = pairVaultAddress.value
-  return pairProduct.deprecatedVaults?.includes(addr) ?? false
-})
-const isDeprecated = computed(() => isVaultDeprecated.value || isPairVaultDeprecated.value)
 const isRestricted = computed(() => {
   const addresses: string[] = []
   if (vault?.address) addresses.push(vault.address)
@@ -91,7 +82,7 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
 <template>
   <div
     v-if="vault"
-    :class="[size === 'large' ? 'gap-16' : 'gap-12']"
+    :class="[size === 'large' ? 'gap-16' : size === 'small' ? 'gap-10' : 'gap-12']"
     class="flex items-center min-w-0"
     data-id="vault-header"
     :data-key="pairVault ? `${vault.address.toLowerCase()}:${pairVault.address.toLowerCase()}` : vault.address.toLowerCase()"
@@ -105,11 +96,14 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
     />
     <AssetAvatar
       :asset="assets"
-      :size="size === 'large' ? '46' : '38'"
+      :size="size === 'large' ? '46' : size === 'small' ? '32' : '38'"
     />
 
     <div class="min-w-0">
-      <div class="flex flex-wrap items-center gap-8 mb-4 min-w-0">
+      <div
+        class="flex flex-wrap items-center gap-8 min-w-0"
+        :class="size === 'small' ? 'mb-2 text-p4' : 'mb-4'"
+      >
         <span
           class="block min-w-0 max-w-full truncate text-content-tertiary"
           :title="pairVault ? displayLabel : displayName"
@@ -121,39 +115,39 @@ const displayAssetsLabel = computed(() => assetsLabel || assets.map(asset => ass
           <VaultDisplayName
             :name="pairVault ? displayLabel : displayName"
             :is-unverified="(!!vault && !isVerifiedVault(vault.address)) || !!(pairVault && !isVerifiedVault(pairVault.address))"
+            :addresses="[vault.address, ...(pairVault ? [pairVault.address] : [])]"
           />
         </span>
-        <span
-          v-if="isDeprecated"
-          class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-        >
-          <SvgIcon
-            name="warning"
-            class="!w-14 !h-14"
-          />
-          Deprecated
-        </span>
-        <UiHoverPreviewTooltip
+        <VaultDeprecatedBadge :addresses="[vault.address, ...(pairVault ? [pairVault.address] : [])]" />
+        <VaultAssessmentWarning
+          :address="vault.address"
+          :family="isEulerEarn(vault) ? 'earn' : isSecuritizeCollateralVault(vault) ? null : 'evk'"
+          hide-deprecated
+          :pair-side="pairVault ? 'collateral' : undefined"
+        />
+        <VaultAssessmentWarning
+          v-if="pairVault"
+          :address="pairVault.address"
+          hide-deprecated
+          pair-side="borrow"
+        />
+        <RestrictedBadge
           v-if="isRestricted"
-          title="Region restricted"
-          text="This vault is not available in your region"
-          placement="top-start"
-        >
-          <span
-            class="inline-flex items-center gap-4 rounded-8 px-8 py-2 bg-warning-100 text-warning-500 text-p5"
-          >
-            <SvgIcon
-              name="warning"
-              class="!w-14 !h-14"
-            />
-            Restricted
-          </span>
-        </UiHoverPreviewTooltip>
+          :vault-addresses="[vault?.address, pairVault?.address]"
+          :chain-id="vault?.chainId ?? pairVault?.chainId"
+        />
         <slot />
       </div>
 
+      <VaultVisibilityNotice :address="vault.address" />
+      <VaultVisibilityNotice
+        v-if="pairVault"
+        :address="pairVault.address"
+      />
+
       <p
-        class="flex flex-wrap items-center gap-8 text-p2 font-semibold text-content-primary min-w-0"
+        class="flex flex-wrap items-center gap-8 font-semibold text-content-primary min-w-0"
+        :class="size === 'small' ? 'text-p3' : 'text-p2'"
         data-id="data-point"
         :data-key="pairVault ? `${vault.address.toLowerCase()}:${pairVault.address.toLowerCase()}` : vault.address.toLowerCase()"
         data-field="asset-symbols"

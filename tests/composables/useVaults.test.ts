@@ -1,7 +1,8 @@
-import type { EVault, EulerEarn } from '@eulerxyz/euler-v2-sdk'
+import { EVault as SdkEVault, type EVault, type EulerEarn, type IEVault } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address } from 'viem'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import type { PublicEulerLabelsData } from '~/utils/public-labels'
 import { __setEulerLabelsDataForTest, useEulerLabels } from '~/composables/useEulerLabels'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useVaults } from '~/composables/useVaults'
@@ -14,10 +15,13 @@ const VISIBLE_WETH_EVAULT = '0xD8b27CF359b7D15710a5BE299AF6e7Bf904984C2'
 const HIDDEN_WETH_LENDING_EVAULT = '0x2ff5F1Ca35f5100226ac58E1BFE5aac56919443B'
 const HIDDEN_TELOSC_WORMHOLE_EVAULT = '0x2e6Dff8907aFdA5D62A278e21B2e65c8595D746E'
 const BASE_EARN_VAULT = '0x8bF41Ad2b816F7c220b22F4BCD63fC2A35Ab4247'
+const EULER_ROUTER = getAddress('0x0000000000000000000000000000000000000201')
+const EULER_ROUTER_GOVERNOR = getAddress('0x0000000000000000000000000000000000000202')
 
 const makeVault = (address: string): EVault => ({
   address: getAddress(address),
   collaterals: [],
+  isEscrow: address === ESCROW_EVAULT,
 }) as unknown as EVault
 
 const makeEarnVault = (address: string): EulerEarn => ({
@@ -29,6 +33,7 @@ const fetchEarnVaults = vi.fn()
 const fetchEarnVault = vi.fn()
 const fetchVerifiedVaultAddresses = vi.fn()
 const fetchVaultTypes = vi.fn()
+const readContract = vi.fn()
 const chainId = ref(1)
 
 describe('useVaults EVault verification metadata', () => {
@@ -38,6 +43,7 @@ describe('useVaults EVault verification metadata', () => {
     fetchEarnVault.mockReset()
     fetchVerifiedVaultAddresses.mockReset()
     fetchVaultTypes.mockReset()
+    readContract.mockReset()
 
     fetchVaults.mockImplementation(async (_chainId: number, addresses: Address[]) => ({
       errors: [],
@@ -64,6 +70,7 @@ describe('useVaults EVault verification metadata', () => {
       eVaultService: { fetchVaults, fetchVerifiedVaultAddresses },
       eulerEarnService: { fetchVaults: fetchEarnVaults, fetchVault: fetchEarnVault },
       vaultMetaService: { fetchVaultTypes },
+      providerService: { getProvider: vi.fn(() => ({ readContract })) },
     }
     vi.stubGlobal('useEulerSdk', () => ({
       getEulerSdk: vi.fn(async () => sdk),
@@ -82,12 +89,91 @@ describe('useVaults EVault verification metadata', () => {
     vi.unstubAllGlobals()
   })
 
+  it('keeps held-only entries and their collateral graph out of periodic discovery refresh', async () => {
+    const registry = useVaultRegistry()
+    const held = makeVault(DYNAMIC_EVAULT)
+    held.collaterals.push({
+      address: ESCROW_EVAULT, borrowLTV: 0.8, liquidationLTV: 0.9,
+      currentLiquidationLTV: 0.9, isLiquidationLTVRamping: false, rampTimeRemaining: 0n, oraclePriceRaw: undefined,
+    })
+    registry.set(DYNAMIC_EVAULT, held, 'evk', { verified: false, portfolioOnly: true })
+    registry.set(LABELED_EVAULT, makeVault(LABELED_EVAULT), 'evk', { verified: true })
+    await useVaults().refreshVaults()
+    expect(fetchVaults.mock.calls.flatMap(call => call[1])).toEqual([getAddress(LABELED_EVAULT)])
+    expect(registry.get(DYNAMIC_EVAULT)).toMatchObject({ vault: held, verified: false, portfolioOnly: true })
+    expect(registry.getVault(ESCROW_EVAULT)).toBeUndefined()
+  })
+
+  it('refreshes SDK classification without promoting an unverified vault', async () => {
+    const registry = useVaultRegistry()
+    registry.set(DYNAMIC_EVAULT, makeVault(DYNAMIC_EVAULT), 'evk')
+    fetchVaults.mockResolvedValueOnce({ errors: [], result: [{ ...makeVault(DYNAMIC_EVAULT), isEscrow: true }] })
+    await useVaults().updateEVaults([DYNAMIC_EVAULT], undefined, true)
+    expect(registry.getVaultCategory(DYNAMIC_EVAULT)).toBe('escrow')
+    expect(registry.get(DYNAMIC_EVAULT)?.verified).toBe(false)
+
+    fetchVaults.mockResolvedValueOnce({ errors: [], result: [{ ...makeVault(DYNAMIC_EVAULT), isEscrow: false }] })
+    await useVaults().updateEVaults([DYNAMIC_EVAULT], undefined, true)
+    expect(registry.getVaultCategory(DYNAMIC_EVAULT)).toBe('standard')
+    expect(registry.get(DYNAMIC_EVAULT)?.verified).toBe(false)
+  })
+
+  it('does not grant verification when refreshing an SDK-classified escrow outside the perspective', async () => {
+    const vault = Object.assign(makeVault(DYNAMIC_EVAULT), { isEscrow: true })
+    vi.stubGlobal('useEulerSdk', () => ({ getEulerSdkForChain: async () => ({
+      eVaultService: { fetchVault: async () => ({ result: vault, errors: [] }) },
+    }) }))
+    const registry = useVaultRegistry()
+    registry.set(DYNAMIC_EVAULT, vault, 'evk')
+    await useVaults().updateEscrowVault(DYNAMIC_EVAULT)
+    expect(registry.isEscrowVault(DYNAMIC_EVAULT)).toBe(true)
+    expect(registry.get(DYNAMIC_EVAULT)?.verified).toBe(false)
+    expect(useVaults().isVaultGovernorVerified(vault)).toBe(false)
+  })
+
   it('keeps EVault batches out of verified lists unless explicitly display-verified', async () => {
     await useVaults().updateEVaults([LABELED_EVAULT], undefined, true)
 
     const registry = useVaultRegistry()
     expect(registry.get(LABELED_EVAULT)?.verified).toBe(false)
     expect(registry.getVerifiedEVaults()).toEqual([])
+  })
+
+  it('filters cached and on-demand discovery without revoking trust or direct access, including showAll', async () => {
+    const registry = useVaultRegistry()
+    const first = makeVault(LABELED_EVAULT)
+    const second = makeVault(DYNAMIC_EVAULT)
+    registry.set(LABELED_EVAULT, first, 'evk', { verified: true })
+    registry.set(DYNAMIC_EVAULT, second, 'evk', { verified: true })
+    const visible = computed(() => registry.getVerifiedEVaults(true).map(v => v.address))
+    __setEulerLabelsDataForTest({ vaultTagAddresses: new Set([LABELED_EVAULT.toLowerCase()]) })
+    expect(visible.value).toEqual([getAddress(LABELED_EVAULT)])
+    expect(registry.isVerifiedVault(DYNAMIC_EVAULT)).toBe(true)
+    expect(await useVaults().getVault(DYNAMIC_EVAULT)).toBe(second)
+    expect(visible.value).toEqual([getAddress(LABELED_EVAULT)])
+
+    __setEulerLabelsDataForTest({ vaultTagAddresses: new Set([DYNAMIC_EVAULT.toLowerCase()]) })
+    expect(visible.value).toEqual([getAddress(DYNAMIC_EVAULT)])
+    expect(registry.getVault(LABELED_EVAULT)).toBe(first)
+    __setEulerLabelsDataForTest({ vaultTagAddresses: new Set() })
+    expect(visible.value).toEqual([])
+    __setEulerLabelsDataForTest()
+    expect(visible.value).toHaveLength(2)
+  })
+
+  it('requires both borrow-pair sides to match the tag even with showAll enabled', () => {
+    const registry = useVaultRegistry()
+    const debt = makeVault(LABELED_EVAULT)
+    debt.collaterals.push({ address: getAddress(ESCROW_EVAULT), borrowLTV: 0.8 } as EVault['collaterals'][number])
+    registry.set(LABELED_EVAULT, debt, 'evk', { verified: true })
+    registry.set(ESCROW_EVAULT, makeVault(ESCROW_EVAULT), 'evk', { verified: true })
+    useVaults().setShowAllLabelEntries(true)
+    __setEulerLabelsDataForTest({ vaultTagAddresses: new Set([LABELED_EVAULT.toLowerCase()]) })
+    expect(useVaults().borrowList.value).toEqual([])
+    __setEulerLabelsDataForTest({ vaultTagAddresses: new Set([LABELED_EVAULT.toLowerCase(), ESCROW_EVAULT.toLowerCase()]) })
+    expect(useVaults().borrowList.value).toHaveLength(1)
+    __setEulerLabelsDataForTest({ vaultTagAddresses: new Set([ESCROW_EVAULT.toLowerCase()]) })
+    expect(useVaults().borrowList.value).toEqual([])
   })
 
   it('marks display-verified EVault batches verified', async () => {
@@ -98,6 +184,33 @@ describe('useVaults EVault verification metadata', () => {
     const registry = useVaultRegistry()
     expect(registry.get(LABELED_EVAULT)?.verified).toBe(true)
     expect(registry.getVerifiedEVaults().map(vault => vault.address)).toEqual([getAddress(LABELED_EVAULT)])
+  })
+
+  it('retains independently resolved EulerRouter governance on a real SDK EVault', async () => {
+    const vault = Object.assign(new SdkEVault({
+      address: getAddress(LABELED_EVAULT),
+      governorAdmin: EULER_ROUTER_GOVERNOR,
+      oracle: { oracle: EULER_ROUTER, name: 'EulerRouter' },
+      asset: { address: EULER_ROUTER, symbol: 'TST', decimals: 18 },
+      shares: { decimals: 18 },
+      collaterals: [],
+    } as unknown as IEVault), { type: 'EVault' })
+    fetchVaults.mockResolvedValueOnce({ errors: [], result: [vault] })
+    readContract.mockResolvedValueOnce(EULER_ROUTER_GOVERNOR)
+
+    await useVaults().updateEVaults([LABELED_EVAULT], undefined, true, {
+      verifiedAddresses: new Set([getAddress(LABELED_EVAULT).toLowerCase()]),
+    })
+
+    const stored = useVaultRegistry().get(LABELED_EVAULT)?.vault as EVault & {
+      eulerRouterGovernor?: Address | null
+    }
+    expect(stored).toBeInstanceOf(SdkEVault)
+    expect(stored.eulerRouterGovernor).toBe(EULER_ROUTER_GOVERNOR)
+    expect(readContract).toHaveBeenCalledWith(expect.objectContaining({
+      address: EULER_ROUTER,
+      functionName: 'governor',
+    }))
   })
 
   it('hides not-explorable deprecated WETH lend vaults unless showAll is enabled', () => {
@@ -168,6 +281,28 @@ describe('useVaults EVault verification metadata', () => {
     ])
   })
 
+  it('retains an open unlisted vault during a same-chain labels reload', async () => {
+    await useVaults().updateEVaults([DYNAMIC_EVAULT], undefined, true)
+    const registry = useVaultRegistry()
+    const dynamic = registry.get(DYNAMIC_EVAULT)?.vault
+    await useVaults().updateEVaults([DEPRECATED_EVAULT], undefined, true, {
+      verifiedAddresses: new Set([getAddress(DEPRECATED_EVAULT).toLowerCase()]),
+    })
+    __setEulerLabelsDataForTest({
+      source: 'v3', visibility: {}, verifiedVaultAddresses: [getAddress(LABELED_EVAULT)],
+    })
+
+    await useVaults().loadVaults({ preserveRegistry: true })
+
+    expect(registry.get(DYNAMIC_EVAULT)?.vault).toBe(dynamic)
+    expect(registry.isVerifiedVault(DYNAMIC_EVAULT)).toBe(false)
+    expect(registry.get(LABELED_EVAULT)).toBeDefined()
+    expect(registry.isVerifiedVault(DEPRECATED_EVAULT)).toBe(false)
+
+    await useVaults().loadVaults()
+    expect(registry.get(DYNAMIC_EVAULT)).toBeUndefined()
+  })
+
   it('chunks EVault fetches for configured chunk chains', async () => {
     const addresses = Array.from(
       { length: 7 },
@@ -204,6 +339,89 @@ describe('useVaults EVault verification metadata', () => {
 
     expect(fetchVaults).toHaveBeenCalledTimes(1)
     expect(fetchVaults.mock.calls[0]?.[1]).toEqual(addresses)
+  })
+
+  it('refreshes unlisted Earn vaults without promoting their verification', async () => {
+    __setEulerLabelsDataForTest({ earnVaults: [getAddress(BASE_EARN_VAULT)] })
+    const vaults = useVaults()
+    await vaults.getEarnVault(DYNAMIC_EVAULT)
+    const registry = useVaultRegistry()
+    registry.set(BASE_EARN_VAULT, makeEarnVault(BASE_EARN_VAULT), 'earn', { verified: true })
+    fetchEarnVaults.mockImplementation(async (_chainId: number, addresses: Address[]) => ({
+      errors: [], result: addresses.map(makeEarnVault),
+    }))
+
+    await vaults.refreshVaults()
+
+    expect(fetchEarnVaults).toHaveBeenCalledWith(1, expect.arrayContaining([
+      getAddress(DYNAMIC_EVAULT), getAddress(BASE_EARN_VAULT),
+    ]), expect.anything())
+    expect(registry.isVerifiedVault(DYNAMIC_EVAULT)).toBe(false)
+    expect(vaults.isEarnVaultOwnerVerified(registry.get(DYNAMIC_EVAULT)!.vault as EulerEarn)).toBe(false)
+    expect(registry.isVerifiedVault(BASE_EARN_VAULT)).toBe(true)
+    expect(vaults.isEarnVaultOwnerVerified(registry.get(BASE_EARN_VAULT)!.vault as EulerEarn)).toBe(true)
+  })
+
+  it('revokes cached EVault and Earn verification when the hosted snapshot removes them', () => {
+    const registry = useVaultRegistry()
+    const snapshot = {
+      verifiedVaultAddresses: [getAddress(LABELED_EVAULT)],
+      earnVaults: [getAddress(BASE_EARN_VAULT)],
+      visibility: {},
+    } as Partial<PublicEulerLabelsData>
+    __setEulerLabelsDataForTest(snapshot)
+    registry.set(LABELED_EVAULT, makeVault(LABELED_EVAULT), 'evk', { verified: true })
+    registry.set(BASE_EARN_VAULT, makeEarnVault(BASE_EARN_VAULT), 'earn', { verified: true })
+    registry.setEscrowAddresses([ESCROW_EVAULT])
+    expect(registry.isVerifiedVault(LABELED_EVAULT)).toBe(true)
+    expect(registry.isVerifiedVault(BASE_EARN_VAULT)).toBe(true)
+
+    __setEulerLabelsDataForTest({ visibility: {} } as Partial<PublicEulerLabelsData>)
+    expect(registry.isVerifiedVault(LABELED_EVAULT)).toBe(false)
+    expect(registry.isVerifiedVault(BASE_EARN_VAULT)).toBe(false)
+    expect(registry.getVerifiedEVaults(true)).toEqual([])
+    expect(registry.isVerifiedVault(ESCROW_EVAULT)).toBe(true)
+    expect(registry.getVault(LABELED_EVAULT)).toBeDefined()
+    expect(registry.getVault(BASE_EARN_VAULT)).toBeDefined()
+  })
+
+  it('uses the V3 visibility membership without rechecking on-chain governors', () => {
+    const registry = useVaultRegistry()
+    __setEulerLabelsDataForTest({
+      source: 'v3',
+      verifiedVaultAddresses: [getAddress(LABELED_EVAULT)],
+      earnVaults: [getAddress(BASE_EARN_VAULT)],
+      visibility: {
+        [LABELED_EVAULT.toLowerCase()]: { status: 'warning', reason: 'Review this vault', decidedBy: 'assessment', explorableLend: true, explorableBorrow: true },
+        [BASE_EARN_VAULT.toLowerCase()]: { status: 'visible', reason: null, decidedBy: 'assessment', explorableLend: true, explorableBorrow: true },
+      },
+    })
+    registry.set(LABELED_EVAULT, makeVault(LABELED_EVAULT), 'evk', { verified: true })
+    registry.set(BASE_EARN_VAULT, makeEarnVault(BASE_EARN_VAULT), 'earn', { verified: true })
+
+    // Neither fixture has governor or owner metadata. On V3, that is already
+    // incorporated into the published verdict and must not override it.
+    expect(useVaults().isVaultGovernorVerified(makeVault(LABELED_EVAULT))).toBe(true)
+    expect(useVaults().isEarnVaultOwnerVerified(makeEarnVault(BASE_EARN_VAULT))).toBe(true)
+
+    __setEulerLabelsDataForTest({ source: 'v3', visibility: {
+      [LABELED_EVAULT.toLowerCase()]: { status: 'hidden', reason: 'No longer listed', decidedBy: 'assessment', explorableLend: false, explorableBorrow: false },
+    } })
+    expect(useVaults().isVaultGovernorVerified(makeVault(LABELED_EVAULT))).toBe(false)
+    expect(useVaults().isEarnVaultOwnerVerified(makeEarnVault(BASE_EARN_VAULT))).toBe(false)
+    // A stale registry flag cannot revive verification when V3 has no verdict.
+    __setEulerLabelsDataForTest({ source: 'v3' })
+    expect(registry.isVerifiedVault(LABELED_EVAULT)).toBe(false)
+  })
+
+  it('clears stale Earn verification when a vault is removed from curation', async () => {
+    const registry = useVaultRegistry()
+    registry.set(BASE_EARN_VAULT, makeEarnVault(BASE_EARN_VAULT), 'earn', { verified: true })
+    fetchEarnVaults.mockResolvedValue({ errors: [], result: [makeEarnVault(BASE_EARN_VAULT)] })
+
+    await useVaults().updateEarnVaults([BASE_EARN_VAULT], undefined, true)
+
+    expect(registry.isVerifiedVault(BASE_EARN_VAULT)).toBe(false)
   })
 
   it('does not fetch stale Earn vault addresses after a chain switch invalidates the load', async () => {
@@ -268,13 +486,13 @@ describe('useVaults EVault verification metadata', () => {
 
   it('preserves registry verification only when refresh metadata omits it', () => {
     const registry = useVaultRegistry()
-    registry.set(LABELED_EVAULT, makeVault(LABELED_EVAULT), 'evk', { verified: true, vaultCategory: 'escrow' })
+    registry.set(LABELED_EVAULT, makeVault(LABELED_EVAULT), 'evk', { verified: true })
 
     registry.set(LABELED_EVAULT, makeVault(LABELED_EVAULT), 'evk')
     expect(registry.get(LABELED_EVAULT)?.verified).toBe(true)
-    expect(registry.get(LABELED_EVAULT)?.vaultCategory).toBe('escrow')
+    expect(registry.get(LABELED_EVAULT)?.vaultCategory).toBe('standard')
 
-    registry.set(LABELED_EVAULT, makeVault(LABELED_EVAULT), 'evk', { verified: false, vaultCategory: 'standard' })
+    registry.set(LABELED_EVAULT, makeVault(LABELED_EVAULT), 'evk', { verified: false })
     expect(registry.get(LABELED_EVAULT)?.verified).toBe(false)
     expect(registry.get(LABELED_EVAULT)?.vaultCategory).toBe('standard')
     expect(registry.getVerifiedEVaults()).toEqual([])

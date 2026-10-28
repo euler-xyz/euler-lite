@@ -75,9 +75,10 @@ export async function waitForSubgraphBlock(
     try {
       const { data } = await axios.post(
         subgraphUrl,
-        { query: '{ _meta { block { number } } }' },
+        { query: '{ _meta { deployment block { number } } }' },
         { timeout: SUBGRAPH_TIMEOUT_MS },
       )
+      if (data?.errors?.length) throw new Error('Subgraph metadata query failed')
       const indexed = BigInt(data?.data?._meta?.block?.number ?? 0)
       if (indexed >= targetBlock) return true
     }

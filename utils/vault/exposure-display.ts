@@ -1,3 +1,5 @@
+import { getAddress } from 'viem'
+import type { VaultAsset } from '~/types/asset'
 import type { RouteLocationRaw } from 'vue-router'
 import type { CollateralExposureBackingAssetSummary, CollateralExposureGroup } from '~/utils/vault/collateral-exposure'
 import { normalizeExposureAddress, type ExposureBackingAsset } from '~/utils/vault/exposure-groups'
@@ -126,6 +128,17 @@ export interface VaultExposureDisplay {
   items: VaultExposureDisplayItem[]
 }
 
+const buildQualitativeExposureDisplay = (collateralGroups: CollateralExposureGroup[]): VaultExposureDisplay => ({
+  valueState: 'unavailable',
+  items: mergeVaultExposureDisplayItems(
+    collateralGroups.map(group => ({
+      asset: group.asset,
+      valueUsd: 0,
+      vaultCount: group.vaultCount,
+    })),
+  ),
+})
+
 /**
  * Build the exposure display when the per-collateral open-interest split is
  * unknown — V3 disabled for the chain, the open-interest fetch failed, or the
@@ -199,15 +212,7 @@ export const buildFallbackVaultExposureDisplay = ({
     }
   }
 
-  const qualitativeItems = mergeVaultExposureDisplayItems(
-    collateralGroups.map(group => ({
-      asset: group.asset,
-      valueUsd: 0,
-      vaultCount: group.vaultCount,
-    })),
-  )
-
-  return { valueState: 'unavailable', items: qualitativeItems }
+  return buildQualitativeExposureDisplay(collateralGroups)
 }
 
 /**
@@ -239,7 +244,6 @@ export const resolveVaultExposureDisplay = ({
   utilization: number
   acceptedCollateralCount: number
 }): VaultExposureDisplay => {
-  // Open interest still resolving — show loading before building any groups.
   if (openInterestEnabled && !hasOpenInterestError && !openInterestLoaded) {
     return { valueState: 'loading', items: [] }
   }
@@ -311,3 +315,61 @@ export const sortVaultExposureDisplayItems = (
     if (b.valueUsd !== a.valueUsd) return b.valueUsd - a.valueUsd
     return (a.label ?? a.asset.symbol).localeCompare(b.label ?? b.asset.symbol)
   })
+
+export const getExposureLead = (
+  display: VaultExposureDisplay,
+  limit = 3,
+): { assets: ExposureBackingAsset[], label: string } | null => {
+  if (display.valueState === 'loading' || !display.items.length) return null
+  const sorted = sortVaultExposureDisplayItems(display.items)
+  const shown = sorted.slice(0, limit)
+  const rest = sorted.length - shown.length
+  const symbols = `${shown.map(item => item.label ?? item.asset.symbol).join(', ')}${rest > 0 ? ` +${rest}` : ''}`
+  return {
+    assets: shown.map(item => item.asset),
+    label: `${display.valueState === 'ready' ? 'Backed by' : 'Accepts'} ${symbols}`,
+  }
+}
+
+/**
+ * The split is built on a nominal supply of one, so only its order and labels are read, never its amounts.
+ * With nothing borrowed the split is empty, so the lead names the collaterals a new borrow can use instead.
+ */
+export const getVaultBackingLead = (
+  input: Omit<Parameters<typeof resolveVaultExposureDisplay>[0], 'totalExposureUsd' | 'totalSupplyState'>,
+): ReturnType<typeof getExposureLead> => {
+  const display = resolveVaultExposureDisplay({ ...input, totalExposureUsd: 1, totalSupplyState: 'ready' })
+  const hasNoBorrows = display.valueState === 'ready' && clampPercentFraction(input.utilization) <= 0
+  if (!hasNoBorrows) return getExposureLead(display)
+  const borrowableGroups = input.getCollateralGroups().filter(group => group.maxBorrowLTV > 0)
+  return getExposureLead(buildQualitativeExposureDisplay(borrowableGroups))
+}
+
+export interface VaultHeaderAssets {
+  assets: VaultAsset[]
+  label?: string
+}
+
+/** Takes no allocation: the header of an Earn strategy describes the strategy, not this vault's share of it. */
+export const getVaultHeaderAssets = (
+  vault: { utilization: number, collaterals: readonly unknown[], asset: VaultAsset },
+  openInterest: { enabled: boolean, loaded: boolean, hasError: boolean },
+  getCollateralGroups: () => CollateralExposureGroup[],
+): VaultHeaderAssets => {
+  const lead = getVaultBackingLead({
+    openInterestEnabled: openInterest.enabled,
+    openInterestLoaded: openInterest.loaded,
+    hasOpenInterestError: openInterest.hasError,
+    getCollateralGroups,
+    utilization: vault.utilization,
+    acceptedCollateralCount: vault.collaterals.length,
+  })
+  if (!lead) {
+    const { address, decimals, name, symbol } = vault.asset
+    return { assets: [{ address, decimals, name, symbol }] }
+  }
+  return {
+    assets: lead.assets.map(asset => ({ address: getAddress(asset.address), decimals: asset.decimals ?? 18, name: asset.name ?? asset.symbol, symbol: asset.symbol })),
+    label: lead.label,
+  }
+}

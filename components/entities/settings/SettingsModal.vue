@@ -85,7 +85,7 @@ defineEmits(['close'])
         />
       </div>
     </div>
-    <Permit2Settings />
+    <SignatureSettings />
     <SlippageSettings />
   </BaseModalWrapper>
 </template>

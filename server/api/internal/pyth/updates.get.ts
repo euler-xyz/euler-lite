@@ -2,6 +2,11 @@ import { createError, getQuery, setResponseHeader } from 'h3'
 import { createRateLimiter } from '~/server/utils/rate-limit'
 import { fetchWithTimeout } from '~/server/utils/fetchWithTimeout'
 import { logger } from '~/server/utils/logger'
+import {
+  buildPythProxyRequestHeaders,
+  isPythProxyConfigured,
+  PYTH_HERMES_URL,
+} from '~/server/utils/pyth-proxy'
 
 const FEED_ID_RE = /^0x[0-9a-fA-F]{64}$/
 
@@ -11,16 +16,11 @@ const rateLimiter = createRateLimiter({
   label: 'pyth-updates',
 })
 
-function getHermesUrl(): string {
-  return (process.env.PYTH_HERMES_URL || process.env.NUXT_PUBLIC_PYTH_HERMES_URL || '').replace(/\/+$/, '')
-}
-
 export default defineEventHandler(async (event) => {
   rateLimiter.consume(event)
 
-  const hermesUrl = getHermesUrl()
-  if (!hermesUrl) {
-    throw createError({ statusCode: 503, statusMessage: 'Pyth Hermes endpoint not configured' })
+  if (!isPythProxyConfigured()) {
+    throw createError({ statusCode: 503, statusMessage: 'Pyth API key not configured' })
   }
 
   const query = getQuery(event)
@@ -42,7 +42,7 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  const url = new URL(`${hermesUrl}/v2/updates/price/latest`)
+  const url = new URL('/v2/updates/price/latest', PYTH_HERMES_URL)
   ids.forEach(id => url.searchParams.append('ids[]', id))
 
   const encoding = String(query.encoding || 'hex')
@@ -55,7 +55,9 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
-    const resp = await fetchWithTimeout(url.toString())
+    const resp = await fetchWithTimeout(url.toString(), undefined, {
+      headers: buildPythProxyRequestHeaders(),
+    })
     setResponseHeader(event, 'Cache-Control', 'no-store')
 
     // Hermes returns 404 with a body listing the missing feed IDs when some

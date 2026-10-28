@@ -1,13 +1,32 @@
+import type { PublicEulerLabelsData } from '~/utils/public-labels'
 import { getAddress, zeroAddress, type Address } from 'viem'
+import { isEVault, type EulerEarn, type EVault, type OracleDetailedInfo } from '@eulerxyz/euler-v2-sdk'
 import { getEulerRouterGovernor } from '~/entities/oracle'
-import type { EulerEarn, OracleDetailedInfo } from '@eulerxyz/euler-v2-sdk'
+
+/**
+ * Value-based governance hydration guard. SDK 2.0 EVault instances always
+ * OWN the `governorAdmin` property — the constructor assigns it even when
+ * governance was never fetched — so an `in`-operator check passes on every
+ * real instance and misreads lazily-hydrated vaults as "governance resolved
+ * to nothing", producing false Unknown badges. Only a defined value means
+ * governance actually resolved.
+ */
+export const hasResolvedGovernorAdmin = (vault: unknown): vault is EVault =>
+  isEVault(vault) && vault.governorAdmin !== undefined
 
 interface VerifiableVault {
   address: string
   governorAdmin?: string
   governor?: string
+  oracle?: {
+    oracle?: string
+    name?: string
+  } | null
   oracleDetailedInfo?: OracleDetailedInfo | null
+  eulerRouterGovernor?: Address | null
   verified?: boolean
+  /** Membership in the on-chain escrow perspective, independent of SDK classification. */
+  escrowVerified?: boolean
   vaultCategory?: 'standard' | 'escrow'
 }
 
@@ -41,6 +60,13 @@ export interface VerificationLabels {
   hasEntityAddress: (entityKey: string, address: Address) => boolean
 }
 
+/** Hosted labels must explicitly declare a curator; absence cannot use static Earn trust. */
+export const getHostedEntityKeys = (labels: Pick<PublicEulerLabelsData, 'source' | 'managingEntityByVault'>, address: string): string[] | undefined => {
+  if (labels.source !== 'v3' && labels.source !== 'v3-metadata') return undefined
+  const entity = labels.managingEntityByVault?.[address.toLowerCase()]
+  return entity ? [entity] : []
+}
+
 const findDeclaredEntityFor = (
   address: Address,
   declaredKeys: string[],
@@ -57,9 +83,9 @@ export const isVaultGovernorVerified = (
   vault: VerifiableVault,
   labels: VerificationLabels,
 ): boolean => {
-  // Escrow vaults have no risk manager — labels treat them as a separate
+  // Escrow vaults have no curator — labels treat them as a separate
   // trust anchor (EscrowedCollateralPerspective), no entity matching applies.
-  if ('vaultCategory' in vault && vault.vaultCategory === 'escrow') return true
+  if (vault.escrowVerified === true) return true
 
   if (!vault.verified) return false
 
@@ -76,12 +102,19 @@ export const isVaultGovernorVerified = (
     return false
   }
 
-  if ('oracleDetailedInfo' in vault) {
-    const routerGovernor = getEulerRouterGovernor(vault.oracleDetailedInfo)
-    if (routerGovernor && routerGovernor !== zeroAddress) {
-      if (!findDeclaredEntityFor(getAddress(routerGovernor), declaredKeys, labels)) {
-        return false
-      }
+  const oracleInfo = vault.oracleDetailedInfo
+  const isEulerRouter = vault.oracle?.name === 'EulerRouter' || oracleInfo?.name === 'EulerRouter'
+  if (isEulerRouter) {
+    const routerGovernor = 'eulerRouterGovernor' in vault
+      ? vault.eulerRouterGovernor
+      : oracleInfo?.name === 'EulerRouter'
+        ? getEulerRouterGovernor(oracleInfo)
+        : null
+    // EulerRouter governance must resolve independently before the vault can
+    // inherit verified entity branding.
+    if (!routerGovernor) return false
+    if (routerGovernor !== zeroAddress && !findDeclaredEntityFor(getAddress(routerGovernor), declaredKeys, labels)) {
+      return false
     }
   }
 
@@ -95,9 +128,9 @@ export const isEarnVaultOwnerVerified = (
   if (!earnVault.verified) return false
 
   const declaredKeys = labels.getDeclaredEntityKeys(earnVault.address)
-  // Earn vaults outside any product are trusted on the strength of being in
-  // earn-vaults.json alone — earn curation lives in that file, not in
-  // products.json. Differs from EVK behaviour.
+  // A published Earn vault can be trusted without a product assignment.
+  // This differs from EVK governance verification, which requires a product
+  // with a declared managing entity.
   if (declaredKeys === undefined) return true
   // But if the earn vault IS in a product whose entity is empty/undefined,
   // the product has no on-chain authority to claim it — treat as unverified.
@@ -109,7 +142,7 @@ export const isEarnVaultOwnerVerified = (
 /**
  * Returns every declared entity key whose addresses contain the vault's
  * governorAdmin, in declared-key order. Companion to `isVaultGovernorVerified`
- * — answers "which entities are the risk managers?" rather than "is the vault
+ * — answers "which entities are the curators?" rather than "is the vault
  * verified?". A product may declare multiple entities and more than one can
  * match; the empty array is returned when none match (or the vault is escrow,
  * unverified, or not in any product). The router-governor gate is NOT consulted
