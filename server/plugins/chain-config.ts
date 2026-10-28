@@ -1,11 +1,8 @@
-import { parseChainIds } from '../../utils/parseChainIds'
 import { loadEulerChains, peekEulerChains } from '../api/internal/euler-chains.get'
-import { getChainEnvIssues, getConfiguredChainIds, getEnabledChainIds } from '~/utils/chain-env'
+import { readChainEnvConfig } from '~/utils/chain-env'
 import { applyChainRegistry, readChainRegistry } from '~/utils/chain-status'
-import { getUnknownChainIds } from '~/entities/chainRegistry'
 import { escapeScriptJson } from '~/server/utils/escape-script-json'
 import { logger } from '~/server/utils/logger'
-import { parseEVaultFetchChunkChainIds } from '~/utils/eVaultFetchChunkConfig'
 
 const BOOT_READ_WAIT_MS = 1_000
 
@@ -15,9 +12,8 @@ const delay = (ms: number) => new Promise<void>((resolve) => {
 })
 
 export default defineNitroPlugin((nitroApp) => {
-  const configuredChainIds = getConfiguredChainIds()
-  const unknownChainIds = getUnknownChainIds(configuredChainIds)
-  const chainEnvIssues = getChainEnvIssues()
+  const envChainConfig = readChainEnvConfig()
+  const { unsupportedChainIds: unknownChainIds, chainEnvIssues } = envChainConfig
   if (unknownChainIds.length) {
     logger.error(
       { ctx: 'chain-config', chainIds: unknownChainIds },
@@ -37,21 +33,6 @@ export default defineNitroPlugin((nitroApp) => {
     )
   }
 
-  const enabledChainIds = getEnabledChainIds()
-
-  const enabledSet = new Set(enabledChainIds)
-  const deprecatedChainIds = parseChainIds(process.env.DEPRECATED_CHAINS, enabledSet)
-  const onchainSdkChainIds = parseChainIds(process.env.ONCHAIN_SDK_CHAINS, enabledSet)
-  const eVaultFetchChunkChainIds = parseEVaultFetchChunkChainIds(process.env, enabledSet)
-
-  const envChainConfig = {
-    enabledChainIds,
-    deprecatedChainIds,
-    onchainSdkChainIds,
-    eVaultFetchChunkChainIds,
-    unsupportedChainIds: unknownChainIds,
-    chainEnvIssues,
-  }
   const isProduction = process.env.DOPPLER_ENVIRONMENT === 'prd'
   // Prerendered pages are static, so they must not bake in a value read at build time.
   const bootRead = import.meta.prerender
