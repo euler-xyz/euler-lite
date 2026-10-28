@@ -22,9 +22,9 @@ export const useStateOverrideResolution = () => ({
  *  - **`wallet.balances`** — the form already knows what the user holds via
  *    `useWallets`. Feed that map through and the SDK skips per-call `balanceOf`
  *    when the snapshot already proves the user holds enough.
- *  - **`noBalanceOverride: true`** — forms validate "Not enough balance" up
- *    front before allowing submit/quotes. The simulator doesn't need to forge
- *    balances; the SDK can skip the entire balance branch.
+ *  - **`noBalanceOverride: true`** — skips the balance branch for simulations
+ *    gated on sufficient wallet funds. Quote previews that accept amounts
+ *    above the wallet balance must keep balance overrides enabled.
  *  - **`slotHints`** — pre-fetched ERC20 storage-slot indices, owner-
  *    -agnostic, computed cryptographically. Lets the SDK bypass
  *    `eth_createAccessList` discovery for the common case. We fire this once
@@ -134,8 +134,8 @@ export const useStateOverrideOptions = () => {
 
   /**
    * Assemble `SimulationStateOverrideOptions` for the next simulate/estimate
-   * call. Pass `noBalanceOverride: true` from any form that validates wallet
-   * balance up front (multiply, deposit-with-swap, repay-with-swap, …).
+   * call. Pass `noBalanceOverride: true` only when this simulation is gated
+   * on sufficient wallet funds or does not consume wallet tokens.
    */
   const buildStateOverrideOptions = (opts?: {
     noBalanceOverride?: boolean

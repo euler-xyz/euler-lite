@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Account, EVault, IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
 import { useMultiplyForm } from '~/composables/borrow/useMultiplyForm'
 import type { RewardCampaign } from '~/entities/reward-campaign'
+import { useSwapQuotesParallel } from '~/composables/useSwapQuotesParallel'
 
 const { USER, makeVault, planAccount, mocks } = vi.hoisted(() => {
   const USER = '0x0000000000000000000000000000000000000001'
@@ -93,12 +94,12 @@ vi.mock('~/components/ui/composables/useToast', () => ({
 vi.mock('~/composables/useStateOverrideOptions', () => ({
   useStateOverrideOptions: () => ({
     primeSlotHintsFor: vi.fn(),
-    buildStateOverrideOptions: vi.fn(() => ({})),
+    buildStateOverrideOptions: vi.fn(options => ({ ...options })),
   }),
 }))
 
 vi.mock('~/composables/useSwapQuotesParallel', () => ({
-  useSwapQuotesParallel: () => ({
+  useSwapQuotesParallel: vi.fn(() => ({
     sortedQuoteCards: ref([]),
     selectedProvider: ref(null),
     selectedQuote: ref(null),
@@ -113,7 +114,7 @@ vi.mock('~/composables/useSwapQuotesParallel', () => ({
     reset: vi.fn(),
     requestQuotes: vi.fn(),
     selectProvider: vi.fn(),
-  }),
+  })),
 }))
 
 vi.mock('~/composables/useMultiplyCollateralOptions', () => ({
@@ -221,7 +222,7 @@ const makeForm = (vault: EVault) => useMultiplyForm({
   isMultiplyRestricted: computed(() => false),
 })
 
-describe('useMultiplyForm cap validation', () => {
+describe('useMultiplyForm', () => {
   beforeEach(() => {
     const createIntent = vi.fn()
     vi.stubGlobal('useOperationIntentFactory', () => ({
@@ -332,6 +333,28 @@ describe('useMultiplyForm cap validation', () => {
     vi.restoreAllMocks()
   })
 
+  it.each([false, true])('allows quote balance overrides while blocking insufficient supply (spy mode: %s)', (isSpyMode) => {
+    vi.stubGlobal('useEffectiveAddress', () => ({
+      isConnected: ref(!isSpyMode),
+      isSpyMode: ref(isSpyMode),
+      effectiveAddress: ref(USER),
+    }))
+    vi.stubGlobal('useWallets', () => ({ getBalance: () => 130_000n }))
+    const vault = makeVault()
+    vault.asset.decimals = 6
+    const form = makeForm(vault)
+    form.initMultiplySupplyVault(vault)
+    form.multiplyInputAmount.value = '1000'
+    form.multiplier.value = 3.5
+
+    const quoteOptions = vi.mocked(useSwapQuotesParallel).mock.calls.at(-1)![0]
+    // Quote previews must be estimable with 0.13 USDC, even though the
+    // requested 1,000 USDC deposit cannot be submitted by this wallet.
+    expect(quoteOptions.getStateOverrideOptions?.()?.noBalanceOverride).not.toBe(true)
+    expect(form.multiplyErrorText.value).toBe('Not enough balance')
+    expect(form.isMultiplySubmitDisabled.value).toBe(true)
+  })
+
   it('surfaces a reached supply cap as the multiply disabled reason and form warning', () => {
     const vault = makeVault(100, 0)
     const form = makeForm(vault)
@@ -404,6 +427,7 @@ describe('useMultiplyForm cap validation', () => {
     expect(mocks.openReview).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       review: expect.objectContaining({ subAccount: USER, sourceSubAccount }),
     }))
+    expect(mocks.runPreparedSimulation.mock.calls.at(-1)?.[1]).toMatchObject({ noBalanceOverride: true })
   })
 
   it('derives projected Net APY, ROE, and rate transitions from one breakdown', async () => {
