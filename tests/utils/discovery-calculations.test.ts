@@ -372,6 +372,29 @@ describe('members without a live LTV edge', () => {
     expect(matrixRows(market)).toContain('0xidle')
     expect(attributeColumns(market)).toContain('0xidle')
   })
+
+  it('draws every member as a standalone node when each one would be dropped', () => {
+    listing.lendHidden.add('0xusdc')
+    listing.lendHidden.add('0xynusdx')
+    const usdc = makeVault('0xUsdc', [])
+    const ynUsdx = makeVault('0xYnUsdx', [])
+    const market = makeMarket([usdc, ynUsdx])
+    const diagram = getMiniDiagram(market)
+
+    expect(diagram.nodes.map(node => node.address).sort()).toEqual(['0xusdc', '0xynusdx'])
+    expect(diagram.edges).toEqual([])
+    expect(diagram.pairCount).toBe(0)
+    expect(getDisplayedMembers(market)).toEqual([usdc, ynUsdx])
+    expect(attributeColumns(market).sort()).toEqual(['0xusdc', '0xynusdx'])
+  })
+
+  it('still drops a lend-hidden member while another member is shown', () => {
+    listing.lendHidden.add('0xidle')
+    const market = makeMarket([makeVault('0xListed', []), makeVault('0xIdle', [])])
+
+    expect(graphNodes(market)).toEqual(['0xlisted'])
+    expect(getDisplayedMembers(market).map(vault => (vault as EVault).address)).toEqual(['0xListed'])
+  })
 })
 
 describe('vaults hidden on both sides', () => {
