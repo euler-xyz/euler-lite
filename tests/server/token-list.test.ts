@@ -162,6 +162,40 @@ describe('/api/internal/token-list decimals', () => {
     expect(mocks.resolveTokenDecimals).not.toHaveBeenCalled()
   })
 
+  it('bounds slow reads, shares them across deadlines and retries only unread tokens', async () => {
+    vi.useFakeTimers()
+    const extraTokens = Array.from({ length: 129 }, (_, index) =>
+      token(1, `0x${(index + 4096).toString(16).padStart(40, '0')}`, `TOKEN${index}`, 18))
+    mocks.fetchWithTimeout.mockImplementation(async (url: string) => ({
+      ok: true,
+      json: async () => url.includes('uniswap') ? { tokens: extraTokens } : {},
+    }))
+    const pending: ((decimals: number) => void)[] = []
+    mocks.resolveTokenDecimals.mockImplementation(() => new Promise<number>((resolve) => {
+      pending.push(resolve)
+    }))
+    const { refreshTokenList } = await importRoute()
+    const first = refreshTokenList(1)
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(await first).toHaveLength(130)
+    expect(mocks.resolveTokenDecimals).toHaveBeenCalledTimes(128)
+
+    const second = refreshTokenList(1)
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(await second).toHaveLength(130)
+    expect(mocks.resolveTokenDecimals).toHaveBeenCalledTimes(128)
+
+    for (const resolve of pending) resolve(6)
+    await vi.advanceTimersByTimeAsync(0)
+    // Finishing after the deadline must not start the remaining queued reads.
+    expect(mocks.resolveTokenDecimals).toHaveBeenCalledTimes(128)
+    mocks.resolveTokenDecimals.mockClear()
+    mocks.resolveTokenDecimals.mockResolvedValue(6)
+    const recovered = await refreshTokenList(1)
+    expect(mocks.resolveTokenDecimals).toHaveBeenCalledTimes(2)
+    expect(recovered.every(t => t.decimals === 6)).toBe(true)
+  })
+
   it('serves the list when the server SDK is unavailable', async () => {
     const { refreshTokenList } = await importRoute()
     mocks.getServerSdk.mockImplementation(() => {

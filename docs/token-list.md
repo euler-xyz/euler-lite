@@ -49,7 +49,9 @@ All four sources run concurrently via `Promise.allSettled`. Each fetcher has its
 
 **Decimals**: the response holds only the requested chain's tokens. Each token's decimals come from its contract through the server SDK (`tokenlistService.resolveTokenDecimals`), memoised once per `chainId:address` for the life of the process.
 
-`applyOnchainDecimals` races that fan-out against a **5-second deadline** (`DECIMALS_READ_DEADLINE_MS`). viem can retry a hanging RPC for ~40 s; the deadline keeps `/api/internal/token-list` from blocking the merged cache that long. Reads that miss the deadline still complete in the background and fill the memo for the next build (`token-list` status `decimals:<chainId>` → `unread`). Until then the merged entry keeps the list-source decimals.
+Decimals reads run with at most **128 concurrent reads per chain** (`DECIMALS_READ_CONCURRENCY`), limiting the token-list contribution to SDK multicall and HTTP batch payloads. Concurrent refreshes for a chain share one decimals job, including while late reads remain pending.
+
+`applyOnchainDecimals` races that job against a **5-second deadline** (`DECIMALS_READ_DEADLINE_MS`). No further reads start after the job deadline. Reads already in progress can finish in the background and fill the memo; unread tokens keep their list-source decimals and are retried on the next build (`token-list` status `decimals:<chainId>` → `unread`).
 
 When a `decimals()` read reports `RawContractError` or `ContractFunctionZeroDataError` (including via `error.cause`), the handler memoises `null` and **drops** the token for the life of the process. This covers absent contracts and missing or reverting `decimals()` implementations; it does not prove that the address has no code. RPC failures keep the token in the list with source decimals and retry on the next build. Native `address(0)` is never read on-chain.
 
