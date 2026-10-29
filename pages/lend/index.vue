@@ -6,12 +6,11 @@ import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 
 import { getAssetUsdValueForEstimate } from '~/utils/sdk-prices'
-import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultRecentlyAdded, isVaultDeprecated, isVaultNotExplorableLend } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, applyVaultOverrides, getEntitiesByVault, isVaultRecentlyAdded, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
-import { isOpDisabled, OP_DEPOSIT } from '~/utils/vault-hooks'
-import { hasBorrowTablePair, isBorrowTableCollateral } from '~/utils/vault/borrow-table'
+import { isLendTableVault } from '~/utils/vault/borrow-table'
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
@@ -117,13 +116,9 @@ watch(chainId, (newChainId, oldChainId) => {
 
 // Lend listing only checks OP_DEPOSIT: it shows a vault as long as depositing is possible,
 // regardless of OP_TRANSFER state. Contrast with borrow/index.vue which checks both.
-const borrowableVaults = computed(() => {
-  return list.value.filter(vault =>
-    (showAllLabelEntries.value || !isVaultNotExplorableLend(vault.address))
-    && hasBorrowTablePair(vault.address, borrowList.value, address => isBorrowTableCollateral(address, showAllLabelEntries.value))
-    && !isOpDisabled(vault, OP_DEPOSIT),
-  )
-})
+const borrowableVaults = computed(() =>
+  list.value.filter(vault => isLendTableVault(vault, borrowList.value, showAllLabelEntries.value)),
+)
 
 // Fetch USD values for all borrowable vaults. Debounced to collapse the
 // bursts of registry updates streamed during loadVaults's RPC refresh

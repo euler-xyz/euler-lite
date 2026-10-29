@@ -1,15 +1,13 @@
 <script setup lang="ts">
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { getAssetUsdValue } from '~/utils/sdk-prices'
-import { getProductByVault, applyVaultOverrides, getUniqueEntitiesByVaults, isVaultRecentlyAdded, isVaultDeprecated, isVaultNotExplorableBorrow } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, applyVaultOverrides, getUniqueEntitiesByVaults, isVaultRecentlyAdded, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
-import { isOpDisabled, OP_BORROW, OP_DEPOSIT, OP_TRANSFER } from '~/utils/vault-hooks'
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
-import { isSecuritizeBorrowPair } from '~/types/borrow-pair'
-import { isBorrowTableCollateral } from '~/utils/vault/borrow-table'
+import { isBorrowTablePair } from '~/utils/vault/borrow-table'
 import { useVaults } from '~/composables/useVaults'
 import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
@@ -128,16 +126,7 @@ const { enableEntityBranding } = useDeployConfig()
 const showAllLabelEntries = useShowAllLabelEntries()
 
 const activeBorrowList = computed(() =>
-  borrowList.value.filter((pair) => {
-    if (!showAllLabelEntries.value && isVaultNotExplorableBorrow(pair.borrow.address)) return false
-    if (!isBorrowTableCollateral(pair.collateral.address, showAllLabelEntries.value)) return false
-    if (isOpDisabled(pair.borrow, OP_BORROW)) return false
-    // Securitize collateral has no EVault hook flags — only check EVault collateral.
-    // Fresh-deposit needs OP_DEPOSIT, savings-sourced needs OP_TRANSFER.
-    // Hide only when BOTH paths are blocked; the form guards the active path.
-    if (!isSecuritizeBorrowPair(pair) && isOpDisabled(pair.collateral, OP_DEPOSIT) && isOpDisabled(pair.collateral, OP_TRANSFER)) return false
-    return true
-  }),
+  borrowList.value.filter(pair => isBorrowTablePair(pair, showAllLabelEntries.value)),
 )
 
 const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<AnyBorrowVaultPair>((pair) => {

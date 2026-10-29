@@ -224,15 +224,14 @@ const getLiveEdgeAddresses = (market: MarketGroup): Set<string> => {
     .flatMap(ltv => [ltv.address.toLowerCase(), vault.address.toLowerCase()])))
 }
 
-const isDroppedWithoutEdges = (market: MarketGroup, address: string): boolean =>
-  !market.showsAllMembers && isVaultNotExplorableLend(address)
-
+// When every member would be dropped, none is, so the market still shows its vaults.
 const getDroppedMembers = (market: MarketGroup): Set<string> => {
   if (market.showsAllMembers) return new Set()
   const connected = getLiveEdgeAddresses(market)
-  return new Set(market.vaults
-    .map(v => getVaultAddress(v).toLowerCase())
-    .filter(address => address && !connected.has(address) && isDroppedWithoutEdges(market, address)))
+  const members = new Set(market.vaults.map(v => getVaultAddress(v).toLowerCase()).filter(Boolean))
+  const dropped = new Set([...members]
+    .filter(address => !connected.has(address) && isVaultNotExplorableLend(address)))
+  return dropped.size === members.size ? new Set() : dropped
 }
 
 export const getDisplayedMembers = (market: MarketGroup): AnyVault[] => {
@@ -315,10 +314,11 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
     }
   }
 
+  const droppedMembers = getDroppedMembers(market)
   const disconnectedVaults: Array<{ address: string, vault: AnyVault }> = []
   for (const v of market.vaults) {
     const addr = getVaultAddress(v).toLowerCase()
-    if (addr && !connectedAddresses.has(addr) && !isDroppedWithoutEdges(market, addr)) {
+    if (addr && !connectedAddresses.has(addr) && !droppedMembers.has(addr)) {
       disconnectedVaults.push({ address: addr, vault: v })
     }
   }
