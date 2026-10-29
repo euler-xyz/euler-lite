@@ -197,12 +197,22 @@ const profileDetails = computed(() => (profileInformation.value?.fields ?? [])
             <h1 class="text-h2 text-content-primary mobile:text-h3">
               {{ profileEntity.name }}
             </h1>
-            <p
+            <div
               v-if="profileError && !profileData"
-              class="mt-8 text-p3 text-content-tertiary"
+              class="mt-8 flex flex-col items-start gap-8"
             >
-              Showing curator details from network labels while the profile request is unavailable.
-            </p>
+              <p class="text-p3 text-content-tertiary">
+                Showing available curator details. Try again to load the full profile.
+              </p>
+              <UiButton
+                variant="primary-stroke"
+                size="small"
+                :disabled="profileStatus === 'pending'"
+                @click="refreshProfile()"
+              >
+                {{ profileStatus === 'pending' ? 'Retrying…' : 'Try again' }}
+              </UiButton>
+            </div>
             <!-- eslint-disable vue/no-v-html -- autoLink escapes label text before adding links -->
             <p
               v-if="profileDescription?.value"
