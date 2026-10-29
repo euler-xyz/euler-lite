@@ -6,12 +6,6 @@ const mocks = vi.hoisted(() => ({
   peekEulerChains: vi.fn((): unknown[] | undefined => undefined),
 }))
 
-vi.mock('~/utils/chain-env', () => ({
-  getConfiguredChainIds: () => mocks.enabledChainIds,
-  getEnabledChainIds: () => mocks.enabledChainIds,
-  getChainEnvIssues: () => ({ emptyRpcUrlChainIds: [], malformedRpcUrlChainIds: [] }),
-}))
-
 vi.mock('~/server/api/internal/euler-chains.get', () => ({
   loadEulerChains: mocks.loadEulerChains,
   peekEulerChains: mocks.peekEulerChains,
@@ -56,6 +50,8 @@ const bootPlugin = async () => {
 
 describe('chain-config plugin registry status', () => {
   beforeEach(() => {
+    for (const key of Object.keys(process.env).filter(key => /^RPC_URL_\d+$/.test(key))) vi.stubEnv(key, undefined)
+    for (const chainId of mocks.enabledChainIds) vi.stubEnv(`RPC_URL_${chainId}`, `https://rpc.example/${chainId}`)
     mocks.peekEulerChains.mockReturnValue(REGISTRY)
   })
 
