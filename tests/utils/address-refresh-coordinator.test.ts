@@ -104,6 +104,56 @@ describe('createAddressRefreshCoordinator', () => {
     expect(coordinator.begin('0xabc')).toBeTypeOf('symbol')
   })
 
+  it.each(['reset', 'preempt'] as const)('releases all running queued generations on %s without disturbing newer work', async (cancellation) => {
+    const coordinator = createAddressRefreshCoordinator()
+    const firstToken = coordinator.begin('0xabc')
+    expectToken(firstToken)
+    const firstQueued = coordinator.begin('0xabc')
+    const firstSettled = vi.fn()
+    const firstWaiting = Promise.resolve(firstQueued).then(firstSettled)
+    let secondToken!: symbol
+    const secondDone = deferred()
+    const firstFinished = coordinator.finish(firstToken, async () => {
+      const token = coordinator.begin('0xabc')
+      expectToken(token)
+      secondToken = token
+      await secondDone.promise
+    })
+    const secondQueued = coordinator.begin('0xabc')
+    const secondSettled = vi.fn()
+    const secondWaiting = Promise.resolve(secondQueued).then(secondSettled)
+    const thirdDone = deferred()
+    const secondFinished = coordinator.finish(secondToken, async () => {
+      expectToken(coordinator.begin('0xabc'))
+      await thirdDone.promise
+    })
+    await Promise.resolve()
+    expect(firstSettled).not.toHaveBeenCalled()
+    expect(secondSettled).not.toHaveBeenCalled()
+
+    if (cancellation === 'reset') coordinator.reset()
+    const newAddress = cancellation === 'reset' ? '0xabc' : '0xdef'
+    const newToken = coordinator.begin(newAddress)
+    expectToken(newToken)
+    await Promise.resolve()
+    expect(firstSettled).toHaveBeenCalledTimes(1)
+    expect(secondSettled).toHaveBeenCalledTimes(1)
+
+    const newQueued = coordinator.begin(newAddress)
+    const newSettled = vi.fn()
+    const newWaiting = Promise.resolve(newQueued).then(newSettled)
+    thirdDone.resolve()
+    await secondFinished
+    secondDone.resolve()
+    await Promise.all([firstFinished, firstWaiting, secondWaiting])
+    expect(newSettled).not.toHaveBeenCalled()
+    expect(coordinator.begin(newAddress)).toBe(newQueued)
+
+    await coordinator.finish(newToken, async () => {})
+    await newWaiting
+    expect(newSettled).toHaveBeenCalledTimes(1)
+  })
+
   it('settles queued callers even if the rerun fails', async () => {
     const coordinator = createAddressRefreshCoordinator()
     const token = coordinator.begin('0xabc')

@@ -200,7 +200,8 @@ export const useEulerAccount = () => {
       markLoaded()
     }
     finally {
-      await refreshCoordinator.finish(refreshToken, () => fetchAndUpdatePortfolio(walletAddress, refreshOptions))
+      // A queued rerun owns the refresh slot and must keep its callers waiting.
+      await refreshCoordinator.finish(refreshToken, () => fetchAndUpdatePortfolio(walletAddress, { ...refreshOptions, preempt: false }))
     }
   }
 

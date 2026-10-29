@@ -2,6 +2,13 @@ export function createAddressRefreshCoordinator(onPreempt?: () => void) {
   let inFlightAddress: string | null = null
   let inFlightToken: symbol | null = null
   let queuedRefresh: { promise: Promise<void>, resolve: () => void } | null = null
+  // Queued callers remain cancellable while their rerun (or a later rerun) is running.
+  const pendingWaiters = new Set<() => void>()
+  const releaseWaiters = () => {
+    pendingWaiters.forEach(resolve => resolve())
+    pendingWaiters.clear()
+    queuedRefresh = null
+  }
 
   const begin = (targetAddress: string) => {
     if (inFlightAddress === targetAddress) {
@@ -10,14 +17,20 @@ export function createAddressRefreshCoordinator(onPreempt?: () => void) {
         const promise = new Promise<void>((resolvePromise) => {
           resolve = resolvePromise
         })
-        queuedRefresh = { promise, resolve }
+        pendingWaiters.add(resolve)
+        queuedRefresh = {
+          promise,
+          resolve: () => {
+            pendingWaiters.delete(resolve)
+            resolve()
+          },
+        }
       }
       return queuedRefresh.promise
     }
     if (inFlightAddress !== null) {
       onPreempt?.()
-      queuedRefresh?.resolve()
-      queuedRefresh = null
+      releaseWaiters()
     }
     inFlightAddress = targetAddress
     inFlightToken = Symbol()
@@ -44,8 +57,7 @@ export function createAddressRefreshCoordinator(onPreempt?: () => void) {
   const reset = () => {
     inFlightAddress = null
     inFlightToken = null
-    queuedRefresh?.resolve()
-    queuedRefresh = null
+    releaseWaiters()
   }
 
   return {

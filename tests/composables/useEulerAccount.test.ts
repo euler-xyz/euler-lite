@@ -143,7 +143,7 @@ describe('useEulerAccount', () => {
     expect(account?.totalSuppliedValue.value).toBe(100)
   }, 20_000)
 
-  it('waits for a queued refresh before callers re-read the portfolio', async () => {
+  it.each([false, true])('waits for a queued refresh after a preempt=%s read before callers re-read the portfolio', async (preempt) => {
     const { useEulerAccount, fetchAccount, buildPortfolio } = await importUseEulerAccount()
     scope = effectScope()
     const account = scope.run(useEulerAccount)!
@@ -159,7 +159,7 @@ describe('useEulerAccount', () => {
       account: { owner }, borrows: [], savings: [], totalBorrowedValueUsd,
     })
     buildPortfolio.mockReturnValue(nextPortfolio(20))
-    const active = account.refreshAllPositions()
+    const active = account.refreshAllPositions(undefined, owner, { preempt })
     const reread = vi.fn(() => account.totalBorrowedValue.value)
     const queued = account.refreshAllPositions().then(reread)
     await vi.waitFor(() => expect(fetchAccount).toHaveBeenCalledTimes(2))

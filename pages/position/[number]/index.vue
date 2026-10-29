@@ -782,8 +782,15 @@ const load = async ({ silent = false }: { silent?: boolean } = {}) => {
     await until(isPositionsLoaded).toBe(true)
     if (sequence !== loadSequence) return
     const nextPosition = getPositionBySubAccountIndex(+getCurrentRoutePositionIndex())
-    // A partial account read cannot confirm that the displayed position is gone.
-    if (silent && !nextPosition && portfolioDiagnostics.value.some(issue => issue.code === 'SOURCE_UNAVAILABLE')) return
+    // Keep a coherent snapshot when a partial read cannot confirm this position's balances.
+    if (silent && portfolioDiagnostics.value.some(issue =>
+      issue.code === 'SOURCE_UNAVAILABLE'
+      && (!nextPosition || issue.locations.some(({ owner, path }) =>
+        owner.kind === 'subAccount'
+        && getAddress(owner.address) === getAddress(nextPosition.subAccount)
+        && path === '$.positions',
+      )),
+    )) return
     position.value = nextPosition
     if (position.value) {
       const initialCollateralVault = collateralVault.value
