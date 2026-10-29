@@ -128,6 +128,17 @@ export interface VaultExposureDisplay {
   items: VaultExposureDisplayItem[]
 }
 
+const buildQualitativeExposureDisplay = (collateralGroups: CollateralExposureGroup[]): VaultExposureDisplay => ({
+  valueState: 'unavailable',
+  items: mergeVaultExposureDisplayItems(
+    collateralGroups.map(group => ({
+      asset: group.asset,
+      valueUsd: 0,
+      vaultCount: group.vaultCount,
+    })),
+  ),
+})
+
 /**
  * Build the exposure display when the per-collateral open-interest split is
  * unknown — V3 disabled for the chain, the open-interest fetch failed, or the
@@ -201,15 +212,7 @@ export const buildFallbackVaultExposureDisplay = ({
     }
   }
 
-  const qualitativeItems = mergeVaultExposureDisplayItems(
-    collateralGroups.map(group => ({
-      asset: group.asset,
-      valueUsd: 0,
-      vaultCount: group.vaultCount,
-    })),
-  )
-
-  return { valueState: 'unavailable', items: qualitativeItems }
+  return buildQualitativeExposureDisplay(collateralGroups)
 }
 
 /**
@@ -328,11 +331,19 @@ export const getExposureLead = (
   }
 }
 
-/** The split is built on a nominal supply of one, so only its order and labels are read, never its amounts. */
+/**
+ * The split is built on a nominal supply of one, so only its order and labels are read, never its amounts.
+ * With nothing borrowed the split is empty, so the lead names the collaterals a new borrow can use instead.
+ */
 export const getVaultBackingLead = (
   input: Omit<Parameters<typeof resolveVaultExposureDisplay>[0], 'totalExposureUsd' | 'totalSupplyState'>,
-): ReturnType<typeof getExposureLead> =>
-  getExposureLead(resolveVaultExposureDisplay({ ...input, totalExposureUsd: 1, totalSupplyState: 'ready' }))
+): ReturnType<typeof getExposureLead> => {
+  const display = resolveVaultExposureDisplay({ ...input, totalExposureUsd: 1, totalSupplyState: 'ready' })
+  const hasNoBorrows = display.valueState === 'ready' && clampPercentFraction(input.utilization) <= 0
+  if (!hasNoBorrows) return getExposureLead(display)
+  const borrowableGroups = input.getCollateralGroups().filter(group => group.maxBorrowLTV > 0)
+  return getExposureLead(buildQualitativeExposureDisplay(borrowableGroups))
+}
 
 export interface VaultHeaderAssets {
   assets: VaultAsset[]

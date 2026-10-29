@@ -1,15 +1,13 @@
 <script setup lang="ts">
 import type { AnyBorrowVaultPair } from '~/types/borrow-pair'
 import { getAssetUsdValue } from '~/utils/sdk-prices'
-import { getProductByVault, applyVaultOverrides, getUniqueEntitiesByVaults, isVaultRecentlyAdded, isVaultDeprecated, isVaultNotExplorableBorrow } from '~/utils/eulerLabelsUtils'
+import { getProductByVault, applyVaultOverrides, getUniqueEntitiesByVaults, isVaultRecentlyAdded, isVaultDeprecated } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { useCustomFilters } from '~/composables/useCustomFilters'
 import { useVaultSearch } from '~/composables/useVaultSearch'
-import { isOpDisabled, OP_BORROW, OP_DEPOSIT, OP_TRANSFER } from '~/utils/vault-hooks'
 import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import { DEBOUNCE_LIST_PRICE_FETCH_MS } from '~/entities/tuning-constants'
-import { isSecuritizeBorrowPair } from '~/types/borrow-pair'
-import { isBorrowTableCollateral } from '~/utils/vault/borrow-table'
+import { isBorrowTablePair } from '~/utils/vault/borrow-table'
 import { useVaults } from '~/composables/useVaults'
 import { useEulerAddresses } from '~/composables/useEulerAddresses'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
@@ -122,21 +120,13 @@ const { borrowList, isEVaultUpdating, isEscrowUpdating } = useVaults()
 const { chainId } = useEulerAddresses()
 
 const isPricesReady = ref(false)
-const { entities, isReady: labelsReady } = useEulerLabels()
+const { entities, isReady: labelsReady, loadError: labelsError } = useEulerLabels()
+const labelsUnavailable = computed(() => !labelsReady.value && Boolean(labelsError.value))
 const { enableEntityBranding } = useDeployConfig()
 const showAllLabelEntries = useShowAllLabelEntries()
 
 const activeBorrowList = computed(() =>
-  borrowList.value.filter((pair) => {
-    if (!showAllLabelEntries.value && isVaultNotExplorableBorrow(pair.borrow.address)) return false
-    if (!isBorrowTableCollateral(pair.collateral.address, showAllLabelEntries.value)) return false
-    if (isOpDisabled(pair.borrow, OP_BORROW)) return false
-    // Securitize collateral has no EVault hook flags — only check EVault collateral.
-    // Fresh-deposit needs OP_DEPOSIT, savings-sourced needs OP_TRANSFER.
-    // Hide only when BOTH paths are blocked; the form guards the active path.
-    if (!isSecuritizeBorrowPair(pair) && isOpDisabled(pair.collateral, OP_DEPOSIT) && isOpDisabled(pair.collateral, OP_TRANSFER)) return false
-    return true
-  }),
+  borrowList.value.filter(pair => isBorrowTablePair(pair, showAllLabelEntries.value)),
 )
 
 const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<AnyBorrowVaultPair>((pair) => {
@@ -611,7 +601,10 @@ const clearBorrowFilters = () => {
       />
     </div>
 
-    <div class="mb-16">
+    <div
+      v-if="!labelsUnavailable"
+      class="mb-16"
+    >
       <div class="flex justify-start items-center w-full gap-8 flex-wrap">
         <UiInput
           v-model="searchQuery"
@@ -698,8 +691,14 @@ const clearBorrowFilters = () => {
     </div>
 
     <div class="flex flex-col flex-1">
+      <LabelsUnavailableState
+        v-if="labelsUnavailable"
+        class="flex-1"
+        title="Borrow markets unavailable"
+        description="Published vault verification could not be loaded. Borrow listings are unavailable until it returns."
+      />
       <div
-        v-if="isLoading"
+        v-else-if="isLoading"
         class="flex flex-col flex-1 items-center justify-center gap-12"
       >
         <UiLoader />

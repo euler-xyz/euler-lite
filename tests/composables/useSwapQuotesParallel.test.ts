@@ -147,6 +147,51 @@ describe('useSwapQuotesParallel', () => {
     expect(quotes.sortedQuoteCards.value[0]?.intents).toBe(prepareTransactionPlan.mock.calls[0]?.[3])
   })
 
+  it('keeps balance overrides on for quote estimates even when the form opts out', async () => {
+    const quote = makeUsdcOutQuote('2000000')
+    const plan = []
+    const prepared = {
+      __prepared: true,
+      plan,
+      chainId: 1,
+      account: requestParams.accountIn,
+      usePermit2: true,
+      unlimitedApproval: false,
+    }
+    const wallet = { balances: { [requestParams.tokenIn]: 130_000n } }
+    const slotHints = { [requestParams.tokenIn]: { balanceSlotIndex: 9 } }
+    const estimateGasForPreparedTransactionPlan = vi.fn().mockResolvedValue(100_000n)
+    getEulerSdkFreshMock.mockResolvedValue({ executionService: { estimateGasForPreparedTransactionPlan } })
+    vi.stubGlobal('useRpcClient', () => ({
+      client: ref({
+        estimateFeesPerGas: vi.fn().mockResolvedValue({ maxFeePerGas: 2n, maxPriorityFeePerGas: 1n }),
+        getBlock: vi.fn().mockResolvedValue({ baseFeePerGas: 1n }),
+      }),
+    }))
+    getSwapProviders.mockResolvedValue(['router'])
+    getSwapQuotes.mockResolvedValue([quote])
+
+    const quotes = useSwapQuotesParallel({
+      amountField: 'amountOut',
+      compare: 'max',
+      buildTxPlanForQuote: vi.fn().mockResolvedValue(plan),
+      prepareTransactionPlan: vi.fn().mockResolvedValue(prepared),
+      getStateOverrideOptions: () => ({ noBalanceOverride: true, wallet, slotHints }),
+      getPlanAccount: () => requestParams.accountIn,
+    } as never)
+
+    await quotes.requestQuotes(requestParams)
+    await vi.waitFor(() => expect(quotes.sortedQuoteCards.value).toHaveLength(1))
+
+    // Forms pass their Review builder (noBalanceOverride: true), but a quote can
+    // be for more than the wallet holds, so the estimate must still fake the
+    // missing balance while reusing the wallet snapshot and slot hints.
+    expect(estimateGasForPreparedTransactionPlan).toHaveBeenCalledWith(prepared, {
+      stateOverrides: true,
+      stateOverrideOptions: { noBalanceOverride: false, wallet, slotHints },
+    })
+  })
+
   it('updates effectiveQuote when selecting a non-best provider', async () => {
     const bestQuote = makeQuote('100', '300')
     const otherQuote = makeQuote('100', '200')

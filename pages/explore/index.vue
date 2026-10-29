@@ -14,6 +14,7 @@ import { buildTvlSortedOptions } from '~/utils/buildTvlSortedOptions'
 import type { FilterOptionEntry } from '~/utils/buildTvlSortedOptions'
 import { compareRecentlyAddedBoost } from '~/utils/recentlyAddedSort'
 import { marketUsdMetricValue } from '~/utils/market-usd-metric'
+import { isExploreListedMarket } from '~/utils/vault/borrow-table'
 
 defineOptions({
   name: 'ExplorePage',
@@ -21,11 +22,18 @@ defineOptions({
 
 const { marketGroups, isResolvingTVL, isReady: marketGroupsReady } = useMarketGroups()
 const { getBestMaxROE } = useBestMaxROE(marketGroups)
-const { isEVaultUpdating, isEarnUpdating, isSecuritizeUpdating, isEscrowUpdating } = useVaults()
+const { isEVaultUpdating, isEarnUpdating, isSecuritizeUpdating, isEscrowUpdating, borrowList, isMarketDataResolved } = useVaults()
 const { chainId } = useEulerAddresses()
 const { isLoading: isTokenListLoading } = useTokenList()
-const { entities } = useEulerLabels()
+const { entities, isReady: labelsReady, loadError: labelsError } = useEulerLabels()
+const labelsUnavailable = computed(() => !labelsReady.value && Boolean(labelsError.value))
 const { enableEntityBranding } = useDeployConfig()
+const showAllLabelEntries = useShowAllLabelEntries()
+
+// Until market data resolves, the pairs are incomplete; filtering then would hide every market for a moment.
+const listedMarketGroups = computed(() => isMarketDataResolved.value
+  ? marketGroups.value.filter(group => isExploreListedMarket(group.vaults, borrowList.value, showAllLabelEntries.value))
+  : marketGroups.value)
 
 const { searchQuery, matchesSearch, clearSearch } = useVaultSearch<MarketGroup>(group => [
   group.name,
@@ -100,7 +108,7 @@ watch(chainId, (newChainId, oldChainId) => {
 
 const marketOptions = computed(() => {
   const entries: FilterOptionEntry[] = []
-  for (const group of marketGroups.value) {
+  for (const group of listedMarketGroups.value) {
     if (group.source !== 'product') continue
     const seenInGroup = new Set<string>()
     for (const vault of group.vaults) {
@@ -120,7 +128,7 @@ const marketOptions = computed(() => {
 const assetOptions = computed(() => {
   const seen = new Set<string>()
   const result: { label: string, value: string, icon: string }[] = []
-  for (const group of marketGroups.value) {
+  for (const group of listedMarketGroups.value) {
     for (const vault of group.vaults) {
       const symbol = getVaultAssetSymbol(vault)
       if (symbol === '?' || seen.has(symbol)) continue
@@ -138,7 +146,7 @@ const assetOptions = computed(() => {
 
 const curatorOptions = computed(() => {
   const entries: FilterOptionEntry[] = []
-  for (const group of marketGroups.value) {
+  for (const group of listedMarketGroups.value) {
     if (group.source !== 'product') continue
     for (const entity of getUniqueEntitiesByVaults(group.vaults)) {
       entries.push({ key: entity.name, label: entity.name, tvl: group.metrics.totalTVL, icon: entity.logo ? getEulerLabelEntityLogo(entity.logo) : undefined })
@@ -169,7 +177,7 @@ const matchesCuratorFilter = (group: MarketGroup): boolean => {
 }
 
 const filteredMarkets = computed(() => {
-  return marketGroups.value
+  return listedMarketGroups.value
     .filter(g => g.source === 'product')
     .filter(matchesSearch)
     .filter(matchesMarketFilter)
@@ -324,7 +332,10 @@ const clearExploreFilters = () => {
       icon="nav-explore"
     />
 
-    <div class="mb-16 -mx-16">
+    <div
+      v-if="!labelsUnavailable"
+      class="mb-16 -mx-16"
+    >
       <div class="flex items-center flex-wrap gap-8 px-16">
         <UiInput
           v-model="searchQuery"
@@ -388,8 +399,14 @@ const clearExploreFilters = () => {
     </div>
 
     <div class="flex flex-col flex-1">
+      <LabelsUnavailableState
+        v-if="labelsUnavailable"
+        class="flex-1"
+        title="Markets unavailable"
+        description="Published vault verification could not be loaded. Market listings are unavailable until it returns."
+      />
       <div
-        v-if="isLoading"
+        v-else-if="isLoading"
         class="flex flex-col flex-1 items-center justify-center gap-12"
       >
         <UiLoader />

@@ -126,9 +126,10 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const usePreparedPipeline = options.usePreparedPipeline ?? true
   // `effectiveBalance` is form-validated in `isSubmitDisabled`. In supply mode that
   // is the wallet ERC20 balance, so `noBalanceOverride: true` saves a balanceOf
-  // RPC per estimate/sim. In withdraw mode the operation doesn't need wallet
-  // ERC20 balance, but slot hints + wallet snapshot still help allowance
-  // overrides.
+  // RPC per Review-time simulation. Quote estimates turn balance overrides back
+  // on (see `useSwapQuotesParallel`). In withdraw mode the operation doesn't
+  // need wallet ERC20 balance, but slot hints + wallet snapshot still help
+  // allowance overrides.
   const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
   const buildCollateralStateOverrideOptions = () =>
     buildStateOverrideOptions({ noBalanceOverride: options.mode === 'supply' })

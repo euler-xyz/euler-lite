@@ -205,7 +205,7 @@ Early unlock is a reviewed-execution `reul-unlock` with an explicit `remainder-l
 
 For fan-out flows (per-quote estimate sweeps, leverage explorers) and heavy single-shot flows, Lite threads two SDK helpers through `useEulerTx` and `useTransactionPlanSimulation` so the per-call RPC + plugin cost collapses to roughly "local plan assembly":
 
-- `composables/useStateOverrideOptions.ts` (`buildStateOverrideOptions` + `primeSlotHintsFor`) — wraps the SDK's `SimulationStateOverrideOptions` for the page. `buildStateOverrideOptions({ noBalanceOverride })` snapshots the wallet balances the form already holds, attaches pre-fetched ERC20 slot hints, and (when the form validates "Not enough balance" up front) tells the SDK to skip balance overrides entirely. `primeSlotHintsFor(tokens)` fires `fetchErc20SlotHints` once per relevant token; subsequent simulate/estimate/prepare calls skip `eth_createAccessList` discovery.
+- `composables/useStateOverrideOptions.ts` (`buildStateOverrideOptions` + `primeSlotHintsFor`) — wraps the SDK's `SimulationStateOverrideOptions` for the page. `buildStateOverrideOptions({ noBalanceOverride })` snapshots the wallet balances the form already holds, attaches pre-fetched ERC20 slot hints, and (for Review-time simulations) tells the SDK to skip balance overrides entirely. `primeSlotHintsFor(tokens)` fires `fetchErc20SlotHints` once per relevant token; subsequent simulate/estimate/prepare calls skip `eth_createAccessList` discovery.
 - `prefetchPluginData(plan, …)` on `useEulerTx` — resolves the plugin pipeline's prefetch payload (Pyth Hermes pull, Keyring credential check) for one representative plan. Pass it into every `prepareTransactionPlan` / simulate / estimate in the sweep so plugins do zero per-quote network I/O.
 
 Wired into:
@@ -223,7 +223,9 @@ Wired into:
   - `pages/lend/[vault]/index.vue` (final pre-review simulation)
   - `composables/borrow/useMultiplyForm.ts` (Review-time prepared simulation)
 
-`noBalanceOverride: true` is only safe when the operation either doesn't consume wallet ERC20 (collateral-swap repay, debt swap) or the form already gates submit on wallet balance (multiply, borrow, lend deposit, wallet-swap repay's EXACT_IN). Withdraw mode on `useCollateralForm` keeps the override but skips the balance branch by binding `noBalanceOverride` to `mode === 'supply'`.
+`noBalanceOverride: true` is for Review-time simulations. When the operation pulls no wallet ERC20 (collateral-swap repay, debt swap) there is nothing to fake. When it does (multiply, borrow, lend deposit, wallet-swap repay), a real wallet shortfall should fail the simulation instead of being faked away; most of these forms also block submit on "Not enough balance" first. Withdraw mode on `useCollateralForm` binds the flag to `mode === 'supply'`; withdraw plans pull no wallet ERC20, so the balance branch is empty either way.
+
+Quote estimates are different. They run for any amount the user types, including more than the wallet holds, and the forms pass the same builder they use at Review. So `useSwapQuotesParallel` always sends `noBalanceOverride: false` to the gas estimate, whatever the builder returns, and keeps the wallet snapshot and slot hints. The SDK only fakes balances for tokens the plan pulls from the wallet, so this costs nothing for flows that pull none.
 
 `primeSlotHintsFor` is owner-/spender-agnostic. The SDK also memoises results in a module-scope `slotHintsCache` keyed on chain id + token. Lite additionally mirrors resolved hints into a chain-scoped registry (`composables/batchPrefetchState.ts`) so form pages and the batch cart share probes even when they do not share one SDK module cache across separately bundled call paths.
 

@@ -10,50 +10,11 @@
  * (2) covers static / CDN deployments where the Nitro render hook never fires.
  */
 
-import {
-  DEFAULT_VAULT_DATA_SOURCE,
-  readBrowserVaultSource,
-  readDisableV3,
-  isV3BackendEnabled,
-  V3_API_PROXY_URL,
-  type VaultDataSource,
-} from '~/utils/api-url-env'
-import {
-  buildAnnouncementConfig,
-  EMPTY_ANNOUNCEMENT_CONFIG,
-  type AnnouncementConfig,
-} from '~/utils/announcement-config'
-import { edgeProvidesVpnEvidence, parseEdgeProvider } from '~/utils/edge-presets'
+import { DEFAULT_VAULT_DATA_SOURCE, V3_API_PROXY_URL, type VaultDataSource } from '~/utils/api-url-env'
+import { buildAnnouncementConfig } from '~/utils/announcement-config'
+import { ENV_CONFIG_DEFAULTS as DEFAULTS, readAppEnvConfig, type AppEnvConfig as EnvConfig } from '~/utils/app-config'
 
-export interface EnvConfig {
-  appTitle: string
-  appDescription: string
-  logoUrl: string
-  socialImageUrl: string
-  pythHermesUrl: string
-  appKitProjectId: string
-  appUrl: string
-  v3ApiUrl: string
-  /** Public V3 images base (ends in /v3/images) the server read from its V3;
-   *  empty when unknown, so chain logos use bundled files and oracle-provider
-   *  logos are hidden. */
-  v3ImagesUrl: string
-  /** True when the deployment has an upstream V3 API configured. Drives the
-   *  SDK "fast" instance: when true it uses v3 adapters; when false it falls
-   *  back to direct on-chain reads with longer caching. */
-  enableV3Backend: boolean
-  /** Explicit deployment-wide V3 opt-out, including optional utilities. */
-  disableV3: boolean
-  /** Adapter chain the browser's "fast" SDK uses (vault lists, prices,
-   *  rewards). Mirrors `SERVER_VAULT_CACHE_SOURCE` on the snapshot side. */
-  browserVaultSource: VaultDataSource
-  swapApiUrl: string
-  eulerInterfacesBranch: string
-  announcement: AnnouncementConfig
-  /** Whether the deployment's edge provider measures VPN usage. Drives the
-   *  client VPN probe in services/vpn.ts — false skips it entirely. */
-  vpnDetection: boolean
-}
+export type { AppEnvConfig as EnvConfig } from '~/utils/app-config'
 
 declare global {
   interface Window {
@@ -62,63 +23,7 @@ declare global {
   }
 }
 
-const DEFAULTS: EnvConfig = {
-  appTitle: 'Euler Lite',
-  appDescription: 'Lightweight interface for Euler Finance lending and borrowing.',
-  logoUrl: '',
-  socialImageUrl: '',
-  pythHermesUrl: '',
-  appKitProjectId: '',
-  appUrl: '',
-  v3ApiUrl: '',
-  v3ImagesUrl: '',
-  enableV3Backend: false,
-  disableV3: false,
-  browserVaultSource: DEFAULT_VAULT_DATA_SOURCE,
-  swapApiUrl: '',
-  eulerInterfacesBranch: 'master',
-  announcement: EMPTY_ANNOUNCEMENT_CONFIG,
-  vpnDetection: false,
-}
-
 let cached: EnvConfig | null = null
-
-function env(key: string, ...fallbackKeys: string[]): string {
-  for (const k of [key, ...fallbackKeys]) {
-    if (process.env[k]) return process.env[k]!
-  }
-  return ''
-}
-
-function scanEnv(): EnvConfig {
-  return {
-    appTitle: env('APP_TITLE', 'NUXT_PUBLIC_CONFIG_APP_TITLE') || DEFAULTS.appTitle,
-    appDescription: env('APP_DESCRIPTION', 'NUXT_PUBLIC_CONFIG_APP_DESCRIPTION') || DEFAULTS.appDescription,
-    logoUrl: env('LOGO_URL', 'NUXT_PUBLIC_CONFIG_LOGO_URL') || DEFAULTS.logoUrl,
-    socialImageUrl: env('SOCIAL_IMAGE_URL', 'NUXT_PUBLIC_CONFIG_SOCIAL_IMAGE_URL') || DEFAULTS.socialImageUrl,
-    pythHermesUrl: env('PYTH_API_KEY').trim() ? 'proxy' : '',
-    appKitProjectId: env('APPKIT_PROJECT_ID', 'NUXT_PUBLIC_APP_KIT_PROJECT_ID') || DEFAULTS.appKitProjectId,
-    appUrl: env('NUXT_PUBLIC_APP_URL') || DEFAULTS.appUrl,
-    v3ApiUrl: V3_API_PROXY_URL,
-    v3ImagesUrl: DEFAULTS.v3ImagesUrl,
-    enableV3Backend: isV3BackendEnabled(),
-    disableV3: readDisableV3(),
-    browserVaultSource: readBrowserVaultSource(),
-    swapApiUrl: env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL') || DEFAULTS.swapApiUrl,
-    eulerInterfacesBranch: env(
-      'EULER_SDK_EULER_INTERFACES_BRANCH',
-      'NUXT_PUBLIC_EULER_INTERFACES_BRANCH',
-      'NUXT_PUBLIC_CONFIG_EULER_INTERFACES_BRANCH',
-    ) || DEFAULTS.eulerInterfacesBranch,
-    announcement: buildAnnouncementConfig({
-      title: env('CONFIG_ANNOUNCEMENT_TITLE', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_TITLE'),
-      body: env('CONFIG_ANNOUNCEMENT_BODY', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_BODY'),
-      items: env('CONFIG_ANNOUNCEMENT_ITEMS', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_ITEMS'),
-      url: env('CONFIG_ANNOUNCEMENT_URL', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_URL'),
-    }),
-    vpnDetection: edgeProvidesVpnEvidence(parseEdgeProvider(process.env.EDGE_PROVIDER)),
-  }
-}
 
 function fromRuntimeConfig(): EnvConfig {
   const rc = useRuntimeConfig().public
@@ -166,7 +71,7 @@ export const useEnvConfig = (): EnvConfig => {
   if (cached) return cached
 
   if (import.meta.server) {
-    cached = scanEnv()
+    cached = readAppEnvConfig()
   }
   else if (typeof window !== 'undefined' && window.__APP_CONFIG__) {
     cached = window.__APP_CONFIG__

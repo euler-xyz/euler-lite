@@ -12,7 +12,9 @@
  * `server/api/internal/proxy/subgraph/[chainId].post.ts`; it is never shipped to the
  * client, so there is no scanner for it here.
  */
-import { getKnownChainIds } from '~/entities/chainRegistry'
+import { getKnownChainIds, getUnknownChainIds } from '~/entities/chainRegistry'
+import { parseChainIds } from './parseChainIds'
+import { parseEVaultFetchChunkChainIds } from './eVaultFetchChunkConfig'
 
 const RPC_URL_KEY = /^RPC_URL_(\d+)$/
 
@@ -75,5 +77,20 @@ export function getChainEnvIssues(env: NodeJS.ProcessEnv = process.env): ChainEn
   return {
     emptyRpcUrlChainIds: uniqueSorted(emptyRpcUrlChainIds),
     malformedRpcUrlChainIds: uniqueSorted(malformedRpcUrlChainIds),
+  }
+}
+
+/** Public chain IDs and diagnostics; RPC endpoints remain in the server environment. */
+export function readChainEnvConfig(env: NodeJS.ProcessEnv = process.env) {
+  const configuredChainIds = getConfiguredChainIds(env)
+  const enabledChainIds = getKnownChainIds(configuredChainIds)
+  const enabledSet = new Set(enabledChainIds)
+  return {
+    enabledChainIds,
+    deprecatedChainIds: parseChainIds(env.DEPRECATED_CHAINS, enabledSet),
+    onchainSdkChainIds: parseChainIds(env.ONCHAIN_SDK_CHAINS, enabledSet),
+    eVaultFetchChunkChainIds: parseEVaultFetchChunkChainIds(env, enabledSet),
+    unsupportedChainIds: getUnknownChainIds(configuredChainIds),
+    chainEnvIssues: getChainEnvIssues(env),
   }
 }

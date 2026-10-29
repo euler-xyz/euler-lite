@@ -8,10 +8,9 @@
  * This avoids runtimeConfig (which is frozen in production) and works
  * with environment variables injected at runtime by Doppler.
  */
-import { getChainEnvIssues, getConfiguredChainIds, getEnabledChainIds, type ChainEnvIssues } from '~/utils/chain-env'
+import { readChainEnvConfig, type ChainEnvIssues } from '~/utils/chain-env'
 import { getUnknownChainIds } from '~/entities/chainRegistry'
 import { logger } from '~/utils/logger'
-import { parseEVaultFetchChunkChainIds } from '~/utils/eVaultFetchChunkConfig'
 
 interface ChainConfig {
   enabledChainIds: number[]
@@ -70,26 +69,11 @@ function normalizeChainConfig(config: ChainConfig): ChainConfig {
   return { ...config, enabledChainIds, deprecatedChainIds, onchainSdkChainIds, eVaultFetchChunkChainIds, unsupportedChainIds: unknownChainIds, chainEnvIssues }
 }
 
-function scanEnv(): ChainConfig {
-  const chainEnvIssues = getChainEnvIssues()
-  const unsupportedChainIds = getUnknownChainIds(getConfiguredChainIds())
-  logUnknownChainIds(unsupportedChainIds)
-  logChainEnvIssues(chainEnvIssues)
-
-  const enabledChainIds = getEnabledChainIds()
-  const enabledSet = new Set(enabledChainIds)
-  const deprecatedChainIds = parseChainIds(process.env.DEPRECATED_CHAINS, enabledSet)
-  const onchainSdkChainIds = parseChainIds(process.env.ONCHAIN_SDK_CHAINS, enabledSet)
-  const eVaultFetchChunkChainIds = parseEVaultFetchChunkChainIds(process.env, enabledSet)
-
-  return { enabledChainIds, deprecatedChainIds, onchainSdkChainIds, eVaultFetchChunkChainIds, unsupportedChainIds, chainEnvIssues }
-}
-
 export const useChainConfig = (): ChainConfig => {
   if (cached) return cached
 
   if (import.meta.server) {
-    cached = normalizeChainConfig(scanEnv())
+    cached = normalizeChainConfig(readChainEnvConfig())
   }
   /* eslint-disable @typescript-eslint/no-explicit-any -- server-injected window global */
   else if (typeof window !== 'undefined' && (window as any).__CHAIN_CONFIG__) {

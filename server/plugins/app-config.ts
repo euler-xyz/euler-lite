@@ -8,14 +8,7 @@
  *
  * Also patches <title> and meta tags so crawlers see the correct values.
  */
-import {
-  readBrowserVaultSource,
-  readDisableV3,
-  isV3BackendEnabled,
-  V3_API_PROXY_URL,
-} from '~/utils/api-url-env'
-import { buildAnnouncementConfig } from '~/utils/announcement-config'
-import { edgeProvidesVpnEvidence, parseEdgeProvider } from '~/utils/edge-presets'
+import { readAppEnvConfig } from '~/utils/app-config'
 import { escapeScriptJson } from '~/server/utils/escape-script-json'
 import { createV3ImagesBaseSource } from '~/server/utils/v3-images-base'
 
@@ -28,11 +21,6 @@ const delay = (ms: number) => new Promise<void>((resolve) => {
   timer.unref?.()
 })
 
-const DEFAULTS = {
-  appTitle: 'Euler Lite',
-  appDescription: 'Lightweight interface for Euler Finance lending and borrowing.',
-}
-
 function escapeHtml(str: string): string {
   return str
     .replace(/&/g, '&amp;')
@@ -42,50 +30,7 @@ function escapeHtml(str: string): string {
     .replace(/'/g, '&#39;')
 }
 
-function env(key: string, ...fallbackKeys: string[]): string {
-  for (const k of [key, ...fallbackKeys]) {
-    if (process.env[k]) return process.env[k]!
-  }
-  return ''
-}
-
-function readAppConfig() {
-  return {
-    appTitle: env('APP_TITLE', 'NUXT_PUBLIC_CONFIG_APP_TITLE') || DEFAULTS.appTitle,
-    appDescription: env('APP_DESCRIPTION', 'NUXT_PUBLIC_CONFIG_APP_DESCRIPTION') || DEFAULTS.appDescription,
-    logoUrl: env('LOGO_URL', 'NUXT_PUBLIC_CONFIG_LOGO_URL'),
-    socialImageUrl: env('SOCIAL_IMAGE_URL', 'NUXT_PUBLIC_CONFIG_SOCIAL_IMAGE_URL'),
-    pythHermesUrl: env('PYTH_API_KEY').trim() ? 'proxy' : '',
-    appKitProjectId: env('APPKIT_PROJECT_ID', 'NUXT_PUBLIC_APP_KIT_PROJECT_ID'),
-    appUrl: env('NUXT_PUBLIC_APP_URL'),
-    v3ApiUrl: V3_API_PROXY_URL,
-    // The client uses this to decide whether the SDK's "fast" instance routes
-    // reads via /api/internal/v3 (v3 adapters) or falls back to direct on-chain reads.
-    enableV3Backend: isV3BackendEnabled(),
-    disableV3: readDisableV3(),
-    // Adapter chain pinned for the browser's "fast" SDK instance. See
-    // utils/api-url-env.ts:readBrowserVaultSource.
-    browserVaultSource: readBrowserVaultSource(),
-    // Whether the deployment's edge provider measures VPN usage. The client
-    // uses this to skip the VPN probe (services/vpn.ts) on edges that carry
-    // no VPN evidence.
-    vpnDetection: edgeProvidesVpnEvidence(parseEdgeProvider(process.env.EDGE_PROVIDER)),
-    swapApiUrl: env('SWAP_API_URL', 'NUXT_PUBLIC_SWAP_API_URL'),
-    eulerInterfacesBranch: env(
-      'EULER_SDK_EULER_INTERFACES_BRANCH',
-      'NUXT_PUBLIC_EULER_INTERFACES_BRANCH',
-      'NUXT_PUBLIC_CONFIG_EULER_INTERFACES_BRANCH',
-    ) || 'master',
-    announcement: buildAnnouncementConfig({
-      title: env('CONFIG_ANNOUNCEMENT_TITLE', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_TITLE'),
-      body: env('CONFIG_ANNOUNCEMENT_BODY', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_BODY'),
-      items: env('CONFIG_ANNOUNCEMENT_ITEMS', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_ITEMS'),
-      url: env('CONFIG_ANNOUNCEMENT_URL', 'NUXT_PUBLIC_CONFIG_ANNOUNCEMENT_URL'),
-    }),
-  }
-}
-
-function patchMeta(html: { head: string[] }, appConfig: ReturnType<typeof readAppConfig>) {
+function patchMeta(html: { head: string[] }, appConfig: ReturnType<typeof readAppEnvConfig>) {
   const appTitle = escapeHtml(appConfig.appTitle)
   const appDescription = escapeHtml(appConfig.appDescription)
 
@@ -136,7 +81,7 @@ function injectSocialImage(html: { head: string[] }, socialImageUrl: string) {
 }
 
 export default defineNitroPlugin((nitroApp) => {
-  const appConfig = readAppConfig()
+  const appConfig = readAppEnvConfig()
   const v3ImagesBase = createV3ImagesBaseSource()
   // Prerendered pages are static, so they must not bake in a value read at build time.
   const bootRead = import.meta.prerender || appConfig.disableV3
