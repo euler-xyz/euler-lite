@@ -1,16 +1,23 @@
 export function createAddressRefreshCoordinator(onPreempt?: () => void) {
   let inFlightAddress: string | null = null
   let inFlightToken: symbol | null = null
-  let queuedRefreshAddress: string | null = null
+  let queuedRefresh: { promise: Promise<void>, resolve: () => void } | null = null
 
   const begin = (targetAddress: string) => {
     if (inFlightAddress === targetAddress) {
-      queuedRefreshAddress = targetAddress
-      return false
+      if (!queuedRefresh) {
+        let resolve!: () => void
+        const promise = new Promise<void>((resolvePromise) => {
+          resolve = resolvePromise
+        })
+        queuedRefresh = { promise, resolve }
+      }
+      return queuedRefresh.promise
     }
     if (inFlightAddress !== null) {
       onPreempt?.()
-      queuedRefreshAddress = null
+      queuedRefresh?.resolve()
+      queuedRefresh = null
     }
     inFlightAddress = targetAddress
     inFlightToken = Symbol()
@@ -18,22 +25,27 @@ export function createAddressRefreshCoordinator(onPreempt?: () => void) {
   }
 
   const finish = async (token: symbol, rerun: () => Promise<void>) => {
-    const ownsInFlight = inFlightToken === token
-    const shouldRerun = ownsInFlight && queuedRefreshAddress === inFlightAddress
-    if (ownsInFlight) {
-      inFlightAddress = null
-      inFlightToken = null
-    }
-    if (shouldRerun) {
-      queuedRefreshAddress = null
-      await rerun()
+    if (inFlightToken !== token) return
+
+    const queued = queuedRefresh
+    inFlightAddress = null
+    inFlightToken = null
+    queuedRefresh = null
+    if (queued) {
+      try {
+        await rerun()
+      }
+      finally {
+        queued.resolve()
+      }
     }
   }
 
   const reset = () => {
     inFlightAddress = null
     inFlightToken = null
-    queuedRefreshAddress = null
+    queuedRefresh?.resolve()
+    queuedRefresh = null
   }
 
   return {

@@ -123,7 +123,10 @@ export const useEulerAccount = () => {
     }
 
     const refreshToken = refreshCoordinator.begin(walletAddress)
-    if (!refreshToken) return
+    if (typeof refreshToken !== 'symbol') {
+      await refreshToken
+      return
+    }
     const gen = positionGuard.current()
 
     try {

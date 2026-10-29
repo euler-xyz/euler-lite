@@ -1,26 +1,44 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createAddressRefreshCoordinator } from '~/utils/address-refresh-coordinator'
 
-function expectToken(token: false | symbol): asserts token is symbol {
+function expectToken(token: unknown): asserts token is symbol {
   expect(token).toBeTypeOf('symbol')
 }
 
+const deferred = () => {
+  let resolve!: () => void
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
 describe('createAddressRefreshCoordinator', () => {
-  it('queues one same-address rerun while a refresh is in flight', async () => {
+  it('coalesces same-address callers and waits until their queued rerun finishes', async () => {
     const coordinator = createAddressRefreshCoordinator()
-    const rerun = vi.fn(async () => {})
+    const pending = deferred()
+    const rerun = vi.fn(() => pending.promise)
 
     const token = coordinator.begin('0xabc')
     expectToken(token)
-    expect(coordinator.begin('0xabc')).toBe(false)
-    expect(coordinator.begin('0xabc')).toBe(false)
+    const queued = coordinator.begin('0xabc')
+    expect(queued).toBeInstanceOf(Promise)
+    expect(coordinator.begin('0xabc')).toBe(queued)
+    const onSettled = vi.fn()
+    const waiting = Promise.resolve(queued).then(onSettled)
+    await Promise.resolve()
+    expect(onSettled).not.toHaveBeenCalled()
 
-    await coordinator.finish(token, rerun)
-
+    const finished = coordinator.finish(token, rerun)
     expect(rerun).toHaveBeenCalledTimes(1)
+    await Promise.resolve()
+    expect(onSettled).not.toHaveBeenCalled()
+    pending.resolve()
+    await Promise.all([finished, waiting])
+    expect(onSettled).toHaveBeenCalledTimes(1)
   })
 
-  it('does not clear a newer different-address refresh when the old one finishes', async () => {
+  it('settles preempted waiters without clearing the newer different-address refresh', async () => {
     const onPreempt = vi.fn()
     const coordinator = createAddressRefreshCoordinator(onPreempt)
     const oldRerun = vi.fn(async () => {})
@@ -28,15 +46,21 @@ describe('createAddressRefreshCoordinator', () => {
 
     const oldToken = coordinator.begin('0xabc')
     expectToken(oldToken)
+    const oldQueued = coordinator.begin('0xabc')
+    expect(oldQueued).toBeInstanceOf(Promise)
     const currentToken = coordinator.begin('0xdef')
     expectToken(currentToken)
     expect(onPreempt).toHaveBeenCalledTimes(1)
+    await oldQueued
 
+    const queued = coordinator.begin('0xdef')
+    expect(queued).toBeInstanceOf(Promise)
     await coordinator.finish(oldToken, oldRerun)
     expect(oldRerun).not.toHaveBeenCalled()
+    expect(coordinator.begin('0xdef')).toBe(queued)
 
-    expect(coordinator.begin('0xdef')).toBe(false)
     await coordinator.finish(currentToken, currentRerun)
+    await queued
     expect(currentRerun).toHaveBeenCalledTimes(1)
   })
 
@@ -54,26 +78,43 @@ describe('createAddressRefreshCoordinator', () => {
     expectToken(newToken)
     expect(onPreempt).toHaveBeenCalledTimes(2)
 
-    expect(coordinator.begin('0xabc')).toBe(false)
+    const queued = coordinator.begin('0xabc')
+    expect(queued).toBeInstanceOf(Promise)
     await coordinator.finish(oldToken, oldRerun)
     expect(oldRerun).not.toHaveBeenCalled()
 
     await coordinator.finish(newToken, newRerun)
+    await queued
     expect(newRerun).toHaveBeenCalledTimes(1)
   })
 
-  it('drops queued work on reset', async () => {
+  it('settles queued callers and drops their work on reset', async () => {
     const coordinator = createAddressRefreshCoordinator()
     const rerun = vi.fn(async () => {})
 
     const token = coordinator.begin('0xabc')
     expectToken(token)
-    expect(coordinator.begin('0xabc')).toBe(false)
+    const queued = coordinator.begin('0xabc')
+    expect(queued).toBeInstanceOf(Promise)
     coordinator.reset()
-
+    await queued
     await coordinator.finish(token, rerun)
 
     expect(rerun).not.toHaveBeenCalled()
+    expect(coordinator.begin('0xabc')).toBeTypeOf('symbol')
+  })
+
+  it('settles queued callers even if the rerun fails', async () => {
+    const coordinator = createAddressRefreshCoordinator()
+    const token = coordinator.begin('0xabc')
+    expectToken(token)
+    const queued = coordinator.begin('0xabc')
+    expect(queued).toBeInstanceOf(Promise)
+
+    await expect(coordinator.finish(token, async () => {
+      throw new Error('refresh failed')
+    })).rejects.toThrow('refresh failed')
+    await expect(queued).resolves.toBeUndefined()
     expect(coordinator.begin('0xabc')).toBeTypeOf('symbol')
   })
 })

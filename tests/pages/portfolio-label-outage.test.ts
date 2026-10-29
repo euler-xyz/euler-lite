@@ -7,6 +7,7 @@ import DepositsPage from '~/pages/portfolio/saving.vue'
 import RewardsPage from '~/pages/portfolio/rewards.vue'
 import LabelsUnavailableState from '~/components/entities/LabelsUnavailableState.vue'
 import UiEmptyState from '~/components/ui/UiEmptyState.vue'
+import { useVisibleTicker } from '~/composables/useVisibleTicker'
 import {
   shouldLeavePortfolioActivityRoute,
   shouldShowPortfolioActivityTab,
@@ -55,6 +56,7 @@ const renderPortfolio = async (child: Component, routeName: string, labelsReady 
   vi.stubGlobal('useVaultRegistry', () => ({ isEarnVault: () => false }))
   vi.stubGlobal('usePortfolioBatchScrollTarget', vi.fn())
   vi.stubGlobal('useDeployConfig', () => ({ enableMerkl: false, enableIncentra: false, enableFuul: false, enableTurtle: false }))
+  vi.stubGlobal('useVisibleTicker', useVisibleTicker)
   vi.stubGlobal('onActivated', onActivated)
   vi.stubGlobal('onDeactivated', onDeactivated)
 

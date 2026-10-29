@@ -29,7 +29,7 @@ const modal = useModal()
 const { error } = useToast()
 const { isConnected, address } = useWagmi()
 const { isSpyMode } = useSpyMode()
-const { isPositionsLoaded, isPositionsLoading, getPositionBySubAccountIndex } = useEulerAccount()
+const { isPositionsLoaded, isPositionsLoading, portfolioDiagnostics, getPositionBySubAccountIndex } = useEulerAccount()
 const { viewer, visibleBreakdown } = useApyVisibility()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -781,7 +781,10 @@ const load = async ({ silent = false }: { silent?: boolean } = {}) => {
   try {
     await until(isPositionsLoaded).toBe(true)
     if (sequence !== loadSequence) return
-    position.value = getPositionBySubAccountIndex(+getCurrentRoutePositionIndex())
+    const nextPosition = getPositionBySubAccountIndex(+getCurrentRoutePositionIndex())
+    // A partial account read cannot confirm that the displayed position is gone.
+    if (silent && !nextPosition && portfolioDiagnostics.value.some(issue => issue.code === 'SOURCE_UNAVAILABLE')) return
+    position.value = nextPosition
     if (position.value) {
       const initialCollateralVault = collateralVault.value
       // Load collaterals: always for multi-collateral, or when oracle failed (to get actual assets)

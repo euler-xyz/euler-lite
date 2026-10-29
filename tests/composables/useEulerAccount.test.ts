@@ -143,6 +143,38 @@ describe('useEulerAccount', () => {
     expect(account?.totalSuppliedValue.value).toBe(100)
   }, 20_000)
 
+  it('waits for a queued refresh before callers re-read the portfolio', async () => {
+    const { useEulerAccount, fetchAccount, buildPortfolio } = await importUseEulerAccount()
+    scope = effectScope()
+    const account = scope.run(useEulerAccount)!
+    await vi.waitFor(() => expect(buildPortfolio).toHaveBeenCalledTimes(2))
+
+    type FetchResult = Awaited<ReturnType<typeof fetchAccount>>
+    let finishActive!: (result: FetchResult) => void
+    let finishQueued!: (result: FetchResult) => void
+    fetchAccount
+      .mockReturnValueOnce(new Promise((resolve) => { finishActive = resolve }))
+      .mockReturnValueOnce(new Promise((resolve) => { finishQueued = resolve }))
+    const nextPortfolio = (totalBorrowedValueUsd: number) => ({
+      account: { owner }, borrows: [], savings: [], totalBorrowedValueUsd,
+    })
+    buildPortfolio.mockReturnValue(nextPortfolio(20))
+    const active = account.refreshAllPositions()
+    const reread = vi.fn(() => account.totalBorrowedValue.value)
+    const queued = account.refreshAllPositions().then(reread)
+    await vi.waitFor(() => expect(fetchAccount).toHaveBeenCalledTimes(2))
+    expect(reread).not.toHaveBeenCalled()
+
+    finishActive({ result: { owner }, errors: [] })
+    await vi.waitFor(() => expect(fetchAccount).toHaveBeenCalledTimes(3))
+    expect(reread).not.toHaveBeenCalled()
+
+    buildPortfolio.mockReturnValue(nextPortfolio(30))
+    finishQueued({ result: { owner }, errors: [] })
+    await Promise.all([active, queued])
+    expect(reread).toHaveReturnedWith(30)
+  })
+
   it('flags partial pricing when one position in view has no price', async () => {
     const priced = (suppliedValueUsd: number) => ({ assets: 10n, shares: 10n, suppliedValueUsd })
     const { useEulerAccount, buildPortfolio } = await importUseEulerAccount({
