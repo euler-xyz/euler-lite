@@ -4,7 +4,7 @@ export function createAddressRefreshCoordinator(onPreempt?: () => void) {
   let inFlightAddress: string | null = null
   let inFlightToken: symbol | null = null
   let queuedRefresh: { promise: Promise<AddressRefreshResult>, resolve: (result: AddressRefreshResult) => void } | null = null
-  // Queued callers remain cancellable while their rerun (or a later rerun) is running.
+  // Active and queued callers remain cancellable until their refresh chain completes.
   const pendingWaiters = new Set<(result: AddressRefreshResult) => void>()
   const releaseWaiters = () => {
     pendingWaiters.forEach(resolve => resolve('cancelled'))
@@ -39,6 +39,23 @@ export function createAddressRefreshCoordinator(onPreempt?: () => void) {
     return inFlightToken
   }
 
+  const run = async (token: symbol, refresh: () => Promise<AddressRefreshResult>): Promise<AddressRefreshResult> => {
+    if (inFlightToken !== token) return 'cancelled'
+
+    let cancel!: (result: AddressRefreshResult) => void
+    const cancellation = new Promise<AddressRefreshResult>((resolve) => {
+      cancel = resolve
+      pendingWaiters.add(resolve)
+    })
+    try {
+      // Release the caller on cancellation while stale-result guards protect late work.
+      return await Promise.race([refresh(), cancellation])
+    }
+    finally {
+      pendingWaiters.delete(cancel)
+    }
+  }
+
   const finish = async (token: symbol, rerun: () => Promise<AddressRefreshResult>): Promise<AddressRefreshResult> => {
     if (inFlightToken !== token) return 'cancelled'
 
@@ -70,6 +87,7 @@ export function createAddressRefreshCoordinator(onPreempt?: () => void) {
 
   return {
     begin,
+    run,
     finish,
     reset,
   }

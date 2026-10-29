@@ -127,85 +127,88 @@ export const useEulerAccount = () => {
       return refreshToken
     }
     const gen = positionGuard.current()
-    let result: AddressRefreshResult
+    return refreshCoordinator.run(refreshToken, async () => {
+      let result: AddressRefreshResult
 
-    try {
-      if (!walletAddress) {
-        visiblePortfolio.value = undefined
-        allPortfolio.value = undefined
-        setBatchPrefetchedBaseAccount(undefined)
-        portfolioDiagnostics.value = []
+      try {
+        if (!walletAddress) {
+          visiblePortfolio.value = undefined
+          allPortfolio.value = undefined
+          setBatchPrefetchedBaseAccount(undefined)
+          portfolioDiagnostics.value = []
+          markLoaded()
+          return 'completed'
+        }
+
+        const { getEulerSdkForChain, getEulerSdkFresh } = useEulerSdk()
+        // Portfolio reads default to the fresh (onchain) instance so positions,
+        // balances and health come from chain rather than the V3 backend.
+        // That selects the data source, not the freshness: reads still resolve
+        // through the shared QueryClient at their `FORM_STALE_TIMES` windows.
+        // Immediate post-tx invalidation marks those rows stale; after subgraph
+        // catch-up, the reviewed-execution refresh advances their cache
+        // generation so its read cannot join a pre-catch-up `fetchQuery`.
+        // Callers can opt into the cached V3-backed instance with `source: 'fast'`.
+        // Capture the chain id once so the SDK backend selection and the fetch
+        // can't diverge if the user switches chains mid-await.
+        const targetChainId = chainId.value
+        const sdk = refreshOptions.source === 'fast'
+          ? await getEulerSdkForChain(targetChainId)
+          : await getEulerSdkFresh()
+        if (positionGuard.isStale(gen)) return 'cancelled'
+        const fetched = await sdk.accountService.fetchAccount(
+          targetChainId,
+          getAddress(walletAddress) as Address,
+          {
+            populateVaults: true,
+            populateMarketPrices: true,
+            populateUserRewards: true,
+            vaultFetchOptions: liteVaultFetchOptions,
+          },
+        )
+        fetched.errors.forEach(issue => logWarn('useEulerAccount/fetchPortfolio', issue))
+
+        if (positionGuard.isStale(gen)) return 'cancelled'
+
+        const nextAllPortfolio = sdk.portfolioService.buildPortfolio(fetched.result)
+        await hydrateHeldVaults(nextAllPortfolio)
+        if (positionGuard.isStale(gen)) return 'cancelled'
+        const nextVisiblePortfolio = sdk.portfolioService.buildPortfolio(fetched.result, {
+          positionFilter: buildVisiblePortfolioPositionFilter(),
+        })
+
+        if (positionGuard.isStale(gen)) return 'cancelled'
+
+        allPortfolio.value = nextAllPortfolio
+        visiblePortfolio.value = nextVisiblePortfolio
+        setBatchPrefetchedBaseAccount(nextAllPortfolio.account)
+        portfolioDiagnostics.value = fetched.errors
         markLoaded()
-        return 'completed'
       }
-
-      const { getEulerSdkForChain, getEulerSdkFresh } = useEulerSdk()
-      // Portfolio reads default to the fresh (onchain) instance so positions,
-      // balances and health come from chain rather than the V3 backend.
-      // That selects the data source, not the freshness: reads still resolve
-      // through the shared QueryClient at their `FORM_STALE_TIMES` windows.
-      // Immediate post-tx invalidation marks those rows stale; after subgraph
-      // catch-up, the reviewed-execution refresh advances their cache
-      // generation so its read cannot join a pre-catch-up `fetchQuery`.
-      // Callers can opt into the cached V3-backed instance with `source: 'fast'`.
-      // Capture the chain id once so the SDK backend selection and the fetch
-      // can't diverge if the user switches chains mid-await.
-      const targetChainId = chainId.value
-      const sdk = refreshOptions.source === 'fast'
-        ? await getEulerSdkForChain(targetChainId)
-        : await getEulerSdkFresh()
-      const fetched = await sdk.accountService.fetchAccount(
-        targetChainId,
-        getAddress(walletAddress) as Address,
-        {
-          populateVaults: true,
-          populateMarketPrices: true,
-          populateUserRewards: true,
-          vaultFetchOptions: liteVaultFetchOptions,
-        },
-      )
-      fetched.errors.forEach(issue => logWarn('useEulerAccount/fetchPortfolio', issue))
-
-      if (positionGuard.isStale(gen)) return 'cancelled'
-
-      const nextAllPortfolio = sdk.portfolioService.buildPortfolio(fetched.result)
-      await hydrateHeldVaults(nextAllPortfolio)
-      if (positionGuard.isStale(gen)) return 'cancelled'
-      const nextVisiblePortfolio = sdk.portfolioService.buildPortfolio(fetched.result, {
-        positionFilter: buildVisiblePortfolioPositionFilter(),
-      })
-
-      if (positionGuard.isStale(gen)) return 'cancelled'
-
-      allPortfolio.value = nextAllPortfolio
-      visiblePortfolio.value = nextVisiblePortfolio
-      setBatchPrefetchedBaseAccount(nextAllPortfolio.account)
-      portfolioDiagnostics.value = fetched.errors
-      markLoaded()
-    }
-    catch (error) {
-      if (positionGuard.isStale(gen)) return 'cancelled'
-      setBatchPrefetchedBaseAccount(undefined)
-      logWarn('useEulerAccount/fetchAndUpdatePortfolio', error)
-      // Diagnostics describe the cached snapshot until a successful refresh replaces it.
-      if (!allPortfolio.value) {
-        portfolioDiagnostics.value = [{
-          code: 'SOURCE_UNAVAILABLE',
-          severity: 'error',
-          message: 'Failed to load portfolio data.',
-          locations: [
-            dataIssueLocation(accountDiagnosticOwner(chainId.value, getAddress(walletAddress) as Address)),
-          ],
-          source: 'portfolioService',
-          originalValue: error instanceof Error ? error.message : String(error),
-        }]
+      catch (error) {
+        if (positionGuard.isStale(gen)) return 'cancelled'
+        setBatchPrefetchedBaseAccount(undefined)
+        logWarn('useEulerAccount/fetchAndUpdatePortfolio', error)
+        // Diagnostics describe the cached snapshot until a successful refresh replaces it.
+        if (!allPortfolio.value) {
+          portfolioDiagnostics.value = [{
+            code: 'SOURCE_UNAVAILABLE',
+            severity: 'error',
+            message: 'Failed to load portfolio data.',
+            locations: [
+              dataIssueLocation(accountDiagnosticOwner(chainId.value, getAddress(walletAddress) as Address)),
+            ],
+            source: 'portfolioService',
+            originalValue: error instanceof Error ? error.message : String(error),
+          }]
+        }
+        markLoaded()
       }
-      markLoaded()
-    }
-    finally {
-      result = await refreshCoordinator.finish(refreshToken, () => fetchAndUpdatePortfolio(walletAddress, { ...refreshOptions, preempt: false }))
-    }
-    return result
+      finally {
+        result = await refreshCoordinator.finish(refreshToken, () => fetchAndUpdatePortfolio(walletAddress, { ...refreshOptions, preempt: false }))
+      }
+      return result
+    })
   }
 
   const maybeUpdatePositions = () => {
