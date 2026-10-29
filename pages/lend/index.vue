@@ -28,7 +28,8 @@ const showAllLabelEntries = useShowAllLabelEntries()
 const list = computed(() => getVerifiedEVaults(showAllLabelEntries.value))
 
 const isPricesReady = ref(false)
-const { entities, isReady: labelsReady } = useEulerLabels()
+const { entities, isReady: labelsReady, loadError: labelsError } = useEulerLabels()
+const labelsUnavailable = computed(() => !labelsReady.value && Boolean(labelsError.value))
 const isLoading = computed(() => isEVaultUpdating.value || !labelsReady.value || !isPricesReady.value)
 const { isSlow } = useSlowLoading(isLoading)
 const { settings } = useUserSettings()
@@ -313,7 +314,10 @@ const clearLendFilters = () => {
       icon="nav-lend"
     />
 
-    <div class="mb-16 -mx-16">
+    <div
+      v-if="!labelsUnavailable"
+      class="mb-16 -mx-16"
+    >
       <div class="flex items-center flex-wrap gap-8 px-16">
         <UiInput
           v-model="searchQuery"
@@ -374,8 +378,14 @@ const clearLendFilters = () => {
     </div>
 
     <div class="flex flex-col flex-1">
+      <LabelsUnavailableState
+        v-if="labelsUnavailable"
+        class="flex-1"
+        title="Lending vaults unavailable"
+        description="Published vault verification could not be loaded. Lending listings are unavailable until it returns."
+      />
       <div
-        v-if="isLoading"
+        v-else-if="isLoading"
         class="flex flex-col flex-1 items-center justify-center gap-12"
       >
         <UiLoader />

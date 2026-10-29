@@ -14,6 +14,11 @@ const { loadEulerConfig, chainId } = useEulerAddresses()
 const { loadVaults, isReady: isVaultsReady, resetVaultsState, setShowAllLabelEntries } = useVaults()
 const { loadTokenList, isLoaded: isTokenListLoaded } = useTokenList()
 const { loadLabels, retryLabels, isReady: isLabelsReady, isLoading: isLabelsLoading, loadError: labelsLoadError } = useEulerLabels()
+const hasPageLabelsErrorState = computed(() =>
+  ['/explore', '/lend', '/borrow', '/earn'].includes(route.path)
+  || route.path.startsWith('/portfolio')
+  || route.path.startsWith('/curators/'),
+)
 const { loadCountry } = useGeoBlock()
 const { updateBalances, resetBalances } = useWallets()
 const { isConnected, address } = useWagmi()
@@ -201,7 +206,7 @@ watch(portfolioRefreshCounter, () => {
     >
       <div class="w-full max-w-container mx-16 mobile:px-16 mobile:mx-0">
         <UiAlert
-          v-if="labelsLoadError && !isLabelsReady"
+          v-if="labelsLoadError && !isLabelsReady && !hasPageLabelsErrorState"
           class="mb-16"
           title="Vault verification unavailable"
           :description="labelsLoadError"
