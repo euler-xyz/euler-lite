@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { effectScope, ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const INTERVAL = 60_000
@@ -101,5 +101,29 @@ describe('usePositionAutoRefresh', () => {
 
     expect(reread).not.toHaveBeenCalled()
     refresh.stop()
+  })
+
+  it.each(['hidden', 'disposed', 'busy'] as const)('does not retry a canceled refresh when %s', async (state) => {
+    let cancel!: (result: 'cancelled') => void
+    mocks.refreshAllPositions.mockReturnValueOnce(new Promise((resolve) => {
+      cancel = resolve
+    }))
+    const scope = effectScope()
+    const busy = ref(false)
+    const { usePositionAutoRefresh } = await import('~/composables/position/usePositionAutoRefresh')
+    const reread = vi.fn(async () => {})
+    const refresh = scope.run(() => usePositionAutoRefresh({ isBusy: () => busy.value, reread }))!
+    refresh.start()
+    await vi.advanceTimersByTimeAsync(INTERVAL)
+
+    if (state === 'hidden') Object.defineProperty(document, 'visibilityState', { value: 'hidden' })
+    if (state === 'disposed') scope.stop()
+    if (state === 'busy') busy.value = true
+    cancel('cancelled')
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(mocks.refreshAllPositions).toHaveBeenCalledTimes(1)
+    expect(reread).not.toHaveBeenCalled()
+    scope.stop()
   })
 })

@@ -1,11 +1,13 @@
+export type AddressRefreshResult = 'completed' | 'cancelled'
+
 export function createAddressRefreshCoordinator(onPreempt?: () => void) {
   let inFlightAddress: string | null = null
   let inFlightToken: symbol | null = null
-  let queuedRefresh: { promise: Promise<void>, resolve: () => void } | null = null
+  let queuedRefresh: { promise: Promise<AddressRefreshResult>, resolve: (result: AddressRefreshResult) => void } | null = null
   // Queued callers remain cancellable while their rerun (or a later rerun) is running.
-  const pendingWaiters = new Set<() => void>()
+  const pendingWaiters = new Set<(result: AddressRefreshResult) => void>()
   const releaseWaiters = () => {
-    pendingWaiters.forEach(resolve => resolve())
+    pendingWaiters.forEach(resolve => resolve('cancelled'))
     pendingWaiters.clear()
     queuedRefresh = null
   }
@@ -13,16 +15,16 @@ export function createAddressRefreshCoordinator(onPreempt?: () => void) {
   const begin = (targetAddress: string) => {
     if (inFlightAddress === targetAddress) {
       if (!queuedRefresh) {
-        let resolve!: () => void
-        const promise = new Promise<void>((resolvePromise) => {
+        let resolve!: (result: AddressRefreshResult) => void
+        const promise = new Promise<AddressRefreshResult>((resolvePromise) => {
           resolve = resolvePromise
         })
         pendingWaiters.add(resolve)
         queuedRefresh = {
           promise,
-          resolve: () => {
+          resolve: (result) => {
             pendingWaiters.delete(resolve)
-            resolve()
+            resolve(result)
           },
         }
       }
@@ -37,20 +39,26 @@ export function createAddressRefreshCoordinator(onPreempt?: () => void) {
     return inFlightToken
   }
 
-  const finish = async (token: symbol, rerun: () => Promise<void>) => {
-    if (inFlightToken !== token) return
+  const finish = async (token: symbol, rerun: () => Promise<AddressRefreshResult>): Promise<AddressRefreshResult> => {
+    if (inFlightToken !== token) return 'cancelled'
 
     const queued = queuedRefresh
     inFlightAddress = null
     inFlightToken = null
     queuedRefresh = null
-    if (queued) {
-      try {
-        await rerun()
-      }
-      finally {
-        queued.resolve()
-      }
+    if (!queued) return 'completed'
+
+    let result: AddressRefreshResult = 'completed'
+    try {
+      // Reset and preemption release the original caller as well as queued callers.
+      result = await Promise.race([
+        rerun(),
+        queued.promise,
+      ])
+      return result
+    }
+    finally {
+      queued.resolve(result)
     }
   }
 

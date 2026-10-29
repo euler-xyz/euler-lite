@@ -6,7 +6,7 @@ import { useVaults } from '~/composables/useVaults'
 import { useWallets } from '~/composables/useWallets'
 import { setBatchPrefetchedBaseAccount } from '~/composables/batchPrefetchState'
 import { normalizeAddressOrEmpty } from '~/utils/accountPositionHelpers'
-import { createAddressRefreshCoordinator } from '~/utils/address-refresh-coordinator'
+import { createAddressRefreshCoordinator, type AddressRefreshResult } from '~/utils/address-refresh-coordinator'
 import { logWarn } from '~/utils/errorHandling'
 import { buildVisiblePortfolioPositionFilter, hydrateHeldVaults } from '~/utils/portfolioPositionFilter'
 import { portfolioPricingGaps } from '~/utils/portfolio-pricing'
@@ -116,7 +116,7 @@ export const useEulerAccount = () => {
   const fetchAndUpdatePortfolio = async (
     walletAddress: string,
     refreshOptions: PortfolioRefreshOptions = {},
-  ) => {
+  ): Promise<AddressRefreshResult> => {
     if (refreshOptions.preempt) {
       positionGuard.next()
       refreshCoordinator.reset()
@@ -124,10 +124,10 @@ export const useEulerAccount = () => {
 
     const refreshToken = refreshCoordinator.begin(walletAddress)
     if (typeof refreshToken !== 'symbol') {
-      await refreshToken
-      return
+      return refreshToken
     }
     const gen = positionGuard.current()
+    let result: AddressRefreshResult
 
     try {
       if (!walletAddress) {
@@ -136,7 +136,7 @@ export const useEulerAccount = () => {
         setBatchPrefetchedBaseAccount(undefined)
         portfolioDiagnostics.value = []
         markLoaded()
-        return
+        return 'completed'
       }
 
       const { getEulerSdkForChain, getEulerSdkFresh } = useEulerSdk()
@@ -166,16 +166,16 @@ export const useEulerAccount = () => {
       )
       fetched.errors.forEach(issue => logWarn('useEulerAccount/fetchPortfolio', issue))
 
-      if (positionGuard.isStale(gen)) return
+      if (positionGuard.isStale(gen)) return 'cancelled'
 
       const nextAllPortfolio = sdk.portfolioService.buildPortfolio(fetched.result)
       await hydrateHeldVaults(nextAllPortfolio)
-      if (positionGuard.isStale(gen)) return
+      if (positionGuard.isStale(gen)) return 'cancelled'
       const nextVisiblePortfolio = sdk.portfolioService.buildPortfolio(fetched.result, {
         positionFilter: buildVisiblePortfolioPositionFilter(),
       })
 
-      if (positionGuard.isStale(gen)) return
+      if (positionGuard.isStale(gen)) return 'cancelled'
 
       allPortfolio.value = nextAllPortfolio
       visiblePortfolio.value = nextVisiblePortfolio
@@ -184,25 +184,28 @@ export const useEulerAccount = () => {
       markLoaded()
     }
     catch (error) {
-      if (positionGuard.isStale(gen)) return
+      if (positionGuard.isStale(gen)) return 'cancelled'
       setBatchPrefetchedBaseAccount(undefined)
       logWarn('useEulerAccount/fetchAndUpdatePortfolio', error)
-      portfolioDiagnostics.value = [{
-        code: 'SOURCE_UNAVAILABLE',
-        severity: 'error',
-        message: 'Failed to load portfolio data.',
-        locations: [
-          dataIssueLocation(accountDiagnosticOwner(chainId.value, getAddress(walletAddress) as Address)),
-        ],
-        source: 'portfolioService',
-        originalValue: error instanceof Error ? error.message : String(error),
-      }]
+      // Diagnostics describe the cached snapshot until a successful refresh replaces it.
+      if (!allPortfolio.value) {
+        portfolioDiagnostics.value = [{
+          code: 'SOURCE_UNAVAILABLE',
+          severity: 'error',
+          message: 'Failed to load portfolio data.',
+          locations: [
+            dataIssueLocation(accountDiagnosticOwner(chainId.value, getAddress(walletAddress) as Address)),
+          ],
+          source: 'portfolioService',
+          originalValue: error instanceof Error ? error.message : String(error),
+        }]
+      }
       markLoaded()
     }
     finally {
-      // A queued rerun owns the refresh slot and must keep its callers waiting.
-      await refreshCoordinator.finish(refreshToken, () => fetchAndUpdatePortfolio(walletAddress, { ...refreshOptions, preempt: false }))
+      result = await refreshCoordinator.finish(refreshToken, () => fetchAndUpdatePortfolio(walletAddress, { ...refreshOptions, preempt: false }))
     }
+    return result
   }
 
   const maybeUpdatePositions = () => {
@@ -303,7 +306,7 @@ export const useEulerAccount = () => {
     walletAddress = portfolioAddress.value,
     refreshOptions?: PortfolioRefreshOptions,
   ) => {
-    await fetchAndUpdatePortfolio(walletAddress, refreshOptions)
+    return fetchAndUpdatePortfolio(walletAddress, refreshOptions)
   }
 
   return {

@@ -5,7 +5,7 @@ import { until } from '@vueuse/core'
 import { Account, Portfolio, assetDiagnosticOwner, accountDiagnosticOwner, dataIssueLocation, subAccountDiagnosticOwner, type DataIssue, type IAccountPosition } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address } from 'viem'
 import { computed, effectScope, nextTick, ref, watch, type EffectScope } from 'vue'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const OWNER = '0x1000000000000000000000000000000000000000'
 const SUB_ACCOUNT = '0x1000000000000000000000000000000000000001'
@@ -44,7 +44,7 @@ const pricingFailure: DataIssue = {
 }
 const vault = (address: Address) => ({ chainId: 1, address, asset: { address: ASSET, symbol: 'TEST', decimals: 18 } })
 type TestVault = ReturnType<typeof vault>
-const makePosition = ({ omitted, removed, assets = 4n }: { omitted?: Address, removed?: Address, assets?: bigint } = {}) => {
+const makeAccount = ({ omitted, removed, assets = 4n }: { omitted?: Address, removed?: Address, assets?: bigint } = {}) => {
   const enabledCollaterals = [COLLATERAL, SECOND_COLLATERAL].filter(address => address !== removed) as Address[]
   const values = (value: bigint) => ({ borrowing: value * WAD, liquidation: value * WAD, oracleMid: value * WAD })
   const account = new Account<TestVault>({
@@ -69,8 +69,9 @@ const makePosition = ({ omitted, removed, assets = 4n }: { omitted?: Address, re
       ],
     } },
   })
-  return new Portfolio(account).borrows[0]!
+  return account
 }
+const makePosition = (options?: Parameters<typeof makeAccount>[0]) => new Portfolio(makeAccount(options)).borrows[0]!
 type TestPosition = ReturnType<typeof makePosition>
 let scope: EffectScope | undefined
 
@@ -221,5 +222,82 @@ describe('position page background refresh', () => {
 
     expect(missingPage.position.value).toBeUndefined()
     expect(missingPage.router.replace).not.toHaveBeenCalled()
+  })
+})
+
+describe('cached portfolio diagnostics', () => {
+  let accountScope: EffectScope | undefined
+  beforeEach(() => {
+    vi.resetModules()
+  })
+  afterEach(() => {
+    accountScope?.stop()
+    vi.unstubAllGlobals()
+    vi.doUnmock('~/composables/useVaults')
+    vi.doUnmock('~/composables/useWallets')
+    vi.doUnmock('~/utils/portfolioPositionFilter')
+    vi.doUnmock('~/composables/useTxBatch')
+  })
+
+  it.each([
+    { name: 'the loan', omitted: undefined },
+    { name: 'primary collateral', omitted: COLLATERAL },
+    { name: 'secondary collateral', omitted: SECOND_COLLATERAL },
+  ] as const)('retains the displayed snapshot when a failed refresh follows missing $name', async ({ omitted }) => {
+    const ready = ref(false)
+    const fetchAccount = vi.fn(async () => ({ result: makeAccount(), errors: [] as DataIssue[] }))
+    const sdk = {
+      accountService: { fetchAccount },
+      portfolioService: { buildPortfolio: (account: ReturnType<typeof makeAccount>) => new Portfolio(account) },
+    }
+    vi.doMock('~/composables/useVaults', () => ({ useVaults: () => ({ isReady: ready }) }))
+    vi.doMock('~/composables/useWallets', () => ({ useWallets: () => ({ isLoaded: ready }) }))
+    vi.doMock('~/utils/portfolioPositionFilter', () => ({ hydrateHeldVaults: async () => {}, buildVisiblePortfolioPositionFilter: () => () => true }))
+    vi.doMock('~/composables/useTxBatch', () => ({
+      activeLayerPortfolioRef: ref(), activeLayerPortfolioAllRef: ref(),
+      activeLayerRemovedBorrowPositionsRef: ref([]), activeLayerRemovedBorrowPositionsAllRef: ref([]),
+      activeLayerRemovedDepositPositionsRef: ref([]), activeLayerRemovedDepositPositionsAllRef: ref([]), activeLayerRemovedKeysRef: ref(new Set()),
+    }))
+    vi.stubGlobal('useEulerLabels', () => ({ isReady: ready }))
+    vi.stubGlobal('useEulerAddresses', () => ({ isReady: ready, chainId: ref(1) }))
+    vi.stubGlobal('useEffectiveAddress', () => ({ effectiveAddress: ref(OWNER) }))
+    vi.stubGlobal('useEulerSdk', () => ({ getEulerSdkFresh: async () => sdk }))
+    const { useEulerAccount } = await import('~/composables/useEulerAccount')
+    accountScope = effectScope()
+    const account = accountScope.run(useEulerAccount)!
+    await account.refreshAllPositions()
+    const page = setupPage(account.getPositionBySubAccountIndex(1) as TestPosition)
+    page.getPositionBySubAccountIndex.mockImplementation(() => account.getPositionBySubAccountIndex(1) as TestPosition | undefined)
+    await page.load()
+    const displayed = page.position.value
+    const displayedCollaterals = page.collateralItems.value
+
+    const partial = omitted
+      ? makeAccount({ omitted })
+      : new Account<TestVault>({ chainId: 1, owner: OWNER, subAccounts: {}, populated: { vaults: true, marketPrices: true } })
+    fetchAccount.mockResolvedValueOnce({ result: partial, errors: [sourceFailure] })
+    await account.refreshAllPositions()
+    page.portfolioDiagnostics.value = account.portfolioDiagnostics.value
+    await page.load({ silent: true })
+    expect(page.position.value).toBe(displayed)
+    expect(page.collateralItems.value).toBe(displayedCollaterals)
+
+    fetchAccount.mockRejectedValueOnce(new Error('RPC unavailable'))
+    await account.refreshAllPositions()
+    page.portfolioDiagnostics.value = account.portfolioDiagnostics.value
+    await page.load({ silent: true })
+    await nextTick()
+
+    expect(page.position.value).toBe(displayed)
+    expect(page.collateralItems.value).toBe(displayedCollaterals)
+    expect(page.router.replace).not.toHaveBeenCalled()
+    expect(account.portfolioDiagnostics.value).toEqual([sourceFailure])
+
+    fetchAccount.mockResolvedValueOnce({ result: makeAccount({ assets: 8n }), errors: [] })
+    await account.refreshAllPositions()
+    page.portfolioDiagnostics.value = account.portfolioDiagnostics.value
+    await page.load({ silent: true })
+    expect(account.portfolioDiagnostics.value).toEqual([])
+    expect(page.collateralItems.value.map(item => item.assets)).toEqual([8n, 8n])
   })
 })

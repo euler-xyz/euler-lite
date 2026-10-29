@@ -175,6 +175,21 @@ describe('useEulerAccount', () => {
     expect(reread).toHaveReturnedWith(30)
   })
 
+  it('reports an initial fetch failure and clears it when a portfolio loads', async () => {
+    const { useEulerAccount, fetchAccount } = await importUseEulerAccount()
+    fetchAccount.mockRejectedValueOnce(new Error('RPC unavailable'))
+    scope = effectScope()
+    const account = scope.run(useEulerAccount)!
+    await vi.waitFor(() => expect(account.isPositionsLoaded.value).toBe(true))
+    expect(account.portfolio.value).toBeUndefined()
+    expect(account.portfolioDiagnostics.value).toMatchObject([{ source: 'portfolioService', code: 'SOURCE_UNAVAILABLE' }])
+
+    await account.refreshAllPositions()
+
+    expect(account.portfolio.value).toBeDefined()
+    expect(account.portfolioDiagnostics.value).toEqual([])
+  })
+
   it('flags partial pricing when one position in view has no price', async () => {
     const priced = (suppliedValueUsd: number) => ({ assets: 10n, shares: 10n, suppliedValueUsd })
     const { useEulerAccount, buildPortfolio } = await importUseEulerAccount({
