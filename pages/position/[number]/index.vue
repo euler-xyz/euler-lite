@@ -782,14 +782,15 @@ const load = async ({ silent = false }: { silent?: boolean } = {}) => {
     await until(isPositionsLoaded).toBe(true)
     if (sequence !== loadSequence) return
     const nextPosition = getPositionBySubAccountIndex(+getCurrentRoutePositionIndex())
+    const subAccount = nextPosition?.subAccount ?? position.value?.subAccount
     // Keep a coherent snapshot when a partial read cannot confirm this position's balances.
-    if (silent && portfolioDiagnostics.value.some(issue =>
+    if (silent && subAccount && portfolioDiagnostics.value.some(issue =>
       issue.code === 'SOURCE_UNAVAILABLE'
-      && (!nextPosition || issue.locations.some(({ owner, path }) =>
+      && issue.locations.some(({ owner, path }) =>
         owner.kind === 'subAccount'
-        && getAddress(owner.address) === getAddress(nextPosition.subAccount)
+        && getAddress(owner.address) === getAddress(subAccount)
         && path === '$.positions',
-      )),
+      ),
     )) return
     position.value = nextPosition
     if (position.value) {

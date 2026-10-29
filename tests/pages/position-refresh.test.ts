@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { ScriptTarget, transpileModule } from 'typescript'
 import { until } from '@vueuse/core'
-import { Account, Portfolio, assetDiagnosticOwner, dataIssueLocation, subAccountDiagnosticOwner, type DataIssue, type IAccountPosition } from '@eulerxyz/euler-v2-sdk'
+import { Account, Portfolio, assetDiagnosticOwner, accountDiagnosticOwner, dataIssueLocation, subAccountDiagnosticOwner, type DataIssue, type IAccountPosition } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, type Address } from 'viem'
 import { computed, effectScope, nextTick, ref, watch, type EffectScope } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -104,13 +104,16 @@ afterEach(() => {
 })
 
 describe('position page background refresh', () => {
-  it('retains the displayed position and collaterals when a partial read omits the position', async () => {
+  it.each([
+    { name: 'alone', diagnostics: [sourceFailure] },
+    { name: 'alongside pricing', diagnostics: [pricingFailure, sourceFailure] },
+  ])('retains the displayed position and collaterals when its position read fails $name', async ({ diagnostics }) => {
     const page = setupPage()
     await page.load()
     const previousPosition = page.position.value
     const previousCollaterals = page.collateralItems.value
     page.getPositionBySubAccountIndex.mockReturnValue(undefined)
-    page.portfolioDiagnostics.value = [sourceFailure]
+    page.portfolioDiagnostics.value = diagnostics
 
     await page.load({ silent: true })
     await nextTick()
@@ -179,6 +182,35 @@ describe('position page background refresh', () => {
     expect(page.collateralItems.value).toHaveLength(1)
     expect(page.collateralItems.value[0]?.assets).toBe(8n)
     expect(page.router.replace).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['pricing', pricingFailure],
+    ['rewards', {
+      code: 'SOURCE_UNAVAILABLE', severity: 'error', source: 'rewardsService',
+      message: 'Failed to populate user rewards.',
+      locations: [dataIssueLocation(accountDiagnosticOwner(1, OWNER), '$.userRewards')],
+    }],
+    ['another sub-account', {
+      ...sourceFailure,
+      locations: [dataIssueLocation(subAccountDiagnosticOwner(1, OWNER), '$.positions')],
+    }],
+  ] satisfies [string, DataIssue][])('removes a confirmed closed loan even when %s is unavailable', async (_label, issue) => {
+    const page = setupPage()
+    await page.load()
+    expect(page.position.value?.borrowed).toBe(1n)
+    const closedAccount = new Account({ chainId: 1, owner: OWNER, subAccounts: {}, populated: { vaults: true, marketPrices: true } })
+    const closedPortfolio = new Portfolio(closedAccount)
+    expect(closedPortfolio.borrows).toEqual([])
+    page.getPositionBySubAccountIndex.mockReturnValue(closedPortfolio.borrows[0])
+    page.portfolioDiagnostics.value = [issue]
+
+    await page.load({ silent: true })
+    await nextTick()
+
+    expect(page.position.value).toBeUndefined()
+    expect(page.collateralItems.value).toEqual([])
+    expect(page.router.replace).toHaveBeenCalledWith({ path: '/portfolio', query: { network: '1' } })
   })
 
   it('keeps the not-found state for an invalid position URL', async () => {
