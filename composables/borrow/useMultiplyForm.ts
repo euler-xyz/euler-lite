@@ -91,9 +91,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const { capture: captureReviewState } = useExecutionReview()
   const { capture: captureIntentFactory, create: createIntent } = useOperationIntentFactory()
   const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
-  // State-override knobs: skip balance probing (form validates "Not enough
-  // balance"), pass current wallet snapshot, and pre-prime slot hints when the
-  // relevant assets resolve.
+  // State-override knobs: pass the current wallet snapshot and pre-prime slot
+  // hints when the relevant assets resolve. Skip balance probing at Review
+  // (form validates "Not enough balance"); quote estimates turn balance
+  // overrides back on (see `useSwapQuotesParallel`).
   const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
   const buildMultiplyStateOverrideOptions = () => buildStateOverrideOptions({ noBalanceOverride: true })
   const { depositPositions } = useEulerAccount()

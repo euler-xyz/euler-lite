@@ -93,7 +93,7 @@ vi.mock('~/components/ui/composables/useToast', () => ({
 vi.mock('~/composables/useStateOverrideOptions', () => ({
   useStateOverrideOptions: () => ({
     primeSlotHintsFor: vi.fn(),
-    buildStateOverrideOptions: vi.fn(() => ({})),
+    buildStateOverrideOptions: vi.fn(options => ({ ...options })),
   }),
 }))
 
@@ -221,7 +221,7 @@ const makeForm = (vault: EVault) => useMultiplyForm({
   isMultiplyRestricted: computed(() => false),
 })
 
-describe('useMultiplyForm cap validation', () => {
+describe('useMultiplyForm', () => {
   beforeEach(() => {
     const createIntent = vi.fn()
     vi.stubGlobal('useOperationIntentFactory', () => ({
@@ -332,6 +332,26 @@ describe('useMultiplyForm cap validation', () => {
     vi.restoreAllMocks()
   })
 
+  it.each([false, true])('blocks a supply amount above the wallet balance (spy mode: %s)', (isSpyMode) => {
+    vi.stubGlobal('useEffectiveAddress', () => ({
+      isConnected: ref(!isSpyMode),
+      isSpyMode: ref(isSpyMode),
+      effectiveAddress: ref(USER),
+    }))
+    vi.stubGlobal('useWallets', () => ({ getBalance: () => 130_000n }))
+    const vault = makeVault()
+    vault.asset.decimals = 6
+    const form = makeForm(vault)
+    form.initMultiplySupplyVault(vault)
+    form.multiplyInputAmount.value = '1000'
+    form.multiplier.value = 3.5
+
+    // Review simulates without faking balances, so this gate has to catch the
+    // shortfall first: 0.13 USDC cannot cover a 1,000 USDC deposit.
+    expect(form.multiplyErrorText.value).toBe('Not enough balance')
+    expect(form.isMultiplySubmitDisabled.value).toBe(true)
+  })
+
   it('surfaces a reached supply cap as the multiply disabled reason and form warning', () => {
     const vault = makeVault(100, 0)
     const form = makeForm(vault)
@@ -404,6 +424,7 @@ describe('useMultiplyForm cap validation', () => {
     expect(mocks.openReview).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       review: expect.objectContaining({ subAccount: USER, sourceSubAccount }),
     }))
+    expect(mocks.runPreparedSimulation.mock.calls.at(-1)?.[1]).toMatchObject({ noBalanceOverride: true })
   })
 
   it('derives projected Net APY, ROE, and rate transitions from one breakdown', async () => {
