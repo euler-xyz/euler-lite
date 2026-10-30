@@ -254,6 +254,8 @@ The `useMarketGroups` composable (`composables/useMarketGroups.ts`) implements a
 3. **Orphan clustering** — Vaults not assigned to any product are clustered using a BFS connected-component algorithm over their collateral relationships. This produces "Ungrouped" markets.
 4. **Async TVL resolution** — Group metrics (TVL, available liquidity, borrowed) are resolved asynchronously using USD pricing.
 
+A grouped product is not automatically listed. `groupHasExplorableMarket` drops collateral-only products (no lend-open member and no borrowable, borrow-open member). Explore then applies `isExploreListedMarket` once market data resolves: the card stays only while a member is a Lend-table vault or in a Borrow-table pair, except a fully deprecated market which stays listed last. `?showAll` keeps every grouped market and sets `showsAllMembers` so graphs keep hidden loan relationships. Listing predicates, Unknown-collateral exclusion, and the graph drop exception are in [Vault Labels → Discovery Page Filtering](./vault-labels-and-verification.md#discovery-page-filtering). Curator names on cards link to `/curators/{entityId}` when a single managing entity resolves; see [Curator profile pages](./vault-labels-and-verification.md#curator-profile-pages).
+
 ### Correlated Pairs, Max ROE, and Max Multiplier
 
 Leveraged return metrics are only shown when the collateral and debt assets are treated as price-correlated. The source of truth is token-list metadata: `useTokenList().getTokenCategoryTags(address)` returns normalized `tags`, and `utils/token-categories.ts` only considers tags present in `CORRELATED_CATEGORY_LABELS` (`usd`, `eth`, `btc`, `mon`, `avax`, `hype`, `bnb`).

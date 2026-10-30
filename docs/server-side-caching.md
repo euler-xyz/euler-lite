@@ -21,6 +21,10 @@ This document covers the per-host proxies, the vault snapshot pipeline, the warm
 | `server/api/internal/proxy/subgraph/[chainId].post.ts` | Proxies the chain's explicit subgraph URL or selected catalog endpoint (router param, per-chain source, not built with the factory) |
 | `server/api/internal/public-labels.get.ts` | Chain/version-scoped aggregate Public Labels endpoint |
 | `server/utils/public-labels-source.ts` | Public Labels V3 pagination, 5-minute cache, in-flight dedup, and bounded stale fallback |
+| `server/api/internal/curator-profiles/[entityId].get.ts` | Chain-independent V3 entity profile |
+| `server/utils/curator-profile-source.ts` | 5-minute profile cache, 15 s timeout, 404 → empty V3 entity |
+| `server/api/internal/curator-networks/[entityId].get.ts` | Per-enabled-chain product / Earn counts for a managing entity |
+| `server/utils/curator-network-index.ts` | 5-minute network-index cache, 25 s timeout, EulerChains admission |
 | `server/api/internal/liquidation-coverage.get.ts` | Chain-scoped default liquidation bot coverage |
 | `server/utils/liquidation-coverage-source.ts` | Reads each bot's `/vault-filter`, 5-minute cache, 30-minute last-good window, one-minute retry floor |
 | `server/utils/static-labels-source.ts` | Atomic static authoring snapshots, used only in static mode |
@@ -99,6 +103,17 @@ The response budget is 8 MiB of decoded body bytes and 10 seconds total for fetc
 `/api/internal/public-labels?chainId=N` is the browser's single label read. `server/utils/public-labels-source.ts` reads the admitted `EulerChains.json` manifest, then paginates vaults, products, entities, entity governance addresses, and geo policies directly from V3. Enabled deprecated chains use metadata with on-chain verification; other enabled chains use V3 visibility verdicts. Results are cached for five minutes by chain, version, and verification mode; concurrent misses share one in-flight operation. Bundle and geo-policy stale fallback is bounded to 24 hours. Geo separately retains a validated, fetchedAt-stamped disk checkpoint; cold starts without valid geo policies cannot publish a bundle. Mount `GEO_POLICY_CACHE_DIR` for cross-container persistence.
 
 `LABELS_SOURCE=v3` performs no label-file reads. `LABELS_SOURCE=static` reads the operator-owned authoring files on the same warm/refresh cycle and uses one atomic disk checkpoint for the entire collection. See [Static labels](./static-labels.md).
+
+### Curator profile and network index
+
+These are separate from the chain-scoped public-labels bundle. Both routes require `entityId` matching `^[A-Za-z0-9_-]{1,100}$`, rate-limit at 120 / 60 s, and send `Cache-Control: public, max-age=60, stale-while-revalidate=60`. Upstream failures are 502.
+
+| Route | Cache key | Timeout | Miss / 404 |
+|---|---|---|---|
+| `GET /api/internal/curator-profiles/{entityId}` | V3 URL + label set + version + entity id | 15 s | 404 → `{ source: 'v3', entity: null }`; other errors use bounded stale then 502 |
+| `GET /api/internal/curator-networks/{entityId}` | same, plus enabled chain ids after EulerChains admission | 25 s | stale then 502 |
+
+Static labels mode returns `{ source: 'static' }` without hitting V3 (profile `entity: null`, networks `[]`). Product counts use `product.entityId`; Earn counts use vault rows with `vaultType === 'earn'`. Page-level fallback and completeness rules are in [Vault Labels → Curator profile pages](./vault-labels-and-verification.md#curator-profile-pages).
 
 ### Liquidation bot coverage
 

@@ -7,7 +7,8 @@ Lite can show a one-time, deployment-controlled announcement after onboarding. I
 | File | Purpose |
 |------|---------|
 | `utils/announcement-config.ts` | Normalizes env input, parses list items, validates links, and builds the dismissal token. |
-| `server/plugins/app-config.ts` | Reads runtime env vars and injects the announcement into `window.__APP_CONFIG__`. |
+| `utils/app-config.ts` | `readAppEnvConfig()` reads `CONFIG_ANNOUNCEMENT_*` (then `NUXT_PUBLIC_` aliases) into `__APP_CONFIG__.announcement`. |
+| `server/plugins/app-config.ts` | Injects `readAppEnvConfig()` into `window.__APP_CONFIG__`. |
 | `composables/useEnvConfig.ts` | Resolves injected runtime config first, then Nuxt public runtime config fallbacks. |
 | `composables/useDeployConfig.ts` | Exposes `announcement` with other deployment config. |
 | `app.vue` | Decides when to open the modal and persists the seen token. |
