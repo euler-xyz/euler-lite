@@ -67,6 +67,23 @@ Combined helpers keep page code simpler where a workflow can use either a same-a
 
 The wrapper supplies the current SDK `Account`, wallet/sub-account owner, and chain id. The quote and vault inputs stay explicit at the page/composable boundary. Forms capture an immutable `OperationIntent` from the same input snapshot used to build each preview; selected quote cards carry that intent alongside their optional plan and prepared result. These helpers may eagerly build and simulate previews, but their results are not wallet-executable authority. The reviewed execution captures the connected wallet/session and seals the effective approval mode before review. Cross-position repay intents list both the debt sub-account and the source sub-account.
 
+## Collateral withdrawal limits
+
+EVK checks a collateral withdrawal against **borrow LTV**, not only liquidation LTV: remaining borrow-adjusted collateral value must stay strictly above the liability. Lite mirrors that in `utils/vault/withdraw.ts` before it builds `planWithdraw` / `planRedeem`.
+
+`getBorrowLtvWithdrawLimit` uses the controller's `IAccountLiquidity` borrowing values:
+
+- No liability → the user's full collateral balance (still cash-capped by vault `availableLiquidity` / `availableAssets` via `getCashLimitedWithdrawAmount`).
+- Headroom is `totalCollateralValue.borrowing - liability - 100 bps`, with the 1% buffer rounded **up** so interest and oracle drift between the snapshot and execution do not revert. The withdrawable amount of this collateral is `headroom * collateralAssets / thisCollateralBorrowingValue`, floored, and never above the balance.
+- Inside that 1% margin, or when `totalCollateralValue.borrowing <= liability` (`isAtBorrowLtvLimit`), the limit is `0`.
+- Collateral the account check values at `0` (including borrow LTV 0) can still be withdrawn in full while other collateral covers the buffered liability. If the position is already at the limit, that zero-value collateral is also blocked.
+
+`getBorrowLtvWithdrawNotice` is shown only at the limit: **Borrow LTV is 0** when this collateral's pair LTV is 0 (`Repay debt or add a different collateral` / `Repay the full debt`), otherwise **LTV limit reached**.
+
+The position withdraw form (`pages/position/[number]/withdraw.vue`) uses the tighter of the borrow-LTV limit and the cash limit as `effectiveBalance`. Max is hidden until the borrow-LTV limit is defined **and** that balance is `> 0n`. `validateCollateralWithdraw` runs on direct withdraw; batched withdrawals are checked with the whole batch. A separate liquidation-LTV projection (`estimateCollateralLiquidityChange` in `utils/position-collateral-estimate.ts`) still has to keep `hasLiquidationLiquidity`. Withdrawing the entire collateral balance uses `planRedeem(shares: maxUint256)` rather than a fixed `withdraw(assets)`, so share-price rounding and accrued interest do not leave dust.
+
+Idle lend/Earn withdraw pages only apply the cash cap. Do not copy the borrow-LTV helper onto those forms.
+
 ## Execution Flow
 
 1. Forms eagerly preprocess accounts, quotes, slot hints, plugin data, and simulation results. Preview data is cached only as canonical serializable values keyed by the full intent/content identity; it never recovers authority from an SDK plan object or Vue reference. Add-to-batch stores only `{ intentId, revision, intent }`; plans and builders stay outside the draft DTO.
