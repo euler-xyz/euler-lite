@@ -156,8 +156,10 @@ describe('/api/internal/rpc batch budget', () => {
       request('eth_call', 2, [transaction, 'latest']),
       request('eth_estimateGas', 3, [transaction]),
     ]))
-    await expect(handler(makeEvent(batch(86)))).rejects.toMatchObject({ statusCode: 429 })
-    await handler(makeEvent(batch(85)))
+    // Omitted gas costs 11 for eth_call and 19 for eth_estimateGas:
+    // 9,900 + 11 + (1 + 11 + 19) leaves 58 units.
+    await expect(handler(makeEvent(batch(59)))).rejects.toMatchObject({ statusCode: 429 })
+    await handler(makeEvent(batch(58)))
     await expect(handler(makeEvent(request()))).rejects.toMatchObject({ statusCode: 429 })
     expect(fetchMock).toHaveBeenCalledTimes(102)
   })

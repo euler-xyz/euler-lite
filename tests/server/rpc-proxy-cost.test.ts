@@ -110,7 +110,7 @@ const accounts = (count: number) => Object.fromEntries(
 describe('/api/internal/rpc route', () => {
   beforeEach(() => {
     mocks.resolveRpcUrl.mockReturnValue('https://rpc.example')
-    mocks.fetch.mockResolvedValue(new Response('{"jsonrpc":"2.0","id":1,"result":"0x1"}', {
+    mocks.fetch.mockImplementation(async () => new Response('{"jsonrpc":"2.0","id":1,"result":"0x1"}', {
       status: 200,
       headers: { 'content-type': 'application/json' },
     }))
@@ -131,9 +131,10 @@ describe('/api/internal/rpc route', () => {
 
   it.each([
     ['cheap RPC method', rpcRequest('eth_blockNumber'), 1],
-    ['small eth_call', rpcRequest('eth_call', [{ to: ADDRESS, data: '0x12345678' }, 'latest']), 2],
-    ['eth_estimateGas', rpcRequest('eth_estimateGas', [{ to: ADDRESS, data: '0x12345678' }]), 10],
-    ['eth_createAccessList', rpcRequest('eth_createAccessList', [{ to: ADDRESS, data: '0x12345678' }, 'latest']), 10],
+    ['eth_call with omitted gas', rpcRequest('eth_call', [{ to: ADDRESS, data: '0x12345678' }, 'latest']), 11],
+    ['eth_call with bounded gas', rpcRequest('eth_call', [{ to: ADDRESS, data: '0x12345678', gas: quantity(5_000_000) }, 'latest']), 2],
+    ['eth_estimateGas with omitted gas', rpcRequest('eth_estimateGas', [{ to: ADDRESS, data: '0x12345678' }]), 19],
+    ['eth_createAccessList with omitted gas', rpcRequest('eth_createAccessList', [{ to: ADDRESS, data: '0x12345678' }, 'latest']), 19],
     ['block headers only', rpcRequest('eth_getBlockByNumber', ['latest', false]), 1],
     ['full block response', rpcRequest('eth_getBlockByNumber', ['latest', true]), 5],
     [
@@ -149,6 +150,25 @@ describe('/api/internal/rpc route', () => {
 
     expect(mocks.consume).toHaveBeenCalledWith(event, expectedCost)
     expect(mocks.fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ['eth_call', 11],
+    ['eth_estimateGas', 19],
+    ['eth_createAccessList', 19],
+  ])('does not discount %s when its gas limit is omitted', async (method, expectedCost) => {
+    const transaction = { to: ADDRESS, data: '0x12345678' }
+    const explicit = rpcRequest(method, [{ ...transaction, gas: quantity(50_000_000) }, 'latest'])
+    const omitted = rpcRequest(method, [transaction, 'latest'])
+
+    await handler(makeEvent(explicit))
+    await handler(makeEvent(omitted))
+
+    expect(mocks.consume).toHaveBeenNthCalledWith(1, expect.anything(), expectedCost)
+    expect(mocks.consume).toHaveBeenNthCalledWith(2, expect.anything(), expectedCost)
+    expect(mocks.fetch).toHaveBeenNthCalledWith(2, 'https://rpc.example', expect.objectContaining({
+      body: JSON.stringify(omitted),
+    }))
   })
 
   it('adds calldata, gas, and state-override complexity to an SDK-shaped eth_call', async () => {
@@ -235,7 +255,7 @@ describe('/api/internal/rpc route', () => {
       statusMessage: 'Too Many Requests',
     })
 
-    expect(mocks.consume).toHaveBeenCalledWith(expect.anything(), 10)
+    expect(mocks.consume).toHaveBeenCalledWith(expect.anything(), 19)
     expect(mocks.fetch).not.toHaveBeenCalled()
   })
 

@@ -155,14 +155,16 @@ function assessTransactionParams(params: unknown): number {
     return invalidParams(`RPC calldata exceeds ${MAX_CALLDATA_BYTES} bytes`, 413)
   }
 
-  let cost = steppedModifier(calldataBytes, CALLDATA_COST_CHUNK_BYTES)
-  if (transaction.gas !== undefined) {
-    const gas = parseHexQuantity(transaction.gas, 'RPC gas limit')
-    if (gas > MAX_EXPLICIT_GAS) {
-      return invalidParams(`RPC gas limit exceeds ${MAX_EXPLICIT_GAS}`)
-    }
-    cost += steppedBigIntModifier(gas, GAS_COST_CHUNK)
+  // An omitted gas limit uses the upstream node's allowance, so charge the
+  // maximum supported tier without changing the forwarded transaction.
+  const gas = transaction.gas === undefined
+    ? MAX_EXPLICIT_GAS
+    : parseHexQuantity(transaction.gas, 'RPC gas limit')
+  if (gas > MAX_EXPLICIT_GAS) {
+    return invalidParams(`RPC gas limit exceeds ${MAX_EXPLICIT_GAS}`)
   }
+  let cost = steppedModifier(calldataBytes, CALLDATA_COST_CHUNK_BYTES)
+    + steppedBigIntModifier(gas, GAS_COST_CHUNK)
 
   const stateOverride = params[2]
   if (stateOverride !== undefined && stateOverride !== null) {
