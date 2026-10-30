@@ -141,7 +141,7 @@ function assessStateOverride(value: unknown): number {
     + Math.ceil(codeBytes / STATE_OVERRIDE_CODE_COST_CHUNK_BYTES)
 }
 
-function assessTransactionParams(params: unknown): number {
+function assessTransactionParams({ method, params }: JsonRpcRequest): number {
   if (!Array.isArray(params)) return 0
   const transaction = params[0]
   if (!isJsonObject(transaction)) return 0
@@ -163,8 +163,12 @@ function assessTransactionParams(params: unknown): number {
   if (gas > MAX_EXPLICIT_GAS) {
     return invalidParams(`RPC gas limit exceeds ${MAX_EXPLICIT_GAS}`)
   }
+  // Geth estimates with the block/node allowance when gas is below 21,000.
+  const gasForCost = method === 'eth_estimateGas' && gas < 21_000n
+    ? MAX_EXPLICIT_GAS
+    : gas
   let cost = steppedModifier(calldataBytes, CALLDATA_COST_CHUNK_BYTES)
-    + steppedBigIntModifier(gas, GAS_COST_CHUNK)
+    + steppedBigIntModifier(gasForCost, GAS_COST_CHUNK)
 
   const stateOverride = params[2]
   if (stateOverride !== undefined && stateOverride !== null) {
@@ -284,10 +288,10 @@ function assessRpcRequestCost(request: JsonRpcRequest): number {
 
   switch (request.method) {
     case 'eth_call':
-      return 2 + assessTransactionParams(request.params)
+      return 2 + assessTransactionParams(request)
     case 'eth_estimateGas':
     case 'eth_createAccessList':
-      return 10 + assessTransactionParams(request.params)
+      return 10 + assessTransactionParams(request)
     case 'eth_getLogs':
       return assessLogFilter(request.params)
     case 'eth_feeHistory':

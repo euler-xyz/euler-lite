@@ -171,6 +171,25 @@ describe('/api/internal/rpc route', () => {
     }))
   })
 
+  it.each([
+    ['eth_estimateGas', 0, 19],
+    ['eth_estimateGas', 1, 19],
+    ['eth_estimateGas', 20_999, 19],
+    ['eth_estimateGas', 21_000, 10],
+    ['eth_call', 0, 2],
+    ['eth_createAccessList', 0, 10],
+  ])('charges %s with gas %i according to its effective execution allowance', async (method, gas, expectedCost) => {
+    const request = rpcRequest(method, [{ to: ADDRESS, data: '0x12345678', gas: quantity(gas) }, 'latest'])
+    const event = makeEvent(request)
+
+    await handler(event)
+
+    expect(mocks.consume).toHaveBeenCalledWith(event, expectedCost)
+    expect(mocks.fetch).toHaveBeenCalledWith('https://rpc.example', expect.objectContaining({
+      body: JSON.stringify(request),
+    }))
+  })
+
   it('adds calldata, gas, and state-override complexity to an SDK-shaped eth_call', async () => {
     const request = rpcRequest('eth_call', [
       {
