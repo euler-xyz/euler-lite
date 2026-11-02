@@ -74,9 +74,9 @@ EVK checks a collateral withdrawal against **borrow LTV**, not only liquidation 
 `getBorrowLtvWithdrawLimit` uses the controller's `IAccountLiquidity` borrowing values:
 
 - No liability → the user's full collateral balance (still cash-capped by vault `availableLiquidity` / `availableAssets` via `getCashLimitedWithdrawAmount`).
-- Headroom is `totalCollateralValue.borrowing - liability - 100 bps`, with the 1% buffer rounded **up** so interest and oracle drift between the snapshot and execution do not revert. The withdrawable amount of this collateral is `headroom * collateralAssets / thisCollateralBorrowingValue`, floored, and never above the balance.
-- Inside that 1% margin, or when `totalCollateralValue.borrowing <= liability` (`isAtBorrowLtvLimit`), the limit is `0`.
-- Collateral the account check values at `0` (including borrow LTV 0) can still be withdrawn in full while other collateral covers the buffered liability. If the position is already at the limit, that zero-value collateral is also blocked.
+- For collateral with a nonzero borrowing value, headroom is `totalCollateralValue.borrowing - liability - ceil(liability * 100 / 10_000)`. The 1% liability buffer is rounded **up** to leave room for interest and oracle drift between the snapshot and execution. The withdrawable amount is `headroom * collateralAssets / thisCollateralBorrowingValue`, floored, and never above the balance.
+- For that nonzero-value collateral, headroom `<= 0` makes the limit `0`.
+- With debt outstanding, collateral the account check values at `0` (including borrow LTV 0) bypasses the 1% buffer: it can be withdrawn in full while `totalCollateralValue.borrowing > liability`, including inside the margin. It is blocked when `totalCollateralValue.borrowing <= liability` (`isAtBorrowLtvLimit`).
 
 `getBorrowLtvWithdrawNotice` is shown only at the limit: **Borrow LTV is 0** when this collateral's pair LTV is 0 (`Repay debt or add a different collateral` / `Repay the full debt`), otherwise **LTV limit reached**.
 
