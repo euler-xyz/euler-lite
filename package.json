@@ -79,7 +79,7 @@
   },
   "overrides": {
     "@base-org/account": "2.5.1",
-    "@wagmi/connectors": "8.2.0",
+    "@wagmi/connectors": "8.2.2",
     "serialize-javascript": "7.1.0",
     "ws": "8.21.3",
     "@coinbase/cdp-sdk": {
