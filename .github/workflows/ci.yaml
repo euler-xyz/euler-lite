@@ -72,3 +72,21 @@ jobs:
       - run: npm run build
 
       - run: npm run test:run
+
+      - name: Install Chromium for CSP controls
+        run: npx playwright install --with-deps chromium
+
+      - name: Check production CSP in a real browser
+        env:
+          HOST: 127.0.0.1
+          PORT: 3000
+          DOPPLER_ENVIRONMENT: dev
+        run: |
+          node .output/server/index.mjs > /tmp/csp-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID"' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:3000/healthz > /dev/null; then break; fi
+            sleep 1
+          done
+          npm run csp:controls -- --url http://127.0.0.1:3000
