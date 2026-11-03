@@ -25,7 +25,7 @@ The adapter also reads `/evk/vaults` and `/earn/vaults` with explicit `visibilit
 
 Entity profiles supply hosted logo URLs. A product's `entityId` is its managing entity; `coBrandEntityIds` supplies additional display branding only. Co-brands do not participate in curator ownership, governor verification, or curator-profile market assignment. Neutral escrow inventory rows are not assigned to a product/entity and are not added to the labels-derived verified set.
 
-Curator pages load one V3 entity profile by ID through `/api/internal/curator-profiles/{entityId}`, independently of the selected chain. The network cards select chain-scoped markets and Earn vaults, which still come from `useEulerLabels`. The profile request has a five-minute server cache with bounded stale fallback. If it fails while a chain labels bundle is available, the page shows entity details from that bundle; if no profile data is available, it offers a retry. With `LABELS_SOURCE=static`, the page uses the selected chain's authored entity profile.
+Dedicated curator pages (`/curators/{entityId}`) load a chain-independent V3 entity profile and a cross-chain network index; the selected chain still supplies markets and Earn vaults. See [Curator profile pages](#curator-profile-pages).
 
 Lite evaluates live V3 geo policies using `countriesResolved` and cumulative global/chain/product/vault/asset rules. Geo rules retain their own fetch time and disk checkpoint. A failed labels refresh can reuse label content with newer geo rules; a cached bundle never serves geo rules past their one-day limit. Mount `GEO_POLICY_CACHE_DIR` on persistent storage for redeploy durability. Hosted snapshots have no GitHub-label dependency. `LABELS_SOURCE=static` supplies the same snapshot from operator-owned files; see [Static labels](./static-labels.md). Production bake/canary remain rollout work. See [Geo-Blocking](./geo-blocking.md).
 
@@ -52,6 +52,30 @@ Vault campaigns have a `name`, hosted `logo`, and `type` of `deposit` or `borrow
 Classification markers use vault `tags`. Current UI-recognized tags include `keyring`, `access control`, `governance limited`, `recently added`, `suppress high utilisation warning`, and `cyclical note`.
 
 Vault tags stay scoped to their vault override. A product-level tag is emitted only when every assigned vault carries that tag, so one vault's classification cannot leak to sibling vaults.
+
+---
+
+## Curator profile pages
+
+`/curators/{entityId}` is a chain-independent profile plus chain-scoped listings. `CuratorEntityLink` links there only when exactly one entity resolves to an id; multi-entity and missing-id rows stay unlinked.
+
+| Surface | Source |
+|---|---|
+| Profile text, logos, social links, completeness | `GET /api/internal/curator-profiles/{entityId}` → V3 `GET /labels/entities/{entityId}` |
+| Network cards (product count / Earn count per enabled chain) | `GET /api/internal/curator-networks/{entityId}` → V3 products + vaults for that `entityId` |
+| Markets and Earn tabs for the selected chain | `useEulerCuratorProfile` over `useEulerLabels` / `useMarketGroups` / Earn registry |
+
+Entity ids in the URL and both routes must match `^[A-Za-z0-9_-]{1,100}$` (400 otherwise). Each route rate-limits at 120 requests/minute and returns `Cache-Control: public, max-age=60, stale-while-revalidate=60`. Upstream failures are 502.
+
+The profile cache is 5 minutes, keyed by V3 URL + label set + version + entity id, with in-flight dedup, a 15 s wall-clock timeout, and bounded stale fallback. A 404 becomes `{ source: 'v3', entity: null }` (not found), not a 502. Identity mismatch (`response.data.id !== entityId`) is a fetch error. The network index uses the same cache shape with a 25 s timeout and only counts products/Earn vaults on chains that remain enabled after EulerChains admission.
+
+HTTPS-only sanitization (`utils/curator-profile.ts`) repairs a leading `hhttps://`, accepts website/social URLs only over `https` without credentials, and expands bare social handles (`@name` → `https://x.com/name`, and the GitHub / Discord / Telegram / YouTube bases). Completeness scores eight fields equally: description, website, legal entity, risk methodology, security, terms of service, licenses, disclaimers. An explicit “does not apply” statement counts as provided. The completeness bar is shown only for a successful V3 profile, not for chain-label fallback.
+
+If the profile request fails while the selected-chain labels bundle still has that entity, the page keeps those details without remounting, hides completeness, and shows **Try again**. Retry calls `refreshProfile()` in place. A failed retry keeps the fallback and re-enables the button. With no fallback entity the page shows the empty/unavailable state instead. Network-index failures leave the profile visible and isolate the listings.
+
+With `LABELS_SOURCE=static`, both endpoints return `{ source: 'static' }` without hitting V3. The page then uses the selected chain's authored entity profile; listings still come from that chain's labels.
+
+Markets on the page are product groups whose **managing** entity matches the profile id. Co-brands do not assign ownership. Earn rows must be verified, owner-verified, tag-selected, and explorable (unless `?showAll`).
 
 ---
 
@@ -313,13 +337,20 @@ Labels control which vaults appear on each discovery page:
 
 Each flag is a table: the lend flag controls the Lend and Earn lists, the borrow flag every Borrow pair the vault takes part in. On V3, deprecation hides both sides unless a side is re-listed where V3 allows it; a re-listed side behaves as listed. Static and metadata-only labels do not hide deprecated vaults: they stay product members with a "Deprecated" badge. An explicit per-vault flag overrides the product setting for that side; a missing flag inherits it.
 
-‡A lending vault is listed while it is open for deposits and has a pair with borrow LTV > 0 against a collateral whose borrow side is listed (`utils/vault/borrow-table.ts`). The vault's own borrow flag and borrow pauses do not affect this. On V3, hiding or deprecating its only such collateral removes the lending vault from Lend.
+‡A lending vault is listed while it is open for deposits and has a pair with borrow LTV > 0 against a collateral the Borrow table lists (`isLendTableVault` in `utils/vault/borrow-table.ts`). The vault's own borrow flag and borrow pauses do not affect this. An **Unknown** collateral (no published label verifies it) stays on the market graph but is not Borrow-table collateral (`isBorrowTableCollateral`), so it cannot keep a lending vault on Lend or a pair on Borrow. On V3, hiding or deprecating its only such collateral removes the lending vault from Lend.
 
-*A member with no live LTV edge stays in the graph and matrices only while its lend side is listed. A live edge has borrow LTV > 0 or a current liquidation LTV above zero (`isLiveCollateralEdge`).
+*A member with no live LTV edge stays in the graph and matrices only while its lend side is listed. A live edge has borrow LTV > 0 or a current liquidation LTV above zero (`isLiveCollateralEdge`). Hidden vaults can be collateral endpoints, but only listed vaults supply **loan-side** relationships unless the market sets `showsAllMembers`. When every member of a listed market would be dropped under that rule, none is dropped, so the graph still shows the product's vaults.
 
 †A vault hidden on both sides appears in a market only while a member accepts it as collateral with a live LTV. When it is only the loan side of live LTVs, it is not drawn.
 
-Explore lists a product only while it has an explorable market side: at least one member vault that is open on the lend side, or borrowable (including residual debt) and open on the borrow side. A collateral-only product — every member flagged `notExplorableLend` and not borrowable, e.g. issuer-governed Securitize collateral wrappers — gets no Explore card. Its vaults still render as external collateral in other markets' graphs, and its direct market URL still resolves on demand (members are satisfied from the vault registry first, so non-EVault members load correctly). Such on-demand markets, and every market under `?showAll`, keep all of their members; a listed market opened by direct URL follows the rules above.
+Explore listing is two layers:
+
+1. **Product grouping** (`groupHasExplorableMarket` in `useMarketGroups`): a product gets a market group only while at least one member is open on the lend side, or borrowable (including residual debt) and open on the borrow side. A collateral-only product — every member flagged `notExplorableLend` and not borrowable, e.g. issuer-governed Securitize wrappers — gets no Explore card. Its vaults still render as external collateral in other markets' graphs, and its direct market URL still resolves on demand (members are satisfied from the vault registry first, so non-EVault members load correctly). On-demand markets, and every market under `?showAll`, set `showsAllMembers` and keep all of their members.
+2. **Page filter** (`isExploreListedMarket` on `pages/explore/index.vue`): after `isMarketDataResolved`, Explore keeps a grouped market only while one of its **member** vaults is in the Lend table or in a Borrow-table pair (including when the listed pair's other side is outside the product). A **fully deprecated** market stays listed, last, so its users can still find it. Until market data resolves, the page does not apply this filter, so incomplete pairs cannot hide every market for a moment. `?showAll` keeps every grouped market.
+
+A product whose members only back a lending vault hidden from Borrow is grouped by layer 1 and dropped by layer 2. A collateral-only product whose vaults still back another market's listed lending vault stays listed. A product hidden from Lend that still has a Borrow-table pair among its members stays listed.
+
+Lend (`pages/lend/index.vue`) and Borrow (`pages/borrow/index.vue`) use the same `isLendTableVault` / `isBorrowTablePair` helpers, so Explore cannot advertise a market that those tables would not show.
 
 Vaults hidden from discovery are still accessible via direct URL and remain visible in the user's portfolio.
 
@@ -382,9 +413,15 @@ These labels appear in address fields across all vault overview types (EVK, Earn
 | `utils/label-logo.ts` | Allowlist for entity / product / campaign logo URLs |
 | `utils/vault-assessment/presentation.ts` | Vault-checks copy, grouping, and listing-impact tags |
 | `utils/eulerLabelsUtils.ts` | Lookup and helper functions backed by the normalized label snapshot |
+| `utils/curator-profile.ts` | Profile completeness, HTTPS URL sanitization, and `/curators/{id}` path |
+| `utils/vault/borrow-table.ts` | Shared Lend / Borrow / Explore listing predicates |
+| `utils/vault/market-group-visibility.ts` | `groupHasExplorableMarket` product-grouping gate |
 | `server/utils/public-labels-source.ts` | Shared V3 aggregate cache used by browser, public APIs, and vault snapshots |
+| `server/utils/curator-profile-source.ts` | Chain-independent V3 entity profile cache |
+| `server/utils/curator-network-index.ts` | Cross-chain product / Earn counts for a managing entity |
 | `server/utils/static-labels-source.ts` | Atomic authoring-file source and durable checkpoint for forks |
 | `composables/useEulerLabels.ts` | Chain-scoped aggregate loading and normalized label publication |
+| `composables/useEulerCuratorProfile.ts` | Selected-chain markets and Earn rows for a curator page |
 | `composables/useVaultRegistry.ts` | Vault registry with type detection and unknown resolution |
 | `composables/useGeoBlock.ts` | V3 country evaluation and independent sanctions gate |
 
