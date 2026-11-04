@@ -10,6 +10,9 @@ vi.mock('~/utils/sdk-prices', () => ({
   getAssetUsdValueForEstimate: async (amount: bigint) => Number(amount),
   getAssetUsdValueOrZero: async (amount: bigint) => Number(amount),
 }))
+vi.mock('~/utils/vault/borrow-table', () => ({
+  isBorrowTablePair: () => true,
+}))
 
 // computeMetricsSync reaches for Nuxt-auto-imported APY helpers; stub them the
 // same way tests/setup.ts stubs other unimport globals.
@@ -91,12 +94,53 @@ describe('buildProductGroups', () => {
     expect(groups.map(group => group.id)).toEqual(['kpk-securitize', 'securitize'])
   })
 
+  it('keeps a collateral-only product whose member backs a listed Borrow pair', () => {
+    const { groups } = buildProductGroups(
+      [makeEVault(LEND_VAULT), makeWrapper(WRAPPER)],
+      products,
+      {},
+      false,
+      new Set([WRAPPER.toLowerCase()]),
+    )
+
+    expect(groups.map(group => group.id)).toEqual(['kpk-securitize', 'securitize'])
+  })
+
   it('keeps members without live LTV edges only when show-all-label-entries is on', () => {
     const build = (listNonMarketGroups: boolean) =>
       buildProductGroups([makeEVault(LEND_VAULT), makeWrapper(WRAPPER)], products, {}, listNonMarketGroups).groups
 
     expect(build(false).every(group => !group.showsAllMembers)).toBe(true)
     expect(build(true).every(group => group.showsAllMembers)).toBe(true)
+  })
+})
+
+describe('listed Borrow collateral product groups', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('carries a collateral-only product through market-group construction', () => {
+    const lend = makeEVault(LEND_VAULT)
+    const wrapper = makeWrapper(WRAPPER)
+    __setEulerLabelsDataForTest({ products })
+    vi.stubGlobal('useVaultRegistry', () => ({
+      getAll: () => [{ vault: lend }, { vault: wrapper }],
+      isKnownEscrowAddress: () => false,
+    }))
+    vi.stubGlobal('useEulerLabels', () => ({ products, entities: {}, isReady: ref(true) }))
+    vi.stubGlobal('useVaults', () => ({
+      borrowList: ref([{ borrow: lend, collateral: wrapper }]),
+      isVaultGovernorVerified: () => true,
+      isCollateralResolved: ref(true),
+      isMarketDataResolved: ref(true),
+      isReady: ref(true),
+    }))
+    vi.stubGlobal('useShowAllLabelEntries', () => ref(false))
+    const scope = effectScope()
+    try {
+      const groups = scope.run(useMarketGroups)!
+      expect(groups.marketGroupsSync.value.map(group => group.id)).toEqual(['kpk-securitize', 'securitize'])
+    }
+    finally { scope.stop() }
   })
 })
 
