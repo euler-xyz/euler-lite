@@ -53,9 +53,10 @@ Euler Lite is the only service. Standard commands live in `README.md` ("Availabl
   `useEulerAccount`, `useTxBatch`, `useWallets`). `app.vue` eagerly instantiates the key
   composables at the root so their watchers survive navigation. TanStack Vue Query
   (`plugins/01.query.ts`) is used for some async caching, not as global app state.
-- **Config flows env → server plugin → `window` global → composable:**
+- **Config flows env → shared builder → server plugin → `window` global → composable:**
   - `RPC_URL_*`, `DEPRECATED_CHAINS`, `ONCHAIN_SDK_CHAINS`, `EVAULT_FETCH_CHUNK_CHAINS`
-    → `server/plugins/chain-config.ts` → `window.__CHAIN_CONFIG__` → `useChainConfig()`.
+    → `readChainEnvConfig()` in `utils/chain-env.ts` → `server/plugins/chain-config.ts` →
+    `window.__CHAIN_CONFIG__` → `useChainConfig()`.
     On every HTML render the plugin layers the cached `EulerChains.json` `status` and
     `explorerUrl` over the env lists (`utils/chain-status.ts`): `unlisted` chains are dropped,
     `staging` chains are dropped when `DOPPLER_ENVIRONMENT=prd`, `deprecated` chains join
@@ -63,9 +64,11 @@ Euler Lite is the only service. Standard commands live in `README.md` ("Availabl
     Note: `__CHAIN_CONFIG__` carries only chain IDs + validation metadata (`enabledChainIds`,
     `deprecatedChainIds`, `onchainSdkChainIds`, `eVaultFetchChunkChainIds`, `unsupportedChainIds`,
     `chainEnvIssues`) and the registry `explorerUrls` — the `RPC_URL_*` values themselves stay
-    server-side.
-  - AppKit / V3 / Swap / Pyth URLs + branding → `server/plugins/app-config.ts` →
-    `window.__APP_CONFIG__` → `useEnvConfig()`
+    server-side. On the server, `useChainConfig()` calls the same builder directly.
+  - AppKit / V3 / Swap / Pyth URLs + branding → `readAppEnvConfig()` in `utils/app-config.ts` →
+    `server/plugins/app-config.ts` (overlays `v3ImagesUrl`) → `window.__APP_CONFIG__` →
+    `useEnvConfig()`. Add new `__APP_CONFIG__` keys in the shared builder, not by re-parsing
+    env in the plugin. On the server, `useEnvConfig()` calls the same builder directly.
   - `NUXT_PUBLIC_CONFIG_*` feature flags/page toggles → Nuxt `runtimeConfig.public` → `useDeployConfig()`
 - **Configured upstream secrets stay server-side.** `RPC_URL_*`, subgraph URLs (`SUBGRAPH_URL_*`),
   and the V3 URL are never shipped to the browser; the app's own reads go through same-origin
@@ -80,7 +83,7 @@ Euler Lite is the only service. Standard commands live in `README.md` ("Availabl
 
 | Directory | Contents |
 |-----------|----------|
-| `pages/` | File-based routes. Key sections: `/explore`, `/lend`, `/borrow`, `/earn`, `/portfolio`, `/position/[number]/*` (supply/withdraw/repay/multiply/migrate), `/batch`. `/ui` is a dev-only component playground stripped from production builds. |
+| `pages/` | File-based routes. Key sections: `/explore`, `/lend`, `/borrow`, `/earn`, `/portfolio`, `/curators/[slug]`, `/position/[number]/*` (supply/withdraw/repay/multiply/migrate), `/batch`. `/ui` is a dev-only component playground stripped from production builds. |
 | `components/` | `base/`, `layout/`, `entities/` (feature components — scanned by Tailwind), `ui/` (design-system kit — SCSS, **excluded** from Tailwind scanning), plus root `Batch*.vue`. Auto-imported flat (`pathPrefix: false`), so use `LogoBrand`, not `BaseLogoBrand`. |
 | `composables/` | Business logic (~97 files). Subdirs `borrow/`, `repay/`, `cowswap/`, `guards/`, `position/`, `useKeyring/`, `useRpcClient/`. **Auto-import nuance:** only top-level `composables/*/index.ts` are auto-imported; nested files must be imported explicitly (e.g. `~/composables/repay/useRepaySwapCore`). |
 | `utils/` | Pure helpers. `utils/vault/` is the largest (classification, APY, LTV, liquidation). |
@@ -102,8 +105,10 @@ Euler Lite is the only service. Standard commands live in `README.md` ("Availabl
   are the app's main outbound data path. Representative routes: `v3/[...path]` (allowlisted V3
   proxy), `rpc/[chainId]` (JSON-RPC, allowlisted methods), `token-list`, `vaults` (pre-computed
   snapshot), `euler-chains` (deployment metadata used as the SDK `deploymentsUrl`),
-  `proxy/subgraph/[chainId]`, `proxy/merkl|fuul|incentra|turtle/*`, `proxy/aave` + `proxy/morpho`
-  (external-migration discovery), `proxy/intrinsic-apy-overrides`, `pyth/updates`, `screen-address`,
+  `curator-profiles/{entityId}` + `curator-networks/{entityId}` (V3 entity profile and
+  cross-chain product/Earn counts), `proxy/subgraph/[chainId]`, `proxy/merkl|fuul|incentra|turtle/*`,
+  `proxy/aave` + `proxy/morpho` (external-migration discovery), `proxy/intrinsic-apy-overrides`,
+  `pyth/updates`, `screen-address`,
   `tenderly/*`, `oracle-*`, `labels/*`, `tos`. This list is **not** exhaustive and drifts between
   branches (e.g. the client-error log endpoint has been removed on `development` to keep browser
   diagnostics local) — treat the `server/api/internal/` directory + `docs/architecture.md` as the
