@@ -11,6 +11,7 @@ import { isLiveCollateralEdge } from '~/utils/vault/ltv'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import { hasResolvedGovernorAdmin } from '~/utils/vault/governor-verification'
 import { groupHasExplorableMarket } from '~/utils/vault/market-group-visibility'
+import { isBorrowTablePair } from '~/utils/vault/borrow-table'
 import { liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
 import { resolveEulerRouterGovernors } from '~/utils/vault/euler-router-governance'
 import { governableGovernorAbi } from '~/abis/oracle'
@@ -66,6 +67,7 @@ export const buildProductGroups = (
   products: Record<string, EulerLabelProduct>,
   entities: Record<string, EulerLabelEntity>,
   listNonMarketGroups: boolean,
+  listedBorrowCollateralAddresses: ReadonlySet<string> = new Set(),
 ): { groups: MarketGroup[], assignedAddresses: Set<string> } => {
   const vaultMap = new Map<string, AnyVault>()
   for (const vault of allVaults) {
@@ -90,12 +92,16 @@ export const buildProductGroups = (
 
     if (memberVaults.length === 0) continue
 
-    // Collateral-only products (every member hidden on both the lend and
-    // borrow side) get no discovery card. Their addresses stay assigned so
-    // the members don't fall into orphan clustering, they still resolve as
-    // externalCollateral in other groups' graphs, and a direct market URL
-    // still loads via fetchMarketGroupOnDemand.
-    if (!listNonMarketGroups && !groupHasExplorableMarket(memberVaults)) continue
+    // Collateral-only products get a discovery card when one of their members
+    // participates as collateral in a listed Borrow pair. Otherwise their
+    // addresses stay assigned so the members don't fall into orphan
+    // clustering, still resolve as externalCollateral in other groups, and
+    // remain available through fetchMarketGroupOnDemand.
+    const hasListedBorrowCollateral = memberVaults.some((vault) => {
+      const address = getVaultAddress(vault)
+      return address && listedBorrowCollateralAddresses.has(address.toLowerCase())
+    })
+    if (!listNonMarketGroups && !groupHasExplorableMarket(memberVaults) && !hasListedBorrowCollateral) continue
 
     // Resolve curator entity
     const entityKeys = Array.isArray(product.entity) ? product.entity : [product.entity]
@@ -384,7 +390,7 @@ export const resolveGroupTVL = async (group: MarketGroup): Promise<MarketGroup> 
 export const useMarketGroups = () => {
   const { getAll, isKnownEscrowAddress } = useVaultRegistry()
   const { products, entities, isReady: labelsReady } = useEulerLabels()
-  const { isVaultGovernorVerified, isCollateralResolved, isMarketDataResolved, isReady: vaultsReady } = useVaults()
+  const { borrowList, isVaultGovernorVerified, isCollateralResolved, isMarketDataResolved, isReady: vaultsReady } = useVaults()
   const showAllLabelEntries = useShowAllLabelEntries()
   const isReady = computed(() => labelsReady.value && vaultsReady.value && isMarketDataResolved.value)
 
@@ -425,7 +431,20 @@ export const useMarketGroups = () => {
     if (vaults.length === 0) return []
 
     // Step 1: Product-label groups
-    const { groups: productGroups, assignedAddresses } = buildProductGroups(vaults, products, entities, showAllLabelEntries.value)
+    const listedBorrowCollateralAddresses = showAllLabelEntries.value
+      ? new Set<string>()
+      : new Set(
+          borrowList.value
+            .filter(pair => isBorrowTablePair(pair, false))
+            .map(pair => pair.collateral.address.toLowerCase()),
+        )
+    const { groups: productGroups, assignedAddresses } = buildProductGroups(
+      vaults,
+      products,
+      entities,
+      showAllLabelEntries.value,
+      listedBorrowCollateralAddresses,
+    )
 
     // Step 2: Augment with collateral graph — pass the full registry so active
     // LTVs targeting non-explorable vaults still resolve as externalCollateral
