@@ -341,16 +341,39 @@ Each flag is a table: the lend flag controls the Lend and Earn lists, the borrow
 
 *A member with no live LTV edge stays in the graph and matrices only while its lend side is listed. A live edge has borrow LTV > 0 or a current liquidation LTV above zero (`isLiveCollateralEdge`). Hidden vaults can be collateral endpoints, but only listed vaults supply **loan-side** relationships unless the market sets `showsAllMembers`. When every member of a listed market would be dropped under that rule, none is dropped, so the graph still shows the product's vaults.
 
-†A vault hidden on both sides appears in a market only while a member accepts it as collateral with a live LTV. When it is only the loan side of live LTVs, it is not drawn.
+†A vault hidden on both sides appears in a market only while a member accepts it as collateral with a live LTV. When it is only the loan side of live LTVs, it is not drawn. Graph node badges are exclusive: Deprecated wins over Unlisted; see [Market graph node badges](#market-graph-node-badges).
 
 Explore listing is two layers:
 
-1. **Product grouping** (`groupHasExplorableMarket` in `useMarketGroups`): a product gets a market group while at least one member is open on the lend side, borrowable (including residual debt) and open on the borrow side, or collateral in a listed Borrow pair. A collateral-only product with no listed Borrow pair — every member flagged `notExplorableLend` and not borrowable, e.g. issuer-governed Securitize wrappers — gets no Explore card. Its vaults still render as external collateral in other markets' graphs, and its direct market URL still resolves on demand (members are satisfied from the vault registry first, so non-EVault members load correctly). On-demand markets, and every market under `?showAll`, set `showsAllMembers` and keep all of their members.
+1. **Product grouping** (`buildProductGroups` in `useMarketGroups`): a product gets a market group while `groupHasExplorableMarket` is true **or** a member is collateral in a listed Borrow-table pair (`isBorrowTablePair`, addresses collected from `borrowList`). `groupHasExplorableMarket` (`utils/vault/market-group-visibility.ts`) is only the first half: a member open on the lend side, or borrowable (including residual debt) and open on the borrow side. It does **not** look at Borrow-table pairs. A collateral-only product with no listed Borrow pair — every member flagged `notExplorableLend` and not borrowable, e.g. issuer-governed Securitize wrappers that do not back a listed lending vault — gets no Explore card. Its vaults still render as external collateral in other markets' graphs, and its direct market URL still resolves on demand (members are satisfied from the vault registry first, so non-EVault members load correctly). On-demand markets, and every market under `?showAll`, set `showsAllMembers` and keep all of their members.
 2. **Page filter** (`isExploreListedMarket` on `pages/explore/index.vue`): after `isMarketDataResolved`, Explore keeps a grouped market only while one of its **member** vaults is in the Lend table or in a Borrow-table pair (including when the listed pair's other side is outside the product). A **fully deprecated** market stays listed, last, so its users can still find it. Until market data resolves, the page does not apply this filter, so incomplete pairs cannot hide every market for a moment. `?showAll` keeps every grouped market.
 
-A product whose members only back a lending vault hidden from Borrow is grouped by layer 1 and dropped by layer 2. A collateral-only product whose vaults still back another market's listed lending vault stays listed. A product hidden from Lend that still has a Borrow-table pair among its members stays listed.
+A product whose members only back a lending vault hidden from Borrow is grouped by layer 1 and dropped by layer 2. A collateral-only product whose vaults still back another market's listed lending vault stays listed (layer 1's Borrow-collateral keep, then layer 2 because that member is in a Borrow-table pair). A product hidden from Lend that still has a Borrow-table pair among its members stays listed.
 
 Lend (`pages/lend/index.vue`) and Borrow (`pages/borrow/index.vue`) use the same `isLendTableVault` / `isBorrowTablePair` helpers, so Explore cannot advertise a market that those tables would not show.
+
+### Market graph node badges
+
+`DiscoveryMarketGraph` draws at most one status mark besides the red Unknown-curator `!`. First match wins:
+
+1. **Vault checks** — V3 `warning` or `hidden`, unless `isDeprecationWarning` suppresses it. Title is always "Vault checks" on the graph (list chips still say Flagged / Warning).
+2. **Deprecated** — `isVaultDeprecated` from labels. Tooltip prefers the V3 deprecation reason when `isDeprecationWarning` is true, otherwise the label reason.
+3. **Ramping down** — `isLiquidationLTVRamping` on a displayed LTV (`isNodeRampingDown`). For a group member, any ramping collateral LTV counts; for external collateral, only a ramping LTV whose other endpoint is already on the graph.
+4. **Unlisted** — hidden from both Lend and Borrow tables (`isVaultNotExplorable`).
+5. **Keyring** — private vault.
+
+`isDeprecationWarning(verdict, deprecatedInLabels)` (`utils/vault-assessment/flagged.ts`) is true only when V3 `status === 'warning'`, `decidedBy === 'deprecated'`, **and** labels also mark the vault deprecated. That combination hides the Vault checks mark so the node shows a single Deprecated badge, including when advisory findings exist. Constraints:
+
+- A V3 deprecation verdict without the label flag stays Vault checks — there is no Deprecated badge to fall through to.
+- A non-deprecation warning or Flagged (`hidden`) verdict wins over Deprecated even when labels say deprecated.
+- Unlisted is not shown when Deprecated already applies.
+- Accepted-only advisory warnings (`decidedBy === 'advisories'`) render nothing.
+
+Do not reuse `VaultAssessmentWarning`'s `hideChecks` on the graph. That prop drops warning chips on list rows; the graph uses `isDeprecationWarning` so a deprecated node keeps the Deprecated badge instead of a Vault checks `!`.
+
+### Market graph ring order
+
+`getRingBlocks` in `utils/discovery-graph-layout.ts` clusters connected vaults so each collateral sits next to its liability. Isolated vaults go last, in input order. The mini preview flattens those blocks onto the ellipse; the enlarged graph calls `getRingBlocks` again on that flattened list and must get the same blocks — the helper is idempotent on its own output. Do not sort nodes by address or TVL for layout: that scatters pairs around the ring and crosses chords. Self-links and edges to addresses outside the node set are ignored.
 
 Vaults hidden from discovery are still accessible via direct URL and remain visible in the user's portfolio.
 
@@ -415,7 +438,9 @@ These labels appear in address fields across all vault overview types (EVK, Earn
 | `utils/eulerLabelsUtils.ts` | Lookup and helper functions backed by the normalized label snapshot |
 | `utils/curator-profile.ts` | Profile completeness, HTTPS URL sanitization, and `/curators/{id}` path |
 | `utils/vault/borrow-table.ts` | Shared Lend / Borrow / Explore listing predicates |
-| `utils/vault/market-group-visibility.ts` | `groupHasExplorableMarket` product-grouping gate |
+| `utils/vault/market-group-visibility.ts` | `groupHasExplorableMarket` lend/borrow-open grouping gate (Borrow-collateral keep is in `buildProductGroups`) |
+| `utils/vault-assessment/flagged.ts` | Flagged copy, opening notices, and `isDeprecationWarning` |
+| `utils/discovery-graph-layout.ts` | `getRingBlocks` / `getRingSlots` market-graph clustering |
 | `server/utils/public-labels-source.ts` | Shared V3 aggregate cache used by browser, public APIs, and vault snapshots |
 | `server/utils/curator-profile-source.ts` | Chain-independent V3 entity profile cache |
 | `server/utils/curator-network-index.ts` | Cross-chain product / Earn counts for a managing entity |
