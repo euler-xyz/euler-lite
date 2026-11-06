@@ -361,6 +361,7 @@ Lend (`pages/lend/index.vue`) and Borrow (`pages/borrow/index.vue`) use the same
 3. **Ramping down** — `isLiquidationLTVRamping` on a displayed LTV (`isNodeRampingDown`). For a group member, any ramping collateral LTV counts; for external collateral, only a ramping LTV whose other endpoint is already on the graph.
 4. **Unlisted** — hidden from both Lend and Borrow tables (`isVaultNotExplorable`).
 5. **Keyring** — private vault.
+6. **Cyclical note** — the vault carries the `cyclical note` label.
 
 `isDeprecationWarning(verdict, deprecatedInLabels)` (`utils/vault-assessment/flagged.ts`) is true only when V3 `status === 'warning'`, `decidedBy === 'deprecated'`, **and** labels also mark the vault deprecated. That combination hides the Vault checks mark so the node shows a single Deprecated badge, including when advisory findings exist. Constraints:
 
