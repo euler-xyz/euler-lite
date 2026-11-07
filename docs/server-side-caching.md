@@ -50,7 +50,7 @@ Merkl, Fuul, Incentra and Turtle are all built from `createProviderProxy(config)
 | Step | Failure → status | Notes |
 |---|---|---|
 | 1. Method in `methods` | 405 | Checked before anything else |
-| 2. Path carries the route prefix | 404 | `Not a <provider> proxy path` |
+| 2. Path starts with the route prefix | 404 | `Not a <provider> proxy path` |
 | 3. `allow(method, path, params)` | 404 | `<Provider> path not allowed`. Exact path + exact query-key allowlist; rejected before rate limiting and before any upstream contact |
 | 4. Rate limit | 429 / 403 | `createRateLimiter` keyed on the trusted client IP; see `server/utils/rate-limit.ts` |
 | 5. `headers()` returns `undefined` | 503 | `<Provider> API key not configured` — a required credential is missing; upstream is never called |

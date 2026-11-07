@@ -18,7 +18,6 @@ import { getInternalFetchHeaders } from '~/server/utils/internal-headers'
 
 vi.mock('h3', () => ({
   createError: (error: unknown) => error,
-  getRequestURL: (event: TestEvent) => new URL(event.url),
 }))
 
 const warn = vi.fn()
@@ -37,6 +36,7 @@ const handler = (await import('~/server/middleware/geo-gate')).default
 
 const makeEvent = (url: string, headers: Record<string, string | undefined> = {}): TestEvent => ({
   url,
+  path: new URL(url).pathname + new URL(url).search,
   node: { req: { headers } },
 } as unknown as TestEvent)
 

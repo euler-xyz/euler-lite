@@ -4,6 +4,7 @@ import { createError, getCookie, getRequestURL, setCookie, setResponseHeader, se
 import { logger } from '~/server/utils/logger'
 import { getEdgeContext } from '~/server/utils/edge'
 import { isInternalRequest } from '~/server/utils/internal-headers'
+import { getRouterPathname } from '~/server/utils/router-path'
 
 function parseAllowedOrigins(): Set<string> {
   // CORS_ALLOWED_ORIGINS is the dedicated CORS var (comma-separated).
@@ -107,8 +108,8 @@ function isSecureRequest(event: H3Event, url: URL): boolean {
   return url.protocol === 'https:' || forwardedProto === 'https'
 }
 
-function shouldSetFirstPartyCookie(url: URL): boolean {
-  return !url.pathname.startsWith('/_nuxt/') && !/\.[a-z0-9]+$/i.test(url.pathname)
+function shouldSetFirstPartyCookie(pathname: string): boolean {
+  return !pathname.startsWith('/_nuxt/') && !/\.[a-z0-9]+$/i.test(pathname)
 }
 
 function setFirstPartyCookie(event: H3Event, url: URL): void {
@@ -147,9 +148,10 @@ export default defineEventHandler((event) => {
   }
 
   const url = getRequestURL(event)
+  const pathname = getRouterPathname(event)
 
-  if (!url.pathname.startsWith('/api/')) {
-    if (shouldSetFirstPartyCookie(url)) {
+  if (!pathname.startsWith('/api/')) {
+    if (shouldSetFirstPartyCookie(pathname)) {
       setFirstPartyCookie(event, url)
     }
     return
@@ -160,7 +162,7 @@ export default defineEventHandler((event) => {
   setResponseHeader(event, 'Vary', 'Origin')
 
   // Endpoints under /api/public/ are intentionally public.
-  if (url.pathname.startsWith('/api/public/')) {
+  if (pathname.startsWith('/api/public/')) {
     setResponseHeader(event, 'Access-Control-Allow-Origin', '*')
     setResponseHeader(event, 'Access-Control-Allow-Methods', 'GET, OPTIONS')
     setResponseHeader(event, 'Access-Control-Allow-Headers', 'Content-Type')
@@ -175,7 +177,7 @@ export default defineEventHandler((event) => {
 
   const origin = event.node.req.headers.origin
 
-  if (origin && (allowedOrigins.has(origin) || (url.pathname === SCREENING_PATH && isEulerFinanceOrigin(origin)))) {
+  if (origin && (allowedOrigins.has(origin) || (pathname === SCREENING_PATH && isEulerFinanceOrigin(origin)))) {
     setResponseHeader(event, 'Access-Control-Allow-Origin', origin)
   }
   else if (origin && process.env.DOPPLER_ENVIRONMENT !== 'dev') {
@@ -191,7 +193,7 @@ export default defineEventHandler((event) => {
     // forced no-store (see cache-error-responses), so this never reaches a
     // shared CDN cache.
     setFirstPartyCookie(event, url)
-    logger.warn({ ctx: 'cors', path: url.pathname }, 'rejected internal endpoint call without Origin')
+    logger.warn({ ctx: 'cors', path: pathname }, 'rejected internal endpoint call without Origin')
     throw createError({
       statusCode: 403,
       statusMessage: 'Forbidden',

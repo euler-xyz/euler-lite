@@ -1,6 +1,6 @@
 import type { H3Event } from 'h3'
-import { getRequestURL } from 'h3'
 import { forceNoStoreCacheHeaders } from '~/server/utils/cache-headers'
+import { getRouterPathname } from '~/server/utils/router-path'
 
 const USER_REWARD_PATH_RE = /^\/api\/internal\/proxy\/merkl\/users\/0x[a-fA-F0-9]{40}\/rewards$/
 
@@ -32,7 +32,7 @@ export function shouldForceNoStoreForPath(pathname: string): boolean {
 }
 
 export function forceNoStoreForSensitivePath(event: H3Event): void {
-  const { pathname } = getRequestURL(event)
+  const pathname = getRouterPathname(event)
   if (!shouldForceNoStoreForPath(pathname)) return
 
   forceNoStoreCacheHeaders(event)

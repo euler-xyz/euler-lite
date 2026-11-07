@@ -1,14 +1,15 @@
-import { createError, getRequestURL } from 'h3'
+import { createError } from 'h3'
 import { SANCTIONED_COUNTRIES } from '~/entities/country-constants'
 import { getEdgeContext } from '~/server/utils/edge'
 import { isInternalRequest } from '~/server/utils/internal-headers'
 import { logger } from '~/server/utils/logger'
 import { safePathTemplate } from '~/server/utils/observability'
+import { getRouterPathname } from '~/server/utils/router-path'
 
 export default defineEventHandler((event) => {
   // Only gate API routes
-  const url = getRequestURL(event)
-  if (!url.pathname.startsWith('/api/')) {
+  const pathname = getRouterPathname(event)
+  if (!pathname.startsWith('/api/')) {
     return
   }
 
@@ -35,7 +36,7 @@ export default defineEventHandler((event) => {
   // (DOPPLER_ENVIRONMENT=dev) without DEV_GEO_COUNTRY set.
   if (!country && edge.providesGeo && process.env.DOPPLER_ENVIRONMENT !== 'dev') {
     logger.warn(
-      { ctx: 'geo-gate', pathTemplate: safePathTemplate(url.pathname) },
+      { ctx: 'geo-gate', pathTemplate: safePathTemplate(pathname) },
       'blocked: country undetermined',
     )
     throw createError({
@@ -47,7 +48,7 @@ export default defineEventHandler((event) => {
   // Log VPN/proxy usage for monitoring (do not block -- too many false positives)
   if (edge.vpnIsUsed === true) {
     logger.warn(
-      { ctx: 'geo-gate', country, vpnIsUsed: true, pathTemplate: safePathTemplate(url.pathname) },
+      { ctx: 'geo-gate', country, vpnIsUsed: true, pathTemplate: safePathTemplate(pathname) },
       'VPN/proxy detected',
     )
   }
@@ -55,7 +56,7 @@ export default defineEventHandler((event) => {
   // Block sanctioned countries
   if (country && SANCTIONED_COUNTRIES.includes(country)) {
     logger.warn(
-      { ctx: 'geo-gate', country, pathTemplate: safePathTemplate(url.pathname) },
+      { ctx: 'geo-gate', country, pathTemplate: safePathTemplate(pathname) },
       'blocked sanctioned country',
     )
     throw createError({
