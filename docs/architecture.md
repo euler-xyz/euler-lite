@@ -376,6 +376,11 @@ The Nuxt server layer (`server/api/`) proxies requests to external services (RPC
 | **Rate limiting** (`server/utils/rate-limit.ts`) | Per-IP cost-based budgets (see below); fails closed (HTTP 403) if the edge provides no trusted client identity in prod |
 | **Swap quote contract validation** (`@eulerxyz/euler-v2-sdk` `swapService`) | Validates each fetched quote's swapper and verifier addresses against the chain's canonical deployment allowlist |
 
+API guards and sensitive-cache checks classify requests with `getRouterPathname(event)`
+(`server/utils/router-path.ts`), using h3's decoded `event.path` without the query string.
+This keeps encoded API prefixes under the same checks as canonical routes. Proxy forwarding
+validation still inspects the raw URL, including V3's rejection of encoded path bytes.
+
 #### JSON-RPC proxy
 
 `POST /api/internal/rpc/{chainId}` forwards JSON-RPC 2.0 to the matching `RPC_URL_<chainId>`. Browser SDK and wagmi transports use it; `getServerSdk` talks to `RPC_URL_*` directly and does **not** go through this proxy.
