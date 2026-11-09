@@ -236,6 +236,26 @@ describe('getCollateralMatrix', () => {
 })
 
 describe('getMiniDiagram', () => {
+  it('marks a pair borrowable when either direction has a borrow LTV', () => {
+    const usdc = makeVault('0xUsdc', [
+      makeLtv({ address: '0xBoth', borrowLTV: 0.7 }),
+      makeLtv({ address: '0xWinding', borrowLTV: 0 }),
+      makeLtv({ address: '0xOneSide', borrowLTV: 0 }),
+    ])
+    const both = makeVault('0xBoth', [makeLtv({ address: '0xUsdc', borrowLTV: 0.7 })])
+    const winding = makeVault('0xWinding', [])
+    const oneSide = makeVault('0xOneSide', [makeLtv({ address: '0xUsdc', borrowLTV: 0.5 })])
+
+    const { edges } = getMiniDiagram(makeMarket([usdc], [both, winding, oneSide]))
+    const between = (a: string, b: string) => edges.find(edge =>
+      [edge.from.address, edge.to.address].sort().join() === [a, b].sort().join(),
+    )
+
+    expect(between('0xboth', '0xusdc')).toMatchObject({ mutual: true, borrowable: true })
+    expect(between('0xwinding', '0xusdc')).toMatchObject({ mutual: false, borrowable: false })
+    expect(between('0xoneside', '0xusdc')).toMatchObject({ mutual: true, borrowable: true })
+  })
+
   it('shows relationships among product members and their direct external collateral only', () => {
     const usdc = makeVault('0xUsdc', [
       makeLtv({ address: '0xCoin', borrowLTV: 0.7 }),
