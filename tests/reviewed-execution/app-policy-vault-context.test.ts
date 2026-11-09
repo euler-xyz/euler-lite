@@ -3,10 +3,13 @@ import { SwapVerificationType } from '@eulerxyz/euler-v2-sdk'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createOperationIntent, type CreateOperationIntentInput } from '~/features/reviewed-execution/domain/factory'
 import { clearDeprecatedDepositAcknowledgements, clearUnverifiedVaultAcknowledgements, recordDeprecatedDepositAcknowledgement, recordUnverifiedVaultAcknowledgement } from '~/features/reviewed-execution/policy/acknowledgements'
+import type { WithdrawalPolicyContext } from '~/features/reviewed-execution/policy/exit-only-withdrawals'
+import { ReviewedExecutionCoordinator } from '~/features/reviewed-execution/coordinator/coordinator'
+import { EoaExecutionAdapter } from '~/features/reviewed-execution/adapters/eoa'
 import { resolveAppPolicy } from '~/features/reviewed-execution/policy/app-policy'
 import { ADDRESS_EXIT_ONLY_MESSAGE, setAddressExitOnly } from '~/composables/addressExitOnlyState'
 import { collectPlannerVaultAddresses, collectPlanningRequirements } from '~/features/reviewed-execution/planning/requirements'
-import { makeReviewedExecution, TEST_ACCOUNT, TEST_TOKEN, TEST_VAULT } from './fixtures'
+import { artifactFor, materializedExecutorFor, makeReviewedExecution, TEST_ACCOUNT, TEST_EVC, TEST_TOKEN, TEST_VAULT } from './fixtures'
 import { makeSwapQuote } from './swap-quote.test-fixture'
 import type { HostedGeoContext } from '~/utils/geo-policies'
 
@@ -385,6 +388,20 @@ describe('final two-vault swap policy', () => {
   describe('exit-only address', () => {
     const intentFor = (kind: CreateOperationIntentInput['kind'], planner: CreateOperationIntentInput['planner'], args: Record<string, unknown>, constraints?: CreateOperationIntentInput['constraints']) =>
       createOperationIntent({ kind, planner, args, constraints, chainId: 1, account: TEST_ACCOUNT, subAccounts: [TEST_ACCOUNT], source: 'test', operation: 'exit-only-test', createdAt: 1, intentId: `exit-only-${planner}` })
+    let debt = 0n
+    let collaterals = [TEST_VAULT]
+    let controllers = [TARGET_VAULT]
+    const getBlockNumber = vi.fn(async () => 101n)
+    const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
+      if (functionName === 'getCollaterals') return collaterals
+      if (functionName === 'getControllers') return controllers
+      if (functionName === 'debtOf') return debt
+      throw new Error(`Unexpected read: ${functionName}`)
+    })
+    const withdrawalContext: WithdrawalPolicyContext = {
+      provider: { getBlockNumber, readContract } as unknown as WithdrawalPolicyContext['provider'],
+      evcAddress: TEST_EVC,
+    }
     const withdrawArgs = { vaultAddress: TEST_VAULT, owner: TEST_ACCOUNT, assets: 1n }
     const repayArgs = { liabilityVault: TEST_VAULT, liabilityAsset: TEST_TOKEN, liabilityAmount: 1n, receiver: TEST_ACCOUNT }
     const swap = { swapQuote: makeSwapQuote() }
@@ -430,6 +447,11 @@ describe('final two-vault swap policy', () => {
     }
 
     beforeEach(() => {
+      debt = 0n
+      collaterals = [TEST_VAULT]
+      controllers = [TARGET_VAULT]
+      getBlockNumber.mockClear()
+      readContract.mockClear()
       setAddressExitOnly(true)
       geo.blocked.mockReturnValue(true)
       verifyVault.mockReturnValue(true)
@@ -437,7 +459,86 @@ describe('final two-vault swap policy', () => {
     afterEach(() => setAddressExitOnly(false))
 
     it.each(Object.keys(allowedIntents) as Array<keyof typeof allowedIntents>)('passes %s', async (planner) => {
-      await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [allowedIntents[planner]()])).resolves.toBeDefined()
+      await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [allowedIntents[planner]()], withdrawalContext)).resolves.toBeDefined()
+    })
+
+    it.each(['withdraw', 'redeem'] as const)('refuses current collateral debt for %s without trusting the form snapshot', async (planner) => {
+      debt = 1n
+      await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [allowedIntents[planner]()], withdrawalContext))
+        .rejects.toThrow(ADDRESS_EXIT_ONLY_MESSAGE)
+      expect(getBlockNumber).toHaveBeenCalledWith({ cacheTime: 0 })
+      expect(readContract.mock.calls.map(([request]) => request)).toEqual([
+        expect.objectContaining({ address: TEST_EVC, functionName: 'getCollaterals', args: [TEST_ACCOUNT], blockNumber: 101n }),
+        expect.objectContaining({ address: TEST_EVC, functionName: 'getControllers', args: [TEST_ACCOUNT], blockNumber: 101n }),
+        expect.objectContaining({ address: TARGET_VAULT, functionName: 'debtOf', args: [TEST_ACCOUNT], blockNumber: 101n }),
+      ])
+    })
+
+    it('does not count a repayment queued ahead of a batch withdrawal as settled debt', async () => {
+      debt = 1n
+      await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100,
+        [allowedIntents['repay-from-wallet'](), allowedIntents.withdraw(), allowedIntents.redeem()], withdrawalContext))
+        .rejects.toThrow(ADDRESS_EXIT_ONLY_MESSAGE)
+      expect(getBlockNumber).toHaveBeenCalledOnce()
+      expect(readContract).toHaveBeenCalledTimes(3)
+    })
+
+    it('allows non-collateral withdrawal while another vault backs debt', async () => {
+      debt = 1n
+      collaterals = [TARGET_VAULT]
+      await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [allowedIntents.withdraw()], withdrawalContext)).resolves.toBeDefined()
+      expect(readContract).toHaveBeenCalledOnce()
+    })
+
+    it('allows collateral withdrawal without an enabled controller', async () => {
+      controllers = []
+      await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [allowedIntents.redeem()], withdrawalContext)).resolves.toBeDefined()
+      expect(readContract).toHaveBeenCalledTimes(2)
+    })
+
+    it('keeps debt repayment available without collateral RPC reads', async () => {
+      debt = 1n
+      await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [allowedIntents['repay-from-deposit']()], withdrawalContext)).resolves.toBeDefined()
+      expect(getBlockNumber).not.toHaveBeenCalled()
+    })
+
+    it('fails closed without a current exposure reader', async () => {
+      await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [allowedIntents.withdraw()])).rejects.toThrow('Current collateral debt is unavailable')
+    })
+
+    it.each(['getCollaterals', 'getControllers', 'debtOf'])('fails closed when %s cannot be read', async (failure) => {
+      const read = vi.fn(async (request: { functionName: string }) => {
+        if (request.functionName === failure) throw new Error('RPC unavailable')
+        return readContract(request)
+      })
+      await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [allowedIntents.withdraw()], {
+        ...withdrawalContext, provider: { getBlockNumber, readContract: read } as unknown as WithdrawalPolicyContext['provider'],
+      })).rejects.toThrow('RPC unavailable')
+    })
+
+    it.each(['withdraw', 'redeem'] as const)('rechecks %s debt at the coordinator handoff after a successful review', async (planner) => {
+      const execution = makeReviewedExecution('eoa', { intent: allowedIntents[planner]() })
+      await resolveAppPolicy(execution.requestSet, 100, execution.intents, withdrawalContext)
+      const sendTransaction = vi.fn(async () => zeroHash)
+      const waitForReceipt = async () => ({ transactionHash: zeroHash, status: 'success' as const })
+      const eoa = new EoaExecutionAdapter({ sendTransaction }, materializedExecutorFor(waitForReceipt), TEST_EVC)
+      const coordinator = new ReviewedExecutionCoordinator({
+        adapters: { eoa, safe: { transport: 'safe', dispatch: async () => { throw new Error('Unexpected Safe') } } },
+        readWalletBinding: async () => execution.requestSet.wallet,
+        revalidatePolicy: async (current) => { await resolveAppPolicy(current.requestSet, 100, current.intents, withdrawalContext) },
+        collectSignature: async () => '0x01',
+        refreshPyth: async () => [],
+        finalize: artifactFor,
+        now: () => 100,
+      })
+      debt = 1n
+      await expect(coordinator.execute(execution, { reviewId: execution.reviewId, reviewDigest: execution.reviewDigest })).resolves.toMatchObject({ status: 'failed', message: ADDRESS_EXIT_ONLY_MESSAGE })
+      expect(sendTransaction).not.toHaveBeenCalled()
+      // An actual settled repayment makes the same exit eligible on its next check.
+      debt = 0n
+      await expect(coordinator.execute(execution, { reviewId: execution.reviewId, reviewDigest: execution.reviewDigest })).resolves.toMatchObject({ status: 'submitted' })
+      expect(sendTransaction).toHaveBeenCalledOnce()
+      expect(getBlockNumber.mock.calls.length).toBeGreaterThan(2)
     })
 
     it.each(Object.keys(refusedIntents) as Array<keyof typeof refusedIntents>)('refuses %s without regional wording', async (planner) => {

@@ -178,7 +178,7 @@ const isSwapOutBlocked = computed(() =>
 const isCollateralWithdrawBlocked = computed(() => {
   const sub = subAccount.value
   if (!isAddressExitOnly.value || !sub) return false
-  // Real chain state, not the batch layer: a repay that is only queued can still be removed.
+  // Early UI gate over the unlayered account snapshot. Final policy reads current RPC debt.
   const chainAccount = cachedAccount.value
   return !chainAccount || isCollateralOfOpenBorrow(chainAccount.getSubAccount(getAddress(sub)), vaultAddress)
 })
@@ -572,6 +572,7 @@ const submit = async () => {
       const ok = await runPreparedSimulation(preparedPlan.value!, undefined, undefined, reviewLaunch.intents)
       if (!ok) return
 
+      if (isCollateralWithdrawBlocked.value) return
       await reviewLaunch.open()
     })
   }

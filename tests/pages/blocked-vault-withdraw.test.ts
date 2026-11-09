@@ -1,3 +1,4 @@
+import { useFreshAccount as useRealFreshAccount } from '~/composables/useFreshAccount'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { computed, createSSRApp, nextTick, ref, ssrContextKey, type Ref } from 'vue'
@@ -21,12 +22,18 @@ const CONTROLLER = '0x7777777777777777777777777777777777777777'
 const quote = { amountIn: '1000000', amountOut: '1', provider: 'test', route: [] }
 
 const mocks = vi.hoisted(() => ({
+  fastAccount: vi.fn(),
+  freshAccount: vi.fn(),
   openReview: vi.fn(async () => undefined),
   addBatchEntry: vi.fn(async () => undefined),
   planWithdrawOrRedeem: vi.fn(async () => []),
   selectedQuote: { value: null as unknown },
 }))
 
+vi.mock('~/composables/useEulerSdk', () => ({
+  getEulerSdkForChain: async () => ({ accountService: { fetchAccount: mocks.fastAccount } }),
+  getEulerSdkFresh: async () => ({ accountService: { fetchAccount: mocks.freshAccount } }),
+}))
 vi.mock('#components', () => ({ SwapTokenSelector: {}, SlippageSettingsModal: {} }))
 vi.mock('~/components/ui/composables/useModal', () => ({ useModal: () => ({ open: vi.fn() }) }))
 vi.mock('~/components/ui/composables/useToast', () => ({ useToast: () => ({ error: vi.fn() }) }))
@@ -337,5 +344,30 @@ describe('withdraw forms on a blocked vault', () => {
     expect(source).toMatch(/<GeoBlockAlert\s+v-if="isWithdrawBlocked"/)
     expect(source).toMatch(/<UiAlert\s+v-else-if="isOutputAssetBlocked \|\| isOutputAssetRestricted"/)
     expect(read('pages/earn/[vault]/[subAccount]/withdraw.vue')).toMatch(/<GeoBlockAlert\s+v-if="isCollateralWithdrawBlocked"/)
+  })
+  it.each([['lend', WithdrawPage], ['earn', EarnWithdrawPage]])('%s rechecks refreshed debt before opening review', async (_name, component) => {
+    setAddressExitOnly(true)
+    subAccountState.enabledCollaterals = [VAULT]
+    const makeAccount = (borrowed: bigint) => ({ chainId: 1, owner: USER, getSubAccount: () => subAccountWith(borrowed) })
+    let finishFresh!: (value: unknown) => void
+    let finishPlan!: (value: unknown[]) => void
+    mocks.fastAccount.mockResolvedValue({ result: makeAccount(0n) })
+    mocks.freshAccount.mockReturnValue(new Promise((resolve) => {
+      finishFresh = resolve
+    }))
+    mocks.planWithdrawOrRedeem.mockImplementationOnce(() => new Promise((resolve) => {
+      finishPlan = resolve
+    }))
+    vi.stubGlobal('usePortfolioRefresh', () => ({ portfolioRefreshCounter: ref(0) }))
+    vi.stubGlobal('useFreshAccount', useRealFreshAccount)
+    const page = await openPage(component)
+    await vi.waitFor(() => expect(page.reviewWithdrawDisabled.value).toBe(false))
+    const submitted = page.submit()
+    await vi.waitFor(() => expect(mocks.planWithdrawOrRedeem).toHaveBeenCalledOnce())
+    finishFresh({ result: makeAccount(1n) })
+    await vi.waitFor(() => expect(page.disabledReasonInfo.value?.message).toContain('Repay any debt'))
+    finishPlan([])
+    await submitted
+    expect(mocks.openReview).not.toHaveBeenCalled()
   })
 })

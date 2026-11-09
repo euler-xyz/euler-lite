@@ -1,4 +1,5 @@
 import { getAddress, isAddress, type Address } from 'viem'
+import { assertExitOnlyWithdrawals, type WithdrawalPolicyContext } from './exit-only-withdrawals'
 import { canonicalDigest, toCanonicalValue } from '../domain/canonical'
 import type { PolicyState, ReviewedPolicy, ReviewedRequestSet } from '../domain/reviewed-execution'
 import type { OperationIntent } from '../domain/intents'
@@ -40,6 +41,7 @@ export const resolveAppPolicy = async (
   requestSet: ReviewedRequestSet,
   now = Date.now(),
   intents?: readonly OperationIntent[],
+  withdrawalContext?: WithdrawalPolicyContext,
 ): Promise<Readonly<ReviewedPolicy>> => {
   const onlyExits = Boolean(intents?.length && intents.every(isExitWithoutAcquisition))
   const expiresAt = now + 5 * 60_000
@@ -219,5 +221,6 @@ export const resolveAppPolicy = async (
     }
     results.push({ ...requirement, result: allowed(version, now, requirement.concern === 'tos' ? undefined : expiresAt) })
   }
+  await assertExitOnlyWithdrawals(intents ?? [], withdrawalContext)
   return buildReviewedPolicy({ requestSet, results, now })
 }
