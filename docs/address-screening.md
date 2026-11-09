@@ -6,7 +6,7 @@ For geographic restrictions see [Geo-Blocking](./geo-blocking.md). For transacti
 
 ## Intent
 
-A connected wallet must not become user-visible until data-v3 compliance returns an explicit clean verdict for that address. Screening is **not** repeated during reviewed execution.
+A connected wallet becomes user-visible only after data-v3 compliance returns an explicit clear or exit-only verdict for that address. Screening is **not** repeated during reviewed execution.
 
 ```text
 wagmi address change
@@ -39,7 +39,7 @@ useAddressScreen.screenConnectedAddress
 | `server/api/internal/screen-address.post.ts` | Rate limit 10/60s, validate `0x` + 40 hex, proxy upstream |
 | `server/utils/screening.ts` | Fail-closed upstream client |
 
-`useWagmi` also routes ENS through the screened address so wallet-tied queries do not run before a clean verdict.
+`useWagmi` also routes ENS through the screened address so wallet-tied queries run only after a clear or exit-only verdict.
 
 An exit-only address stays connected under the rules in [Exit-only addresses](./geo-blocking.md#exit-only-addresses). A blocked address disconnects the wallet and opens `BlockedAddressModal`. Closing it navigates to the deployment default page. Disconnect without a new address resets the screening, VPN, and country caches.
 
@@ -113,7 +113,7 @@ Logs hash the address (`hashIdentifier`); do not add raw addresses to screening 
 
 `features/reviewed-execution/policy/engine.ts` `SUBJECT_CONCERNS.account` is `[]`. There is no `wallet-screening` concern. Preparation does not call `screenAddress` or `detectVpn`.
 
-Connect-time gating already hid a restricted wallet from `useWagmi.address`. Derived EVC sub-accounts are bound into the reviewed request but are not screened as separate wallets.
+Connect-time gating hides blocked or pending wallets from `useWagmi.address`. Reviewed execution enforces the accepted exit-only verdict without requesting another screening answer. Derived EVC sub-accounts are bound into the reviewed request but are not screened as separate wallets.
 
 ## Troubleshooting
 
