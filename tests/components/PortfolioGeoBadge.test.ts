@@ -1,12 +1,13 @@
 import { renderToString } from '@vue/server-renderer'
 import { createSSRApp, h, ref, type Component } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import RestrictedBadge from '~/components/entities/vault/RestrictedBadge.vue'
 import PortfolioBorrowItem from '~/components/entities/portfolio/PortfolioBorrowItem.vue'
 import PortfolioSavingItem from '~/components/entities/portfolio/PortfolioSavingItem.vue'
 import PortfolioEarnItem from '~/components/entities/portfolio/PortfolioEarnItem.vue'
 import { __setEulerLabelsDataForTest } from '~/composables/useEulerLabels'
 import { useGeoBlock } from '~/composables/useGeoBlock'
+import { setAddressExitOnly } from '~/composables/addressExitOnlyState'
 import { staticGeoLabels } from '~/tests/fixtures/static-geo-labels'
 
 const registry = vi.hoisted(() => ({ getVault: vi.fn<(address: string) => { chainId: number } | undefined>(() => undefined), getVaultCategory: () => 'standard', isVerifiedVault: () => false }))
@@ -58,6 +59,7 @@ beforeEach(() => {
   vi.stubGlobal('useRewardsApy', () => new Proxy({}, { get: () => () => 0 }))
   for (const key of ['getVaultSupplyApy', 'getVaultBorrowApy', 'ltvToPercent']) vi.stubGlobal(key, () => 0)
 })
+afterEach(() => setAddressExitOnly(false))
 describe.each(['hosted', 'static'] as const)('%s labels', (source) => {
   beforeEach(() => {
     if (source === 'static') __setEulerLabelsDataForTest(staticGeoLabels())
@@ -90,6 +92,10 @@ describe.each(['hosted', 'static'] as const)('%s labels', (source) => {
     it('still displays actual geographic restrictions', async () => {
       useGeoBlock().country.value = 'IR'
       expect(await render(component)).toContain('Restricted')
+    })
+    it('shows no region badge for an exit-only address', async () => {
+      setAddressExitOnly(true)
+      expect(await render(component)).not.toContain('Restricted')
     })
   })
 })
