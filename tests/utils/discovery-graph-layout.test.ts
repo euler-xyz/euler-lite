@@ -25,7 +25,7 @@ const diagramOf = (addresses: string[], links: RingLink[]): MiniDiagramData => {
   const byAddress = new Map(nodes.map(node => [node.address, node]))
   return {
     nodes,
-    edges: links.map(({ from, to }) => ({ from: byAddress.get(from)!, to: byAddress.get(to)!, mutual: false })),
+    edges: links.map(({ from, to }) => ({ from: byAddress.get(from)!, to: byAddress.get(to)!, mutual: false, borrowable: true })),
     pairCount: links.length,
     assetCount: nodes.length,
     viewWidth: 0,

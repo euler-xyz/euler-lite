@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { isEulerEarn, isSecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
-import type { MarketGroup, MiniDiagramData } from '~/entities/lend-discovery'
+import type { MarketGroup, MiniDiagramData, MiniEdge } from '~/entities/lend-discovery'
 import { getAssetLogoUrl } from '~/composables/useTokenList'
 import { getVaultDeprecation, isVaultDeprecated, isVaultKeyring, isVaultCyclicalNote, isVaultNotExplorable } from '~/utils/eulerLabelsUtils'
 import { isDeprecationWarning } from '~/utils/vault-assessment/flagged'
@@ -36,6 +36,14 @@ const isGraphEdgeHighlighted = (fromAddr: string, toAddr: string): boolean => {
     || toAddr === props.selectedNodeAddress
   )
 }
+const isEdgeSelected = (edge: MiniEdge): boolean =>
+  Boolean(props.selectedNodeAddress) && isGraphEdgeHighlighted(edge.from.address, edge.to.address)
+const edgeColor = (edge: MiniEdge): string =>
+  isEdgeSelected(edge) ? 'var(--accent-500)' : 'var(--graph-edge)'
+const forwardArrow = (edge: MiniEdge, nodeRadius: number) =>
+  getArrow(edge.from.x, edge.from.y, edge.to.x, edge.to.y, nodeRadius)
+const reverseArrow = (edge: MiniEdge, nodeRadius: number) =>
+  getArrow(edge.to.x, edge.to.y, edge.from.x, edge.from.y, nodeRadius)
 
 const isNodeCyclicalNote = (address: string): boolean => {
   return isVaultCyclicalNote(address)
@@ -105,111 +113,7 @@ const isNodeCuratorUnknown = (address: string): boolean => {
           v-for="(edge, idx) in enlarged.edges"
           :key="`edge-${idx}`"
         >
-          <!-- Highlighted + selected: show directed arrows in accent color -->
-          <template
-            v-if="
-              selectedNodeAddress
-                && isGraphEdgeHighlighted(edge.from.address, edge.to.address)
-            "
-          >
-            <line
-              data-id="discovery-graph-edge"
-              data-list="discovery-graph-edge"
-              :data-key="`${edge.from.address}:${edge.to.address}`"
-              :data-market-id="market.id"
-              :data-from-address="edge.from.address"
-              :data-to-address="edge.to.address"
-              :data-mutual="edge.mutual"
-              :x1="edge.from.x"
-              :y1="edge.from.y"
-              :x2="
-                getArrow(
-                  edge.from.x,
-                  edge.from.y,
-                  edge.to.x,
-                  edge.to.y,
-                  enlarged.nodeRadius,
-                ).lineX2
-              "
-              :y2="
-                getArrow(
-                  edge.from.x,
-                  edge.from.y,
-                  edge.to.x,
-                  edge.to.y,
-                  enlarged.nodeRadius,
-                ).lineY2
-              "
-              style="stroke: var(--accent-500)"
-              :stroke-width="0.8"
-              stroke-linecap="round"
-              opacity="0.9"
-            />
-            <polygon
-              :points="
-                getArrow(
-                  edge.from.x,
-                  edge.from.y,
-                  edge.to.x,
-                  edge.to.y,
-                  enlarged.nodeRadius,
-                ).triangle
-              "
-              style="fill: var(--accent-500)"
-              opacity="0.9"
-            />
-            <template v-if="edge.mutual">
-              <line
-                data-id="discovery-graph-edge"
-                data-list="discovery-graph-edge"
-                :data-key="`${edge.to.address}:${edge.from.address}`"
-                :data-market-id="market.id"
-                :data-from-address="edge.to.address"
-                :data-to-address="edge.from.address"
-                data-mutual="true"
-                :x1="edge.to.x"
-                :y1="edge.to.y"
-                :x2="
-                  getArrow(
-                    edge.to.x,
-                    edge.to.y,
-                    edge.from.x,
-                    edge.from.y,
-                    enlarged.nodeRadius,
-                  ).lineX2
-                "
-                :y2="
-                  getArrow(
-                    edge.to.x,
-                    edge.to.y,
-                    edge.from.x,
-                    edge.from.y,
-                    enlarged.nodeRadius,
-                  ).lineY2
-                "
-                style="stroke: var(--accent-500)"
-                :stroke-width="0.8"
-                stroke-linecap="round"
-                opacity="0.9"
-              />
-              <polygon
-                :points="
-                  getArrow(
-                    edge.to.x,
-                    edge.to.y,
-                    edge.from.x,
-                    edge.from.y,
-                    enlarged.nodeRadius,
-                  ).triangle
-                "
-                style="fill: var(--accent-500)"
-                opacity="0.9"
-              />
-            </template>
-          </template>
-          <!-- Default state or dimmed -->
           <line
-            v-else
             data-id="discovery-graph-edge"
             data-list="discovery-graph-edge"
             :data-key="`${edge.from.address}:${edge.to.address}`"
@@ -217,18 +121,33 @@ const isNodeCuratorUnknown = (address: string): boolean => {
             :data-from-address="edge.from.address"
             :data-to-address="edge.to.address"
             :data-mutual="edge.mutual"
-            :x1="edge.from.x"
-            :y1="edge.from.y"
-            :x2="edge.to.x"
-            :y2="edge.to.y"
+            :data-borrowable="edge.borrowable"
+            :x1="isEdgeSelected(edge) && edge.mutual ? reverseArrow(edge, enlarged.nodeRadius).lineX2 : edge.from.x"
+            :y1="isEdgeSelected(edge) && edge.mutual ? reverseArrow(edge, enlarged.nodeRadius).lineY2 : edge.from.y"
+            :x2="isEdgeSelected(edge) ? forwardArrow(edge, enlarged.nodeRadius).lineX2 : edge.to.x"
+            :y2="isEdgeSelected(edge) ? forwardArrow(edge, enlarged.nodeRadius).lineY2 : edge.to.y"
             :style="{
-              stroke: edge.mutual ? 'var(--graph-edge-mutual)' : 'var(--graph-edge)',
+              stroke: edgeColor(edge),
               transition: 'opacity 0.2s, stroke 0.2s',
             }"
-            :stroke-width="edge.mutual ? 1.0 : 0.5"
+            :stroke-width="edge.mutual ? 1 : 0.5"
+            :stroke-dasharray="edge.borrowable ? undefined : '5 4'"
             stroke-linecap="round"
-            :opacity="selectedNodeAddress ? 0.15 : edge.mutual ? 0.9 : 0.5"
+            :opacity="isGraphEdgeHighlighted(edge.from.address, edge.to.address) ? 0.9 : 0.15"
           />
+          <template v-if="isEdgeSelected(edge)">
+            <polygon
+              :points="forwardArrow(edge, enlarged.nodeRadius).triangle"
+              :style="{ fill: edgeColor(edge) }"
+              opacity="0.9"
+            />
+            <polygon
+              v-if="edge.mutual"
+              :points="reverseArrow(edge, enlarged.nodeRadius).triangle"
+              :style="{ fill: edgeColor(edge) }"
+              opacity="0.9"
+            />
+          </template>
         </template>
 
         <!-- Nodes -->
