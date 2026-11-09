@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createSSRApp, h, ref } from 'vue'
 import { renderToString } from '@vue/server-renderer'
 import RestrictedBadge from '~/components/entities/vault/RestrictedBadge.vue'
 import { __setEulerLabelsDataForTest } from '~/composables/useEulerLabels'
 import { useGeoBlock } from '~/composables/useGeoBlock'
+import { setAddressExitOnly } from '~/composables/addressExitOnlyState'
 import { cozy } from '~/tests/fixtures/static-geo-labels'
 
 vi.mock('#components', () => ({ RestrictedInfoModal: {} }))
@@ -20,6 +21,7 @@ beforeEach(() => {
   useGeoBlock().country.value = 'NL'
   __setEulerLabelsDataForTest({ geoContext: { chainId: 1, policies: [], productByVault: {} } })
 })
+afterEach(() => setAddressExitOnly(false))
 describe('shared geographic badge', () => {
   it('does not turn an absent registry entry into an affirmative region badge', async () => {
     expect(await render()).not.toContain('Restricted')
@@ -31,5 +33,11 @@ describe('shared geographic badge', () => {
   it('keeps a confirmed sanction badge', async () => {
     useGeoBlock().country.value = 'IR'
     expect(await render()).toContain('Restricted')
+  })
+  it('stays off for an exit-only address, whatever the country', async () => {
+    setAddressExitOnly(true)
+    expect(await render()).not.toContain('Restricted')
+    useGeoBlock().country.value = 'IR'
+    expect(await render()).not.toContain('Restricted')
   })
 })

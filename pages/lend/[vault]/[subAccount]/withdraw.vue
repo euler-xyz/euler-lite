@@ -16,14 +16,15 @@ import { nanoToValue } from '~/utils/crypto-utils'
 import { isOperationBlocked } from '~/utils/operationGuardRegistry'
 import { isOpDisabled, OP_REDEEM, OP_WITHDRAW } from '~/utils/vault-hooks'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
-import { isAssetBlockedByCountry, isAssetRestrictedByCountry } from '~/composables/useGeoBlock'
+import { getVaultGeoUnavailableReason, isAssetBlockedByCountry, isAssetRestrictedByCountry, isVaultBlockedByCountry } from '~/composables/useGeoBlock'
+import { isAddressExitOnly } from '~/composables/addressExitOnlyState'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { getTxErrorMessage } from '~/utils/tx-errors'
 import { getAddress, formatUnits, zeroAddress, type Address } from 'viem'
 import { SwapTokenSelector, SlippageSettingsModal } from '#components'
 import { FixedPoint } from '~/utils/fixed-point'
-import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
+import { getCashLimitedWithdrawAmount, isCollateralOfOpenBorrow } from '~/utils/vault/withdraw'
 import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import { createRaceGuard } from '~/utils/race-guard'
 import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
@@ -171,6 +172,17 @@ const effectiveWithdrawOp = computed(() => {
   const isMax = FixedPoint.fromValue(assetsBalance.value, asset.value?.decimals).lte(amountFixed.value)
   return isMax ? OP_REDEEM : OP_WITHDRAW
 })
+const isSwapOutBlocked = computed(() =>
+  needsSwap.value && !!vault.value && isVaultBlockedByCountry(vault.value),
+)
+const isCollateralWithdrawBlocked = computed(() => {
+  const sub = subAccount.value
+  if (!isAddressExitOnly.value || !sub) return false
+  // Real chain state, not the batch layer: a repay that is only queued can still be removed.
+  const chainAccount = cachedAccount.value
+  return !chainAccount || isCollateralOfOpenBorrow(chainAccount.getSubAccount(getAddress(sub)), vaultAddress)
+})
+const isWithdrawBlocked = computed(() => isSwapOutBlocked.value || isCollateralWithdrawBlocked.value)
 const isOutputAssetBlocked = computed(() =>
   needsSwap.value && isAssetBlockedByCountry(selectedOutputAsset.value),
 )
@@ -180,7 +192,7 @@ const isOutputAssetRestricted = computed(() =>
 const isSubmitDisabled = computed(() => {
   if (!isConnected.value && !isSpyMode.value) return false
   if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as EVault, effectiveWithdrawOp.value)) return true
-  if (isOutputAssetBlocked.value || isOutputAssetRestricted.value) return true
+  if (isWithdrawBlocked.value || isOutputAssetBlocked.value || isOutputAssetRestricted.value) return true
   if (withdrawableAssets.value < amountFixed.value.value) return true
   if (isLoading.value || amountFixed.value.isZero() || amountFixed.value.isNegative()) return true
   if (estimatesError.value) return true
@@ -190,6 +202,7 @@ const isSubmitDisabled = computed(() => {
 const reviewWithdrawDisabled = isSubmitDisabled
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
   if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as EVault, effectiveWithdrawOp.value)) return { message: 'Withdrawals are currently disabled for this vault', variant: 'warning' }
+  if (isWithdrawBlocked.value) return { message: getVaultGeoUnavailableReason(vault.value) || 'Swapping from this vault is not available in your region', variant: 'warning' }
   if (isOutputAssetBlocked.value || isOutputAssetRestricted.value) return { message: 'Receiving this asset is not available in your region', variant: 'warning' }
   if (estimatesError.value) return { message: estimatesError.value, variant: 'error' }
   if (!amountFixed.value.isZero() && assetsBalance.value < amountFixed.value.value) return { message: 'Insufficient balance', variant: 'error' }
@@ -483,7 +496,7 @@ const updateBalance = () => {
 }
 const submit = async () => {
   if (isOperationBlocked.value) return
-  if (isPreparing.value || isOutputAssetBlocked.value || isOutputAssetRestricted.value) return
+  if (isPreparing.value || isWithdrawBlocked.value || isOutputAssetBlocked.value || isOutputAssetRestricted.value) return
   if (!asset.value?.address) return
   const capturedAsset = asset.value
   const capturedAmount = amount.value
@@ -574,7 +587,7 @@ const isCowSwapSelected = computed(() =>
   needsSwap.value && isCowProviderOrQuote(swapSelectedProvider.value, swapSelectedQuote.value),
 )
 const canAddToBatch = computed(() => {
-  if (isOutputAssetBlocked.value || isOutputAssetRestricted.value) return false
+  if (isWithdrawBlocked.value || isOutputAssetBlocked.value || isOutputAssetRestricted.value) return false
   if (vault.value && !isSecuritizeVaultType.value && isOpDisabled(vault.value as EVault, effectiveWithdrawOp.value)) return false
   if (!(+amount.value)) return false
   if (needsSwap.value) return !!swapSelectedQuote.value && !isCowSwapSelected.value
@@ -857,8 +870,14 @@ watch(swapSelectedQuote, () => {
               variant="warning"
               size="compact"
             />
+            <GeoBlockAlert
+              v-if="isWithdrawBlocked"
+              :vault-addresses="[vault.address]"
+              title="Swap restricted"
+              description="Swapping from this vault is not available in your region. You can withdraw the vault's underlying asset directly."
+            />
             <UiAlert
-              v-if="isOutputAssetBlocked || isOutputAssetRestricted"
+              v-else-if="isOutputAssetBlocked || isOutputAssetRestricted"
               title="Asset restricted"
               description="Receiving this asset is not available in your region. Pick a different token."
               variant="warning"

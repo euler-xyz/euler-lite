@@ -14,6 +14,7 @@ import { getEulerGeoContext, getEulerLabelsVersion, useEulerLabels } from '~/com
 import { isOperationBlockerKey, operationBlockerEntries } from '~/utils/operationGuardRegistry'
 import { collectPlanningRequirements } from '~/features/reviewed-execution/planning/requirements'
 import { isVaultBlockedByCountry, isVaultRestrictedByCountry, useGeoBlock } from '~/composables/useGeoBlock'
+import { ADDRESS_EXIT_ONLY_MESSAGE, isAddressExitOnly } from '~/composables/addressExitOnlyState'
 import type { EulerEarn, EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { getVaultDeprecation } from '~/utils/eulerLabelsUtils'
 import { depositTargetVaults } from '~/utils/vault-action-targets'
@@ -86,6 +87,7 @@ export const resolveAppPolicy = async (
 
     const simpleExitPlanners = new Set(['withdraw', 'redeem', 'repay-from-wallet', 'repay-from-deposit', 'repay-with-swap', 'swap-and-repay', 'cleanup', 'reward-claim', 'reul-unlock'])
     const hardGeoRequired = intents.some(intent => !simpleExitPlanners.has(intent.planner.name))
+    if (hardGeoRequired && isAddressExitOnly.value) throw new Error(ADDRESS_EXIT_ONLY_MESSAGE)
     const softGeoRequired = intents.some(intent =>
       intent.planner.name.includes('swap')
       || intent.planner.name.includes('borrow')

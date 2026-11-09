@@ -1,4 +1,4 @@
-import type { EVault, EulerEarn, IAccountLiquidity, IHasVaultAddress, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import type { EVault, EulerEarn, IAccountLiquidity, IHasVaultAddress, ISubAccount, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import type { VaultWarning } from '~/composables/useVaultWarnings'
 
 type BorrowLiquidity = Pick<IAccountLiquidity<IHasVaultAddress>, 'liabilityValue' | 'totalCollateralValue' | 'collaterals'>
@@ -20,6 +20,25 @@ export const getCashLimitedWithdrawAmount = (
   if (!vault) return userWithdrawableAssets
   const capacity = getVaultWithdrawCapacity(vault)
   return userWithdrawableAssets < capacity ? userWithdrawableAssets : capacity
+}
+
+type SubAccountExposure = Pick<ISubAccount<IHasVaultAddress>, 'enabledCollaterals' | 'enabledControllers' | 'positions'>
+
+// The account read drops the row of a vault whose lens read failed, so a controller with no row may still be owed.
+const owesDebt = ({ enabledControllers, positions }: SubAccountExposure): boolean => {
+  if (positions.some(position => position.borrowed > 0n)) return true
+  const rows = new Set(positions.map(position => position.vaultAddress.toLowerCase()))
+  return enabledControllers.some(controller => !rows.has(controller.toLowerCase()))
+}
+
+/** A vault counts as backing debt while its sub-account owes anything and lists it as an enabled collateral. */
+export const isCollateralOfOpenBorrow = (
+  subAccount: SubAccountExposure | undefined,
+  vaultAddress: string,
+): boolean => {
+  if (!subAccount || !owesDebt(subAccount)) return false
+  const target = vaultAddress.toLowerCase()
+  return subAccount.enabledCollaterals.some(address => address.toLowerCase() === target)
 }
 
 const getCollateralBorrowingValue = (liquidity: BorrowLiquidity, collateralAddress: string): bigint => {

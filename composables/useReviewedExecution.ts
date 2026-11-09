@@ -40,6 +40,7 @@ import { projectEulerSimulation } from '~/features/reviewed-execution/simulation
 import { refreshPortfolioAfterReviewedSubmission } from '~/features/reviewed-execution/review/post-tx-refresh'
 import { logWarn } from '~/utils/errorHandling'
 import { approvalAssetsWithSpenders, fetchWalletForApprovals } from '~/features/reviewed-execution/planning/approval-reads'
+import { isAddressExitOnly } from '~/composables/addressExitOnlyState'
 
 const COMPILER_VERSION = 'lite-reviewed-execution-v2'
 const CLASSIFICATION_VERSION = 'safe-classification-v2'
@@ -95,12 +96,13 @@ const executions = new Map<Hash, Readonly<ReviewedExecution>>()
 const runtimePluginPlans = new Map<Hash, Readonly<PluginPlanBundle>>()
 const reviewGenerations = new Map<Hash, { publisher: GenerationPublisher, generation: number }>()
 
-const currentPolicyVersionDigest = () => {
+export const currentPolicyVersionDigest = () => {
   const { country } = useGeoBlock()
   return canonicalDigest('policy-version-v1', toCanonicalValue({
     version: POLICY_VERSION,
     country: country.value ?? (country.value === null ? 'unknown' : 'pending'),
     labelsVersion: getEulerLabelsVersion(),
+    exitOnly: isAddressExitOnly.value,
   }))
 }
 

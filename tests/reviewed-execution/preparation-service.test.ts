@@ -20,7 +20,7 @@ import { detectVpn } from '~/services/vpn'
 import { screenAddress } from '~/services/screening'
 
 vi.mock('~/services/vpn', () => ({ detectVpn: vi.fn(async () => false) }))
-vi.mock('~/services/screening', () => ({ screenAddress: vi.fn(async () => false) }))
+vi.mock('~/services/screening', () => ({ screenAddress: vi.fn(async () => 'clear') }))
 const labelsState = vi.hoisted(() => ({ isReady: { value: true } }))
 vi.mock('~/composables/useEulerLabels', () => ({
   getEulerLabelsVersion: vi.fn(() => 1),
@@ -54,7 +54,7 @@ beforeEach(() => {
   currentVault = { address: VAULT, type: 'evault', asset: { address: TOKEN, symbol: 'TEST', decimals: 18 } }
   vi.mocked(getEulerLabelsVersion).mockReturnValue(1)
   vi.mocked(detectVpn).mockReset().mockResolvedValue(false)
-  vi.mocked(screenAddress).mockReset().mockResolvedValue(false)
+  vi.mocked(screenAddress).mockReset().mockResolvedValue('clear')
   const getVault = (address: string) => getAddress(address) === VAULT ? currentVault : undefined
   const registry = {
     getVault,

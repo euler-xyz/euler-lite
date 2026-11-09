@@ -80,14 +80,14 @@ describe('POST /api/internal/screen-address', () => {
     stubScreeningEnv()
     vi.stubGlobal('fetch', vi.fn(async () => cleanVerdict()))
 
-    await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: false })
+    await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: false, exitOnly: false })
   })
 
   it('binds the verdict to the requested address case-insensitively', async () => {
     stubScreeningEnv()
     vi.stubGlobal('fetch', vi.fn(async () => cleanVerdict(`0x${USER.slice(2).toUpperCase()}`)))
 
-    await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: false })
+    await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: false, exitOnly: false })
   })
 
   it('fails closed when the verdict echoes a different or missing address', async () => {
@@ -98,8 +98,8 @@ describe('POST /api/internal/screen-address', () => {
 
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true })
-    await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true })
+    await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true, exitOnly: false })
+    await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true, exitOnly: false })
   })
 
   it('fails closed for malformed successful upstream verdicts', async () => {
@@ -120,15 +120,97 @@ describe('POST /api/internal/screen-address', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     for (let i = 0; i < 7; i++) {
-      await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true })
+      await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true, exitOnly: false })
     }
+  })
+
+  describe('exit-only verdicts', () => {
+    it('reports exit-only for a flagged verdict that carries a strict true', async () => {
+      stubScreeningEnv()
+      vi.stubGlobal('fetch', vi.fn(async () => fullVerdict({ addressIsSuspicious: true, exitOnly: true })))
+
+      await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true, exitOnly: true })
+    })
+
+    it('matches the echoed address case-insensitively', async () => {
+      stubScreeningEnv()
+      vi.stubGlobal('fetch', vi.fn(async () => fullVerdict({
+        address: `0x${USER.slice(2).toUpperCase()}`,
+        addressIsSuspicious: true,
+        exitOnly: true,
+      })))
+
+      await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true, exitOnly: true })
+    })
+
+    it('fails closed on a clean answer that also claims exitOnly, instead of granting full access', async () => {
+      stubScreeningEnv()
+      vi.stubGlobal('fetch', vi.fn(async () => fullVerdict({ addressIsSuspicious: false, exitOnly: true })))
+
+      await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true, exitOnly: false })
+    })
+
+    it.each([
+      ['false', false],
+      ['the string "true"', 'true'],
+    ])('keeps a clean answer clean when exitOnly is %s', async (_case, exitOnly) => {
+      stubScreeningEnv()
+      vi.stubGlobal('fetch', vi.fn(async () => fullVerdict({ addressIsSuspicious: false, exitOnly })))
+
+      await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: false, exitOnly: false })
+    })
+
+    it.each([
+      ['the string "true"', { addressIsSuspicious: true, exitOnly: 'true' }],
+      ['the number 1', { addressIsSuspicious: true, exitOnly: 1 }],
+      ['an explicit false', { addressIsSuspicious: true, exitOnly: false }],
+      ['null', { addressIsSuspicious: true, exitOnly: null }],
+      ['a missing field', { addressIsSuspicious: true }],
+    ])('keeps a flagged address blocked when exitOnly is %s', async (_case, overrides) => {
+      stubScreeningEnv()
+      vi.stubGlobal('fetch', vi.fn(async () => fullVerdict(overrides)))
+
+      await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true, exitOnly: false })
+    })
+
+    it('does not honour exitOnly for a different echoed address', async () => {
+      stubScreeningEnv()
+      vi.stubGlobal('fetch', vi.fn(async () => fullVerdict({ address: OTHER, addressIsSuspicious: true, exitOnly: true })))
+
+      await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true, exitOnly: false })
+    })
+
+    it.each([201, 202, 401, 500])('does not honour exitOnly on HTTP %s', async (status) => {
+      stubScreeningEnv()
+      vi.stubGlobal('fetch', vi.fn(async () => fullVerdict({ addressIsSuspicious: true, exitOnly: true }, status)))
+
+      await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true, exitOnly: false })
+    })
+
+    it('does not honour exitOnly on an incomplete envelope', async () => {
+      stubScreeningEnv()
+      vi.stubGlobal('fetch', vi.fn(async () => fullVerdict({ addressIsSuspicious: true, exitOnly: true, ruleVersion: undefined })))
+
+      await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true, exitOnly: false })
+    })
+
+    it('treats an older v3 without the field exactly as before', async () => {
+      stubScreeningEnv()
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(fullVerdict())
+        .mockResolvedValueOnce(fullVerdict({ addressIsSuspicious: true }))
+      vi.stubGlobal('fetch', fetchMock)
+
+      await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: false, exitOnly: false })
+      await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true, exitOnly: false })
+    })
   })
 
   it('disables screening when neither env var is configured outside production (forks pass)', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: false })
+    await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: false, exitOnly: false })
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -137,7 +219,7 @@ describe('POST /api/internal/screen-address', () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true })
+    await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true, exitOnly: false })
     expect(fetchMock).not.toHaveBeenCalled()
     vi.unstubAllEnvs()
   })
@@ -147,11 +229,11 @@ describe('POST /api/internal/screen-address', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     process.env.ADDRESS_SCREENING_URI = SCREENING_URI
-    await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true })
+    await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true, exitOnly: false })
 
     delete process.env.ADDRESS_SCREENING_URI
     process.env.ADDRESS_SCREENING_API_KEY = SCREENING_API_KEY
-    await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true })
+    await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true, exitOnly: false })
 
     expect(fetchMock).not.toHaveBeenCalled()
   })
@@ -162,14 +244,14 @@ describe('POST /api/internal/screen-address', () => {
 
     for (const uri of ['http://v3.example/screen', 'ftp://v3.example/screen', 'not a url']) {
       stubScreeningEnv(uri)
-      await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true })
+      await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true, exitOnly: false })
     }
     expect(fetchMock).not.toHaveBeenCalled()
 
     // Loopback http stays allowed for local development.
     stubScreeningEnv('http://localhost:8787/screen')
     vi.stubGlobal('fetch', vi.fn(async () => cleanVerdict()))
-    await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: false })
+    await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: false, exitOnly: false })
   })
 
   it('fails closed on upstream errors, non-ok statuses, and timeouts', async () => {
@@ -185,7 +267,7 @@ describe('POST /api/internal/screen-address', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     for (let i = 0; i < 5; i++) {
-      await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true })
+      await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true, exitOnly: false })
     }
   })
 
@@ -218,7 +300,7 @@ describe('POST /api/internal/screen-address', () => {
       new Response(JSON.stringify({ data: { address: USER, addressIsSuspicious: true } }), { status: 200 }),
     ))
 
-    await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true })
+    await expect(handler(makeEvent({ address: USER }))).resolves.toEqual({ addressIsSuspicious: true, exitOnly: false })
 
     expect(mocks.warn).toHaveBeenCalledWith(
       expect.objectContaining({

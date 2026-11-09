@@ -22,7 +22,7 @@ The system distinguishes two levels of geographic restriction:
 
 A vault that is **blocked** for the user's country prevents **all** new operations. The UI shows opacity dimming and a "Restricted" chip on all browse pages.
 
-- **Lending deposits** (`/lend/[vault]`): withdraw is always allowed (no geo check on the withdraw page). Supply is blocked.
+- **Lending deposits** (`/lend/[vault]`): direct withdraw is always allowed. Withdraw-and-swap is disabled on the withdraw form, and supply is blocked.
 - **Borrow positions** (`/position/[number]`): the geo check uses `isAnyVaultBlockedByCountry` across **all** vaults in the position (borrow + collaterals). If any vault is blocked, only **Repay** remains enabled — Supply, Withdraw, Multiply, Borrow, Collateral Swap, and Debt Swap are all disabled.
 
 ### Restricted (Soft Block)
@@ -35,7 +35,7 @@ A vault that is **restricted** for the user's country prevents the user from **a
 | Supply via swap (swap + deposit) | NO | NO | **NO** |
 | Earn deposit from wallet | NO | NO | YES |
 | Withdraw to underlying (no swap) | YES | NO | YES |
-| Withdraw via swap (withdraw + swap) | — | NO | **NO** |
+| Withdraw via swap (withdraw + swap) | NO | NO | **NO** |
 | Repay | — | YES | YES |
 | Borrow from this vault | NO | NO | **NO** |
 | Multiply (as long or short) | NO | NO | **NO** |
@@ -44,6 +44,37 @@ A vault that is **restricted** for the user's country prevents the user from **a
 | Swap collateral/debt FROM this vault | NO | NO | **NO** |
 
 When both collateral AND borrow vault in a pair are restricted, the pair is treated as **effectively blocked** — identical to a hard block in the UI. On the borrow browse page this means opacity dimming + "Restricted" chip. On the position overview, all buttons except Repay are disabled and the same "Region restricted" toast is shown as for hard-blocked positions.
+
+## Exit-only addresses
+
+The screening answer can mark an address exit-only. The address stays connected, under the same rules a blocked vault applies, on every vault. V3 reports it as `addressIsSuspicious: true, exitOnly: true`. Any other answer, including one from a V3 release without the field, leaves the address clear or blocked exactly as before; see [Address Screening](./address-screening.md).
+
+| Action | Exit-only address |
+|---|---|
+| Direct withdraw of lend and earn deposits | YES |
+| Repay from wallet, with or without a swap | YES |
+| Repay from a deposit or from collateral | YES |
+| Cleanup | YES |
+| Reward claims and rEUL unlocks | YES |
+| Supply, borrow, multiply | NO |
+| Any swap other than a repay swap, withdraw-and-swap included | NO |
+| Migrate, in either direction, and transfer | NO |
+| Collateral withdraw while a borrow position is open | NO: repay first |
+
+**How it is enforced**
+
+- `useAddressScreen` holds the verdict in `composables/addressExitOnlyState.ts`, which geo code can import without pulling in wagmi or the modal. It raises the flag before the address becomes visible through `useWagmi`, and clears it at the start of every screening and on reset.
+- `getVaultGeoBlockReason` returns `address-exit-only` ahead of the country check, so `isVaultBlockedByCountry` is true for every vault and the existing form gates apply. `getVaultTags` reports every vault as disabled, except in `supply-source` context, which keeps a repayment source selectable.
+- `resolveAppPolicy` refuses any intent set with a planner outside the simple-exit list, before any country or policy check. The flag is part of the policy version digest, so a prepared review goes stale if it changes.
+- A collateral withdraw is refused on the position form by the geo gate, and on the lend and earn withdraw forms when the sub-account owes debt and lists the vault as an enabled collateral. These two gates read real chain state rather than the batch layer, because a repay that is only queued can still be removed: the repay has to land before the withdraw, and repaying from collateral closes a position in one step. They refuse until that state has loaded, and treat an enabled controller with no position row as owing. The reviewed policy does not check debt.
+- CoW orders skip the reviewed policy. Only the multiply and refinance forms can open or swap into a position through CoW, and both stop on `isGeoBlocked` before the CoW branch. The collateral repay flow closes a position, which is an exit.
+- `isVaultRestrictedByCountry` and the asset-level helpers stay on real geo. A real soft restriction or asset block therefore still applies to an exit-only address, for example on a repay swap, and a repay swap outside CoW still needs a known country.
+
+**Copy**
+
+User-facing copy comes from `ADDRESS_EXIT_ONLY_TITLE` and `ADDRESS_EXIT_ONLY_MESSAGE`. It says what the address can do and never mentions screening or a region. `getVaultGeoUnavailableReason` and `GeoBlockAlert` both use it, even with an empty vault list. The "Restricted" chip stays off because `getVaultTags` only tags `region`. `app.vue` shows a persistent notice while the address is connected.
+
+This is client-side, like the rest of geo-blocking: the forms and the reviewed policy refuse the transaction, and the contracts do not. Lite screens on connect, so a changed answer reaches a connected wallet only on reconnect.
 
 ## Country Detection
 
@@ -116,7 +147,7 @@ The browser tracks geo-rule and labels timestamps separately. Hosted geo rules b
 ## Helper functions
 
 - `isVaultBlockedByCountry(vaultOrAddress, { asset? })` combines sanctions and matching block policies. `hydrateHeldVaults` registers chain-matched SDK portfolio vaults before positions are published, with registry resolution as a fallback for missing objects. This covers hosted and static labels independently of listing status, so address-based portfolio, detail and action checks can resolve their underlying assets. Newly held entries are unverified and portfolio-only: discovery groups, collateral discovery and token suggestions exclude them; portfolio refreshes update them without promoting them. Discovery loads can register them normally. Stale vault or hosted policy chain context fails closed, including address-only calls while a hosted policy snapshot belongs to another chain.
-- `getVaultGeoBlockReason(vaultOrAddress)` distinguishes a confirmed `region` restriction from unavailable country, policy or asset data and chain mismatches. Portfolio badges and detail headers display geographic restrictions only for `region`; eligibility helpers retain missing-data safeguards and the policy-outage exit exception.
+- `getVaultGeoBlockReason(vaultOrAddress)` returns `address-exit-only` first for an [exit-only address](#exit-only-addresses), then distinguishes a confirmed `region` restriction from unavailable country, policy or asset data and chain mismatches. Portfolio badges and detail headers display geographic restrictions only for `region`; eligibility helpers retain missing-data safeguards and the policy-outage exit exception.
 - `getVaultGeoUnavailableReason(...vaults)` supplies availability-specific copy to `GeoBlockAlert` and disabled-action explanations. `RestrictedBadge` requires matching geographic evidence. Unknown country, unavailable policies and missing assets do not claim a confirmed geographic restriction. Each form retains its operation-specific eligibility checks, including the policy-outage exit exception.
 - `isVaultRestrictedByCountry(vaultOrAddress, { asset?, counterpart? })` evaluates soft restrictions.
 - `isAnyVaultBlockedByCountry` / `isAnyVaultRestrictedByCountry` combine decisions across vaults.

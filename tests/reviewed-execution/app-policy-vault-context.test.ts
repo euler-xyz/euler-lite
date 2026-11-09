@@ -1,10 +1,11 @@
 import { getAddress, zeroAddress, zeroHash } from 'viem'
 import { SwapVerificationType } from '@eulerxyz/euler-v2-sdk'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createOperationIntent } from '~/features/reviewed-execution/domain/factory'
+import { createOperationIntent, type CreateOperationIntentInput } from '~/features/reviewed-execution/domain/factory'
 import { clearDeprecatedDepositAcknowledgements, clearUnverifiedVaultAcknowledgements, recordDeprecatedDepositAcknowledgement, recordUnverifiedVaultAcknowledgement } from '~/features/reviewed-execution/policy/acknowledgements'
 import { resolveAppPolicy } from '~/features/reviewed-execution/policy/app-policy'
-import { collectPlannerVaultAddresses } from '~/features/reviewed-execution/planning/requirements'
+import { ADDRESS_EXIT_ONLY_MESSAGE, setAddressExitOnly } from '~/composables/addressExitOnlyState'
+import { collectPlannerVaultAddresses, collectPlanningRequirements } from '~/features/reviewed-execution/planning/requirements'
 import { makeReviewedExecution, TEST_ACCOUNT, TEST_TOKEN, TEST_VAULT } from './fixtures'
 import { makeSwapQuote } from './swap-quote.test-fixture'
 import type { HostedGeoContext } from '~/utils/geo-policies'
@@ -379,5 +380,101 @@ describe('final two-vault swap policy', () => {
     await expect(resolveAppPolicy(requestSet, 100, [deposit])).rejects.toThrow('Deprecated vault deposit acknowledgement')
     recordDeprecatedDepositAcknowledgement({ chainId: 1, account: TEST_ACCOUNT, operation: 'lend-deposit', vaults: [TARGET_VAULT] })
     await expect(resolveAppPolicy(requestSet, 100, [deposit])).resolves.toBeDefined()
+  })
+
+  describe('exit-only address', () => {
+    const intentFor = (kind: CreateOperationIntentInput['kind'], planner: CreateOperationIntentInput['planner'], args: Record<string, unknown>, constraints?: CreateOperationIntentInput['constraints']) =>
+      createOperationIntent({ kind, planner, args, constraints, chainId: 1, account: TEST_ACCOUNT, subAccounts: [TEST_ACCOUNT], source: 'test', operation: 'exit-only-test', createdAt: 1, intentId: `exit-only-${planner}` })
+    const withdrawArgs = { vaultAddress: TEST_VAULT, owner: TEST_ACCOUNT, assets: 1n }
+    const repayArgs = { liabilityVault: TEST_VAULT, liabilityAsset: TEST_TOKEN, liabilityAmount: 1n, receiver: TEST_ACCOUNT }
+    const swap = { swapQuote: makeSwapQuote() }
+    const collateralLeg = { collateralVault: TEST_VAULT, collateralAmount: 1n, collateralAsset: TEST_TOKEN }
+
+    const allowedIntents = {
+      'withdraw': () => intentFor('withdraw', 'withdraw', withdrawArgs),
+      'redeem': () => intentFor('withdraw', 'redeem', { vaultAddress: TEST_VAULT, owner: TEST_ACCOUNT, shares: 1n }),
+      'repay-from-wallet': () => intentFor('repay', 'repay-from-wallet', repayArgs),
+      'repay-from-deposit': () => intentFor('repay', 'repay-from-deposit', { ...repayArgs, fromVault: TARGET_VAULT, fromAccount: TEST_ACCOUNT }),
+      'repay-with-swap': () => intentFor('repay', 'repay-with-swap', swap),
+      'swap-and-repay': () => intentFor('repay', 'swap-and-repay', { ...swap, amount: 1n, tokenIn: TEST_TOKEN, liabilityVault: TEST_VAULT }),
+      'cleanup': () => intentFor('collateral', 'cleanup', { subAccount: TEST_ACCOUNT }, []),
+      'reward-claim': () => intentFor('reward-claim', 'reward-claim', { claimIds: ['claim-1'], provider: 'merkl', rewardsDigest: zeroHash }, [{ kind: 'selected-rewards', claimIds: ['claim-1'] }]),
+      'reul-unlock': () => intentFor('reul-unlock', 'reul-unlock', { lockTimestamps: [1], lockAmounts: [1n], remainderLossMaximum: 0n }, [{ kind: 'remainder-loss', token: TEST_TOKEN, maximumLoss: 0n }]),
+    }
+
+    const refinanceDebt = () => ({ debt: { planner: 'swap-debt', args: { swapQuote: { ...makeSwapQuote(), vaultIn: TARGET_VAULT, receiver: TEST_VAULT } } } })
+    const migration = (direction: string) => ({
+      direction, connectorId: 'aave', owner: TEST_ACCOUNT,
+      positionRef: { collateralAsset: TEST_TOKEN, debtAsset: TEST_TOKEN, pool: TEST_VAULT },
+      deadline: 1_000n,
+      authorizationEvidenceDigest: zeroHash,
+    })
+    const refusedIntents = {
+      'deposit': () => intentFor('deposit', 'deposit', { vaultAddress: TEST_VAULT, assetAddress: TEST_TOKEN, amount: 1n }),
+      'deposit-with-swap': () => intentFor('deposit', 'deposit-with-swap', { ...swap, amount: 1n, tokenIn: TEST_TOKEN }),
+      'borrow': () => intentFor('borrow', 'borrow', { vaultAddress: TEST_VAULT, assetAddress: TEST_TOKEN, amount: 1n, borrowAccount: TEST_ACCOUNT }),
+      'swap-and-borrow': () => intentFor('borrow', 'swap-and-borrow', { ...swap, amount: 1n, tokenIn: TEST_TOKEN, borrowVault: TEST_VAULT, borrowAmount: 1n }),
+      'multiply-with-swap': () => intentFor('borrow', 'multiply-with-swap', { ...swap, ...collateralLeg }),
+      'multiply-same-asset': () => intentFor('borrow', 'multiply-same-asset', { ...collateralLeg, longVault: TEST_VAULT, liabilityVault: TARGET_VAULT, liabilityAmount: 1n, receiver: TEST_ACCOUNT }),
+      'withdraw-and-swap': () => intentFor('withdraw', 'withdraw-and-swap', { ...swap, ...withdrawArgs }),
+      'redeem-and-swap': () => intentFor('withdraw', 'redeem-and-swap', { ...swap, vaultAddress: TEST_VAULT, owner: TEST_ACCOUNT, shares: 1n }),
+      'swap-from-wallet': () => intentFor('swap', 'swap-from-wallet', { ...swap, amount: 1n, tokenIn: TEST_TOKEN }),
+      'swap-collateral': () => swapIntent(),
+      'swap-debt': () => swapIntent(SwapVerificationType.DebtMax),
+      'refinance-position': () => intentFor('refinance', 'refinance-position', refinanceDebt()),
+      'migrate-same-asset-collateral': () => intentFor('collateral', 'migrate-same-asset-collateral', { fromVault: TEST_VAULT, toVault: TARGET_VAULT, amount: 1n, positionAccount: TEST_ACCOUNT, toAsset: TARGET_TOKEN }),
+      'migrate-same-asset-debt': () => intentFor('refinance', 'migrate-same-asset-debt', { oldLiabilityVault: TEST_VAULT, newLiabilityVault: TARGET_VAULT, newLiabilityAsset: TEST_TOKEN, liabilityAmount: 1n, liabilityAccount: TEST_ACCOUNT }),
+      'transfer': () => intentFor('collateral', 'transfer', { vaultAddress: TEST_VAULT, from: TEST_ACCOUNT, to: TEST_ACCOUNT, amount: 1n }),
+      'external-to-Euler migration': () => intentFor('migration', 'cross-protocol-migration', { ...migration('external-to-euler'), target: { eulerAccount: TEST_ACCOUNT, collateralVault: TEST_VAULT, borrowVault: TARGET_VAULT } }, [{ kind: 'deadline', timestamp: 1_000 }]),
+      'Euler-to-external migration': () => intentFor('migration', 'cross-protocol-migration', { ...migration('euler-to-external'), source: { eulerAccount: TEST_ACCOUNT, collateralVault: TEST_VAULT, borrowVault: TARGET_VAULT } }, [{ kind: 'deadline', timestamp: 1_000 }]),
+    }
+
+    beforeEach(() => {
+      setAddressExitOnly(true)
+      geo.blocked.mockReturnValue(true)
+      verifyVault.mockReturnValue(true)
+    })
+    afterEach(() => setAddressExitOnly(false))
+
+    it.each(Object.keys(allowedIntents) as Array<keyof typeof allowedIntents>)('passes %s', async (planner) => {
+      await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [allowedIntents[planner]()])).resolves.toBeDefined()
+    })
+
+    it.each(Object.keys(refusedIntents) as Array<keyof typeof refusedIntents>)('refuses %s without regional wording', async (planner) => {
+      const refusal = resolveAppPolicy(makeReviewedExecution().requestSet, 100, [refusedIntents[planner]()])
+      await expect(refusal).rejects.toThrow(ADDRESS_EXIT_ONLY_MESSAGE)
+      await expect(refusal).rejects.not.toThrow(/region/i)
+    })
+
+    it('refuses a mixed batch when one intent is not an exit', async () => {
+      await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [allowedIntents.withdraw(), refusedIntents.deposit()]))
+        .rejects.toThrow(ADDRESS_EXIT_ONLY_MESSAGE)
+    })
+
+    it.each([
+      ['a loading country', undefined, undefined],
+      ['an unknown country', null, undefined],
+      ['expired geo policies', 'US', { chainId: 1, policies: undefined, productByVault: {} }],
+    ] as const)('keeps the exit-only refusal with %s', async (_case, country, context) => {
+      geo.country.value = country
+      geo.context = context
+      await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [refusedIntents.deposit()]))
+        .rejects.toThrow(ADDRESS_EXIT_ONLY_MESSAGE)
+    })
+
+    it('refuses an acquiring intent that names no vault', async () => {
+      geo.blocked.mockReturnValue(false)
+      const quote = makeSwapQuote()
+      const walletSwap = { ...quote, vaultIn: zeroAddress, verify: { ...quote.verify, type: SwapVerificationType.TransferMin, vault: TEST_ACCOUNT, account: zeroAddress } }
+      const noVault = intentFor('swap', 'swap-from-wallet', { swapQuote: walletSwap, amount: 1n, tokenIn: TEST_TOKEN })
+      expect(collectPlanningRequirements([noVault]).vaults).toEqual([])
+      await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [noVault])).rejects.toThrow(ADDRESS_EXIT_ONLY_MESSAGE)
+    })
+
+    it('keeps the regional wording for a real block with the flag down', async () => {
+      setAddressExitOnly(false)
+      await expect(resolveAppPolicy(makeReviewedExecution().requestSet, 100, [refusedIntents.deposit()]))
+        .rejects.toThrow('This operation is not available in your region')
+    })
   })
 })

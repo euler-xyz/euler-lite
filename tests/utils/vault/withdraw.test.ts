@@ -5,6 +5,7 @@ import {
   getBorrowLtvWithdrawNotice,
   getCashLimitedWithdrawAmount,
   isAtBorrowLtvLimit,
+  isCollateralOfOpenBorrow,
   validateCollateralWithdraw,
 } from '~/utils/vault/withdraw'
 
@@ -341,5 +342,53 @@ describe('validateCollateralWithdraw', () => {
   it('requires known and strictly sufficient liquidation coverage', () => {
     expect(() => validateCollateralWithdraw({ ...valid, hasLiquidationLiquidity: undefined })).toThrow('Position liquidity unavailable')
     expect(() => validateCollateralWithdraw({ ...valid, hasLiquidationLiquidity: false })).toThrow('Not enough liquidity for the vault, LTV is too large')
+  })
+})
+
+describe('isCollateralOfOpenBorrow', () => {
+  const VAULT = '0x63bA834bFf27Dd1d80533a56cA27Aa058AAA1130'
+  const OTHER = '0x9Db3e0FBd969ec2468C8d9f85440dC5595CE1FD9'
+  const CONTROLLER = '0x7777777777777777777777777777777777777777'
+  const subAccount = (enabledCollaterals: string[], borrowed: bigint) => ({
+    enabledCollaterals,
+    enabledControllers: [CONTROLLER],
+    positions: [{ vaultAddress: CONTROLLER, borrowed }],
+  }) as unknown as Parameters<typeof isCollateralOfOpenBorrow>[0]
+
+  it('is true for an enabled collateral on a sub-account with debt, in any casing', () => {
+    expect(isCollateralOfOpenBorrow(subAccount([VAULT], 1n), VAULT)).toBe(true)
+    expect(isCollateralOfOpenBorrow(subAccount([VAULT], 1n), VAULT.toLowerCase())).toBe(true)
+  })
+
+  it('is false for a deposit that is not an enabled collateral', () => {
+    expect(isCollateralOfOpenBorrow(subAccount([OTHER], 1n), VAULT)).toBe(false)
+  })
+
+  it('is false once the debt is gone, even with the collateral still enabled', () => {
+    expect(isCollateralOfOpenBorrow(subAccount([VAULT], 0n), VAULT)).toBe(false)
+  })
+
+  it('is false for an unknown sub-account', () => {
+    expect(isCollateralOfOpenBorrow(undefined, VAULT)).toBe(false)
+  })
+
+  it('counts an enabled controller with no position row as owing', () => {
+    const debtRowDropped = {
+      enabledCollaterals: [VAULT],
+      enabledControllers: [CONTROLLER],
+      positions: [{ vaultAddress: VAULT, borrowed: 0n }],
+    } as unknown as Parameters<typeof isCollateralOfOpenBorrow>[0]
+
+    expect(isCollateralOfOpenBorrow(debtRowDropped, VAULT)).toBe(true)
+  })
+
+  it('matches a controller to its position row in any casing', () => {
+    const repaid = {
+      enabledCollaterals: [VAULT],
+      enabledControllers: ['0xABCDEFabcdefABCDEFabcdefABCDEFabcdefABCD'],
+      positions: [{ vaultAddress: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd', borrowed: 0n }],
+    } as unknown as Parameters<typeof isCollateralOfOpenBorrow>[0]
+
+    expect(isCollateralOfOpenBorrow(repaid, VAULT)).toBe(false)
   })
 })

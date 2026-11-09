@@ -20,12 +20,12 @@ useAddressScreen.screenConnectedAddress
                 ▼
         screenAddressUpstream   → POST data-v3 /v3/compliance/address-screening
                 │
-        ┌───────┴────────┐
-        │ restricted     │ clean
-        ▼                ▼
-   disconnect +     screenedAddress = address
-   BlockedAddressModal
-   useWagmi.address / isConnected stay unset
+        ┌───────┴────────┬──────────────┐
+        │ blocked        │ clear        │ exit-only
+        ▼                ▼              ▼
+   disconnect +     screenedAddress   exit-only flag, then
+   BlockedAddressModal  = address     screenedAddress = address
+   useWagmi.address / isConnected stay unset on blocked
 ```
 
 ## Connect-time gate
@@ -35,13 +35,13 @@ useAddressScreen.screenConnectedAddress
 | `composables/useWagmi.ts` | Watches the raw wagmi address; `address` / `isConnected` stay unset until `isAddressScreened` |
 | `composables/useAddressScreen.ts` | Module-scoped verdict so every consumer agrees; generation counter drops stale in-flight results |
 | `services/vpn.ts` | Optional client VPN probe |
-| `services/screening.ts` | Browser POST; any non-ok / non-explicit-clean response is restricted |
+| `services/screening.ts` | Browser POST returning `clear`, `exit-only` or `blocked`; any non-ok or malformed response is `blocked` |
 | `server/api/internal/screen-address.post.ts` | Rate limit 10/60s, validate `0x` + 40 hex, proxy upstream |
 | `server/utils/screening.ts` | Fail-closed upstream client |
 
 `useWagmi` also routes ENS through the screened address so wallet-tied queries do not run before a clean verdict.
 
-A restricted address disconnects the wallet and opens `BlockedAddressModal`. Closing it navigates to the deployment default page. Disconnect without a new address resets the screening, VPN, and country caches.
+An exit-only address stays connected under the rules in [Exit-only addresses](./geo-blocking.md#exit-only-addresses). A blocked address disconnects the wallet and opens `BlockedAddressModal`. Closing it navigates to the deployment default page. Disconnect without a new address resets the screening, VPN, and country caches.
 
 Client timeout: `WALLET_SCREENING_TIMEOUT_MS` (10s). Abort or throw → restricted.
 
@@ -58,14 +58,14 @@ Lite client body:
 Lite response:
 
 ```json
-{ "addressIsSuspicious": true }
+{ "addressIsSuspicious": true, "exitOnly": false }
 ```
 
-`addressIsSuspicious !== false` is treated as restricted, including a malformed JSON body.
+`addressIsSuspicious !== false` is restricted, including a malformed JSON body. A caller that ignores `exitOnly` therefore keeps an exit-only address blocked. Lite reads `addressIsSuspicious: true, exitOnly: true` as exit-only, and both must be strict booleans.
 
 The server forwards `{ address, chain: "all", vpnIsUsed }` to data-v3. `chain: "all"` is explicit so TRM coverage does not depend on the upstream default.
 
-Success envelope required from upstream (`data.*`): `address`, `addressIsSuspicious`, `screenedAt`, `resolvedChain`, `cached`, `ruleVersion`. Any other 2xx, a partial envelope, or a verdict echoing a different address is suspicious.
+Success envelope required from upstream (`data.*`): `address`, `addressIsSuspicious`, `screenedAt`, `resolvedChain`, `cached`, `ruleVersion`. Any other 2xx, a partial envelope, or a verdict echoing a different address is suspicious. The optional `exitOnly` is honoured only on a complete HTTP 200 envelope for the requested address with `addressIsSuspicious: true` and a strict `true`; every other case returns `exitOnly: false`. A clean verdict that also claims `exitOnly: true` is ambiguous and reported as suspicious.
 
 Invalid Lite body → HTTP 400 `Invalid address`.
 
