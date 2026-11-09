@@ -2,6 +2,7 @@
 import { POLL_INTERVAL_60S_MS } from '~/entities/tuning-constants'
 import { AnnouncementModal } from '#components'
 import { useModal } from '~/components/ui/composables/useModal'
+import { ADDRESS_EXIT_ONLY_MESSAGE, ADDRESS_EXIT_ONLY_TITLE } from '~/composables/addressExitOnlyState'
 
 const route = useRoute()
 const router = useRouter()
@@ -24,6 +25,7 @@ const { refreshLiquidationCoverageIfStale } = useLiquidationCoverage()
 const { loadCountry } = useGeoBlock()
 const { updateBalances, resetBalances } = useWallets()
 const { isConnected, address } = useWagmi()
+const { isExitOnly } = useAddressScreen()
 const showAllLabelEntries = useShowAllLabelEntries()
 
 // Eagerly instantiate useEulerAccount at app root so its internal watchers
@@ -250,6 +252,13 @@ onUnmounted(() => {
           variant="error"
           :action-text="isLabelsLoading ? 'Retrying…' : 'Retry'"
           @action="retryLabels"
+        />
+        <UiAlert
+          v-if="isConnected && isExitOnly"
+          class="mb-16"
+          :title="ADDRESS_EXIT_ONLY_TITLE"
+          :description="ADDRESS_EXIT_ONLY_MESSAGE"
+          variant="warning"
         />
         <NuxtLayout>
           <NuxtPage

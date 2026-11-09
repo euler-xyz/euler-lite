@@ -10,7 +10,8 @@ import { useToast } from '~/components/ui/composables/useToast'
 import { getSubAccountAddress } from '@eulerxyz/euler-v2-sdk'
 import { getAddress } from 'viem'
 import { FixedPoint } from '~/utils/fixed-point'
-import { getCashLimitedWithdrawAmount } from '~/utils/vault/withdraw'
+import { getCashLimitedWithdrawAmount, isCollateralOfOpenBorrow } from '~/utils/vault/withdraw'
+import { ADDRESS_EXIT_ONLY_MESSAGE, isAddressExitOnly } from '~/composables/addressExitOnlyState'
 import { createRaceGuard } from '~/utils/race-guard'
 import { reportClientEvent } from '~/utils/client-observability'
 
@@ -23,6 +24,7 @@ const { capture: captureReviewState } = useExecutionReview()
 const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: planAccount } = usePlanAccount()
+const { account: chainAccount } = useFreshAccount()
 const { getEarnVault, isMarketDataResolved } = useVaults()
 const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
 const { runSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
@@ -85,15 +87,24 @@ const withdrawableAssets = computed(() => getCashLimitedWithdrawAmount(
   assetsBalance.value,
   vault.value,
 ))
+const isCollateralWithdrawBlocked = computed(() => {
+  const sub = subAccount.value
+  if (!isAddressExitOnly.value || !sub) return false
+  // Early UI gate over the unlayered account snapshot. Final policy reads current RPC debt.
+  const account = chainAccount.value
+  return !account || isCollateralOfOpenBorrow(account.getSubAccount(getAddress(sub)), vaultAddress)
+})
 const isSubmitDisabled = computed(() => {
   if (!isConnected.value && !isSpyMode.value) return false
-  return withdrawableAssets.value < amountFixed.value.value
+  return isCollateralWithdrawBlocked.value
+    || withdrawableAssets.value < amountFixed.value.value
     || isLoading.value
     || amountFixed.value.isZero() || amountFixed.value.isNegative()
     || !!(estimatesError.value)
 })
 const reviewWithdrawDisabled = isSubmitDisabled
 const disabledReasonInfo = computed((): DisabledReasonInfo | undefined => {
+  if (isCollateralWithdrawBlocked.value) return { message: ADDRESS_EXIT_ONLY_MESSAGE, variant: 'warning' }
   if (estimatesError.value) return { message: estimatesError.value, variant: 'error' }
   if (!amountFixed.value.isZero() && assetsBalance.value < amountFixed.value.value) return { message: 'Insufficient balance', variant: 'error' }
   if (!amountFixed.value.isZero() && withdrawableAssets.value < amountFixed.value.value) return { message: 'Not enough liquidity in vault', variant: 'error' }
@@ -131,7 +142,7 @@ const updateBalance = () => {
 }
 const submit = async () => {
   if (isOperationBlocked.value) return
-  if (isPreparing.value) return
+  if (isPreparing.value || isCollateralWithdrawBlocked.value) return
   isPreparing.value = true
   try {
     if (!asset.value?.address) {
@@ -208,6 +219,7 @@ const submit = async () => {
       }
     }
 
+    if (isCollateralWithdrawBlocked.value) return
     await reviewLaunch.open()
   }
   finally {
@@ -335,6 +347,10 @@ watch(amount, () => {
               maxable
             />
 
+            <GeoBlockAlert
+              v-if="isCollateralWithdrawBlocked"
+              :vault-addresses="[vault.address]"
+            />
             <UiAlert
               v-show="estimatesError"
               title="Error"

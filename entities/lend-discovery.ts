@@ -102,6 +102,8 @@ export interface MiniEdge {
   from: MiniNode
   to: MiniNode
   mutual: boolean
+  /** False when neither direction has a borrow LTV, so the pair opens no new borrows. */
+  borrowable: boolean
 }
 
 export interface MiniDiagramData {

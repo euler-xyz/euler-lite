@@ -17,6 +17,7 @@ import { getEulerSdkFresh } from '~/composables/useEulerSdk'
 import { invalidateSdkQueries } from '~/utils/sdk-query-cache'
 import { INVALIDATE_AFTER_TX } from '~/utils/sdk-query-policy'
 import { usePortfolioRefresh } from '~/composables/usePortfolioRefresh'
+import { ADDRESS_EXIT_ONLY_MESSAGE, isAddressExitOnly } from '~/composables/addressExitOnlyState'
 import { logWarn } from '~/utils/errorHandling'
 
 /** SDK progress status → lite UI status used by the review modal. */
@@ -107,6 +108,13 @@ export const useCowSwapExecutionCore = () => {
    * is available.
    */
   const executePlan = async (flow: CowSwapPlanFlow): Promise<CowSwapOrderUid> => {
+    const assertExecutionAllowed = () => {
+      requireWallet()
+      if (isAddressExitOnly.value && flow.plan.some(item => item.type !== 'cowSwap'
+        || (item.kind !== 'closePosition' && item.kind !== 'cancelClosePosition'))) {
+        throw new Error(ADDRESS_EXIT_ONLY_MESSAGE)
+      }
+    }
     const userAddress = requireWallet()
     error.value = null
     locallyCancelled.value = false
@@ -119,14 +127,28 @@ export const useCowSwapExecutionCore = () => {
       : undefined
 
     try {
+      assertExecutionAllowed()
       const sdk = await getEulerSdkFresh()
+      assertExecutionAllowed()
       const result = await sdk.executionService.executeCowSwapTransactionPlan({
         plan: flow.plan,
         chainId: flow.chainId,
         account: userAddress,
-        sendTransaction,
-        signTypedData,
-        onProgress,
+        sendTransaction: (request) => {
+          assertExecutionAllowed()
+          return sendTransaction(request)
+        },
+        signTypedData: async (typedData) => {
+          assertExecutionAllowed()
+          const signature = await signTypedData(typedData)
+          assertExecutionAllowed()
+          return signature
+        },
+        onProgress: (progress) => {
+          // The SDK emits this synchronously before posting the signed order.
+          if (progress.status === 'submitOrder') assertExecutionAllowed()
+          onProgress(progress)
+        },
       })
 
       for (const r of result.results) {

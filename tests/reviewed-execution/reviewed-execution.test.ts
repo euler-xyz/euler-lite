@@ -1,5 +1,5 @@
 import { encodeFunctionData, getAddress, keccak256, toHex, zeroAddress } from 'viem'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { EVCBatchItem, TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { EVC_ABI } from '~/abis/evc'
 import type { PolicyState, PluginSnapshot, WalletBinding } from '~/features/reviewed-execution/domain/reviewed-execution'
@@ -12,7 +12,8 @@ import { PreparationCache, type PreparationCacheIdentity } from '~/features/revi
 import { assertPolicyVersionsMatch, buildReviewedPolicy, collectPolicyRequirements, collectPolicySubjects, type PolicyResultInput } from '~/features/reviewed-execution/policy/engine'
 import { buildReviewedSimulation, validateSimulationCoverage } from '~/features/reviewed-execution/simulation/coverage'
 import { createOperationIntent } from '~/features/reviewed-execution/domain/factory'
-import { createReadOnlyWalletBinding } from '~/composables/useReviewedExecution'
+import { createReadOnlyWalletBinding, currentPolicyVersionDigest } from '~/composables/useReviewedExecution'
+import { setAddressExitOnly } from '~/composables/addressExitOnlyState'
 import { makeSwapQuote } from './swap-quote.test-fixture'
 
 const ACCOUNT = getAddress('0x1000000000000000000000000000000000000000')
@@ -301,5 +302,24 @@ describe('generation-bound preparation cache', () => {
     cache.put(identity, { hit: true })
     expect(cache.get({ ...identity, [key]: value }, 999)).toBeUndefined()
     expect(cache.get(identity, 999)).toEqual({ hit: true })
+  })
+})
+
+describe('currentPolicyVersionDigest', () => {
+  afterEach(() => {
+    setAddressExitOnly(false)
+    vi.unstubAllGlobals()
+  })
+
+  it('moves with the exit-only flag, so a prepared review goes stale when it changes', () => {
+    vi.stubGlobal('useGeoBlock', () => ({ country: { value: 'NL' } }))
+    const clear = currentPolicyVersionDigest()
+
+    setAddressExitOnly(true)
+    const exitOnly = currentPolicyVersionDigest()
+    expect(exitOnly).not.toBe(clear)
+
+    setAddressExitOnly(false)
+    expect(currentPolicyVersionDigest()).toBe(clear)
   })
 })

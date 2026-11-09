@@ -384,10 +384,11 @@ const getMaxRoeModalData = (result: BestMaxRoeResult) => ({
               :y1="edge.from.y"
               :x2="edge.to.x"
               :y2="edge.to.y"
-              :style="{ stroke: edge.mutual ? 'var(--graph-edge-mutual)' : 'var(--graph-edge)' }"
-              :stroke-width="edge.mutual ? 1.2 : 1"
+              :style="{ stroke: 'var(--graph-edge)' }"
+              :stroke-width="edge.mutual ? 1 : 0.5"
+              :stroke-dasharray="edge.borrowable ? undefined : '3 2'"
               stroke-linecap="round"
-              :opacity="edge.mutual ? 0.8 : 0.5"
+              opacity="0.9"
             />
             <g
               v-for="node in diagram.nodes"

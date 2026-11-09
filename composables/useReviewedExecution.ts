@@ -23,6 +23,7 @@ import { collectPythPreviewData, rehydratePluginPrefetch, serializePluginPrefetc
 import { PYTH_FRESHNESS_POLICY, PYTH_MAX_UPDATE_FEE } from '~/features/reviewed-execution/planning/plugin-config'
 import { assertPermit2NonceCurrent, preparePermit2Slots } from '~/features/reviewed-execution/materialization/signature-slots'
 import { resolveAppPolicy } from '~/features/reviewed-execution/policy/app-policy'
+import { assertExitOnlyWithdrawals } from '~/features/reviewed-execution/policy/exit-only-withdrawals'
 import { assertPolicyVersionsMatch } from '~/features/reviewed-execution/policy/engine'
 import type { EulerSimulationProjection } from '~/features/reviewed-execution/simulation/coverage'
 import { collectPlanningRequirements, intentSetDigest } from '~/features/reviewed-execution/planning/requirements'
@@ -40,6 +41,7 @@ import { projectEulerSimulation } from '~/features/reviewed-execution/simulation
 import { refreshPortfolioAfterReviewedSubmission } from '~/features/reviewed-execution/review/post-tx-refresh'
 import { logWarn } from '~/utils/errorHandling'
 import { approvalAssetsWithSpenders, fetchWalletForApprovals } from '~/features/reviewed-execution/planning/approval-reads'
+import { isAddressExitOnly } from '~/composables/addressExitOnlyState'
 
 const COMPILER_VERSION = 'lite-reviewed-execution-v2'
 const CLASSIFICATION_VERSION = 'safe-classification-v2'
@@ -95,12 +97,13 @@ const executions = new Map<Hash, Readonly<ReviewedExecution>>()
 const runtimePluginPlans = new Map<Hash, Readonly<PluginPlanBundle>>()
 const reviewGenerations = new Map<Hash, { publisher: GenerationPublisher, generation: number }>()
 
-const currentPolicyVersionDigest = () => {
+export const currentPolicyVersionDigest = () => {
   const { country } = useGeoBlock()
   return canonicalDigest('policy-version-v1', toCanonicalValue({
     version: POLICY_VERSION,
     country: country.value ?? (country.value === null ? 'unknown' : 'pending'),
     labelsVersion: getEulerLabelsVersion(),
+    exitOnly: isAddressExitOnly.value,
   }))
 }
 
@@ -352,6 +355,10 @@ export const useReviewedExecution = () => {
       },
     }
     const provider = sdk.providerService.getProvider(wallet.chainId)
+    const withdrawalContext = {
+      provider,
+      evcAddress: getAddress(sdk.deploymentService.getDeployment(wallet.chainId).addresses.coreAddrs.evc),
+    }
     const snapshotLoader = new PlanningSnapshotLoader(cache, createAppSnapshotDependencies({
       account,
       getBlockNumber: () => provider.getBlockNumber(),
@@ -424,7 +431,7 @@ export const useReviewedExecution = () => {
       async collectPythEvidence(plan, _binding, _snapshot, prefetched) {
         return collectPythPreviewData(plan, prefetched)
       },
-      resolvePolicy: requestSet => resolveAppPolicy(requestSet, Date.now(), intents),
+      resolvePolicy: requestSet => resolveAppPolicy(requestSet, Date.now(), intents, withdrawalContext),
       async simulate(plan, requestSet, _snapshot, rawPlan, intentPlans, prefetchedPlugins) {
         const stateCovered = requestSet.effects.some(node => node.simulation.kind === 'evc-state' || node.simulation.kind === 'independent-call')
         if (!stateCovered) return undefined
@@ -499,6 +506,10 @@ export const useReviewedExecution = () => {
       after: migrationAfter,
       assertContext: assertPreparationContext,
     })
+    // Simulation and cache adoption can outlive an account refresh. Check again
+    // before publishing the review, using the same policy as wallet handoff.
+    await assertExitOnlyWithdrawals(intents, withdrawalContext)
+    await assertPreparationContext()
     const previewPlan = pluginPlans.previewPlan as unknown as TransactionPlan
     const preparedReview: PreparedExecutionReview = {
       execution,
@@ -665,7 +676,7 @@ export const useReviewedExecution = () => {
         if (current.validity.policyVersionDigest !== currentPolicyVersionDigest()) {
           throw new Error('Policy configuration changed after review')
         }
-        const policy = await resolveAppPolicy(current.requestSet, Date.now(), current.intents)
+        const policy = await resolveAppPolicy(current.requestSet, Date.now(), current.intents, { provider: publicClient, evcAddress })
         assertPolicyVersionsMatch(current.policy, policy)
         const permit2 = getAddress(sdk.deploymentService.getDeployment(current.requestSet.wallet.chainId).addresses.coreAddrs.permit2)
         for (const slot of current.requestSet.signatureSlots.filter(candidate => candidate.kind === 'permit2')) {

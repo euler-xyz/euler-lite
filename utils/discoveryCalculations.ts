@@ -286,6 +286,7 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
 
   const directedEdges = new Set<string>()
   const displayEdges = new Set<string>()
+  const borrowableEdges = new Set<string>()
   const connectedAddresses = new Set<string>()
   const connectedUnknownAddresses = new Set<string>()
 
@@ -307,6 +308,7 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
       }
       if (isLiveCollateralEdge(ltv)) {
         displayEdges.add(`${colAddr}:${liabAddr}`)
+        if (ltv.borrowLTV > 0) borrowableEdges.add(`${colAddr}:${liabAddr}`)
         connectedAddresses.add(liabAddr)
         if (isKnown) connectedAddresses.add(colAddr)
         else connectedUnknownAddresses.add(colAddr)
@@ -392,8 +394,13 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
     const toNode = nodeMap.get(toAddr)
     if (!fromNode || !toNode) continue
 
-    const reverseExists = displayEdges.has(`${toAddr}:${fromAddr}`)
-    edges.push({ from: fromNode, to: toNode, mutual: reverseExists })
+    const reverseKey = `${toAddr}:${fromAddr}`
+    edges.push({
+      from: fromNode,
+      to: toNode,
+      mutual: displayEdges.has(reverseKey),
+      borrowable: borrowableEdges.has(key) || borrowableEdges.has(reverseKey),
+    })
   }
 
   const viewWidth = (cx + rx + 8)
