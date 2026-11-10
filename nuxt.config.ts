@@ -197,6 +197,10 @@ export default defineNuxtConfig({
   },
 
   experimental: {
+    // Keep entry CSS dependencies in chunk hashes so stylesheet changes
+    // invalidate preload URLs cached by browsers and CDNs.
+    entryImportMap: false,
+
     // Reload the app immediately when any chunk fails to load (including
     // lazy components outside route navigation). 'automatic-immediate'
     // enables Nuxt's built-in chunk-reload-immediate.client plugin which
