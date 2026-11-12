@@ -1,6 +1,7 @@
 import { loadEulerChains, peekEulerChains } from '../api/internal/euler-chains.get'
 import { readChainEnvConfig } from '~/utils/chain-env'
-import { applyChainRegistry, readChainRegistry } from '~/utils/chain-status'
+import { readServerChainPolicy } from '~/server/utils/chain-policy'
+import { loadV3ChainCatalog } from '~/server/utils/v3-chain-catalog'
 import { escapeScriptJson } from '~/server/utils/escape-script-json'
 import { logger } from '~/server/utils/logger'
 
@@ -33,15 +34,14 @@ export default defineNitroPlugin((nitroApp) => {
     )
   }
 
-  const isProduction = process.env.DOPPLER_ENVIRONMENT === 'prd'
   // Prerendered pages are static, so they must not bake in a value read at build time.
   const bootRead = import.meta.prerender
     ? Promise.resolve()
-    : Promise.race([loadEulerChains().catch(() => undefined), delay(BOOT_READ_WAIT_MS)])
+    : Promise.race([Promise.allSettled([loadEulerChains(), loadV3ChainCatalog()]), delay(BOOT_READ_WAIT_MS)])
 
   nitroApp.hooks.hook('render:html', async (html) => {
     await bootRead
-    const chainConfig = applyChainRegistry(envChainConfig, readChainRegistry(peekEulerChains()), isProduction)
+    const chainConfig = readServerChainPolicy(peekEulerChains())
     html.head.push(`<script>window.__CHAIN_CONFIG__=${escapeScriptJson(JSON.stringify(chainConfig))}</script>`)
   })
 })

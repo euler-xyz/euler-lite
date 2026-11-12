@@ -3,11 +3,11 @@ import { getLabelVaultCandidates } from '~/utils/public-labels'
  * Per-chain vault snapshot cache.
  *
  * Single refresh path (`refreshChainVaults`) used by:
- *   - `server/plugins/warm-cache.ts` — every 5 min, force-refreshes each
- *     enabled chain's entry so steady-state reads always hit fresh cache.
- *   - `server/api/internal/vaults.get.ts` — cold-path fallback when the cache is
- *     empty (before the first warm cycle completes). Steady state: the
- *     handler is a pure read.
+ *   - `server/plugins/warm-cache.ts` — every 1 min with V3 enabled, otherwise
+ *     5 min, force-refreshes enabled non-deprecated chains.
+ *   - `server/api/internal/vaults.get.ts` — request-time refresh when the
+ *     current policy has no usable snapshot. A usable cached entry is
+ *     returned without refreshing vault data.
  *
  * Snapshot semantics:
  *   - Snapshot is a wire-shape payload with bigints replaced by
@@ -17,7 +17,7 @@ import { getLabelVaultCandidates } from '~/utils/public-labels'
  *     populated server-side. The client's two-pass hydrate restores them
  *     via a registry-backed `IVaultMetaService` stub, preserving object
  *     identity for Vue reactivity.
- *   - Stale ceiling 30 min: if the warm cycle stalls and a refresh fails,
+ *   - Stale fallback up to 3 times the TTL (6 min with V3, 15 min otherwise): if the warm cycle stalls and a refresh fails,
  *     `vaultsCache.getStale` lets the handler serve the last-known good
  *     payload up to that ceiling; past that the cold path retries.
  */
@@ -35,6 +35,8 @@ import { logger } from './logger'
 import { reportStatus } from './log'
 import { buildVaultAssetLookup, summarizeSdkIssue } from './observability'
 import { getServerSdk } from './sdk-server'
+import { loadServerChainReadPolicy } from './chain-policy'
+import { chainReadPolicyKey, type ChainReadPolicy } from '~/utils/chain-policy'
 import { isSdkErrorDiagnostic } from './sdk-diagnostics'
 import { getPublicEulerLabelsData } from './public-labels-source'
 import { encodeBigints } from '~/utils/snapshot-codec'
@@ -52,11 +54,9 @@ import type {
 import { resolveEulerRouterGovernors } from '~/utils/vault/euler-router-governance'
 import { governableGovernorAbi } from '~/abis/oracle'
 
-// With V3 configured the SDK falls back through V3's batched endpoints —
-// each refresh is cheap, so we can afford a tighter cache TTL and rewarm
-// cadence (see `server/plugins/warm-cache.ts:VAULTS_REWARM_INTERVAL_MS`).
-// Without V3, the snapshot is built from onchain lens multicalls which
-// are heavier; the 5-min TTL keeps the cost bounded.
+// TTL and warm cadence use the deployment-wide V3 setting, even for explicit
+// onchain overrides. Deprecated chains skip warming. See
+// `server/plugins/warm-cache.ts:VAULTS_REWARM_INTERVAL_MS`.
 const CACHE_TTL_MS = isV3BackendEnabled() ? 2 * 60_000 : 5 * 60_000
 
 export const SNAPSHOT_CACHE_TTL_MS = CACHE_TTL_MS
@@ -68,7 +68,10 @@ export const vaultsCache = createTtlCache<SerialisedSnapshot>({
   maxEntries: 64,
 })
 
-const inFlight = createInFlightDedup<number, SerialisedSnapshot>()
+const inFlight = createInFlightDedup<string, SerialisedSnapshot>()
+
+export const vaultsCacheKey = (chainId: number, policy: ChainReadPolicy): string =>
+  `${chainId}:${chainReadPolicyKey(policy)}`
 
 const waitForEVaultFetchChunkSlot = async () => {
   await new Promise(resolve => setTimeout(resolve, EVAULT_FETCH_CHUNK_DELAY_MS))
@@ -183,9 +186,11 @@ const fetchEVaultsForSnapshot = async (
  * collapse via in-flight dedup so a warm-cycle refresh and a cold-path
  * request arriving together share one upstream pass.
  */
-export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot> =>
-  inFlight.run(chainId, async () => {
-    const sdk = await getServerSdk(chainId)
+export const refreshChainVaults = async (chainId: number): Promise<SerialisedSnapshot> => {
+  const policy = await loadServerChainReadPolicy(chainId)
+  const key = vaultsCacheKey(chainId, policy)
+  return inFlight.run(key, async () => {
+    const sdk = await getServerSdk(chainId, policy)
     const labels = await getPublicEulerLabelsData(chainId)
     const escrowAddrs = await fetchEscrowAddrs(sdk, chainId)
     const { evkAddrs, securitizeAddrs, earnAddrs } = await partitionVerified(
@@ -257,6 +262,7 @@ export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot>
     // determines the loaded category in the browser, including explicit false.
     const payload: SerialisedSnapshot = encodeBigints({
       chainId,
+      chainPolicy: policy,
       fetchedAt: Date.now(),
       evkVaults: (evk.result as unknown[]).filter(Boolean).map(wrapVault('evk')),
       earnVaults: (earn.result as unknown[]).filter(Boolean).map(wrapVault('earn')),
@@ -264,7 +270,11 @@ export const refreshChainVaults = (chainId: number): Promise<SerialisedSnapshot>
       escrowVaults: (escrow.result as unknown[]).filter(Boolean).map(wrapVault('escrow')),
     }) as SerialisedSnapshot
 
-    vaultsCache.set(String(chainId), payload)
+    if (chainReadPolicyKey(await loadServerChainReadPolicy(chainId)) !== chainReadPolicyKey(policy)) {
+      throw new Error('Chain policy changed during vault refresh')
+    }
+    vaultsCache.set(key, payload)
     reportStatus('vaults-cache', `chain=${chainId}`, 'ok')
     return payload
   })
+}

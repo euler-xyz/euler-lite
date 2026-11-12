@@ -21,7 +21,13 @@ const mocks = vi.hoisted(() => ({
   warn: vi.fn(),
   error: vi.fn(),
   readContract: vi.fn(),
+  loadServerChainReadPolicy: vi.fn(),
 }))
+
+vi.mock('~/server/utils/chain-policy', () => ({ loadServerChainReadPolicy: mocks.loadServerChainReadPolicy }))
+
+const ACTIVE_POLICY = { deprecated: false, onchain: false, metadataOnly: false }
+const RETIRED_POLICY = { deprecated: false, onchain: true, metadataOnly: true }
 
 vi.mock('~/server/utils/public-labels-source', () => ({
   getPublicEulerLabelsData: mocks.getPublicEulerLabelsData,
@@ -65,6 +71,7 @@ describe('vaults cache', () => {
     mocks.warn.mockReset()
     mocks.error.mockReset()
     mocks.readContract.mockReset()
+    mocks.loadServerChainReadPolicy.mockReset().mockResolvedValue(ACTIVE_POLICY)
     process.env.EVAULT_FETCH_CHUNK_CHAINS = '146'
 
     mocks.fetchVerifiedVaultAddresses.mockResolvedValue([])
@@ -94,7 +101,7 @@ describe('vaults cache', () => {
   })
 
   it('does not replace the previous snapshot when a chunked eVault refresh throws', async () => {
-    const { refreshChainVaults, vaultsCache } = await import('~/server/utils/vaults-cache')
+    const { refreshChainVaults, vaultsCache, vaultsCacheKey } = await import('~/server/utils/vaults-cache')
     const previous: SerialisedSnapshot = {
       chainId: 146,
       fetchedAt: 123,
@@ -104,7 +111,8 @@ describe('vaults cache', () => {
       escrowVaults: [],
     }
 
-    vaultsCache.set('146', previous)
+    const key = vaultsCacheKey(146, ACTIVE_POLICY)
+    vaultsCache.set(key, previous)
     mocks.fetchVaults
       .mockResolvedValueOnce({
         result: VAULTS.slice(0, 6).map(address => ({ address })),
@@ -114,7 +122,7 @@ describe('vaults cache', () => {
 
     await expect(refreshChainVaults(146)).rejects.toThrow('chunk failed')
 
-    expect(vaultsCache.getStale('146')).toBe(previous)
+    expect(vaultsCache.getStale(key)).toBe(previous)
     expect(mocks.warn).toHaveBeenCalledWith(
       expect.objectContaining({
         chainId: 146,
@@ -157,5 +165,28 @@ describe('vaults cache', () => {
       address: router,
       functionName: 'governor',
     }))
+  })
+
+  it('separates policy snapshots and rejects a late refresh from the previous routing mode', async () => {
+    const { refreshChainVaults, vaultsCache, vaultsCacheKey } = await import('~/server/utils/vaults-cache')
+    const { getServerSdk } = await import('~/server/utils/sdk-server')
+    let finishOld!: (value: { result: unknown[], errors: unknown[] }) => void
+    mocks.fetchVaults.mockImplementationOnce(() => new Promise((resolve) => {
+      finishOld = resolve
+    }))
+    const old = refreshChainVaults(1)
+    const oldRejected = expect(old).rejects.toThrow('Chain policy changed')
+    await vi.waitFor(() => expect(mocks.fetchVaults).toHaveBeenCalledOnce())
+
+    mocks.loadServerChainReadPolicy.mockResolvedValue(RETIRED_POLICY)
+    mocks.fetchVaults.mockResolvedValue({ result: [], errors: [] })
+    const [current, concurrent] = await Promise.all([refreshChainVaults(1), refreshChainVaults(1)])
+    expect(concurrent).toBe(current)
+    expect(current.chainPolicy).toEqual(RETIRED_POLICY)
+    expect(getServerSdk).toHaveBeenLastCalledWith(1, RETIRED_POLICY)
+    finishOld({ result: [], errors: [] })
+    await oldRejected
+    expect(vaultsCache.getStale(vaultsCacheKey(1, ACTIVE_POLICY))).toBeUndefined()
+    expect(vaultsCache.get(vaultsCacheKey(1, RETIRED_POLICY))).toBe(current)
   })
 })

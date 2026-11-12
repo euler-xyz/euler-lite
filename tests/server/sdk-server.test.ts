@@ -8,7 +8,20 @@ const mocks = vi.hoisted(() => ({
   resolveRpcUrl: vi.fn(),
   getPublicLabelsBundle: vi.fn(),
   fetchWithTimeout: vi.fn(),
+  loadEulerChains: vi.fn(),
+  catalog: { indexedChainIds: [1, 8453, 146, 463] },
+  catalogUnavailable: false,
 }))
+
+vi.mock('~/server/utils/v3-chain-catalog', () => ({
+  loadV3ChainCatalog: async () => {
+    if (mocks.catalogUnavailable) throw new Error('catalog unavailable')
+    return mocks.catalog
+  },
+  peekV3ChainCatalog: () => mocks.catalog,
+}))
+
+vi.mock('~/server/api/internal/euler-chains.get', () => ({ loadEulerChains: mocks.loadEulerChains }))
 
 vi.mock('@eulerxyz/euler-v2-sdk', async importOriginal => ({
   ...await importOriginal<typeof import('@eulerxyz/euler-v2-sdk')>(),
@@ -53,6 +66,11 @@ describe('getServerSdk', () => {
     mocks.resolveRpcUrl.mockReset()
     mocks.getPublicLabelsBundle.mockReset()
     mocks.fetchWithTimeout.mockReset()
+    mocks.loadEulerChains.mockReset().mockResolvedValue([1, 8453, 146, 463].map(chainId => ({ chainId, status: 'production' })))
+    mocks.catalog = { indexedChainIds: [1, 8453, 146, 463] }
+    mocks.catalogUnavailable = false
+    for (const chainId of [1, 8453, 146, 463]) vi.stubEnv(`RPC_URL_${chainId}`, 'https://rpc.example')
+    vi.stubEnv('LABELS_SOURCE', 'v3')
     vi.stubGlobal('fetch', vi.fn(async () => {
       throw new Error('Unexpected direct fetch in server SDK test')
     }))
@@ -69,9 +87,7 @@ describe('getServerSdk', () => {
     mocks.resolveRpcUrl.mockReturnValue('https://rpc.example')
     process.env.V3_API_URL = 'https://v3.example'
     process.env.SERVER_VAULT_CACHE_SOURCE = 'fallback'
-    // Routing is driven by ONCHAIN_SDK_CHAINS only; DEPRECATED_CHAINS is a
-    // UI/warm-cache concern and must not affect adapter selection.
-    process.env.DEPRECATED_CHAINS = '1'
+    process.env.DEPRECATED_CHAINS = ''
     process.env.ONCHAIN_SDK_CHAINS = '8453'
     delete process.env.TURTLE_EARN_API_KEY
   })
@@ -317,8 +333,9 @@ describe('getServerSdk', () => {
     const { getServerSdk } = await import('~/server/utils/sdk-server')
 
     const first = getServerSdk(146)
-    expect(getServerSdk(146)).toBe(first)
+    const concurrent = getServerSdk(146)
     const sdk = await first
+    expect(await concurrent).toBe(sdk)
 
     expect(mocks.buildEulerSDK).toHaveBeenCalledOnce()
     const options = mocks.buildEulerSDK.mock.calls[0]?.[0]
@@ -349,6 +366,66 @@ describe('getServerSdk', () => {
     await getServerSdk(146)
 
     expect(mocks.buildEulerSDK).toHaveBeenCalledTimes(2)
+  })
+
+  it('rebuilds cached SDKs on V3 retirement and reactivation while lifecycle stays deprecated', async () => {
+    mocks.loadEulerChains.mockResolvedValue([{ chainId: 146, status: 'deprecated' }])
+    const { getServerSdk } = await import('~/server/utils/sdk-server')
+    const active = await getServerSdk(146)
+    expect(mocks.buildEulerSDK.mock.calls[0][0].config.eVaultServiceAdapter).toBe('fallback')
+    mocks.catalog = { indexedChainIds: [] }
+    const deprecated = await getServerSdk(146)
+    expect(deprecated).not.toBe(active)
+    expect(await getServerSdk(146)).toBe(deprecated)
+    expect(mocks.buildEulerSDK.mock.calls[1][0].config).toMatchObject({
+      accountServiceAdapter: 'onchain', eVaultServiceAdapter: 'onchain',
+      eulerEarnServiceAdapter: 'onchain', vaultTypeAdapter: 'subgraph', rewardsServiceAdapter: 'direct',
+    })
+    mocks.catalog = { indexedChainIds: [146] }
+    const reactivated = await getServerSdk(146)
+    expect(reactivated).not.toBe(active)
+    expect(reactivated).not.toBe(deprecated)
+    expect(mocks.buildEulerSDK.mock.calls[2][0].config.eVaultServiceAdapter).toBe('fallback')
+    expect(mocks.buildEulerSDK).toHaveBeenCalledTimes(3)
+  })
+
+  it('cannot reuse a cached SDK when required catalog support has expired', async () => {
+    const { getServerSdk } = await import('~/server/utils/sdk-server')
+    const active = await getServerSdk(146)
+    mocks.catalogUnavailable = true
+    await expect(getServerSdk(146)).rejects.toThrow('catalog unavailable')
+    expect(mocks.buildEulerSDK).toHaveBeenCalledTimes(1)
+    mocks.catalogUnavailable = false
+    mocks.catalog = { indexedChainIds: [] }
+    expect(await getServerSdk(146)).not.toBe(active)
+    expect(mocks.buildEulerSDK.mock.lastCall?.[0].config.accountServiceAdapter).toBe('onchain')
+  })
+
+  it('keeps a newer policy build cached when an older in-flight build fails', async () => {
+    let rejectOld!: (reason: Error) => void
+    mocks.buildEulerSDK.mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      rejectOld = reject
+    }))
+    const { getServerSdk } = await import('~/server/utils/sdk-server')
+    const old = getServerSdk(146)
+    const failure = expect(old).rejects.toThrow('old build failed')
+    await vi.waitFor(() => expect(mocks.buildEulerSDK).toHaveBeenCalledOnce())
+    mocks.catalog = { indexedChainIds: [] }
+    const current = await getServerSdk(146)
+    rejectOld(new Error('old build failed'))
+    await failure
+    expect(await getServerSdk(146)).toBe(current)
+    expect(mocks.buildEulerSDK).toHaveBeenCalledTimes(2)
+  })
+
+  it('preserves static-label backend choices and explicit onchain overrides', async () => {
+    vi.stubEnv('LABELS_SOURCE', 'static')
+    mocks.loadEulerChains.mockResolvedValue([{ chainId: 146, status: 'deprecated' }, { chainId: 8453, status: 'deprecated' }])
+    const { getServerSdk } = await import('~/server/utils/sdk-server')
+    await getServerSdk(146)
+    await getServerSdk(8453)
+    expect(mocks.buildEulerSDK.mock.calls[0][0].config.eVaultServiceAdapter).toBe('fallback')
+    expect(mocks.buildEulerSDK.mock.calls[1][0].config.eVaultServiceAdapter).toBe('onchain')
   })
 
   it('splits 36 Sonic lens reads into three-call aggregates inside one HTTP batch', async () => {

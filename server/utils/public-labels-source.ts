@@ -2,11 +2,13 @@ import { createGeoPolicySource } from './geo-policy-source'
 import { createTtlCache } from './cache'
 import { fetchWithTimeout, withWallClock } from './fetchWithTimeout'
 import { createInFlightDedup } from './in-flight'
-import { readLabelsSource, readV3LabelsSelection, isLabelsOnchainVerificationChain, readLabelsVaultTag, readHostedLabelImageOrigins } from './labels-base-url'
+import { readLabelsSource, readV3LabelsSelection, readLabelsVaultTag, readHostedLabelImageOrigins } from './labels-base-url'
+import { readServerChainPolicy } from './chain-policy'
+import { loadV3ChainCatalog, peekV3ChainCatalog, requiresV3ChainCatalog } from './v3-chain-catalog'
 import { getStaticLabelsBundle } from './static-labels-source'
 import { logger } from './logger'
 import { loadEulerChains, peekEulerChains } from '~/server/api/internal/euler-chains.get'
-import { readChainRegistry } from '~/utils/chain-status'
+import { chainReadPolicyKey, getChainReadPolicy, type ChainReadPolicy, type V3ChainCatalog } from '~/utils/chain-policy'
 import { PublicLabelsV3Adapter, PublicLabelsV3MetadataAdapter } from '@eulerxyz/euler-v2-sdk/public-labels'
 import {
   normalizeLabelsBundle,
@@ -42,8 +44,8 @@ const getGeoSource = () => {
 const cacheKey = (chainId: number, labelSet: string, version: string, metadataOnly: boolean): string =>
   JSON.stringify([readResolvedV3ApiUrl(), labelSet, chainId, version, metadataOnly])
 
-const isMetadataOnlyChain = (chainId: number, manifest: readonly unknown[]): boolean =>
-  isLabelsOnchainVerificationChain(chainId, readChainRegistry(manifest))
+const readPolicy = (chainId: number, manifest: readonly unknown[] | undefined, catalog?: V3ChainCatalog): ChainReadPolicy =>
+  getChainReadPolicy(readServerChainPolicy(manifest, catalog), chainId)
 
 export const createPublicLabelsRequest = (): PublicLabelsRequest => async <T>(
   path: string,
@@ -74,8 +76,8 @@ export class PublicLabelsRequestError extends Error {
 }
 
 // Cached source data is complete; deployment policy is attached on every read.
-const withDeploymentConfig = (bundle: PublicLabelsBundle): PublicLabelsBundle => {
-  let configuredBundle = bundle
+const withDeploymentConfig = (bundle: PublicLabelsBundle, chainPolicy: ChainReadPolicy): PublicLabelsBundle => {
+  let configuredBundle = { ...bundle, chainPolicy }
   if (bundle.source !== 'static') {
     const allowedOrigins = readHostedLabelImageOrigins()
     const labels = bundle.publicLabels
@@ -91,7 +93,7 @@ const withDeploymentConfig = (bundle: PublicLabelsBundle): PublicLabelsBundle =>
     // Do not publish a private V3 origin merely because it is configured.
     // The browser only receives origins already present in approved logo URLs.
     const logoOrigins = allowedOrigins.filter(origin => usedOrigins.has(origin))
-    if (logoOrigins.length) configuredBundle = { ...bundle, logoOrigins }
+    if (logoOrigins.length) configuredBundle = { ...bundle, chainPolicy, logoOrigins }
   }
   const vaultTag = readLabelsVaultTag()
   return vaultTag ? { ...configuredBundle, vaultTag } : configuredBundle
@@ -163,47 +165,63 @@ function refreshV3PublicLabelsBundle(
       }
       throw err
     }
-  }).then(withDeploymentConfig)
+  })
 }
 
 export function refreshPublicLabelsBundle(
   chainId: number,
   version?: string,
 ): Promise<PublicLabelsBundle> {
-  if (readLabelsSource() === 'static') return getStaticLabelsBundle(chainId, true).then(withDeploymentConfig)
-  const selection = readV3LabelsSelection()
-  const selectedVersion = version ?? selection.version
-  return loadEulerChains().then(manifest => refreshV3PublicLabelsBundle(
-    chainId,
-    selection.labelSet,
-    selectedVersion,
-    isMetadataOnlyChain(chainId, manifest),
-  ))
+  return loadPublicLabelsBundle(chainId, true, version)
 }
 
 export function getCachedPublicLabelsBundle(chainId: number, version?: string): PublicLabelsBundle | undefined {
   if (readLabelsSource() === 'static') return undefined
-  // Without a registry snapshot, the cached adapter's verification mode is unknown.
+  // Both admission and V3 support must be known before choosing a cached adapter.
   const manifest = peekEulerChains()
-  if (!manifest) return undefined
+  const catalog = peekV3ChainCatalog()
+  if (!manifest || (requiresV3ChainCatalog() && !catalog)) return undefined
   const selection = readV3LabelsSelection()
-  const hit = cache.get(cacheKey(chainId, selection.labelSet, version ?? selection.version, isMetadataOnlyChain(chainId, manifest)))
-  return hit && hasUsableGeo(hit) ? withDeploymentConfig(hit) : undefined
+  const policy = readPolicy(chainId, manifest, catalog)
+  const hit = cache.get(cacheKey(chainId, selection.labelSet, version ?? selection.version, policy.metadataOnly))
+  return hit && hasUsableGeo(hit) ? withDeploymentConfig(hit, policy) : undefined
 }
 
 export async function getPublicLabelsBundle(
   chainId: number,
   version?: string,
 ): Promise<PublicLabelsBundle> {
-  if (readLabelsSource() === 'static') return getStaticLabelsBundle(chainId).then(withDeploymentConfig)
-  const selection = readV3LabelsSelection()
-  const selectedVersion = version ?? selection.version
-  const manifest = await loadEulerChains()
-  const metadataOnly = isMetadataOnlyChain(chainId, manifest)
-  const hit = cache.get(cacheKey(chainId, selection.labelSet, selectedVersion, metadataOnly))
-  return hit && hasUsableGeo(hit)
-    ? withDeploymentConfig(hit)
-    : refreshV3PublicLabelsBundle(chainId, selection.labelSet, selectedVersion, metadataOnly)
+  return loadPublicLabelsBundle(chainId, false, version)
+}
+
+async function loadPublicLabelsBundle(chainId: number, forceRefresh: boolean, version?: string): Promise<PublicLabelsBundle> {
+  const isStatic = readLabelsSource() === 'static'
+  const selection = isStatic ? undefined : readV3LabelsSelection()
+  const currentPolicy = async () => {
+    const [manifest, catalog] = await Promise.all([
+      isStatic ? peekEulerChains() : loadEulerChains(),
+      loadV3ChainCatalog(),
+    ])
+    return readPolicy(chainId, manifest, catalog)
+  }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const policy = await currentPolicy()
+    let bundle: PublicLabelsBundle
+    if (isStatic) {
+      bundle = await getStaticLabelsBundle(chainId, forceRefresh)
+    }
+    else {
+      const selectedVersion = version ?? selection!.version
+      const hit = !forceRefresh && cache.get(cacheKey(chainId, selection!.labelSet, selectedVersion, policy.metadataOnly))
+      bundle = hit && hasUsableGeo(hit)
+        ? hit
+        : await refreshV3PublicLabelsBundle(chainId, selection!.labelSet, selectedVersion, policy.metadataOnly)
+    }
+    if (chainReadPolicyKey(policy) === chainReadPolicyKey(await currentPolicy())) {
+      return withDeploymentConfig(bundle, policy)
+    }
+  }
+  throw new Error('Chain policy changed during labels refresh')
 }
 
 export async function getPublicEulerLabelsData(

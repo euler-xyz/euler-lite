@@ -10,6 +10,7 @@ import {
 } from '@eulerxyz/euler-v2-sdk/public-labels'
 import type { HostedGeoContext } from '~/utils/geo-policies'
 import { resolveLabelLogo } from '~/utils/label-logo'
+import type { ChainReadPolicy } from '~/utils/chain-policy'
 
 export {
   PUBLIC_LABELS_RUNTIME_VERSION,
@@ -57,7 +58,7 @@ export type HostedLabelsBundle = (V3LabelsBundle | V3MetadataLabelsBundle) & {
   /** Server-approved public origins already used by this snapshot's logos. */
   logoOrigins?: string[]
 }
-export type PublicLabelsBundle = (HostedLabelsBundle | StaticLabelsBundle) & { vaultTag?: string }
+export type PublicLabelsBundle = (HostedLabelsBundle | StaticLabelsBundle) & { vaultTag?: string, chainPolicy?: ChainReadPolicy }
 
 /** V3 owns hosted membership, published content and per-side visibility. */
 export const normalizePublicLabelsData = (chainId: number, source: PublicLabelsSource): PublicEulerLabelsData => {
