@@ -12,15 +12,17 @@ const mocks = vi.hoisted(() => ({
   loadEulerChains: vi.fn(),
   peekEulerChains: vi.fn(),
   catalog: { indexedChainIds: [1, 146] } as { indexedChainIds: number[] } | undefined,
+  requiresCatalog: true,
 }))
 
 vi.mock('~/server/utils/v3-chain-catalog', () => ({
   loadV3ChainCatalog: async () => {
+    if (!mocks.requiresCatalog) return undefined
     if (!mocks.catalog) throw new Error('catalog unavailable')
     return mocks.catalog
   },
-  peekV3ChainCatalog: () => mocks.catalog,
-  requiresV3ChainCatalog: () => true,
+  peekV3ChainCatalog: () => mocks.requiresCatalog ? mocks.catalog : undefined,
+  requiresV3ChainCatalog: () => mocks.requiresCatalog,
 }))
 
 vi.mock('~/server/api/internal/euler-chains.get', () => ({
@@ -82,6 +84,7 @@ describe('public labels server source', () => {
     vi.stubEnv('LABELS_VAULT_TAG', '')
     vi.stubEnv('V3_API_URL', 'https://v3.example.test')
     mocks.catalog = { indexedChainIds: [1, 146] }
+    mocks.requiresCatalog = true
     const manifest = [{ chainId: 1, status: 'production' }, { chainId: 146, status: 'production' }]
     mocks.loadEulerChains.mockReset().mockResolvedValue(manifest)
     mocks.peekEulerChains.mockReset().mockReturnValue(manifest)
@@ -97,6 +100,24 @@ describe('public labels server source', () => {
     await rm(directory, { recursive: true, force: true })
     vi.useRealTimers()
     vi.unstubAllEnvs()
+  })
+
+  it('keeps custom hosted labels cached without a catalog and refreshes policy tags for overrides', async () => {
+    mocks.requiresCatalog = false
+    mocks.catalog = undefined
+    vi.stubEnv('RPC_URL_146', 'https://rpc.example.test')
+    const { getPublicLabelsBundle, getCachedPublicLabelsBundle } = await import('~/server/utils/public-labels-source')
+    const active = await getPublicLabelsBundle(146)
+    expect(active.chainPolicy).toEqual({ deprecated: false, onchain: false, metadataOnly: false })
+    const requests = mocks.fetchWithTimeout.mock.calls.length
+    vi.stubEnv('DEPRECATED_CHAINS', '146')
+    vi.stubEnv('ONCHAIN_SDK_CHAINS', '146')
+    const overridden = await getPublicLabelsBundle(146)
+    expect(overridden.chainPolicy).toEqual({ deprecated: true, onchain: true, metadataOnly: false })
+    expect(overridden.source).not.toBe('v3-metadata')
+    expect(getCachedPublicLabelsBundle(146)).toEqual(overridden)
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(requests)
+    expect(mocks.fetchWithTimeout.mock.calls.every(([url]) => String(url).startsWith('https://v3.example.test/'))).toBe(true)
   })
 
   it.each(['get', 'refresh'])('rechecks policy after an in-flight %s labels request', async (method) => {

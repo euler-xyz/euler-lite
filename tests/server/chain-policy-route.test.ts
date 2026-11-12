@@ -14,7 +14,7 @@ describe('independent chain policy endpoint', () => {
   beforeEach(() => {
     vi.resetModules()
     vi.useFakeTimers()
-    vi.stubEnv('V3_API_URL', 'https://v3.example.test')
+    vi.stubEnv('V3_API_URL', 'https://v3.euler.finance')
     vi.stubEnv('DISABLE_V3', 'false')
     vi.stubEnv('RPC_URL_146', 'https://rpc.example.test')
     vi.stubEnv('LABELS_SOURCE', 'v3')
@@ -72,6 +72,36 @@ describe('independent chain policy endpoint', () => {
     expect(await handler({} as never)).toMatchObject({ policy: { deprecated: true, onchain: false, metadataOnly: false } })
     vi.stubEnv('ONCHAIN_SDK_CHAINS', '146')
     expect(await handler({} as never)).toMatchObject({ policy: { deprecated: true, onchain: true, metadataOnly: false } })
+  })
+
+  it.each(['v3', 'static'])('keeps custom V3 routing ready with %s labels and no catalog endpoint', async (labelsSource) => {
+    vi.stubEnv('V3_API_URL', 'https://custom-indexer.example.test')
+    vi.stubEnv('LABELS_SOURCE', labelsSource)
+    mocks.fetch.mockRejectedValue(new Error('No catalog endpoint'))
+    const { default: handler } = await import('~/server/api/internal/chain-policy.get')
+    const { readServerChainPolicy } = await import('~/server/utils/chain-policy')
+    for (const status of ['production', 'deprecated', 'production']) {
+      const manifest = [{ chainId: 146, status }]
+      mocks.loadEulerChains.mockResolvedValue(manifest)
+      expect(readServerChainPolicy(manifest).unresolvedChainIds).toEqual([])
+      expect(await handler({} as never)).toMatchObject({ policy: { deprecated: status === 'deprecated', onchain: false, metadataOnly: false } })
+    }
+    vi.stubEnv('ONCHAIN_SDK_CHAINS', '146')
+    expect(await handler({} as never)).toMatchObject({ policy: { deprecated: false, onchain: true, metadataOnly: false } })
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    expect(readServerChainPolicy(undefined).unresolvedChainIds).toContain(146)
+    mocks.loadEulerChains.mockRejectedValue(new Error('registry unavailable'))
+    await expect(handler({} as never)).rejects.toThrow('registry unavailable')
+  })
+
+  it('does not apply a cached Euler retirement after selecting a custom V3', async () => {
+    mocks.loadEulerChains.mockResolvedValue([{ chainId: 146, status: 'deprecated' }])
+    mocks.fetch.mockResolvedValueOnce(Response.json({ data: [] }))
+    const { default: handler } = await import('~/server/api/internal/chain-policy.get')
+    expect(await handler({} as never)).toMatchObject({ policy: { deprecated: true, onchain: true, metadataOnly: true } })
+    vi.stubEnv('V3_API_URL', 'https://custom-indexer.example.test')
+    expect(await handler({} as never)).toMatchObject({ policy: { deprecated: true, onchain: false, metadataOnly: false } })
+    expect(mocks.fetch).toHaveBeenCalledOnce()
   })
 
   it('does not describe excluded chains or a missing registry as active', async () => {

@@ -3,7 +3,7 @@ import { withWallClock } from './fetchWithTimeout'
 import { createInFlightDedup } from './in-flight'
 import { readLabelsSource } from './labels-base-url'
 import { logger } from './logger'
-import { isV3BackendEnabled, readBrowserVaultSource, readDisableV3, readResolvedV3ApiUrl, readServerVaultCacheSource, readV3ApiKey } from '~/utils/api-url-env'
+import { DEFAULT_V3_API_URL, isV3BackendEnabled, readBrowserVaultSource, readDisableV3, readResolvedV3ApiUrl, readServerVaultCacheSource, readV3ApiKey } from '~/utils/api-url-env'
 import type { V3ChainCatalog } from '~/utils/chain-policy'
 
 const CACHE_TTL_MS = 5 * 60_000
@@ -21,8 +21,11 @@ export class V3ChainCatalogUnavailableError extends Error {
   }
 }
 
+/** Custom backends retain configured routing without implementing Euler's catalog. */
 export const requiresV3ChainCatalog = (): boolean =>
-  !readDisableV3() && (readLabelsSource() === 'v3' || isV3BackendEnabled()
+  !readDisableV3()
+  && new URL(readResolvedV3ApiUrl()).href === new URL(DEFAULT_V3_API_URL).href
+  && (readLabelsSource() === 'v3' || isV3BackendEnabled()
     || readBrowserVaultSource() === 'v3' || readServerVaultCacheSource() === 'v3')
 
 const source = () => {

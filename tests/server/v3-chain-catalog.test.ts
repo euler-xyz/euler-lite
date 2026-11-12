@@ -10,7 +10,7 @@ describe('V3 supported-chain catalog', () => {
     vi.resetModules()
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-11-12T12:00:00Z'))
-    vi.stubEnv('V3_API_URL', 'https://v3.example.test')
+    vi.stubEnv('V3_API_URL', 'https://v3.euler.finance')
     vi.stubEnv('V3_API_KEY', 'server-secret')
     vi.stubEnv('DISABLE_V3', 'false')
     vi.stubEnv('LABELS_SOURCE', 'v3')
@@ -26,24 +26,64 @@ describe('V3 supported-chain catalog', () => {
     vi.useRealTimers()
   })
 
-  it('deduplicates requests and scopes the five-minute cache to upstream and credentials', async () => {
+  it('deduplicates requests and scopes the five-minute cache to credentials', async () => {
     const { loadV3ChainCatalog } = await import('~/server/utils/v3-chain-catalog')
     const [first, joined] = await Promise.all([loadV3ChainCatalog(), loadV3ChainCatalog()])
     expect(first).toEqual({ indexedChainIds: [1, 999] })
     expect(joined).toBe(first)
     expect(await loadV3ChainCatalog()).toBe(first)
-    expect(mocks.fetch).toHaveBeenCalledExactlyOnceWith('https://v3.example.test/v3/chains', {
+    expect(mocks.fetch).toHaveBeenCalledExactlyOnceWith('https://v3.euler.finance/v3/chains', {
       signal: expect.any(AbortSignal),
       headers: { 'accept': 'application/json', 'X-API-Key': 'server-secret' }, redirect: 'error',
     })
-    vi.stubEnv('V3_API_URL', 'https://fork.example.test/v3/')
-    mocks.fetch.mockResolvedValueOnce(Response.json(catalog([])))
-    expect(await loadV3ChainCatalog()).toEqual({ indexedChainIds: [] })
-    expect(mocks.fetch.mock.lastCall?.[0]).toBe('https://fork.example.test/v3/chains')
     vi.stubEnv('V3_API_KEY', 'different-secret')
     expect(await loadV3ChainCatalog()).toEqual({ indexedChainIds: [1, 999] })
-    expect(mocks.fetch).toHaveBeenCalledTimes(3)
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
     expect(JSON.stringify(first)).not.toContain('secret')
+  })
+
+  it.each(['', 'https://v3.euler.finance/', 'https://V3.EULER.FINANCE:443/'])(
+    'recognizes the default Euler service after URL normalization: %s', async (url) => {
+      for (const key of ['V3_API_URL', 'EULER_SDK_V3_API_URL', 'NUXT_PUBLIC_V3_API_URL']) vi.stubEnv(key, '')
+      vi.stubEnv('V3_API_URL', url)
+      const { requiresV3ChainCatalog, loadV3ChainCatalog } = await import('~/server/utils/v3-chain-catalog')
+      expect(requiresV3ChainCatalog()).toBe(true)
+      expect(await loadV3ChainCatalog()).toEqual({ indexedChainIds: [1, 999] })
+      expect(mocks.fetch.mock.lastCall?.[0]).toBe('https://v3.euler.finance/v3/chains')
+    },
+  )
+
+  it.each(['V3_API_URL', 'EULER_SDK_V3_API_URL', 'NUXT_PUBLIC_V3_API_URL'])(
+    'uses the existing %s alias to select Euler or custom routing', async (key) => {
+      for (const alias of ['V3_API_URL', 'EULER_SDK_V3_API_URL', 'NUXT_PUBLIC_V3_API_URL']) vi.stubEnv(alias, '')
+      const { requiresV3ChainCatalog, loadV3ChainCatalog, peekV3ChainCatalog } = await import('~/server/utils/v3-chain-catalog')
+      vi.stubEnv(key, 'https://v3.euler.finance')
+      await loadV3ChainCatalog()
+      vi.stubEnv(key, 'https://indexer.example.test')
+      expect(requiresV3ChainCatalog()).toBe(false)
+      expect(peekV3ChainCatalog()).toBeUndefined()
+      expect(await loadV3ChainCatalog()).toBeUndefined()
+      expect(mocks.fetch).toHaveBeenCalledOnce()
+    },
+  )
+
+  it.each([
+    'https://indexer.example.test', 'https://v3.euler.finance.example.test',
+    'https://v3.euler.finance:8443', 'http://v3.euler.finance',
+    'https://v3.euler.finance/custom', 'https://proxy.example.test/v3',
+  ])('does not probe or use Euler cached support for a custom base URL: %s', async (url) => {
+    const { loadV3ChainCatalog, peekV3ChainCatalog, requiresV3ChainCatalog } = await import('~/server/utils/v3-chain-catalog')
+    mocks.fetch.mockResolvedValueOnce(Response.json(catalog([])))
+    await loadV3ChainCatalog()
+    vi.stubEnv('V3_API_URL', url)
+    vi.stubEnv('EULER_SDK_V3_API_URL', 'https://v3.euler.finance')
+    mocks.fetch.mockRejectedValue(new Error('Custom indexer has no catalog'))
+    expect(requiresV3ChainCatalog()).toBe(false)
+    expect(await loadV3ChainCatalog()).toBeUndefined()
+    expect(peekV3ChainCatalog()).toBeUndefined()
+    expect(mocks.fetch).toHaveBeenCalledOnce()
+    vi.stubEnv('V3_API_URL', 'https://v3.euler.finance')
+    expect(await loadV3ChainCatalog()).toEqual({ indexedChainIds: [] })
   })
 
   it('follows a complete retirement and reactivation without using health status as support', async () => {
