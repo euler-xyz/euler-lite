@@ -1,5 +1,5 @@
 import { createTtlCache } from './cache'
-import { fetchWithTimeout, withWallClock } from './fetchWithTimeout'
+import { withWallClock } from './fetchWithTimeout'
 import { createInFlightDedup } from './in-flight'
 import { readLabelsSource } from './labels-base-url'
 import { logger } from './logger'
@@ -77,9 +77,11 @@ export const loadV3ChainCatalog = async (): Promise<V3ChainCatalog | undefined> 
   }
   if (failures.get(key)) return staleOrThrow()
   return inFlight.run(key, async () => {
+    const controller = new AbortController()
     try {
       const catalog = await withWallClock(async () => {
-        const response = await fetchWithTimeout(url, REQUEST_BUDGET_MS, {
+        const response = await fetch(url, {
+          signal: controller.signal,
           headers: { accept: 'application/json', ...(apiKey ? { 'X-API-Key': apiKey } : {}) },
           redirect: 'error',
         })
@@ -94,6 +96,10 @@ export const loadV3ChainCatalog = async (): Promise<V3ChainCatalog | undefined> 
       logger.warn({ ctx: 'v3-chain-catalog' }, 'catalog refresh failed; retaining bounded last-known support')
       failures.set(key, true)
       return staleOrThrow()
+    }
+    finally {
+      // The deadline covers headers and body; abort also releases a stalled body read.
+      controller.abort()
     }
   })
 }

@@ -3,9 +3,6 @@ import { setResponseHeader } from 'h3'
 
 const mocks = vi.hoisted(() => ({ loadEulerChains: vi.fn(), fetch: vi.fn() }))
 vi.mock('~/server/api/internal/euler-chains.get', () => ({ loadEulerChains: mocks.loadEulerChains }))
-vi.mock('~/server/utils/fetchWithTimeout', async original => ({
-  ...await original<typeof import('~/server/utils/fetchWithTimeout')>(), fetchWithTimeout: mocks.fetch,
-}))
 vi.mock('~/server/utils/rate-limit', () => ({ createRateLimiter: () => ({ consume: vi.fn() }) }))
 vi.mock('~/server/utils/resolve-chain-id', () => ({ resolveChainId: () => 146 }))
 vi.mock('h3', () => ({
@@ -25,10 +22,12 @@ describe('independent chain policy endpoint', () => {
     vi.stubEnv('ONCHAIN_SDK_CHAINS', '')
     mocks.loadEulerChains.mockReset()
     mocks.fetch.mockReset().mockImplementation(async () => Response.json({ data: [{ id: 146, capabilities: ['indexing'] }] }))
+    vi.stubGlobal('fetch', mocks.fetch)
     vi.clearAllMocks()
   })
   afterEach(() => {
     vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
     vi.useRealTimers()
   })
 

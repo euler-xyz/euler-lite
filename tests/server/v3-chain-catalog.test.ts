@@ -1,10 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({ fetch: vi.fn(), warn: vi.fn() }))
-vi.mock('~/server/utils/fetchWithTimeout', async original => ({
-  ...await original<typeof import('~/server/utils/fetchWithTimeout')>(),
-  fetchWithTimeout: mocks.fetch,
-}))
 vi.mock('~/server/utils/logger', () => ({ logger: { warn: mocks.warn } }))
 
 const catalog = (ids: number[]) => ({ data: ids.map(id => ({ id, capabilities: ['indexing', 'labels', 'assessments'] })) })
@@ -21,10 +17,12 @@ describe('V3 supported-chain catalog', () => {
     vi.stubEnv('SERVER_VAULT_CACHE_SOURCE', 'fallback')
     vi.stubEnv('NUXT_PUBLIC_BROWSER_VAULT_SOURCE', 'fallback')
     mocks.fetch.mockReset().mockImplementation(async () => Response.json(catalog([1, 999])))
+    vi.stubGlobal('fetch', mocks.fetch)
     mocks.warn.mockReset()
   })
   afterEach(() => {
     vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
     vi.useRealTimers()
   })
 
@@ -34,7 +32,8 @@ describe('V3 supported-chain catalog', () => {
     expect(first).toEqual({ indexedChainIds: [1, 999] })
     expect(joined).toBe(first)
     expect(await loadV3ChainCatalog()).toBe(first)
-    expect(mocks.fetch).toHaveBeenCalledExactlyOnceWith('https://v3.example.test/v3/chains', 10_000, {
+    expect(mocks.fetch).toHaveBeenCalledExactlyOnceWith('https://v3.example.test/v3/chains', {
+      signal: expect.any(AbortSignal),
       headers: { 'accept': 'application/json', 'X-API-Key': 'server-secret' }, redirect: 'error',
     })
     vi.stubEnv('V3_API_URL', 'https://fork.example.test/v3/')
@@ -117,12 +116,46 @@ describe('V3 supported-chain catalog', () => {
     const pending = expect(loadV3ChainCatalog()).rejects.toMatchObject({ statusCode: 503 })
     await vi.advanceTimersByTimeAsync(10_000)
     await pending
+    expect(mocks.fetch.mock.calls[0][1].signal.aborted).toBe(true)
     vi.advanceTimersByTime(30_000)
     mocks.fetch.mockResolvedValueOnce(Response.json(catalog([])))
     expect(await loadV3ChainCatalog()).toEqual({ indexedChainIds: [] })
     finish(catalog([999]))
     await Promise.resolve()
     expect(peekV3ChainCatalog()).toEqual({ indexedChainIds: [] })
+  })
+
+  it.each([false, true])('cancels a stalled body and releases the request with a cached policy=%s', async (warm) => {
+    const { loadV3ChainCatalog, peekV3ChainCatalog } = await import('~/server/utils/v3-chain-catalog')
+    if (warm) {
+      await loadV3ChainCatalog()
+      vi.advanceTimersByTime(5 * 60_000)
+    }
+    const cancel = vi.fn()
+    mocks.fetch.mockImplementationOnce(async (_url, { signal }: RequestInit) => {
+      const stream = new ReadableStream({
+        start(controller) {
+          signal!.addEventListener('abort', () => {
+            cancel()
+            controller.error(new DOMException('Aborted', 'AbortError'))
+          }, { once: true })
+          controller.enqueue(new TextEncoder().encode('{"data":['))
+        },
+      })
+      return new Response(stream)
+    })
+    const pending = loadV3ChainCatalog()
+    const outcome = warm
+      ? expect(pending).resolves.toEqual({ indexedChainIds: [1, 999] })
+      : expect(pending).rejects.toMatchObject({ statusCode: 503 })
+    await vi.advanceTimersByTimeAsync(9_999)
+    expect(cancel).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    await outcome
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(peekV3ChainCatalog()).toEqual(warm ? { indexedChainIds: [1, 999] } : undefined)
+    vi.advanceTimersByTime(30_000)
+    expect(await loadV3ChainCatalog()).toEqual({ indexedChainIds: [1, 999] })
   })
 
   it('does not contact V3 for a deployment with V3 disabled', async () => {
