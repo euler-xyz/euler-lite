@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({ fetch: vi.fn(), warn: vi.fn() }))
-vi.mock('~/server/utils/logger', () => ({ logger: { warn: mocks.warn } }))
+vi.mock('~/server/utils/logger', () => ({ logger: { warn: mocks.warn, info: vi.fn() } }))
 
 const catalog = (ids: number[]) => ({ data: ids.map(id => ({ id, capabilities: ['indexing', 'labels', 'assessments'] })) })
 
@@ -83,7 +83,7 @@ describe('V3 supported-chain catalog', () => {
     'https://v3.euler.finance:8443', 'http://v3.euler.finance',
     'https://v3.euler.finance/custom', 'https://proxy.example.test/v3',
   ])('does not probe or use Euler cached support for a custom base URL: %s', async (url) => {
-    const { loadV3ChainCatalog, peekV3ChainCatalog, requiresV3ChainCatalog } = await import('~/server/utils/v3-chain-catalog')
+    const { loadV3ChainCatalog, refreshV3ChainCatalog, peekV3ChainCatalog, requiresV3ChainCatalog } = await import('~/server/utils/v3-chain-catalog')
     mocks.fetch.mockResolvedValueOnce(Response.json(catalog([])))
     await loadV3ChainCatalog()
     vi.stubEnv('V3_API_URL', url)
@@ -91,22 +91,51 @@ describe('V3 supported-chain catalog', () => {
     mocks.fetch.mockRejectedValue(new Error('Custom indexer has no catalog'))
     expect(requiresV3ChainCatalog()).toBe(false)
     expect(await loadV3ChainCatalog()).toBeUndefined()
+    expect(await refreshV3ChainCatalog()).toBeUndefined()
     expect(peekV3ChainCatalog()).toBeUndefined()
     expect(mocks.fetch).toHaveBeenCalledOnce()
     vi.stubEnv('V3_API_URL', 'https://v3.euler.finance')
     expect(await loadV3ChainCatalog()).toEqual({ indexedChainIds: [] })
   })
 
-  it('follows a complete retirement and reactivation without using health status as support', async () => {
-    const { loadV3ChainCatalog } = await import('~/server/utils/v3-chain-catalog')
+  it('serves stale immediately while one background refresh retires or reactivates a chain', async () => {
+    const { loadV3ChainCatalog, refreshV3ChainCatalog } = await import('~/server/utils/v3-chain-catalog')
     mocks.fetch.mockResolvedValueOnce(Response.json({ data: [{ id: 999, status: 'degraded', labeling: false, capabilities: ['indexing'] }] }))
-    expect(await loadV3ChainCatalog()).toEqual({ indexedChainIds: [999] })
-    vi.advanceTimersByTime(5 * 60_000)
-    mocks.fetch.mockResolvedValueOnce(Response.json(catalog([])))
+    let current = await loadV3ChainCatalog()
+    expect(current).toEqual({ indexedChainIds: [999] })
+    for (const ids of [[], [999]]) {
+      vi.advanceTimersByTime(5 * 60_000)
+      let finish!: (response: Response) => void
+      mocks.fetch.mockImplementationOnce(() => new Promise<Response>((resolve) => {
+        finish = resolve
+      }))
+      const calls = mocks.fetch.mock.calls.length
+      const startedAt = Date.now()
+      expect(await Promise.all([loadV3ChainCatalog(), loadV3ChainCatalog(), loadV3ChainCatalog()])).toEqual([current, current, current])
+      expect(Date.now()).toBe(startedAt)
+      expect(mocks.fetch).toHaveBeenCalledTimes(calls + 1)
+      const refreshed = refreshV3ChainCatalog()
+      finish(Response.json(catalog(ids)))
+      current = await refreshed
+      expect(await loadV3ChainCatalog()).toEqual({ indexedChainIds: ids })
+      expect(mocks.fetch).toHaveBeenCalledTimes(calls + 1)
+    }
+  })
+
+  it('forces periodic refresh before expiry while reads retain the fresh copy', async () => {
+    const { loadV3ChainCatalog, refreshV3ChainCatalog } = await import('~/server/utils/v3-chain-catalog')
+    const first = await loadV3ChainCatalog()
+    vi.advanceTimersByTime(5 * 60_000 - 1)
+    let finish!: (response: Response) => void
+    mocks.fetch.mockImplementationOnce(() => new Promise<Response>((resolve) => {
+      finish = resolve
+    }))
+    const refresh = refreshV3ChainCatalog()
+    expect(await loadV3ChainCatalog()).toBe(first)
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+    finish(Response.json(catalog([])))
+    await refresh
     expect(await loadV3ChainCatalog()).toEqual({ indexedChainIds: [] })
-    vi.advanceTimersByTime(5 * 60_000)
-    mocks.fetch.mockResolvedValueOnce(Response.json(catalog([999])))
-    expect(await loadV3ChainCatalog()).toEqual({ indexedChainIds: [999] })
   })
 
   it('requires indexing capability for indexed routing', async () => {
@@ -116,13 +145,15 @@ describe('V3 supported-chain catalog', () => {
   })
 
   it.each([true, false])('preserves last-known indexed=%s during outages without renewing its age', async (indexed) => {
-    const { loadV3ChainCatalog, peekV3ChainCatalog } = await import('~/server/utils/v3-chain-catalog')
+    const { loadV3ChainCatalog, refreshV3ChainCatalog, peekV3ChainCatalog } = await import('~/server/utils/v3-chain-catalog')
     mocks.fetch.mockResolvedValueOnce(Response.json(catalog(indexed ? [999] : [])))
     const first = await loadV3ChainCatalog()
     vi.advanceTimersByTime(5 * 60_000)
     mocks.fetch.mockImplementation(async () => new Response('unavailable', { status: 503 }))
     expect(await loadV3ChainCatalog()).toBe(first)
     expect(await loadV3ChainCatalog()).toBe(first)
+    expect(await refreshV3ChainCatalog()).toBe(first)
+    expect(await refreshV3ChainCatalog()).toBe(first)
     expect(mocks.fetch).toHaveBeenCalledTimes(2)
     vi.advanceTimersByTime(24 * 60 * 60_000)
     expect(peekV3ChainCatalog()).toBeUndefined()
@@ -130,6 +161,21 @@ describe('V3 supported-chain catalog', () => {
     vi.advanceTimersByTime(30_000)
     mocks.fetch.mockResolvedValueOnce(Response.json(catalog(indexed ? [] : [999])))
     expect(await loadV3ChainCatalog()).toEqual({ indexedChainIds: indexed ? [] : [999] })
+  })
+
+  it('stops serving a last-good copy that expires during a background refresh', async () => {
+    const { loadV3ChainCatalog, peekV3ChainCatalog } = await import('~/server/utils/v3-chain-catalog')
+    const first = await loadV3ChainCatalog()
+    vi.advanceTimersByTime(24 * 60 * 60_000 - 1_000)
+    mocks.fetch.mockImplementationOnce(() => new Promise<Response>(() => {}))
+    expect(await loadV3ChainCatalog()).toBe(first)
+    await vi.advanceTimersByTimeAsync(1_001)
+    expect(peekV3ChainCatalog()).toBeUndefined()
+    const expired = expect(loadV3ChainCatalog()).rejects.toMatchObject({ statusCode: 503 })
+    await vi.advanceTimersByTimeAsync(8_999)
+    await expired
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+    expect(mocks.fetch.mock.calls[1][1].signal.aborted).toBe(true)
   })
 
   it.each([
@@ -143,11 +189,12 @@ describe('V3 supported-chain catalog', () => {
     { ...catalog([1]), meta: { hasMore: 'true' } },
     { ...catalog([1]), meta: { nextCursor: 'next' } },
   ])('does not infer retirement from malformed or partial JSON: %j', async (payload) => {
-    const { loadV3ChainCatalog } = await import('~/server/utils/v3-chain-catalog')
+    const { loadV3ChainCatalog, refreshV3ChainCatalog } = await import('~/server/utils/v3-chain-catalog')
     const first = await loadV3ChainCatalog()
     vi.advanceTimersByTime(5 * 60_000)
     mocks.fetch.mockResolvedValueOnce(Response.json(payload))
     expect(await loadV3ChainCatalog()).toBe(first)
+    expect(await refreshV3ChainCatalog()).toBe(first)
   })
 
   it.each([401, 403, 404, 429, 500, 503])('reports unknown on a cold HTTP %s rather than an empty catalog', async (status) => {
@@ -199,6 +246,7 @@ describe('V3 supported-chain catalog', () => {
     const outcome = warm
       ? expect(pending).resolves.toEqual({ indexedChainIds: [1, 999] })
       : expect(pending).rejects.toMatchObject({ statusCode: 503 })
+    if (warm) await outcome
     await vi.advanceTimersByTimeAsync(9_999)
     expect(cancel).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
@@ -207,13 +255,15 @@ describe('V3 supported-chain catalog', () => {
     expect(peekV3ChainCatalog()).toEqual(warm ? { indexedChainIds: [1, 999] } : undefined)
     vi.advanceTimersByTime(30_000)
     expect(await loadV3ChainCatalog()).toEqual({ indexedChainIds: [1, 999] })
+    await vi.advanceTimersByTimeAsync(0)
   })
 
   it('does not contact V3 for a deployment with V3 disabled', async () => {
     vi.stubEnv('DISABLE_V3', 'true')
     vi.stubEnv('LABELS_SOURCE', 'static')
-    const { loadV3ChainCatalog, peekV3ChainCatalog } = await import('~/server/utils/v3-chain-catalog')
+    const { loadV3ChainCatalog, refreshV3ChainCatalog, peekV3ChainCatalog } = await import('~/server/utils/v3-chain-catalog')
     expect(await loadV3ChainCatalog()).toBeUndefined()
+    expect(await refreshV3ChainCatalog()).toBeUndefined()
     expect(peekV3ChainCatalog()).toBeUndefined()
     expect(mocks.fetch).not.toHaveBeenCalled()
   })

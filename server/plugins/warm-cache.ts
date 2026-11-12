@@ -14,7 +14,7 @@
  *
  * Two timers, each with its own cadence:
  *
- *   • Global cycle (5 min): Euler Chains and runtime ABIs once, then each
+ *   • Global cycle (5 min): Euler Chains, the V3 catalog and runtime ABIs once, then each
  *     chain's labels bundle, token list and (when LIQUIDATION_BOT_API_URL is
  *     set) liquidation bot coverage, serialized across chains. Hosted
  *     bundles share the live geo-policy cache.
@@ -43,6 +43,7 @@ import { refreshTokenList } from '../api/internal/token-list.get'
 import { refreshChainVaults } from '../utils/vaults-cache'
 import { UPSTREAM_FETCH_TIMEOUT_MS } from '../utils/fetchWithTimeout'
 import { refreshPublicLabelsBundle } from '../utils/public-labels-source'
+import { refreshV3ChainCatalog } from '../utils/v3-chain-catalog'
 import { isLiquidationCoverageEnabled, refreshLiquidationCoverage } from '../utils/liquidation-coverage-source'
 import {
   readDisableServerVaultCache,
@@ -109,6 +110,9 @@ const reportWarm = <T>(context: string, task: Promise<T>): Promise<T | undefined
 const warmEulerChains = () =>
   reportWarm('euler-chains', refreshEulerChains())
 
+const warmV3ChainCatalog = () =>
+  reportWarm('v3-chain-catalog', refreshV3ChainCatalog())
+
 // Runtime ABI documents are chain-agnostic (one file per contract), so a
 // single warm per cycle keeps the manifest caches hot for the browser SDK's
 // /api/internal/abis reads.
@@ -158,7 +162,7 @@ export default defineNitroPlugin(() => {
     parseChainIds(process.env.DEPRECATED_CHAINS, new Set(enabledChainIds)),
   )
   const chainIds = enabledChainIds.filter(id => !deprecatedChainIds.has(id))
-  if (chainIds.length === 0) return
+  if (enabledChainIds.length === 0) return
 
   const currentChainIds = () => {
     const registryDeprecated = new Set(getRegistryDeprecatedChainIds(readChainRegistry(peekEulerChains())))
@@ -185,6 +189,7 @@ export default defineNitroPlugin(() => {
     try {
       await Promise.allSettled([
         warmEulerChains(),
+        warmV3ChainCatalog(),
         ...warmAbis(),
         warmChainsSequentially(),
       ])

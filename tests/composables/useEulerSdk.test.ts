@@ -389,6 +389,7 @@ describe('useEulerSdk', () => {
         const { readAppEnvConfig } = await import('~/utils/app-config')
         vi.stubGlobal('useEnvConfig', () => readAppEnvConfig())
         const { loadServerChainPolicy } = await import('~/server/utils/chain-policy')
+        const { refreshV3ChainCatalog } = await import('~/server/utils/v3-chain-catalog')
         const { getChainReadPolicy } = await import('~/utils/chain-policy')
         const { getServerSdk } = await import('~/server/utils/sdk-server')
         vi.stubGlobal('window', { __CHAIN_CONFIG__: await loadServerChainPolicy() })
@@ -416,6 +417,14 @@ describe('useEulerSdk', () => {
         if (automatic) {
           indexed = false
           vi.advanceTimersByTime(5 * 60_000)
+          const catalogRefresh = createDeferred<Response>()
+          fetch.mockReturnValueOnce(catalogRefresh.promise)
+          await refreshChainReadPolicy(999)
+          expect(await getEulerSdkForChain(999)).toBe(browser)
+          expect(await getServerSdk(999)).toBe(server)
+          expect(useChainConfig().policyRevision).toBe(0)
+          catalogRefresh.resolve(Response.json({ data: [] }))
+          await refreshV3ChainCatalog()
         }
         else vi.stubEnv('ONCHAIN_SDK_CHAINS', '999')
         await refreshChainReadPolicy(999)
@@ -434,6 +443,7 @@ describe('useEulerSdk', () => {
         indexed = true
         vi.stubEnv('ONCHAIN_SDK_CHAINS', '')
         vi.advanceTimersByTime(5 * 60_000)
+        if (automatic) await refreshV3ChainCatalog()
         await refreshChainReadPolicy(999)
         expect(await getEulerSdkForChain(999)).not.toBe(browser)
         expect(await getServerSdk(999)).not.toBe(server)

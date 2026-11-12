@@ -1,6 +1,6 @@
 import { createTtlCache } from './cache'
 import { withWallClock } from './fetchWithTimeout'
-import { createInFlightDedup } from './in-flight'
+import { createInFlightDedup, scheduleBackgroundRefresh } from './in-flight'
 import { readLabelsSource } from './labels-base-url'
 import { logger } from './logger'
 import { DEFAULT_V3_API_URL, isV3BackendEnabled, readBrowserVaultSource, readDisableV3, readResolvedV3ApiUrl, readServerVaultCacheSource, readV3ApiKey } from '~/utils/api-url-env'
@@ -68,11 +68,10 @@ const parseCatalog = (payload: unknown): V3ChainCatalog => {
 export const peekV3ChainCatalog = (): V3ChainCatalog | undefined =>
   requiresV3ChainCatalog() ? cache.getStale(source().key) : undefined
 
-export const loadV3ChainCatalog = async (): Promise<V3ChainCatalog | undefined> => {
+/** Refresh even a fresh entry for periodic warming; failures keep its original age. */
+export const refreshV3ChainCatalog = async (): Promise<V3ChainCatalog | undefined> => {
   if (!requiresV3ChainCatalog()) return undefined
   const { url, apiKey, key } = source()
-  const fresh = cache.get(key)
-  if (fresh) return fresh
   const staleOrThrow = () => {
     const stale = cache.getStale(key)
     if (stale) return stale
@@ -105,4 +104,20 @@ export const loadV3ChainCatalog = async (): Promise<V3ChainCatalog | undefined> 
       controller.abort()
     }
   })
+}
+
+/** Warm reads never wait on upstream; only an absent or expired last-good entry blocks. */
+export const loadV3ChainCatalog = async (): Promise<V3ChainCatalog | undefined> => {
+  if (!requiresV3ChainCatalog()) return undefined
+  const { key } = source()
+  const fresh = cache.get(key)
+  if (fresh) return fresh
+  const stale = cache.getStale(key)
+  if (stale) {
+    if (!failures.get(key) && !inFlight.peek(key)) {
+      scheduleBackgroundRefresh('v3-chain-catalog', refreshV3ChainCatalog)
+    }
+    return stale
+  }
+  return refreshV3ChainCatalog()
 }
