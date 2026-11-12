@@ -68,6 +68,7 @@ describe('chain-config plugin registry status', () => {
     vi.stubEnv('DEPRECATED_CHAINS', '')
     vi.stubEnv('ONCHAIN_SDK_CHAINS', '')
     vi.stubEnv('LABELS_SOURCE', 'v3')
+    vi.stubEnv('STATIC_LABELS_BASE_URL', 'https://labels.example.test')
   })
 
   afterEach(() => {

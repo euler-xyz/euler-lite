@@ -1,6 +1,8 @@
 import { loadEulerChains, peekEulerChains } from '../api/internal/euler-chains.get'
 import { readChainEnvConfig } from '~/utils/chain-env'
+import { applyChainRegistry, readChainRegistry } from '~/utils/chain-status'
 import { readServerChainPolicy } from '~/server/utils/chain-policy'
+import { LabelsConfigurationError } from '~/server/utils/labels-configuration-error'
 import { loadV3ChainCatalog } from '~/server/utils/v3-chain-catalog'
 import { escapeScriptJson } from '~/server/utils/escape-script-json'
 import { logger } from '~/server/utils/logger'
@@ -41,7 +43,17 @@ export default defineNitroPlugin((nitroApp) => {
 
   nitroApp.hooks.hook('render:html', async (html) => {
     await bootRead
-    const chainConfig = readServerChainPolicy(peekEulerChains())
+    const manifest = peekEulerChains()
+    let chainConfig: ReturnType<typeof readServerChainPolicy>
+    try {
+      chainConfig = readServerChainPolicy(manifest)
+    }
+    catch (error) {
+      if (!(error instanceof LabelsConfigurationError)) throw error
+      // Render the shell without authorizing reads; data endpoints retain their configuration errors.
+      const admitted = applyChainRegistry(readChainEnvConfig(), readChainRegistry(manifest), process.env.DOPPLER_ENVIRONMENT === 'prd')
+      chainConfig = { ...admitted, metadataOnlyChainIds: [], unresolvedChainIds: [...admitted.enabledChainIds] }
+    }
     html.head.push(`<script>window.__CHAIN_CONFIG__=${escapeScriptJson(JSON.stringify(chainConfig))}</script>`)
   })
 })

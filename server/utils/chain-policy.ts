@@ -1,5 +1,5 @@
 import { loadEulerChains } from '~/server/api/internal/euler-chains.get'
-import { readLabelsSource } from './labels-base-url'
+import { readLabelsSource, validateLabelsConfiguration } from './labels-base-url'
 import { readChainEnvConfig } from '~/utils/chain-env'
 import { readChainRegistry } from '~/utils/chain-status'
 import { resolveChainPolicy, getChainReadPolicy, chainReadPolicyKey } from '~/utils/chain-policy'
@@ -7,6 +7,7 @@ import { loadV3ChainCatalog, peekV3ChainCatalog, requiresV3ChainCatalog } from '
 
 /** Public policy only: configured RPCs and other upstream credentials stay server-side. */
 export const readServerChainPolicy = (manifest: readonly unknown[] | undefined, catalog = peekV3ChainCatalog()) => {
+  validateLabelsConfiguration()
   const config = resolveChainPolicy(readChainEnvConfig(), readChainRegistry(manifest), process.env.DOPPLER_ENVIRONMENT === 'prd', readLabelsSource(), catalog)
   const unresolved = manifest === undefined || (requiresV3ChainCatalog() && !catalog)
   return { ...config, unresolvedChainIds: unresolved ? [...config.enabledChainIds] : [] }

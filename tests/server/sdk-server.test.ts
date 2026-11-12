@@ -72,6 +72,7 @@ describe('getServerSdk', () => {
     mocks.catalogUnavailable = false
     for (const chainId of [1, 8453, 146, 463]) vi.stubEnv(`RPC_URL_${chainId}`, 'https://rpc.example')
     vi.stubEnv('LABELS_SOURCE', 'v3')
+    vi.stubEnv('STATIC_LABELS_BASE_URL', 'https://labels.example.test')
     vi.stubGlobal('fetch', vi.fn(async () => {
       throw new Error('Unexpected direct fetch in server SDK test')
     }))
@@ -258,6 +259,7 @@ describe('getServerSdk', () => {
   })
   it('disables optional V3 utilities as well as adapters for an explicit opt-out', async () => {
     vi.stubEnv('DISABLE_V3', 'true')
+    vi.stubEnv('LABELS_SOURCE', 'static')
     const priceService = { setBackendClient: vi.fn() }
     const tokenlistService = { setQueryTokenList: vi.fn() }
     mocks.buildEulerSDK.mockResolvedValue({ priceService, tokenlistService })
@@ -279,6 +281,7 @@ describe('getServerSdk', () => {
 
   it('keeps registry network selection and custom ABIs with V3 disabled in a real SDK', async () => {
     vi.stubEnv('DISABLE_V3', 'true')
+    vi.stubEnv('LABELS_SOURCE', 'static')
     vi.stubEnv('NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL', 'https://abis.example/fork')
     mocks.fetchWithTimeout.mockResolvedValueOnce(Response.json(accountLensAbi))
     const { getServerSdk } = await import('~/server/utils/sdk-server')
