@@ -24,7 +24,7 @@ export class V3ChainCatalogUnavailableError extends Error {
 /** Custom backends retain configured routing without implementing Euler's catalog. */
 export const requiresV3ChainCatalog = (): boolean =>
   !readDisableV3()
-  && new URL(readResolvedV3ApiUrl()).href === new URL(DEFAULT_V3_API_URL).href
+  && URL.parse(readResolvedV3ApiUrl())?.href === new URL(DEFAULT_V3_API_URL).href
   && (readLabelsSource() === 'v3' || isV3BackendEnabled()
     || readBrowserVaultSource() === 'v3' || readServerVaultCacheSource() === 'v3')
 

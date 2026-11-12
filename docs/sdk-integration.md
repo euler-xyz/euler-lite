@@ -130,7 +130,7 @@ The same list also gates the direct (non-SDK) V3 fetches via `composables/useV3C
 
 `useChainConfig().eVaultFetchChunkChainIds`, injected from `EVAULT_FETCH_CHUNK_CHAINS`, is a Lite-side throttle for EVault list reads. Configured chains split browser and server-snapshot `sdk.eVaultService.fetchVaults(...)` calls into small sequential chunks; the SDK package itself is still called through its normal service API.
 
-`useEulerSdk` reads only these — no auto-probing, no user toggle. Switching sources requires changing the env / runtime config. A boot-time warning (`utils/api-url-env.ts:warnIfVaultSourceNeedsV3`) fires when `browserVaultSource` ∈ `{fallback, v3}` but no `V3_API_URL` is configured.
+`useEulerSdk` selects adapters from the configured default and the resolved per-chain policy, without a user-facing source toggle. Changing the configured default requires an env / runtime config change. With Euler's default V3, catalog updates automatically switch individual chains between onchain routing and that configured default; custom V3 deployments use their configured sources and explicit overrides. A boot-time warning (`utils/api-url-env.ts:warnIfVaultSourceNeedsV3`) fires when `browserVaultSource` ∈ `{fallback, v3}` but no `V3_API_URL` is configured.
 
 The server-side snapshot builder has its own independent `SERVER_VAULT_CACHE_SOURCE` flag — see [server-side caching](./server-side-caching.md).
 

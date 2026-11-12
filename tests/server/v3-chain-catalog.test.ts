@@ -67,6 +67,17 @@ describe('V3 supported-chain catalog', () => {
     },
   )
 
+  it.each(['v3.operator.example', 'https://[invalid'])('leaves malformed URL validation to the labels configuration: %s', async (url) => {
+    vi.stubEnv('V3_API_URL', url)
+    const { requiresV3ChainCatalog, peekV3ChainCatalog, loadV3ChainCatalog } = await import('~/server/utils/v3-chain-catalog')
+    const { readV3LabelsSelection } = await import('~/server/utils/labels-base-url')
+    expect(requiresV3ChainCatalog()).toBe(false)
+    expect(peekV3ChainCatalog()).toBeUndefined()
+    await expect(loadV3ChainCatalog()).resolves.toBeUndefined()
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    expect(readV3LabelsSelection).toThrow('V3_API_URL must be an HTTP(S) directory URL without credentials, query or fragment')
+  })
+
   it.each([
     'https://indexer.example.test', 'https://v3.euler.finance.example.test',
     'https://v3.euler.finance:8443', 'http://v3.euler.finance',
