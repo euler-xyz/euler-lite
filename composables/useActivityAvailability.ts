@@ -110,7 +110,7 @@ export const useActivityAvailability = (
     }
   }
 
-  watch([resolvedChainId, scopeKey], () => {
+  watch([resolvedChainId, scopeKey, () => isV3EnabledForChain(resolvedChainId.value)], () => {
     void checkAvailability()
   }, { immediate: true })
 

@@ -12,6 +12,7 @@ import { getExplorerLink } from '~/utils/block-explorer'
 import { shortenAddress } from '~/utils/string-utils'
 import { VaultAssessmentChecksModal } from '#components'
 import { useOracleAdapterAnchors } from '~/composables/useOracleAdapterAnchors'
+import { getChainPolicyGeneration } from '~/composables/useChainConfig'
 
 const props = defineProps<{
   address: string
@@ -65,7 +66,7 @@ const lineViews = computed(() => lines.value.map(line => ({
 })))
 
 watch(
-  () => [chainId.value, props.address, family.value] as const,
+  () => [chainId.value, props.address, family.value, getChainPolicyGeneration(chainId.value)] as const,
   ([id, address, selectedFamily]) => {
     if (id) void loadVaultAssessment(id, address, selectedFamily)
   },

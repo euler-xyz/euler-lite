@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { getChainPolicyGeneration } from '~/composables/useChainConfig'
 import type { VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
 import { hasOnlyAcceptedVaultCheckFindings } from '~/utils/vault-assessment/presentation'
 import { FLAGGED_VAULT_LABEL, FLAGGED_VAULT_TITLE, PAIR_SIDE_BADGE_LABELS, getFlaggedVaultLine, type VaultPairSide } from '~/utils/vault-assessment/flagged'
@@ -24,7 +25,7 @@ const acceptedOnly = computed(() => verdict.value?.status === 'warning' && verdi
   && assessmentEntry.value.status === 'available'
   && !!assessmentEntry.value.assessment && hasOnlyAcceptedVaultCheckFindings(assessmentEntry.value.assessment))
 watch(
-  () => [chainId.value, address, family, verdict.value?.status, verdict.value?.decidedBy, hideChecks] as const,
+  () => [chainId.value, address, family, verdict.value?.status, verdict.value?.decidedBy, hideChecks, getChainPolicyGeneration(chainId.value)] as const,
   ([id, vaultAddress, selectedFamily, status, decidedBy, suppressed]) => {
     if (id && selectedFamily && !suppressed && status === 'warning' && decidedBy === 'advisories' && assessmentEntry.value.status === 'idle') {
       void loadVaultAssessment(id, vaultAddress, selectedFamily)
