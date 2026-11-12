@@ -351,13 +351,22 @@ describe('useEulerSdk', () => {
     expect(buildEulerSDK).toHaveBeenCalledTimes(5)
   })
 
-  it.each(['https://v3.euler.finance', 'https://custom-indexer.example.test'])(
-    'shares server policy and isolates browser/server SDK caches for %s', async (upstream) => {
+  it.each([
+    ['https://v3.euler.finance', 'v3', 'v3', false],
+    ['https://custom-indexer.example.test', 'v3', 'v3', false],
+    ['https://custom-indexer.example.test', 'fallback', 'fallback', false],
+    ['https://custom-indexer.example.test', 'fallback', 'onchain', false],
+    ['https://custom-indexer.example.test', 'onchain', 'fallback', false],
+    ['https://custom-indexer.example.test', 'onchain', 'onchain', false],
+    ['https://custom-indexer.example.test', 'fallback', 'onchain', true],
+  ] as const)(
+    'shares policy and isolates SDK caches for %s (browser=%s, server=%s, disableV3=%s)', async (upstream, browserSource, serverSource, disableV3) => {
       const automatic = upstream === 'https://v3.euler.finance'
       vi.useFakeTimers()
       for (const [key, value] of Object.entries({
-        V3_API_URL: upstream, DISABLE_V3: 'false', LABELS_SOURCE: 'v3',
-        SERVER_VAULT_CACHE_SOURCE: 'v3', RPC_URL_999: 'https://rpc.example.test',
+        V3_API_URL: upstream, DISABLE_V3: String(disableV3), LABELS_SOURCE: disableV3 ? 'static' : 'v3',
+        SERVER_VAULT_CACHE_SOURCE: serverSource, NUXT_PUBLIC_BROWSER_VAULT_SOURCE: browserSource,
+        STATIC_LABELS_BASE_URL: 'https://labels.example.test', RPC_URL_999: 'https://rpc.example.test',
         DEPRECATED_CHAINS: '', ONCHAIN_SDK_CHAINS: '',
       })) vi.stubEnv(key, value)
       const manifest = [{ chainId: 999, status: 'deprecated' }]
@@ -371,9 +380,14 @@ describe('useEulerSdk', () => {
       })
       vi.stubGlobal('fetch', fetch)
       try {
-        const buildEulerSDK = vi.fn().mockImplementation(async () => createMockSdk(`sdk-${buildEulerSDK.mock.calls.length}`))
+        const buildEulerSDK = vi.fn().mockImplementation(async () => ({
+          ...createMockSdk(`sdk-${buildEulerSDK.mock.calls.length}`),
+          priceService: { setBackendClient: vi.fn() },
+          tokenlistService: { setQueryTokenList: vi.fn() },
+        }))
         const { getEulerSdkForChain } = await importUseEulerSdk(ref([999]), buildEulerSDK)
-        vi.stubGlobal('useEnvConfig', () => ({ enableV3Backend: true, disableV3: false, browserVaultSource: 'v3' }))
+        const { readAppEnvConfig } = await import('~/utils/app-config')
+        vi.stubGlobal('useEnvConfig', () => readAppEnvConfig())
         const { loadServerChainPolicy } = await import('~/server/utils/chain-policy')
         const { getChainReadPolicy } = await import('~/utils/chain-policy')
         const { getServerSdk } = await import('~/server/utils/sdk-server')
@@ -383,7 +397,13 @@ describe('useEulerSdk', () => {
         vi.stubGlobal('$fetch', async () => ({ chainId: 999, policy: getChainReadPolicy(await loadServerChainPolicy(), 999) }))
         const browser = await getEulerSdkForChain(999)
         const server = await getServerSdk(999)
-        expect(buildEulerSDK.mock.calls.map(([options]) => options.config.eVaultServiceAdapter)).toEqual(['v3', 'v3'])
+        expect(buildEulerSDK.mock.calls.map(([options]) => options.config.eVaultServiceAdapter)).toEqual([browserSource, serverSource])
+        expect(buildEulerSDK.mock.calls.map(([options]) => options.config.disableV3)).toEqual([disableV3, disableV3])
+        for (const result of buildEulerSDK.mock.results) {
+          const sdk = await result.value
+          expect(sdk.priceService.setBackendClient).toHaveBeenCalledTimes(disableV3 ? 1 : 0)
+          expect(sdk.tokenlistService.setQueryTokenList).toHaveBeenCalledTimes(disableV3 ? 1 : 0)
+        }
         await refreshChainReadPolicy(999)
         expect(await getEulerSdkForChain(999)).toBe(browser)
         expect(await getServerSdk(999)).toBe(server)
@@ -417,7 +437,8 @@ describe('useEulerSdk', () => {
         await refreshChainReadPolicy(999)
         expect(await getEulerSdkForChain(999)).not.toBe(browser)
         expect(await getServerSdk(999)).not.toBe(server)
-        expect(buildEulerSDK.mock.calls.slice(4).map(([options]) => options.config.eVaultServiceAdapter)).toEqual(['v3', 'v3'])
+        expect(buildEulerSDK.mock.calls.slice(4).map(([options]) => options.config.eVaultServiceAdapter)).toEqual([browserSource, serverSource])
+        expect(buildEulerSDK.mock.calls.every(([options]) => options.config.disableV3 === disableV3)).toBe(true)
         expect(getChainReadPolicy(useChainConfig(), 999)).toEqual({ deprecated: true, onchain: false, metadataOnly: false })
         expect(useChainConfig().policyRevision).toBe(2)
         expect(fetch).toHaveBeenCalledTimes(automatic ? 3 : 0)
