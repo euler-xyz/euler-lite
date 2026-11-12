@@ -88,8 +88,9 @@ const importUseEulerSdk = async (
   }))
   vi.doMock('~/utils/sdk-labels', () => ({
     LiteEulerLabelsService: class LiteEulerLabelsService {
-      fetchEulerLabelsData = vi.fn()
+      constructor(readonly fetchEulerLabelsData: (chainId: number) => Promise<unknown>) {}
     },
+    loadBrowserLabelsBundle: vi.fn().mockResolvedValue({ source: 'v3' }),
   }))
   vi.stubGlobal('useEulerAddresses', () => ({
     allowedChainIds: chainIds,
@@ -348,6 +349,49 @@ describe('useEulerSdk', () => {
     expect(await getEulerSdkForChain(999)).not.toBe(active)
     expect(buildEulerSDK.mock.calls[4][0].config.eVaultServiceAdapter).toBe('fallback')
     expect(buildEulerSDK).toHaveBeenCalledTimes(5)
+  })
+
+  it.each([true, false])('waits for cold policy before choosing indexed=%s browsing adapters', async (indexed) => {
+    const buildEulerSDK = vi.fn().mockResolvedValue(createMockSdk('resolved'))
+    const { getEulerSdkForChain } = await importUseEulerSdk(ref([999]), buildEulerSDK)
+    vi.stubGlobal('useEnvConfig', () => ({ enableV3Backend: true, browserVaultSource: 'v3' }))
+    vi.stubGlobal('window', { __CHAIN_CONFIG__: {
+      enabledChainIds: [999], deprecatedChainIds: [999], onchainSdkChainIds: [], unresolvedChainIds: [999], eVaultFetchChunkChainIds: [],
+    } })
+    const { useChainConfig } = await import('~/composables/useChainConfig')
+    vi.stubGlobal('useChainConfig', useChainConfig)
+    const policy = createDeferred<unknown>()
+    const fetch = vi.fn().mockRejectedValueOnce(new Error('catalog unavailable')).mockReturnValueOnce(policy.promise)
+    vi.stubGlobal('$fetch', fetch)
+    await expect(getEulerSdkForChain(999)).rejects.toThrow('catalog unavailable')
+    expect(buildEulerSDK).not.toHaveBeenCalled()
+    const pending = getEulerSdkForChain(999)
+    await Promise.resolve()
+    expect(buildEulerSDK).not.toHaveBeenCalled()
+    policy.resolve({ chainId: 999, policy: { deprecated: true, onchain: !indexed, metadataOnly: !indexed } })
+    await pending
+    expect(buildEulerSDK.mock.calls[0][0].config.eVaultServiceAdapter).toBe(indexed ? 'v3' : 'onchain')
+    expect(useChainConfig().policyRevision).toBe(1)
+  })
+
+  it('also blocks label population from a generic SDK while cold policy is unresolved', async () => {
+    const buildEulerSDK = vi.fn().mockResolvedValue(createMockSdk('generic'))
+    const { getEulerSdk } = await importUseEulerSdk(ref([999]), buildEulerSDK)
+    vi.stubGlobal('window', { __CHAIN_CONFIG__: {
+      enabledChainIds: [999], deprecatedChainIds: [], onchainSdkChainIds: [], unresolvedChainIds: [999], eVaultFetchChunkChainIds: [],
+    } })
+    const { useChainConfig } = await import('~/composables/useChainConfig')
+    vi.stubGlobal('useChainConfig', useChainConfig)
+    const fetch = vi.fn().mockRejectedValueOnce(new Error('catalog unavailable'))
+      .mockResolvedValueOnce({ chainId: 999, policy: { deprecated: false, onchain: false, metadataOnly: false } })
+    vi.stubGlobal('$fetch', fetch)
+    await getEulerSdk()
+    const labels = buildEulerSDK.mock.calls[0][0].servicesOverrides.eulerLabelsService
+    const { loadBrowserLabelsBundle } = await import('~/utils/sdk-labels')
+    await expect(labels.fetchEulerLabelsData(999)).rejects.toThrow('catalog unavailable')
+    expect(loadBrowserLabelsBundle).not.toHaveBeenCalled()
+    await expect(labels.fetchEulerLabelsData(999)).resolves.toMatchObject({ source: 'v3' })
+    expect(loadBrowserLabelsBundle).toHaveBeenCalledOnce()
   })
   it('preserves deployment admission with the V3 opt-out in browsing and plan-time SDKs', async () => {
     const sdk = {

@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   enabledChainIds: [1, 137, 146, 8453],
-  catalog: { indexedChainIds: [1, 137, 146, 8453] },
+  catalog: { indexedChainIds: [1, 137, 146, 8453] } as { indexedChainIds: number[] } | undefined,
+  requiresCatalog: true,
   loadEulerChains: vi.fn((): Promise<unknown[]> => Promise.resolve([])),
   peekEulerChains: vi.fn((): unknown[] | undefined => undefined),
 }))
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('~/server/utils/v3-chain-catalog', () => ({
   loadV3ChainCatalog: async () => mocks.catalog,
   peekV3ChainCatalog: () => mocks.catalog,
+  requiresV3ChainCatalog: () => mocks.requiresCatalog,
 }))
 
 vi.mock('~/server/api/internal/euler-chains.get', () => ({
@@ -35,6 +37,7 @@ interface InjectedChainConfig {
   deprecatedChainIds: number[]
   onchainSdkChainIds: number[]
   metadataOnlyChainIds: number[]
+  unresolvedChainIds: number[]
   explorerUrls: Record<string, string>
 }
 
@@ -61,6 +64,7 @@ describe('chain-config plugin registry status', () => {
     for (const chainId of mocks.enabledChainIds) vi.stubEnv(`RPC_URL_${chainId}`, `https://rpc.example/${chainId}`)
     mocks.peekEulerChains.mockReturnValue(REGISTRY)
     mocks.catalog = { indexedChainIds: [1, 137, 146, 8453] }
+    mocks.requiresCatalog = true
     vi.stubEnv('DEPRECATED_CHAINS', '')
     vi.stubEnv('ONCHAIN_SDK_CHAINS', '')
     vi.stubEnv('LABELS_SOURCE', 'v3')
@@ -121,6 +125,25 @@ describe('chain-config plugin registry status', () => {
     }
   })
 
+  it('marks cold catalog policy unresolved without inferring retirement and resolves it on a later render', async () => {
+    mocks.catalog = undefined
+    const { render } = await bootPlugin()
+    const config = await render()
+    expect(config.unresolvedChainIds).toEqual(config.enabledChainIds)
+    expect(config.onchainSdkChainIds).toEqual([])
+    expect(config.metadataOnlyChainIds).toEqual([])
+    mocks.catalog = { indexedChainIds: [1, 137, 146, 8453] }
+    expect((await render()).unresolvedChainIds).toEqual([])
+  })
+
+  it('does not hold static deployments without V3 for an unnecessary catalog', async () => {
+    mocks.catalog = undefined
+    mocks.requiresCatalog = false
+    vi.stubEnv('LABELS_SOURCE', 'static')
+    const { render } = await bootPlugin()
+    expect((await render()).unresolvedChainIds).toEqual([])
+  })
+
   it('injects catalog retirement and reactivation while lifecycle stays deprecated', async () => {
     mocks.peekEulerChains.mockReturnValue([{ chainId: 146, status: 'deprecated' }])
     const { render } = await bootPlugin()
@@ -152,6 +175,7 @@ describe('chain-config plugin registry status', () => {
     const config = await render()
     expect(config.enabledChainIds).toEqual([1, 137, 146, 8453])
     expect(config.deprecatedChainIds).toEqual([146])
+    expect(config.unresolvedChainIds).toEqual(config.enabledChainIds)
     expect(config.explorerUrls).toEqual({})
   })
 

@@ -41,7 +41,7 @@ import {
 } from '~/utils/sdk-snapshot-populate-stubs'
 import type { SerialisedSnapshot, SerialisedVault } from '~/utils/snapshot-types'
 import { chainReadPolicyKey, getChainReadPolicy } from '~/utils/chain-policy'
-import { subscribeToChainPolicyChanges } from '~/composables/useChainConfig'
+import { isChainReadPolicyReady, subscribeToChainPolicyChanges } from '~/composables/useChainConfig'
 import { resolveEulerRouterGovernors, retainEulerRouterGovernor } from '~/utils/vault/euler-router-governance'
 import { governableGovernorAbi } from '~/abis/oracle'
 
@@ -729,6 +729,7 @@ const scheduleHydratedSnapshotEnrichment = (snapshot: HydratedSnapshot, generati
  * chain-aware browser SDK load.
  */
 const hydrateFromServer = async (targetChainId: number, generation: number): Promise<boolean> => {
+  if (!isChainReadPolicyReady(targetChainId)) return false
   const { setMany: registrySetMany, setEscrowAddresses } = useVaultRegistry()
   try {
     const wire = await $fetch<SerialisedSnapshot>('/api/internal/vaults', { query: { chainId: targetChainId } })

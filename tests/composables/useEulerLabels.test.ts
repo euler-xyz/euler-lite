@@ -115,6 +115,7 @@ describe('useEulerLabels chain-scoped loading', () => {
     config.deprecatedChainIds.splice(0)
     config.onchainSdkChainIds.splice(0)
     config.metadataOnlyChainIds = []
+    config.unresolvedChainIds = []
     config.policyRevision = 0
     mocks.evcBatchCall.mockReset().mockResolvedValue([])
     mocks.fetchPublicLabelsBundle.mockReset()
@@ -141,6 +142,31 @@ describe('useEulerLabels chain-scoped loading', () => {
 
   afterAll(() => {
     vi.unstubAllGlobals()
+  })
+
+  it('cannot accept HTTP-cached verification with unknown cold policy and recovers without a page reload', async () => {
+    useChainConfig().unresolvedChainIds!.push(1)
+    mocks.fetchChainPolicy.mockRejectedValueOnce(new Error('catalog unavailable'))
+    mocks.fetchPublicLabelsBundle.mockResolvedValue(bundleFor(labelsFor('cached')))
+    const labels = useEulerLabels()
+    await labels.loadLabels()
+    expect(labels.isReady.value).toBe(false)
+    expect(labels.loadError.value).toBeTruthy()
+    expect(mocks.fetchPublicLabelsBundle).not.toHaveBeenCalled()
+    await labels.loadLabels()
+    expect(labels.isReady.value).toBe(true)
+    expect(currentProductKeys()).toEqual(['cached'])
+    expect(useChainConfig().unresolvedChainIds).toEqual([])
+  })
+
+  it('retains usable verification when a known policy refresh fails', async () => {
+    mocks.fetchPublicLabelsBundle.mockResolvedValue(bundleFor(labelsFor('known')))
+    const labels = useEulerLabels()
+    await labels.loadLabels()
+    mocks.fetchChainPolicy.mockRejectedValueOnce(new Error('catalog unavailable'))
+    await labels.loadLabels(true)
+    expect(labels.isReady.value).toBe(true)
+    expect(currentProductKeys()).toEqual(['known'])
   })
 
   it('refreshes retirement/reactivation routing while lifecycle and vault membership stay unchanged', async () => {

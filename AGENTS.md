@@ -66,12 +66,14 @@ Euler Lite is the only service. Standard commands live in `README.md` ("Availabl
     The env lists are additive overrides; static labels retain authored membership.
     The V3 catalog is fresh for five minutes with last-good support bounded to 24 hours;
     outages never imply retirement. Without a usable required catalog, server data reads fail
-    and browser policy stays unchanged. Cold HTML can seed env defaults. Open tabs refresh policy independently of labels via
+    and existing browser policy stays unchanged. Cold HTML marks chains with unresolved registry
+    or catalog policy in `unresolvedChainIds`; chain-aware SDK reads wait for policy, and label verification,
+    snapshot hydration and direct V3 reads stay unavailable until it resolves. Open tabs refresh policy independently of labels via
     `/api/internal/chain-policy` (`no-store`), rebuild SDKs and advance query generations.
     Labels must match the current policy; pending vault/assessment reads are invalidated. Server SDK/snapshot/public API caches
     separate results by the same resolved policy.
     Note: `__CHAIN_CONFIG__` carries only chain IDs + validation metadata (`enabledChainIds`,
-    `deprecatedChainIds`, `onchainSdkChainIds`, `metadataOnlyChainIds`, `eVaultFetchChunkChainIds`, `unsupportedChainIds`,
+    `deprecatedChainIds`, `onchainSdkChainIds`, `metadataOnlyChainIds`, `unresolvedChainIds`, `eVaultFetchChunkChainIds`, `unsupportedChainIds`,
     `chainEnvIssues`) and the registry `explorerUrls` — the `RPC_URL_*` values themselves stay
     server-side. Server data routes use `server/utils/chain-policy.ts`; the server-side
     `useChainConfig()` composable provides env defaults.

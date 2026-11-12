@@ -24,6 +24,7 @@ interface ChainConfig {
   deprecatedChainIds: number[]
   onchainSdkChainIds: number[]
   metadataOnlyChainIds?: number[]
+  unresolvedChainIds?: number[]
   policyRevision?: number
   eVaultFetchChunkChainIds: number[]
   unsupportedChainIds?: number[]
@@ -32,11 +33,21 @@ interface ChainConfig {
 }
 
 let cached: ChainConfig | null = null
-const policyGenerations = new Map<number, number>()
+const policyGenerations = shallowReactive(new Map<number, number>())
 const pendingPolicyReads = new Map<number, Promise<void>>()
 const policyListeners = new Set<(chainId: number) => void>()
 
 export const getChainPolicyGeneration = (chainId: number): number => policyGenerations.get(chainId) ?? 0
+
+export const isChainReadPolicyReady = (chainId: number): boolean =>
+  !useChainConfig().unresolvedChainIds?.includes(chainId)
+
+/** Cold reads need an authoritative policy; an existing policy survives refresh failures. */
+export const ensureChainReadPolicy = async (chainId: number): Promise<void> => {
+  if (isChainReadPolicyReady(chainId)) return
+  await refreshChainReadPolicy(chainId)
+  if (!isChainReadPolicyReady(chainId)) throw new Error('Chain policy unavailable')
+}
 
 export const subscribeToChainPolicyChanges = (listener: (chainId: number) => void) => {
   policyListeners.add(listener)
@@ -105,14 +116,15 @@ function normalizeChainConfig(config: ChainConfig): ChainConfig {
   const eVaultFetchChunkChainIds = (config.eVaultFetchChunkChainIds ?? []).filter(id => enabledSet.has(id))
 
   const metadataOnlyChainIds = (config.metadataOnlyChainIds ?? []).filter(id => enabledSet.has(id))
-  return { ...config, enabledChainIds, deprecatedChainIds, onchainSdkChainIds, metadataOnlyChainIds, policyRevision: 0, eVaultFetchChunkChainIds, unsupportedChainIds: unknownChainIds, chainEnvIssues }
+  const unresolvedChainIds = (config.unresolvedChainIds ?? []).filter(id => enabledSet.has(id))
+  return { ...config, enabledChainIds, deprecatedChainIds, onchainSdkChainIds, metadataOnlyChainIds, unresolvedChainIds, policyRevision: 0, eVaultFetchChunkChainIds, unsupportedChainIds: unknownChainIds, chainEnvIssues }
 }
 
 /** Apply an authoritative policy read and invalidate derived in-flight state. */
 export const applyChainReadPolicy = (chainId: number, policy: ChainReadPolicy): boolean => {
   const config = useChainConfig()
   if (!config.enabledChainIds.includes(chainId)) return false
-  if (chainReadPolicyKey(getChainReadPolicy(config, chainId)) === chainReadPolicyKey(policy)) return false
+  if (isChainReadPolicyReady(chainId) && chainReadPolicyKey(getChainReadPolicy(config, chainId)) === chainReadPolicyKey(policy)) return false
   const update = (ids: number[], included: boolean) => {
     const next = ids.filter(id => id !== chainId)
     if (included) next.push(chainId)
@@ -121,6 +133,7 @@ export const applyChainReadPolicy = (chainId: number, policy: ChainReadPolicy): 
   update(config.deprecatedChainIds, policy.deprecated)
   update(config.onchainSdkChainIds, policy.onchain)
   update(config.metadataOnlyChainIds ??= [], policy.metadataOnly)
+  update(config.unresolvedChainIds ??= [], false)
   policyGenerations.set(chainId, getChainPolicyGeneration(chainId) + 1)
   config.policyRevision = (config.policyRevision ?? 0) + 1
   for (const listener of policyListeners) listener(chainId)
@@ -141,7 +154,7 @@ export const useChainConfig = (): ChainConfig => {
   /* eslint-enable @typescript-eslint/no-explicit-any */
   }
   else {
-    cached = reactive({ enabledChainIds: [], deprecatedChainIds: [], onchainSdkChainIds: [], metadataOnlyChainIds: [], policyRevision: 0, eVaultFetchChunkChainIds: [] })
+    cached = reactive({ enabledChainIds: [], deprecatedChainIds: [], onchainSdkChainIds: [], metadataOnlyChainIds: [], unresolvedChainIds: [], policyRevision: 0, eVaultFetchChunkChainIds: [] })
   }
 
   return cached!

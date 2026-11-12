@@ -22,7 +22,7 @@ import { erc4626AssetAbi } from '~/abis/erc4626'
 import { buildBatchItem, evcBatchCall } from '~/utils/multicall'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { isLabelsSnapshotUsable, LABELS_MAX_STALE_MS, LABELS_REFRESH_INTERVAL_MS } from '~/utils/labels-freshness'
-import { getChainPolicyGeneration, refreshChainReadPolicy, useChainConfig } from '~/composables/useChainConfig'
+import { getChainPolicyGeneration, isChainReadPolicyReady, refreshChainReadPolicy, useChainConfig } from '~/composables/useChainConfig'
 import { chainReadPolicyKey, getChainReadPolicy } from '~/utils/chain-policy'
 import { loadBrowserLabelsBundle } from '~/utils/sdk-labels'
 import {
@@ -62,6 +62,7 @@ const labelsPolicyKey = ref<string | null>(null)
 const labelsPolicyGeneration = ref<number | null>(null)
 const isReady = computed(() => snapshotReady.value && (labelsPolicyKey.value === null
   || (labelsChainId.value !== null
+    && isChainReadPolicyReady(labelsChainId.value)
     && labelsPolicyKey.value === chainReadPolicyKey(getChainReadPolicy(useChainConfig(), labelsChainId.value))
     && labelsPolicyGeneration.value === getChainPolicyGeneration(labelsChainId.value))))
 const loadError = ref<string | undefined>()
@@ -185,6 +186,7 @@ const getLabelsFetch = (chainId: number, forceRefresh: boolean) => {
 
   const fetchPromise = (async () => {
     try {
+      if (!isChainReadPolicyReady(chainId)) throw new Error('Chain policy unavailable')
       const bundle = await loadBrowserLabelsBundle(chainId, policy, forceRefresh)
       const now = Date.now()
       const sourceFetchedAt = bundle.source === 'static' ? now : bundle.sourceFetchedAt

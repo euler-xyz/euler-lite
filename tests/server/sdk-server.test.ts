@@ -19,6 +19,7 @@ vi.mock('~/server/utils/v3-chain-catalog', () => ({
     return mocks.catalog
   },
   peekV3ChainCatalog: () => mocks.catalog,
+  requiresV3ChainCatalog: () => true,
 }))
 
 vi.mock('~/server/api/internal/euler-chains.get', () => ({ loadEulerChains: mocks.loadEulerChains }))

@@ -7,7 +7,7 @@ import { sdkBuildQuery, sdkFreshBuildQuery, withSdkQueryScope } from '~/utils/sd
 import { createLiteTosPlugin } from '~/utils/sdk-tos'
 import { createYuzuIntrinsicApyService } from '~/utils/yuzu-intrinsic-apy'
 import { LiteEulerLabelsService, loadBrowserLabelsBundle } from '~/utils/sdk-labels'
-import { getChainPolicyGeneration } from '~/composables/useChainConfig'
+import { ensureChainReadPolicy, getChainPolicyGeneration } from '~/composables/useChainConfig'
 import { getChainReadPolicy } from '~/utils/chain-policy'
 import { createNoV3IntrinsicApyService, disableSdkV3Utilities } from '~/utils/sdk-no-v3'
 import { PYTH_MAX_UPDATE_FEE } from '~/features/reviewed-execution/planning/plugin-config'
@@ -337,6 +337,7 @@ const buildInstance = async ({ backend, buildQuery }: InstanceBuildArgs): Promis
       intrinsicApyService,
       deploymentService,
       eulerLabelsService: new LiteEulerLabelsService(async (chainId) => {
+        await ensureChainReadPolicy(chainId)
         const generation = getChainPolicyGeneration(chainId)
         const bundle = await loadBrowserLabelsBundle(chainId, getChainReadPolicy(useChainConfig(), chainId))
         if (generation !== getChainPolicyGeneration(chainId)) throw new Error('Chain policy changed during SDK labels load')
@@ -396,6 +397,7 @@ export const getEulerSdk = async (): Promise<EulerSDK> => {
 }
 
 export const getEulerSdkForChain = async (chainId: number): Promise<EulerSDK> => {
+  await ensureChainReadPolicy(chainId)
   const { onchainSdkChainIds } = useChainConfig()
   const backend: SdkBackend = onchainSdkChainIds.includes(chainId) ? 'onchain' : 'fast'
   const { sdk } = await lookupInstance('cached', backend, sdkBuildQuery)

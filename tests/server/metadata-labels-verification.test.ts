@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({ labels: vi.fn(), vaults: vi.fn(), types: vi.fn
 vi.mock('~/server/utils/v3-chain-catalog', () => ({
   loadV3ChainCatalog: async () => mocks.catalog,
   peekV3ChainCatalog: () => mocks.catalog,
+  requiresV3ChainCatalog: () => true,
 }))
 vi.mock('~/server/api/internal/euler-chains.get', () => ({ loadEulerChains: mocks.loadEulerChains }))
 vi.mock('~/server/utils/public-labels-source', () => ({ getPublicEulerLabelsData: mocks.labels }))
