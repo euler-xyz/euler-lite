@@ -42,14 +42,21 @@ describe('V3 supported-chain catalog', () => {
     expect(JSON.stringify(first)).not.toContain('secret')
   })
 
-  it.each(['', 'https://v3.euler.finance/', 'https://V3.EULER.FINANCE:443/'])(
-    'recognizes the default Euler service after URL normalization: %s', async (url) => {
+  it.each([
+    ['', 'https://v3.euler.finance'],
+    ['https://v3.euler.finance/', 'https://v3.euler.finance'],
+    ['https://V3.EULER.FINANCE:443/', 'https://v3.euler.finance'],
+    ['https://catalog-fixture.euler.finance', 'https://catalog-fixture.euler.finance'],
+    ['https://CATALOG-FIXTURE.EULER.FINANCE:443/', 'https://catalog-fixture.euler.finance'],
+    ['https://nested.catalog-fixture.euler.finance/', 'https://nested.catalog-fixture.euler.finance'],
+  ])(
+    'loads the configured Euler subdomain catalog after URL normalization: %s', async (url, origin) => {
       for (const key of ['V3_API_URL', 'EULER_SDK_V3_API_URL', 'NUXT_PUBLIC_V3_API_URL']) vi.stubEnv(key, '')
       vi.stubEnv('V3_API_URL', url)
       const { requiresV3ChainCatalog, loadV3ChainCatalog } = await import('~/server/utils/v3-chain-catalog')
       expect(requiresV3ChainCatalog()).toBe(true)
       expect(await loadV3ChainCatalog()).toEqual({ indexedChainIds: [1, 999] })
-      expect(mocks.fetch.mock.lastCall?.[0]).toBe('https://v3.euler.finance/v3/chains')
+      expect(mocks.fetch.mock.lastCall?.[0]).toBe(`${origin}/v3/chains`)
     },
   )
 
@@ -59,11 +66,15 @@ describe('V3 supported-chain catalog', () => {
       const { requiresV3ChainCatalog, loadV3ChainCatalog, peekV3ChainCatalog } = await import('~/server/utils/v3-chain-catalog')
       vi.stubEnv(key, 'https://v3.euler.finance')
       await loadV3ChainCatalog()
+      vi.stubEnv(key, 'https://catalog-fixture.euler.finance')
+      expect(peekV3ChainCatalog()).toBeUndefined()
+      expect(await loadV3ChainCatalog()).toEqual({ indexedChainIds: [1, 999] })
+      expect(mocks.fetch.mock.lastCall?.[0]).toBe('https://catalog-fixture.euler.finance/v3/chains')
       vi.stubEnv(key, 'https://indexer.example.test')
       expect(requiresV3ChainCatalog()).toBe(false)
       expect(peekV3ChainCatalog()).toBeUndefined()
       expect(await loadV3ChainCatalog()).toBeUndefined()
-      expect(mocks.fetch).toHaveBeenCalledOnce()
+      expect(mocks.fetch).toHaveBeenCalledTimes(2)
     },
   )
 
@@ -80,8 +91,13 @@ describe('V3 supported-chain catalog', () => {
 
   it.each([
     'https://indexer.example.test', 'https://v3.euler.finance.example.test',
+    'https://not-euler.finance', 'https://euler.finance',
     'https://v3.euler.finance:8443', 'http://v3.euler.finance',
     'https://v3.euler.finance/custom', 'https://proxy.example.test/v3',
+    'https://catalog-fixture.euler.finance:8443', 'http://catalog-fixture.euler.finance',
+    'https://catalog-fixture.euler.finance/v3',
+    'https://user:secret@catalog-fixture.euler.finance',
+    'https://catalog-fixture.euler.finance?query=1', 'https://catalog-fixture.euler.finance#fragment',
   ])('does not probe or use Euler cached support for a custom base URL: %s', async (url) => {
     const { loadV3ChainCatalog, refreshV3ChainCatalog, peekV3ChainCatalog, requiresV3ChainCatalog } = await import('~/server/utils/v3-chain-catalog')
     mocks.fetch.mockResolvedValueOnce(Response.json(catalog([])))
@@ -96,6 +112,40 @@ describe('V3 supported-chain catalog', () => {
     expect(mocks.fetch).toHaveBeenCalledOnce()
     vi.stubEnv('V3_API_URL', 'https://v3.euler.finance')
     expect(await loadV3ChainCatalog()).toEqual({ indexedChainIds: [] })
+  })
+
+  it.each([
+    ['https://catalog-fixture.euler.finance', 'server-secret', true],
+    ['https://v3.euler.finance', 'different-secret', true],
+    ['https://indexer.example.test', 'server-secret', false],
+  ] as const)('isolates a pending refresh from a newly selected source: %s (%s)', async (url, apiKey, needsCatalog) => {
+    const { loadV3ChainCatalog, refreshV3ChainCatalog, peekV3ChainCatalog } = await import('~/server/utils/v3-chain-catalog')
+    const first = await loadV3ChainCatalog()
+    vi.advanceTimersByTime(5 * 60_000)
+    let finish!: (response: Response) => void
+    mocks.fetch.mockImplementationOnce(() => new Promise<Response>((resolve) => {
+      finish = resolve
+    }))
+    expect(await loadV3ChainCatalog()).toBe(first)
+    const oldRefresh = refreshV3ChainCatalog()
+
+    vi.stubEnv('V3_API_URL', url)
+    vi.stubEnv('V3_API_KEY', apiKey)
+    expect(peekV3ChainCatalog()).toBeUndefined()
+    mocks.fetch.mockResolvedValueOnce(Response.json(catalog([])))
+    const expected = needsCatalog ? { indexedChainIds: [] } : undefined
+    expect(await loadV3ChainCatalog()).toEqual(expected)
+    if (needsCatalog) {
+      expect(mocks.fetch.mock.lastCall).toEqual([`${url}/v3/chains`, expect.objectContaining({
+        headers: { 'accept': 'application/json', 'X-API-Key': apiKey },
+      })])
+    }
+
+    finish(Response.json(catalog([999])))
+    await oldRefresh
+    expect(peekV3ChainCatalog()).toEqual(expected)
+    expect(await loadV3ChainCatalog()).toEqual(expected)
+    expect(mocks.fetch).toHaveBeenCalledTimes(needsCatalog ? 3 : 2)
   })
 
   it('serves stale immediately while one background refresh retires or reactivates a chain', async () => {

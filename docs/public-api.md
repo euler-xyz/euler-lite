@@ -18,7 +18,7 @@ A vault is **verified** through one of these paths:
 - **V3 assessment path**: on assessed chains, the published effective visibility verdict is `visible` or `warning` and the vault has a managing entity. `hidden` and `pending_review` vaults are not verified, even when their display metadata is available.
 - **Metadata-only or static path**: without a V3 verdict, the vault must have a qualifying label and the on-chain governor, router governor, or Earn owner must match a declared managing entity, according to the source's verification rules.
 
-Vault and chain deprecation are independent of verification. With Euler's default V3, a chain without catalog indexing support uses metadata-only hosted labels and on-chain verification. Custom V3 endpoints retain full hosted labels independently of chain deprecation and onchain overrides. An independently non-explorable vault can still be verified; a V3 `hidden` visibility verdict cannot.
+Vault and chain deprecation are independent of verification. With Euler V3, a chain without catalog indexing support uses metadata-only hosted labels and on-chain verification. Custom V3 endpoints retain full hosted labels independently of chain deprecation and onchain overrides. An independently non-explorable vault can still be verified; a V3 `hidden` visibility verdict cannot.
 
 ### Scope of `is-known`
 

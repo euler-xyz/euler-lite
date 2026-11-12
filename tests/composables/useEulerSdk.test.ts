@@ -353,6 +353,9 @@ describe('useEulerSdk', () => {
 
   it.each([
     ['https://v3.euler.finance', 'v3', 'v3', false],
+    ['https://catalog-fixture.euler.finance', 'v3', 'v3', false],
+    ['https://catalog-fixture.euler.finance', 'fallback', 'onchain', false],
+    ['https://catalog-fixture.euler.finance', 'fallback', 'onchain', true],
     ['https://custom-indexer.example.test', 'v3', 'v3', false],
     ['https://custom-indexer.example.test', 'fallback', 'fallback', false],
     ['https://custom-indexer.example.test', 'fallback', 'onchain', false],
@@ -361,7 +364,7 @@ describe('useEulerSdk', () => {
     ['https://custom-indexer.example.test', 'fallback', 'onchain', true],
   ] as const)(
     'shares policy and isolates SDK caches for %s (browser=%s, server=%s, disableV3=%s)', async (upstream, browserSource, serverSource, disableV3) => {
-      const automatic = upstream === 'https://v3.euler.finance'
+      const automatic = upstream !== 'https://custom-indexer.example.test' && !disableV3
       vi.useFakeTimers()
       for (const [key, value] of Object.entries({
         V3_API_URL: upstream, DISABLE_V3: String(disableV3), LABELS_SOURCE: disableV3 ? 'static' : 'v3',
@@ -375,7 +378,7 @@ describe('useEulerSdk', () => {
       }))
       let indexed = true
       const fetch = vi.fn(async (url: string) => {
-        expect(url).toBe('https://v3.euler.finance/v3/chains')
+        expect(url).toBe(`${upstream}/v3/chains`)
         return Response.json({ data: indexed ? [{ id: 999, capabilities: ['indexing'] }] : [] })
       })
       vi.stubGlobal('fetch', fetch)

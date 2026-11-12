@@ -3,7 +3,7 @@ import { withWallClock } from './fetchWithTimeout'
 import { createInFlightDedup, scheduleBackgroundRefresh } from './in-flight'
 import { readLabelsSource } from './labels-base-url'
 import { logger } from './logger'
-import { DEFAULT_V3_API_URL, isV3BackendEnabled, readBrowserVaultSource, readDisableV3, readResolvedV3ApiUrl, readServerVaultCacheSource, readV3ApiKey } from '~/utils/api-url-env'
+import { isV3BackendEnabled, readBrowserVaultSource, readDisableV3, readResolvedV3ApiUrl, readServerVaultCacheSource, readV3ApiKey } from '~/utils/api-url-env'
 import type { V3ChainCatalog } from '~/utils/chain-policy'
 
 const CACHE_TTL_MS = 5 * 60_000
@@ -21,12 +21,15 @@ export class V3ChainCatalogUnavailableError extends Error {
   }
 }
 
-/** Custom backends retain configured routing without implementing Euler's catalog. */
-export const requiresV3ChainCatalog = (): boolean =>
-  !readDisableV3()
-  && URL.parse(readResolvedV3ApiUrl())?.href === new URL(DEFAULT_V3_API_URL).href
-  && (readLabelsSource() === 'v3' || isV3BackendEnabled()
-    || readBrowserVaultSource() === 'v3' || readServerVaultCacheSource() === 'v3')
+/** Configured HTTPS roots on Euler subdomains use their own catalog; custom backends retain configured routing. */
+export const requiresV3ChainCatalog = (): boolean => {
+  if (readDisableV3()) return false
+  const url = URL.parse(readResolvedV3ApiUrl())
+  if (!url || url.protocol !== 'https:' || !url.hostname.endsWith('.euler.finance')
+    || url.port || url.pathname !== '/' || url.username || url.password || url.search || url.hash) return false
+  return readLabelsSource() === 'v3' || isV3BackendEnabled()
+    || readBrowserVaultSource() === 'v3' || readServerVaultCacheSource() === 'v3'
+}
 
 const source = () => {
   const url = new URL(readResolvedV3ApiUrl())

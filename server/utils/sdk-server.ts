@@ -22,7 +22,7 @@ import { resolveSubgraphSource, LiteSubgraphUnavailableError as SubgraphUnavaila
  *   - `v3`: account/vault/Earn and rewards use V3 without onchain fallback.
  *     An unset upstream URL resolves to Euler's hosted default.
  *
- * Chains retired by Euler's default V3 catalog and `ONCHAIN_SDK_CHAINS` overrides use
+ * Chains retired by the Euler V3 catalog and `ONCHAIN_SDK_CHAINS` overrides use
  * the onchain config. A policy change replaces the cached SDK and its queries.
  *
  * Turtle Earn requires `X-API-Key` on every endpoint. The direct and

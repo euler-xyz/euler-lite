@@ -61,11 +61,12 @@ Euler Lite is the only service. Standard commands live in `README.md` ("Availabl
     `explorerUrl` over the env lists (`utils/chain-status.ts`): `unlisted` chains are dropped,
     `staging` chains are dropped when `DOPPLER_ENVIRONMENT=prd`, `deprecated` chains join
     `deprecatedChainIds`; deprecation does not change data sources. `utils/chain-policy.ts`
-    independently uses Euler's default V3 `GET /v3/chains` indexing capability: unsupported
+    independently uses Euler V3 `GET /v3/chains` indexing capability: unsupported
     chains join `onchainSdkChainIds` and, with hosted labels, `metadataOnlyChainIds`.
     Custom V3 base URLs skip the catalog and use configured source settings plus onchain overrides,
-    retaining full hosted labels. Only the normalized `https://v3.euler.finance` root selects
-    automatic catalog routing; other hosts, ports and base paths are custom.
+    retaining full hosted labels. Configured HTTPS roots on `*.euler.finance` with the default
+    HTTPS port select automatic catalog routing, including staging endpoints. Each matching
+    endpoint must serve its own catalog; other hosts, ports and base paths are custom.
     The env lists are additive overrides; static labels retain authored membership.
     The V3 catalog is fresh for five minutes with last-good support bounded to 24 hours;
     usable stale entries return immediately while refreshing in the background. Global warming

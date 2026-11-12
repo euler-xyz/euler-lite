@@ -6,7 +6,7 @@
  * would otherwise surface stale or missing data the SDK path already avoids.
  *
  * Unresolved chain policies keep V3 reads gated until an authoritative policy arrives.
- * The onchain list includes chains retired by Euler's default V3 catalog and explicit
+ * The onchain list includes chains retired by the Euler V3 catalog and explicit
  * `ONCHAIN_SDK_CHAINS` overrides. A
  * deployment that pins *every* chain to on-chain reads via a global
  * `NUXT_PUBLIC_BROWSER_VAULT_SOURCE=onchain` while still configuring a V3 URL
