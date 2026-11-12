@@ -2,11 +2,11 @@
  * Provides reactive browser chain policy seeded by the HTML response.
  *
  * The server-side composable exposes environment defaults; server data routes
- * resolve registry lifecycle and V3 catalog support through server/utils/chain-policy.ts.
+ * resolve registry lifecycle and optional Euler V3 catalog support through server/utils/chain-policy.ts.
  * On the client, reads from window.__CHAIN_CONFIG__ which is injected
  * by server/plugins/chain-config.ts via the render:html hook. Open tabs refresh
  * the selected chain's policy through a no-store endpoint backed by the
- * server's shared registry and V3 catalog caches. The enabled chain list is seeded on page load.
+ * server's shared registry and optional catalog caches. The enabled chain list is seeded on page load.
  *
  * This avoids runtimeConfig (which is frozen in production) and works
  * with environment variables injected at runtime by Doppler.

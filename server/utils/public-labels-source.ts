@@ -177,7 +177,7 @@ export function refreshPublicLabelsBundle(
 
 export function getCachedPublicLabelsBundle(chainId: number, version?: string): PublicLabelsBundle | undefined {
   if (readLabelsSource() === 'static') return undefined
-  // Both admission and V3 support must be known before choosing a cached adapter.
+  // Admission and any required Euler catalog must be known before choosing a cached adapter.
   const manifest = peekEulerChains()
   const catalog = peekV3ChainCatalog()
   if (!manifest || (requiresV3ChainCatalog() && !catalog)) return undefined
