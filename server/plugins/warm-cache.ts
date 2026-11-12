@@ -216,17 +216,15 @@ export default defineNitroPlugin(() => {
 
   // Vault snapshot cycle is opt-out via DISABLE_SERVER_VAULT_CACHE. When
   // disabled, /api/internal/vaults responds 503 and the browser falls through to
-  // its normal RPC pipeline — useful when the host can't afford the
+  // its chain-aware SDK — useful when the host can't afford the
   // outbound V3/RPC fan-out the snapshot builder needs, or when running
   // behind aggressive bot-management (CF) that throttles bursty
   // origin-side traffic.
   if (!serverVaultCacheDisabled) {
     warmVaultsForChains()
     // Run the vaults timer separately so its cadence can be faster than
-    // the global cycle when V3 is configured. When the two intervals are
-    // equal (no V3), the timers naturally double-warm at every cycle; the
-    // in-flight dedup inside refreshChainVaults collapses the concurrent
-    // calls onto a single upstream pass.
+    // the global cycle when V3 is enabled. Only this timer warms snapshots;
+    // in-flight dedup also coalesces overlapping request-time refreshes.
     const vaultsInterval = setInterval(warmVaultsForChains, VAULTS_REWARM_INTERVAL_MS)
     vaultsInterval.unref()
   }

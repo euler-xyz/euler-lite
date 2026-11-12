@@ -64,13 +64,15 @@ Euler Lite uses the [Euler V2 SDK](https://github.com/euler-xyz/euler-sdks) for 
 | -------- | ------- | ----------- |
 | `SERVER_VAULT_CACHE_SOURCE` | `fallback` | Server snapshot builder adapter chain: `fallback`, `onchain`, or `v3`. |
 | `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` | `fallback` | Browser "fast" SDK adapter chain: `fallback`, `onchain`, or `v3`. The plan-time SDK is always on-chain. |
-| `DISABLE_SERVER_VAULT_CACHE` | `false` | Set to `true` to disable `/api/internal/vaults` snapshots and let the browser fall through to the normal RPC pipeline. |
-| `DEPRECATED_CHAINS` | — | Optional comma-separated deprecated-chain override. Enabled chains marked `deprecated` here or in `EulerChains.json` appear collapsed in the chain selector, skip warm-cache cycles, and use V3 metadata with on-chain labels verification. They must also be in `ONCHAIN_SDK_CHAINS`. |
-| `ONCHAIN_SDK_CHAINS` | — | Comma-separated chain IDs pinned to the onchain SDK adapter config for chain-aware browser reads and the server vault snapshot, bypassing V3. Independent of deprecated status; include every enabled chain using metadata-only labels verification. |
+| `DISABLE_SERVER_VAULT_CACHE` | `false` | Set to `true` to disable `/api/internal/vaults` snapshots. The browser loads through its chain-aware SDK using the resolved V3/onchain routing. |
+| `DEPRECATED_CHAINS` | — | Optional comma-separated additions to registry deprecation. Enabled deprecated chains appear collapsed and skip per-chain warm-cache cycles. Deprecation does not change their data sources or label verification. |
+| `ONCHAIN_SDK_CHAINS` | — | Optional comma-separated additions to the resolved onchain SDK list for chain-aware browser reads and server snapshots. Chains without indexing support in the V3 chain catalog are included automatically. Indexed chains using hosted labels keep the full V3 labels bundle, including verification and visibility, even when deprecated. Direct vault/oracle assessment reads are disabled for chains in this list. |
 | `EVAULT_FETCH_CHUNK_CHAINS` | — | Comma-separated chain IDs whose EVault list reads are split into small sequential SDK calls. Use for RPC/lens endpoints that fail under larger concurrent onchain EVault fetches. |
 | `EULER_SDK_EULER_INTERFACES_BRANCH` | `master` | Euler interfaces branch used for runtime ABIs and `EulerChains.json`. Explicit `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL` and `NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL` overrides take precedence over the branch for their respective manifests. |
 
 `fallback` uses V3 first and on-chain reads second. If no V3 URL is configured, Lite passes `disableV3: true` to the SDK so fallback reads go straight on-chain.
+
+The configured V3's `GET /v3/chains` catalog controls automatic data routing independently of `EulerChains.json` lifecycle status. A valid catalog without indexing support for an enabled chain selects onchain account/vault/Earn adapters and, with hosted labels, metadata with on-chain verification. Reactivation restores the configured sources unless an onchain override applies. Catalog outages retain bounded last-known support; an unavailable catalog is never treated as an empty one. See [chain lifecycle and V3 routing](docs/fork-setup.md#chain-lifecycle-and-v3-routing).
 
 #### Optional Server Controls
 

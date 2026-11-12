@@ -60,11 +60,21 @@ Euler Lite is the only service. Standard commands live in `README.md` ("Availabl
     On every HTML render the plugin layers the cached `EulerChains.json` `status` and
     `explorerUrl` over the env lists (`utils/chain-status.ts`): `unlisted` chains are dropped,
     `staging` chains are dropped when `DOPPLER_ENVIRONMENT=prd`, `deprecated` chains join
-    `deprecatedChainIds`. With no cached manifest the env lists apply unchanged.
+    `deprecatedChainIds`; deprecation does not change data sources. `utils/chain-policy.ts`
+    independently uses the configured V3's `GET /v3/chains` indexing capability: unsupported
+    chains join `onchainSdkChainIds` and, with hosted labels, `metadataOnlyChainIds`.
+    The env lists are additive overrides; static labels retain authored membership.
+    The V3 catalog is fresh for five minutes with last-good support bounded to 24 hours;
+    outages never imply retirement. Without a usable required catalog, server data reads fail
+    and browser policy stays unchanged. Cold HTML can seed env defaults. Open tabs refresh policy independently of labels via
+    `/api/internal/chain-policy` (`no-store`), rebuild SDKs and advance query generations.
+    Labels must match the current policy; pending vault/assessment reads are invalidated. Server SDK/snapshot/public API caches
+    separate results by the same resolved policy.
     Note: `__CHAIN_CONFIG__` carries only chain IDs + validation metadata (`enabledChainIds`,
-    `deprecatedChainIds`, `onchainSdkChainIds`, `eVaultFetchChunkChainIds`, `unsupportedChainIds`,
+    `deprecatedChainIds`, `onchainSdkChainIds`, `metadataOnlyChainIds`, `eVaultFetchChunkChainIds`, `unsupportedChainIds`,
     `chainEnvIssues`) and the registry `explorerUrls` — the `RPC_URL_*` values themselves stay
-    server-side. On the server, `useChainConfig()` calls the same builder directly.
+    server-side. Server data routes use `server/utils/chain-policy.ts`; the server-side
+    `useChainConfig()` composable provides env defaults.
   - AppKit / V3 / Swap / Pyth URLs + branding → `readAppEnvConfig()` in `utils/app-config.ts` →
     `server/plugins/app-config.ts` (overlays `v3ImagesUrl`) → `window.__APP_CONFIG__` →
     `useEnvConfig()`. Add new `__APP_CONFIG__` keys in the shared builder, not by re-parsing

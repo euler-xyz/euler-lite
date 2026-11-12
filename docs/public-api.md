@@ -18,7 +18,7 @@ A vault is **verified** through one of these paths:
 - **V3 assessment path**: on assessed chains, the published effective visibility verdict is `visible` or `warning` and the vault has a managing entity. `hidden` and `pending_review` vaults are not verified, even when their display metadata is available.
 - **Metadata-only or static path**: without a V3 verdict, the vault must have a qualifying label and the on-chain governor, router governor, or Earn owner must match a declared managing entity, according to the source's verification rules.
 
-Deprecation does not change the verification rule. An independently non-explorable vault can still be verified; a V3 `hidden` visibility verdict cannot.
+Vault and chain deprecation are independent of verification. A chain without indexing support in the configured V3 catalog uses metadata-only hosted labels and on-chain verification. An independently non-explorable vault can still be verified; a V3 `hidden` visibility verdict cannot.
 
 ### Scope of `is-known`
 
@@ -75,8 +75,8 @@ Addresses are validated via viem's `isAddress` (strict EIP-55 checks) and normal
 ### Caching and propagation
 
 - **Response headers**: browsers receive up to `Cache-Control: public, max-age=30, stale-while-revalidate=30`. On V3-assessed chains, the browser, CDN and Cloudflare cache windows all shorten as the source verdict approaches its one-day keep-alive deadline.
-- **Server-side cache**: per-chain in-memory verified set with a 5-minute TTL, rebuilt on demand from the shared Public Labels bundle. A V3 verdict is usable for one day after its source read, even when the derived set was rebuilt more recently.
-- **In-flight dedup**: concurrent cold requests for the same chain collapse onto a single upstream pass.
+- **Server-side cache**: in-memory verified set keyed by chain and resolved policy, with a 5-minute TTL, rebuilt on demand from the shared Public Labels bundle. A V3 verdict is usable for one day after its source read, even when the derived set was rebuilt more recently.
+- **In-flight dedup**: concurrent cold requests for the same chain and policy collapse onto a single upstream pass. A policy change prevents reuse or publication of the preceding policy's result.
 - **Propagation**: Public Labels verdict and publication changes, and on-chain governor changes on fallback sources, typically propagate within **~5 minutes**. Public Labels and the vault snapshot are warmed; verified-set requests use those cached inputs.
 - **Stale fallback**: during upstream outages, the bridge serves the last-known-good data for up to one day after the source read; after that it answers `503` with `Retry-After` until a fresh read succeeds.
 
@@ -210,9 +210,9 @@ Use `/api/public/is-known` for the verification verdict. Use the non-`null` / `n
 ### Caching and propagation
 
 - **Response header**: `Cache-Control: public, max-age=30, stale-while-revalidate=30`.
-- **Server-side cache**: per-chain in-memory metadata map, 5-minute TTL.
+- **Server-side cache**: in-memory metadata map keyed by chain and resolved policy, 5-minute TTL.
 - **Refresh**: requests rebuild an expired metadata map from the shared cached labels and vault inputs.
-- **In-flight dedup**: concurrent cold requests for the same chain collapse onto a single upstream pass.
+- **In-flight dedup**: concurrent cold requests for the same chain and policy collapse onto a single upstream pass. A policy change prevents reuse or publication of the preceding policy's result.
 - **Propagation**: on-chain changes and label edits propagate within **~5 minutes**.
 - **Stale fallback**: serves last-known-good data for up to one day past the source read during prolonged upstream outages.
 

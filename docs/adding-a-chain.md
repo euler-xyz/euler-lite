@@ -30,7 +30,7 @@ Apply the configuration to dev first, then stage, then prod **and** base. A `v*`
 
 Euler's published catalog is `https://raw.githubusercontent.com/euler-xyz/euler-subgraph/catalog/v1/catalog.json`; `.env.example` selects it. Forks can select their own catalog or direct endpoints; see [Your own subgraphs](./fork-setup.md#your-own-subgraphs) for override priority and how to prevent bundled Euler fallback. Ensure `SUBGRAPH_DISABLED_<id>` is unset or `false` for a chain that needs discovery.
 
-Catalog publication is separate from adding a chain to `EulerChains.json`. Verify the entry is published and queryable before enabling catalog-backed discovery. Catalog membership does not configure RPCs, change chain lifecycle, or replace `ONCHAIN_SDK_CHAINS` entries required for deprecated chains using hosted labels.
+Catalog publication is separate from adding a chain to `EulerChains.json`. Verify the entry is published and queryable before enabling catalog-backed discovery. Catalog membership does not configure RPCs or chain lifecycle. The separate V3 chain catalog (`GET /v3/chains`) controls V3 indexing support: an enabled chain without that support uses onchain account/vault/Earn reads and, with hosted labels, metadata-only verification. `ONCHAIN_SDK_CHAINS` adds optional overrides. Registry deprecation does not change data routing.
 
 ## 4. ECS redeploy
 
@@ -55,7 +55,7 @@ A chain appears only when `RPC_URL_<id>` is set and its deployment metadata is a
 |---|---|
 | `production` | Shown. |
 | `staging` | Shown only where `DOPPLER_ENVIRONMENT` is not `prd`: dev, stage, and local runs where it is unset. Hidden on prod and base. |
-| `deprecated` | Shown in the chain selector's "Deprecated chains" section and skipped by warm-cache, the same as listing it in `DEPRECATED_CHAINS`. |
+| `deprecated` | Shown in the chain selector's "Deprecated chains" section and skipped by per-chain warm-cache work. Data sources and label verification follow V3 catalog support independently. `DEPRECATED_CHAINS` adds the same lifecycle status locally. |
 | `unlisted` | Hidden. |
 
 The retired status `testing` counts as `staging`; any other unknown status hides the chain. When no manifest is cached (upstream down when a task starts), the initial env configuration applies; the browser resolves deployment metadata before constructing SDK providers and keeps only admitted chains. The code is in `utils/chain-status.ts` and `server/plugins/chain-config.ts`.

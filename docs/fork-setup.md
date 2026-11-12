@@ -24,7 +24,7 @@ Starting from `.env.example` and the common app/RPC setup below, apply the sourc
 | `LABELS_IMAGE_ORIGINS` | Optional; unset/blank is sufficient for Euler's V3 label image URLs, your configured V3 origin, and static-source images. Set only for hosted V3 label images on an additional CDN. It does not configure the labels source or extend static image rules. |
 | `EULER_SDK_V3_API_KEY` | Required only if your V3 backend requires authentication. Otherwise leave blank. |
 | `SERVER_VAULT_CACHE_SOURCE`, `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` | Optional; both default to `fallback`. With `DISABLE_V3=true`, either `fallback` or `onchain` works; `v3` is invalid. |
-| `ONCHAIN_SDK_CHAINS` | Required for every enabled deprecated chain using hosted labels. Keep existing entries; static labels do not require them for label verification. See [Deprecated chains](#deprecated-chains). |
+| `ONCHAIN_SDK_CHAINS` | Optional additional onchain chains. Chains without V3 catalog indexing support are included automatically, independently of deprecation. See [Chain lifecycle and V3 routing](#chain-lifecycle-and-v3-routing). |
 | `DEPRECATED_CHAINS` | Optional status override; the chain manifest can supply deprecated status. Keep the current deployment's chain configuration. |
 | `NUXT_PUBLIC_CONFIG_EULER_CHAINS_URL`, `NUXT_PUBLIC_CONFIG_EULER_ABIS_BASE_URL` | Optional; set only to use your own manifest or ABI source. Otherwise the configured Euler interfaces branch supplies them. |
 
@@ -137,15 +137,29 @@ Use origins only, with no path, credentials, query or fragment. This setting doe
 
 Chain and oracle-provider logos use the public base returned by your V3's `GET /v3/images` endpoint as `{ "data": { "publicBaseUrl": "https://images.operator.example/v3/images" } }`. That public base must use HTTPS. If it is unavailable, chain logos use bundled fallbacks and oracle-provider logos are omitted.
 
-### Deprecated chains
+### Chain lifecycle and V3 routing
 
-For hosted labels, every enabled chain marked `deprecated` in the chain manifest or in `DEPRECATED_CHAINS` must also be listed in `ONCHAIN_SDK_CHAINS`. For example, if your manifest marks enabled chain 146 deprecated:
+`EulerChains.json` and `DEPRECATED_CHAINS` control lifecycle presentation and per-chain warm-cache selection. V3 support comes independently from the configured V3's `GET /v3/chains` catalog. Browser and server reads use the same resolved policy:
+
+| Enabled chain state | Data routing and hosted labels |
+|---|---|
+| Indexed by V3, including a deprecated chain | Configured SDK source and full hosted labels, including V3 verification and visibility. |
+| Missing from a valid V3 catalog, or present without `indexing` | Onchain account/vault/Earn adapters, subgraph factory lookup, and metadata-only labels with on-chain governor/owner verification. |
+| Indexing restored | Configured SDK source and full hosted labels again, unless an explicit onchain override applies. Deprecation stays independent. |
+| Catalog request fails or returns malformed/incomplete data | Keep bounded last-known support. Without a usable snapshot, server policy/data reads fail; open tabs retain their current policy. An outage never implies retirement or reactivation. |
+
+The environment lists add overrides. For example, to deprecate chain 999 locally while leaving its V3 routing intact, and force chain 1 onto onchain reads:
 
 ```dotenv
-ONCHAIN_SDK_CHAINS=146
+DEPRECATED_CHAINS=999
+ONCHAIN_SDK_CHAINS=1
 ```
 
-The optional `DEPRECATED_CHAINS` variable can add deprecated status; it is not required when your manifest already supplies it. These chains use V3 metadata with on-chain governor/owner verification. Other enabled chains use V3 assessments even when their quantitative reads use RPC. Keep the explicit chain entry even if you globally select on-chain reads. Static labels bypass this hosted-label check and retain authored membership and country rules.
+Indexed onchain overrides with hosted labels use the full V3 labels bundle, including verification and visibility, regardless of deprecation. Direct vault/oracle assessment reads are disabled for every chain in the resolved onchain SDK list. Static labels retain authored membership and country rules; when V3 is configured, their data routing also follows its catalog. `DISABLE_V3=true`, or static labels with neither a V3 URL nor an explicit `v3` source, skips the V3 catalog. Empty overrides do not cancel catalog defaults or registry deprecation. Overrides cannot enable a chain without a configured RPC or an admitted deployment.
+
+Open tabs refresh the selected chain's policy through `/api/internal/chain-policy` (`no-store`) on initial label loading, every 60 seconds while visible, and on focus/visibility changes, independently of labels availability. A changed policy rebuilds browser SDK instances, advances query-cache generations and invalidates pending vault and assessment reads. Labels from another policy are unavailable for verification; matching labels reload vaults while preserving displayed entries. Server SDKs and derived caches also separate results by policy, and browser hydration rejects mismatched snapshots. The registry and V3 catalog each have five-minute freshness. V3 catalog failures retry after 30 seconds and can use a last-good snapshot up to 24 hours old without extending its age. Cold HTML can seed env defaults, but server SDK, snapshot and hosted-label reads require a usable catalog. Environment changes require a process restart.
+
+This refresh updates deprecation and read modes for an already-enabled chain. New chains, hide/unhide transitions, explorer URLs and the browser's allowed-chain list require a page reload to consume the server's current registry configuration. A new chain also needs a configured RPC, compatible SDK/AppKit network support, valid deployments, and the labels/subgraph/data services its selected routes require. Chain deprecation selects archive presentation and skips per-chain warming; it does not select data routing or enforce exit-only transactions.
 
 ## Your own static labels with V3
 
@@ -249,9 +263,9 @@ If you retain Euler's chain manifest, its live status changes still apply to you
 
 ## Verify the setup
 
-1. Start the server and check for `labels-config` errors. Chain checks follow manifest admission and deployment visibility, so excluded chains are not diagnosed as active label configuration errors. Messages name settings and chain IDs without printing configured URLs or credentials.
+1. Start the server and check for `labels-config` errors, which validate the source, URL and publication settings. For a configured chain, inspect `/api/internal/chain-policy?chainId=1` to confirm routing. A required V3 catalog with no usable last-good snapshot returns `503`.
 2. Open the app and select each configured chain. Confirm the intended products, labels and governor/owner verification; confirm country rules and any deployment tag filter.
-3. Inspect the app's `/api/internal/public-labels?chainId=1` response in browser developer tools. Check your expected publication or authored content. `source=static` identifies authored files; `source=v3-metadata` identifies deprecated-chain metadata. Assessed V3 bundles may omit `source` or set it to `v3`. Do not treat a successful `/healthz` check as proof that labels are available.
+3. Inspect the app's `/api/internal/public-labels?chainId=1` response in browser developer tools. Check your expected publication or authored content. `source=static` identifies authored files; `source=v3-metadata` identifies metadata for a chain without V3 indexing support. Assessed V3 bundles may omit `source` or set it to `v3`. Do not treat a successful `/healthz` check as proof that labels are available.
 4. Check logos both in the UI and in `/api/public/metadata?chainId=1`. Set `LABELS_IMAGE_ORIGINS` only for hosted label images on additional CDN origins; Euler V3 label images, your configured V3 origin and static-source images require no extra setting.
 5. With `DISABLE_V3=true`, confirm V3 requests receive a local 503 and no V3 upstream request is made. Verify RPC browsing and token decimals, and expect V3-only sections to be unavailable.
 6. For direct-only subgraphs, verify all explicit URL assignments belong to your intended services and `SUBGRAPH_CATALOG_DISABLED=true`. For catalog mode, verify a configured chain resolves from your catalog and an omitted/retired chain fails rather than selecting a bundled endpoint. Observe upstream requests at your own service; the browser only sees Lite's proxy.

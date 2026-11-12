@@ -152,7 +152,7 @@ Vault configuration checks and listing are separate V3 results. A vault can have
 
 ### Vault checks UI
 
-The overview **Vault checks** accordion is hosted-V3 only (`source === 'v3'` and `isVaultAssessmentAvailableForChain`). Chains in `ONCHAIN_SDK_CHAINS` hide it. It is not a risk rating:
+The overview **Vault checks** accordion is hosted-V3 only (`source === 'v3'` and `isVaultAssessmentAvailableForChain`). Chains in the resolved onchain SDK list hide it. It is not a risk rating:
 
 > Vault checks test this vault's configuration against fixed rules. They are not a risk rating or a recommendation by Euler.
 
@@ -273,7 +273,7 @@ The client keeps an in-session categorization cache with this shape:
 
 Loaded EVaults use the SDK's `isEscrow` flag: `true` means `escrow`, `false` means `standard`, and `null`/missing remains unknown, clearing any previous category. Lite does not recover classification from cached categories, snapshot buckets, or perspective membership. This applies to registry inserts, refreshes, server-snapshot hydration, and the server labels view. Classification does not grant verification: labels and on-chain perspective membership retain their existing trust rules. Snapshot buckets retain discovery provenance; the flag determines the loaded category. Before details load, perspective membership can identify discovery entries.
 
-The selected SDK adapter supplies the flag: V3 first with on-chain fallback for normal browsing, and on-chain reads for `ONCHAIN_SDK_CHAINS`. A successful V3 entity with an unknown flag does not trigger automatic SDK fallback. Full escrow address discovery remains an on-chain perspective read on every chain.
+The selected SDK adapter supplies the flag: V3 first with on-chain fallback for normal browsing, and on-chain reads for chains without V3 indexing support and explicit onchain overrides. A successful V3 entity with an unknown flag does not trigger automatic SDK fallback. Full escrow address discovery remains an on-chain perspective read on every chain.
 
 For per-address lookups during direct navigation to a not-yet-cached vault, `fetchVaultCategory(address)` checks the SDK escrow verified array first, then asks `vaultMetaService.fetchVaultType` for the vault type.
 
@@ -427,16 +427,18 @@ These labels appear in address fields across all vault overview types (EVK, Earn
 
 ## Programmatic verification lookup
 
-External consumers that only need a yes/no answer for a vault address can call the public [`GET /api/public/is-known`](./public-api.md#get-apipublicis-known) endpoint instead of loading the full label set. It uses V3 verified membership on assessed chains, the governor / router-governor / owner check on metadata-only and static sources, and independent on-chain `escrowedCollateralPerspective` membership. It answers batches of up to 100 addresses per request. Deprecation does not change the verification verdict.
+External consumers that only need a yes/no answer for a vault address can call the public [`GET /api/public/is-known`](./public-api.md#get-apipublicis-known) endpoint instead of loading the full label set. It uses V3 verified membership on assessed chains, the governor / router-governor / owner check on metadata-only and static sources, and independent on-chain `escrowedCollateralPerspective` membership. It answers batches of up to 100 addresses per request. Vault-level deprecation is independent of verification. Chains without indexing support in the configured V3 catalog use the metadata-only verification path below; chain deprecation is independent.
 
 Consumers that need display metadata (resolved name, description, governing entity, asset) on top of the verification verdict can call [`GET /api/public/metadata`](./public-api.md#get-apipublicmetadata), which applies the same labels / override / verification rules the client UI uses and returns a uniform shape across EVK, Securitize, and Earn vaults.
 
 
 On assessed chains, V3 supplies the managing entity and effective visibility verdict, including for standalone Earn vaults. A visible or warning row without a curator does not grant verified membership. Both client and public APIs apply this rule. Static Earn labels preserve their authored membership semantics.
 
-## Archived chains: V3 metadata with on-chain verification
+## Chains without V3 indexing: metadata with on-chain verification
 
-Enabled chains marked `deprecated` in `EulerChains.json` select the SDK's `PublicLabelsV3MetadataAdapter`. `DEPRECATED_CHAINS` is an optional override with the same effect. Each selected chain must also be in `ONCHAIN_SDK_CHAINS`; a missing entry is a configuration error. Chains without a configured RPC are ignored, and other enabled chains keep V3 assessments even if they use on-chain SDK reads. The shared server labels loader reads the admitted Euler interfaces manifest before selecting or serving a cached adapter result. If no manifest is available, hosted labels remain unavailable until it loads. No separate labels chain variable is required.
+With hosted labels, enabled chains missing from a valid `GET /v3/chains` catalog, or present without `indexing`, select the SDK's `PublicLabelsV3MetadataAdapter` and onchain account/vault/Earn adapters automatically. Indexed chains retain full hosted labels regardless of `EulerChains.json` deprecation or `DEPRECATED_CHAINS`. Indexed `ONCHAIN_SDK_CHAINS` overrides also keep full hosted labels, including V3 verification and visibility, while separate vault/oracle assessment reads are disabled. Static labels retain authored membership; their data routing follows the catalog when V3 is configured. Chains without a configured RPC are ignored. The shared server labels loader reads the admitted Euler interfaces manifest and required V3 catalog before selecting or serving a cached adapter result. A catalog outage preserves bounded last-known support, never implies retirement, and prevents hosted labels from being served when no usable support snapshot exists. Catalog reactivation restores the full hosted label path even if the chain stays deprecated.
+
+The labels response carries the policy used to assemble its content. The server rechecks that policy before returning a bundle. Open tabs obtain routing policy independently from `/api/internal/chain-policy` (`no-store`); cached labels cannot change routing. A policy change makes mismatched labels unavailable for verification, invalidates pending vault and assessment reads, and rebuilds SDKs. Matching labels trigger a vault reload. Browser queries, server snapshots and public verification/metadata caches separate results by policy, including in-flight work.
 
 The SDK shares metadata fetching and display mapping between its adapters. Metadata-only bundles carry `source: 'v3-metadata'` and contain no visibility verdicts. They use the same label set/publication selection, live entity addresses and live geo policies as the assessed path. Candidate addresses are separate from verified membership.
 

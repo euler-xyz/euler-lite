@@ -39,8 +39,8 @@ const DISABLE_SERVER_VAULT_CACHE_ENV_KEYS = [
  * Adapter chain used to satisfy a vault read.
  *
  *   - `fallback` — V3 primary, on-chain secondary (SDK default).
- *   - `onchain`  — direct on-chain reads only.
- *   - `v3`       — V3 only; fails to build when no V3 endpoint is configured.
+ *   - `onchain`  — account/vault/Earn reads use RPC/subgraph adapters.
+ *   - `v3`       — V3 only; an unset endpoint uses Euler's hosted default.
  *
  * Used by both the server snapshot builder (`SERVER_VAULT_CACHE_SOURCE`)
  * and the browser's "fast" SDK instance (`NUXT_PUBLIC_BROWSER_VAULT_SOURCE`).
@@ -132,7 +132,7 @@ export function readBrowserVaultSource(env: NodeJS.ProcessEnv = process.env): Va
 /**
  * When set, the warm-cache plugin skips the vault snapshot cycle and the
  * `/api/internal/vaults` endpoint short-circuits with 503. The browser's snapshot
- * hydrate falls through to the normal RPC pipeline.
+ * hydrate falls through to the chain-aware browser SDK.
  */
 export function readDisableServerVaultCache(env: NodeJS.ProcessEnv = process.env): boolean {
   const raw = firstEnv(env, DISABLE_SERVER_VAULT_CACHE_ENV_KEYS)
@@ -143,7 +143,7 @@ export function readDisableServerVaultCache(env: NodeJS.ProcessEnv = process.env
  * Emit a one-time warning when a configured source needs the V3 backend
  * but no `V3_API_URL` (or alias) is set:
  *
- *   - `source === 'v3'`       → SDK build throws on missing V3.
+ *   - `source === 'v3'`       → the resolved upstream uses Euler's hosted default.
  *   - `source === 'fallback'` → SDK silently sets `disableV3: true` and
  *                                degrades to on-chain. Surprising in dev.
  *
