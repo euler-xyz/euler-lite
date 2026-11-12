@@ -327,6 +327,28 @@ describe('useEulerSdk', () => {
       rewardsServiceAdapter: 'fallback',
     })
   })
+
+  it('rebuilds browsing and fresh SDKs across catalog retirement/reactivation on a deprecated chain', async () => {
+    const buildEulerSDK = vi.fn().mockImplementation(async () => createMockSdk(`sdk-${buildEulerSDK.mock.calls.length}`))
+    const { getEulerSdkForChain, getEulerSdkFresh } = await importUseEulerSdk(ref([999]), buildEulerSDK)
+    vi.stubGlobal('window', { __CHAIN_CONFIG__: {
+      enabledChainIds: [999], deprecatedChainIds: [999], onchainSdkChainIds: [], eVaultFetchChunkChainIds: [],
+    } })
+    const { useChainConfig, applyChainReadPolicy } = await import('~/composables/useChainConfig')
+    vi.stubGlobal('useChainConfig', useChainConfig)
+    const active = await getEulerSdkForChain(999)
+    const fresh = await getEulerSdkFresh()
+    applyChainReadPolicy(999, { deprecated: true, onchain: true, metadataOnly: true })
+    const deprecated = await getEulerSdkForChain(999)
+    expect(deprecated).not.toBe(active)
+    expect(await getEulerSdkFresh()).not.toBe(fresh)
+    expect(await getEulerSdkForChain(999)).toBe(deprecated)
+    expect(buildEulerSDK.mock.calls[2][0].config.eVaultServiceAdapter).toBe('onchain')
+    applyChainReadPolicy(999, { deprecated: true, onchain: false, metadataOnly: false })
+    expect(await getEulerSdkForChain(999)).not.toBe(active)
+    expect(buildEulerSDK.mock.calls[4][0].config.eVaultServiceAdapter).toBe('fallback')
+    expect(buildEulerSDK).toHaveBeenCalledTimes(5)
+  })
   it('preserves deployment admission with the V3 opt-out in browsing and plan-time SDKs', async () => {
     const sdk = {
       ...createMockSdk('no-v3'),

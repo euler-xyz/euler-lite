@@ -104,6 +104,24 @@ describe('useVaults EVault verification metadata', () => {
     expect(registry.getVault(ESCROW_EVAULT)).toBeUndefined()
   })
 
+  it.each([undefined, { deprecated: false, onchain: false, metadataOnly: false }])('rejects a cached server snapshot with missing or mismatched policy: %s', async (chainPolicy) => {
+    vi.stubGlobal('useChainConfig', () => ({
+      deprecatedChainIds: [1], onchainSdkChainIds: [1], metadataOnlyChainIds: [1], eVaultFetchChunkChainIds: [],
+    }))
+    vi.stubGlobal('$fetch', vi.fn().mockResolvedValue({
+      chainId: 1, fetchedAt: Date.now(),
+      chainPolicy,
+      evkVaults: [{ kind: 'evk', data: {
+        address: DYNAMIC_EVAULT, collaterals: [], asset: { decimals: 18 }, shares: { decimals: 18 },
+      } }],
+      earnVaults: [], securitizeVaults: [], escrowVaults: [],
+    }))
+    __setEulerLabelsDataForTest({ verifiedVaultAddresses: [getAddress(LABELED_EVAULT)] })
+    await useVaults().loadVaults()
+    expect(useVaultRegistry().getVault(DYNAMIC_EVAULT)).toBeUndefined()
+    expect(fetchVaults.mock.calls.flatMap(call => call[1])).toContain(getAddress(LABELED_EVAULT))
+  })
+
   it('refreshes SDK classification without promoting an unverified vault', async () => {
     const registry = useVaultRegistry()
     registry.set(DYNAMIC_EVAULT, makeVault(DYNAMIC_EVAULT), 'evk')

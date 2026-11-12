@@ -3,10 +3,12 @@ import { buildEulerSDK, DeploymentService, createKeyringPlugin, createPythPlugin
 import type { BuildQueryFn, EulerSDK, EulerSDKConfig } from '@eulerxyz/euler-v2-sdk'
 import { INTERNAL_API_BASE } from '~/utils/api-url-env'
 import { logWarn } from '~/utils/errorHandling'
-import { sdkBuildQuery, sdkFreshBuildQuery } from '~/utils/sdk-query-cache'
+import { sdkBuildQuery, sdkFreshBuildQuery, withSdkQueryScope } from '~/utils/sdk-query-cache'
 import { createLiteTosPlugin } from '~/utils/sdk-tos'
 import { createYuzuIntrinsicApyService } from '~/utils/yuzu-intrinsic-apy'
-import { LiteEulerLabelsService } from '~/utils/sdk-labels'
+import { LiteEulerLabelsService, loadBrowserLabelsBundle } from '~/utils/sdk-labels'
+import { getChainPolicyGeneration } from '~/composables/useChainConfig'
+import { getChainReadPolicy } from '~/utils/chain-policy'
 import { createNoV3IntrinsicApyService, disableSdkV3Utilities } from '~/utils/sdk-no-v3'
 import { PYTH_MAX_UPDATE_FEE } from '~/features/reviewed-execution/planning/plugin-config'
 
@@ -56,13 +58,13 @@ const pythProxyFetch: typeof fetch = (input, init) => {
  *         onchain via `disableV3: true` when no V3 endpoint is configured.
  *       • `onchain`  — account/vault/Earn reads use RPC; optional V3 utilities
  *         remain available unless the deployment sets DISABLE_V3.
- *       • `v3`       — V3 only; SDK build throws without a V3 endpoint.
+ *       • `v3`       — V3 account/vault/Earn and rewards, without onchain fallback.
  *     Uses the default `sdkBuildQuery` cache policy (sub-minute stale times
  *     for hot reads, longer for catalogue data). Consumed by UI surfaces:
  *     vault lists, portfolio display, prices, rewards.
  *
  *   - `getEulerSdkForChain(chainId)` — same browsing cache policy as
- *     `getEulerSdk()`, but chains listed in `ONCHAIN_SDK_CHAINS` are routed to
+ *     `getEulerSdk()`, but chains in the resolved onchain policy are routed to
  *     the onchain adapter config so their fast reads do not use V3-backed
  *     account/vault/Earn adapters.
  *
@@ -90,6 +92,7 @@ const pythProxyFetch: typeof fetch = (input, init) => {
 type SdkInstance = { sdk: EulerSDK }
 
 const instances = new Map<string, Promise<SdkInstance>>()
+let instancePolicyRevision = 0
 
 const getPublicRuntimeConfig = (): Record<string, string> => {
   if (typeof useRuntimeConfig !== 'function') return {}
@@ -185,7 +188,7 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
   const subgraphUrls = buildSubgraphUrlMap()
   const { enableV3Backend, disableV3, browserVaultSource, eulerInterfacesBranch } = useEnvConfig()
   // 'fast' resolves to whatever NUXT_PUBLIC_BROWSER_VAULT_SOURCE pins.
-  // 'onchain' covers both ONCHAIN_SDK_CHAINS fast reads and the plan-time
+  // 'onchain' covers catalog/override-selected browsing reads and the plan-time
   // instance, which exists specifically so the planner sees fresh chain
   // state, not V3-cached data, even when fast reads can tolerate stale.
   const fastSource = backend === 'fast' ? browserVaultSource : 'onchain'
@@ -227,8 +230,8 @@ const buildSdkStaticConfig = (backend: SdkBackend) => {
     ...adapterConfigForFastSource(fastSource),
     // Fallback chains short-circuit to the secondary (onchain/direct/subgraph)
     // when no upstream V3 is configured. Other sources have their adapters
-    // pinned explicitly; v3-pinned without V3 will fail the SDK build (the
-    // boot-time warning in api-url-env.ts flags this earlier).
+    // pinned explicitly. The proxy resolves an unset V3 upstream URL to
+    // Euler's hosted default; the boot-time warning asks for explicit configuration.
     disableV3: Boolean(disableV3) || (fastSource === 'fallback' && !enableV3Backend),
   }
 
@@ -333,7 +336,12 @@ const buildInstance = async ({ backend, buildQuery }: InstanceBuildArgs): Promis
     servicesOverrides: {
       intrinsicApyService,
       deploymentService,
-      eulerLabelsService: new LiteEulerLabelsService(),
+      eulerLabelsService: new LiteEulerLabelsService(async (chainId) => {
+        const generation = getChainPolicyGeneration(chainId)
+        const bundle = await loadBrowserLabelsBundle(chainId, getChainReadPolicy(useChainConfig(), chainId))
+        if (generation !== getChainPolicyGeneration(chainId)) throw new Error('Chain policy changed during SDK labels load')
+        return bundle
+      }),
     },
     plugins: [
       createPythPlugin({ buildQuery, fetchFn: pythProxyFetch, maxUpdateFee: PYTH_MAX_UPDATE_FEE }),
@@ -355,14 +363,19 @@ const lookupInstance = async (
   backend: SdkBackend,
   buildQuery: BuildQueryFn,
 ): Promise<SdkInstance> => {
+  const policyRevision = useChainConfig().policyRevision ?? 0
+  if (policyRevision !== instancePolicyRevision) {
+    instances.clear()
+    instancePolicyRevision = policyRevision
+  }
   const rpcUrls = buildRpcUrls()
   const { cacheKey: staticCacheKey } = buildSdkStaticConfig(backend)
   const { buildSdkKeyringHookTargets } = await loadSdkKeyringModule()
   const keyringCacheKey = JSON.stringify(buildSdkKeyringHookTargets())
-  const key = `${freshness}|${backend}|${getRpcCacheKey(rpcUrls)}|${staticCacheKey}|keyring:${keyringCacheKey}`
+  const key = `${policyRevision}|${freshness}|${backend}|${getRpcCacheKey(rpcUrls)}|${staticCacheKey}|keyring:${keyringCacheKey}`
   let entry = instances.get(key)
   if (!entry) {
-    entry = buildInstance({ backend, buildQuery }).catch((err) => {
+    entry = buildInstance({ backend, buildQuery: withSdkQueryScope(buildQuery, `chain-policy:${policyRevision}`) }).catch((err) => {
       // Don't poison the map on transient build failure — drop the entry so
       // the next caller retries.
       if (instances.get(key) === entry) instances.delete(key)

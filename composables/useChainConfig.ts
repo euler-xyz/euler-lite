@@ -1,9 +1,12 @@
 /**
- * Provides chain configuration derived from environment variables.
+ * Provides reactive browser chain policy seeded by the HTML response.
  *
- * On the server, scans process.env directly (for SSR or API routes).
+ * The server-side composable exposes environment defaults; server data routes
+ * resolve registry lifecycle and V3 catalog support through server/utils/chain-policy.ts.
  * On the client, reads from window.__CHAIN_CONFIG__ which is injected
- * by server/plugins/chain-config.ts via the render:html hook.
+ * by server/plugins/chain-config.ts via the render:html hook. Open tabs refresh
+ * the selected chain's policy through a no-store endpoint backed by the
+ * server's shared registry and V3 catalog caches. The enabled chain list is seeded on page load.
  *
  * This avoids runtimeConfig (which is frozen in production) and works
  * with environment variables injected at runtime by Doppler.
@@ -11,11 +14,17 @@
 import { readChainEnvConfig, type ChainEnvIssues } from '~/utils/chain-env'
 import { getUnknownChainIds } from '~/entities/chainRegistry'
 import { logger } from '~/utils/logger'
+import { getChainReadPolicy, chainReadPolicyKey, type ChainReadPolicy, type ChainPolicyResponse } from '~/utils/chain-policy'
+import { advanceSdkQueryGeneration } from '~/utils/sdk-query-cache'
+import { SDK_QUERY_POLICY } from '~/utils/sdk-query-policy'
+import type { EulerSDKQueryName } from '@eulerxyz/euler-v2-sdk'
 
 interface ChainConfig {
   enabledChainIds: number[]
   deprecatedChainIds: number[]
   onchainSdkChainIds: number[]
+  metadataOnlyChainIds?: number[]
+  policyRevision?: number
   eVaultFetchChunkChainIds: number[]
   unsupportedChainIds?: number[]
   chainEnvIssues?: ChainEnvIssues
@@ -23,6 +32,35 @@ interface ChainConfig {
 }
 
 let cached: ChainConfig | null = null
+const policyGenerations = new Map<number, number>()
+const pendingPolicyReads = new Map<number, Promise<void>>()
+const policyListeners = new Set<(chainId: number) => void>()
+
+export const getChainPolicyGeneration = (chainId: number): number => policyGenerations.get(chainId) ?? 0
+
+export const subscribeToChainPolicyChanges = (listener: (chainId: number) => void) => {
+  policyListeners.add(listener)
+  return () => policyListeners.delete(listener)
+}
+
+/** Routing remains refreshable when the labels upstream is unavailable. */
+export const refreshChainReadPolicy = (chainId: number): Promise<void> => {
+  const pending = pendingPolicyReads.get(chainId)
+  if (pending) return pending
+  const generation = getChainPolicyGeneration(chainId)
+  const task = $fetch<ChainPolicyResponse>('/api/internal/chain-policy', {
+    query: { chainId },
+    cache: 'no-store',
+    timeout: 10_000,
+  }).then((response) => {
+    if (response.chainId !== chainId) throw new Error('Chain policy response does not match the requested chain')
+    if (getChainPolicyGeneration(chainId) === generation) applyChainReadPolicy(chainId, response.policy)
+  }).finally(() => {
+    if (pendingPolicyReads.get(chainId) === task) pendingPolicyReads.delete(chainId)
+  })
+  pendingPolicyReads.set(chainId, task)
+  return task
+}
 
 function logUnknownChainIds(chainIds: readonly number[]) {
   if (chainIds.length) {
@@ -66,7 +104,29 @@ function normalizeChainConfig(config: ChainConfig): ChainConfig {
   const onchainSdkChainIds = (config.onchainSdkChainIds ?? []).filter(id => enabledSet.has(id))
   const eVaultFetchChunkChainIds = (config.eVaultFetchChunkChainIds ?? []).filter(id => enabledSet.has(id))
 
-  return { ...config, enabledChainIds, deprecatedChainIds, onchainSdkChainIds, eVaultFetchChunkChainIds, unsupportedChainIds: unknownChainIds, chainEnvIssues }
+  const metadataOnlyChainIds = (config.metadataOnlyChainIds ?? []).filter(id => enabledSet.has(id))
+  return { ...config, enabledChainIds, deprecatedChainIds, onchainSdkChainIds, metadataOnlyChainIds, policyRevision: 0, eVaultFetchChunkChainIds, unsupportedChainIds: unknownChainIds, chainEnvIssues }
+}
+
+/** Apply an authoritative policy read and invalidate derived in-flight state. */
+export const applyChainReadPolicy = (chainId: number, policy: ChainReadPolicy): boolean => {
+  const config = useChainConfig()
+  if (!config.enabledChainIds.includes(chainId)) return false
+  if (chainReadPolicyKey(getChainReadPolicy(config, chainId)) === chainReadPolicyKey(policy)) return false
+  const update = (ids: number[], included: boolean) => {
+    const next = ids.filter(id => id !== chainId)
+    if (included) next.push(chainId)
+    ids.splice(0, ids.length, ...next.sort((a, b) => a - b))
+  }
+  update(config.deprecatedChainIds, policy.deprecated)
+  update(config.onchainSdkChainIds, policy.onchain)
+  update(config.metadataOnlyChainIds ??= [], policy.metadataOnly)
+  policyGenerations.set(chainId, getChainPolicyGeneration(chainId) + 1)
+  config.policyRevision = (config.policyRevision ?? 0) + 1
+  for (const listener of policyListeners) listener(chainId)
+  // Pending reads finish in their original generation; new SDKs cannot join them.
+  void advanceSdkQueryGeneration(Object.keys(SDK_QUERY_POLICY) as EulerSDKQueryName[])
+  return true
 }
 
 export const useChainConfig = (): ChainConfig => {
@@ -77,11 +137,11 @@ export const useChainConfig = (): ChainConfig => {
   }
   /* eslint-disable @typescript-eslint/no-explicit-any -- server-injected window global */
   else if (typeof window !== 'undefined' && (window as any).__CHAIN_CONFIG__) {
-    cached = normalizeChainConfig((window as any).__CHAIN_CONFIG__)
+    cached = reactive(normalizeChainConfig((window as any).__CHAIN_CONFIG__))
   /* eslint-enable @typescript-eslint/no-explicit-any */
   }
   else {
-    cached = { enabledChainIds: [], deprecatedChainIds: [], onchainSdkChainIds: [], eVaultFetchChunkChainIds: [] }
+    cached = reactive({ enabledChainIds: [], deprecatedChainIds: [], onchainSdkChainIds: [], metadataOnlyChainIds: [], policyRevision: 0, eVaultFetchChunkChainIds: [] })
   }
 
   return cached!

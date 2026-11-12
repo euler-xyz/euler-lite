@@ -13,6 +13,7 @@ import {
 import type { PublicLabelsBundle } from '~/utils/public-labels'
 import { getVaultDeprecation, isVaultSelectedByTag } from '~/utils/eulerLabelsUtils'
 import { useGeoBlock } from '~/composables/useGeoBlock'
+import { applyChainReadPolicy, useChainConfig } from '~/composables/useChainConfig'
 
 type Deferred<T> = {
   promise: Promise<T>
@@ -34,6 +35,7 @@ const deferred = <T>(): Deferred<T> => {
 const mocks = vi.hoisted(() => ({
   evcBatchCall: vi.fn(),
   fetchPublicLabelsBundle: vi.fn(),
+  fetchChainPolicy: vi.fn(),
   normalizePublicLabelsData: vi.fn(),
   getProvider: vi.fn(),
   loadVaults: vi.fn(),
@@ -99,6 +101,7 @@ const bundleFor = (labels: EulerLabelsData): PublicLabelsBundle => ({
   version: 'v20260804151305236',
   publicLabels: labels,
   sourceFetchedAt: Date.now(),
+  chainPolicy: { deprecated: false, onchain: false, metadataOnly: false },
   effectivePolicy: { products: {}, earnVaults: [], assets: [] },
 }) as unknown as PublicLabelsBundle
 
@@ -107,8 +110,18 @@ const currentProductKeys = () => Object.keys(getCurrentEulerLabelsData().product
 describe('useEulerLabels chain-scoped loading', () => {
   beforeEach(() => {
     currentChainId.value = 1
+    const config = useChainConfig()
+    config.enabledChainIds.splice(0, config.enabledChainIds.length, 1, 2)
+    config.deprecatedChainIds.splice(0)
+    config.onchainSdkChainIds.splice(0)
+    config.metadataOnlyChainIds = []
+    config.policyRevision = 0
     mocks.evcBatchCall.mockReset().mockResolvedValue([])
     mocks.fetchPublicLabelsBundle.mockReset()
+    mocks.fetchChainPolicy.mockReset().mockImplementation(async (_url, options) => ({
+      chainId: options.query.chainId,
+      policy: { deprecated: false, onchain: false, metadataOnly: false },
+    }))
     mocks.normalizePublicLabelsData.mockReset().mockImplementation(
       (_chainId: number, labels: EulerLabelsData) => labels,
     )
@@ -116,7 +129,9 @@ describe('useEulerLabels chain-scoped loading', () => {
     vi.stubGlobal('useVaults', () => ({ loadVaults: mocks.loadVaults }))
     mocks.getProvider.mockReset().mockReturnValue({})
     mocks.vaults.length = 0
-    vi.stubGlobal('$fetch', mocks.fetchPublicLabelsBundle)
+    vi.stubGlobal('$fetch', (url: string, options: unknown) => url === '/api/internal/chain-policy'
+      ? mocks.fetchChainPolicy(url, options)
+      : mocks.fetchPublicLabelsBundle(url, options))
     vi.stubGlobal('useEulerAddresses', () => ({
       getCurrentChainConfig,
       loadEulerConfig: vi.fn(),
@@ -126,6 +141,145 @@ describe('useEulerLabels chain-scoped loading', () => {
 
   afterAll(() => {
     vi.unstubAllGlobals()
+  })
+
+  it('refreshes retirement/reactivation routing while lifecycle and vault membership stay unchanged', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(1_000_000)
+      const active = { deprecated: false, onchain: false, metadataOnly: false }
+      const retired = { deprecated: false, onchain: true, metadataOnly: true }
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce({ ...bundleFor(labelsFor('same')), chainPolicy: active })
+      const labels = useEulerLabels()
+      await labels.loadLabels()
+      vi.setSystemTime(1_300_001)
+      mocks.fetchChainPolicy.mockResolvedValue({ chainId: 1, policy: retired })
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce({ ...bundleFor(labelsFor('same')), source: 'v3-metadata', chainPolicy: retired })
+      await labels.refreshLabelsIfStale()
+      expect(useChainConfig().deprecatedChainIds).toEqual([])
+      expect(useChainConfig().onchainSdkChainIds).toEqual([1])
+      expect(useChainConfig().metadataOnlyChainIds).toEqual([1])
+      expect(useChainConfig().policyRevision).toBe(1)
+      expect(mocks.loadVaults).toHaveBeenCalledExactlyOnceWith({ preserveRegistry: true })
+
+      vi.setSystemTime(1_600_002)
+      mocks.fetchChainPolicy.mockResolvedValue({ chainId: 1, policy: active })
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce({ ...bundleFor(labelsFor('same')), chainPolicy: active })
+      await labels.refreshLabelsIfStale()
+      expect(useChainConfig().onchainSdkChainIds).toEqual([])
+      expect(useChainConfig().policyRevision).toBe(2)
+      expect(mocks.loadVaults).toHaveBeenCalledTimes(2)
+    }
+    finally { vi.useRealTimers() }
+  })
+
+  it('ignores policy from an older labels request that finishes after a forced refresh', async () => {
+    const older = deferred<PublicLabelsBundle>()
+    const latest = deferred<PublicLabelsBundle>()
+    mocks.fetchPublicLabelsBundle.mockReturnValueOnce(older.promise).mockReturnValueOnce(latest.promise)
+    const labels = useEulerLabels()
+    const first = labels.loadLabels()
+    await vi.waitFor(() => expect(mocks.fetchPublicLabelsBundle).toHaveBeenCalledOnce())
+    mocks.fetchChainPolicy.mockResolvedValue({ chainId: 1, policy: { deprecated: true, onchain: true, metadataOnly: true } })
+    const second = labels.loadLabels(true)
+    await vi.waitFor(() => expect(mocks.fetchPublicLabelsBundle).toHaveBeenCalledTimes(2))
+    latest.resolve({ ...bundleFor(labelsFor('new')), source: 'v3-metadata', chainPolicy: { deprecated: true, onchain: true, metadataOnly: true } } as PublicLabelsBundle)
+    await second
+    older.resolve({ ...bundleFor(labelsFor('old')), chainPolicy: { deprecated: false, onchain: false, metadataOnly: false } })
+    await first
+    expect(currentProductKeys()).toEqual(['new'])
+    expect(useChainConfig().onchainSdkChainIds).toEqual([1])
+    expect(useChainConfig().policyRevision).toBe(1)
+  })
+
+  it('rejects HTTP-cached labels without undoing the current policy', async () => {
+    const deprecated = { deprecated: true, onchain: true, metadataOnly: true }
+    applyChainReadPolicy(1, deprecated)
+    mocks.fetchChainPolicy.mockResolvedValue({ chainId: 1, policy: deprecated })
+    mocks.fetchPublicLabelsBundle.mockResolvedValue(bundleFor(labelsFor('active-cache')))
+    const labels = useEulerLabels()
+    await labels.loadLabels()
+    expect(useChainConfig().onchainSdkChainIds).toEqual([1])
+    expect(labels.isReady.value).toBe(false)
+    expect(currentProductKeys()).toEqual([])
+    expect(mocks.fetchPublicLabelsBundle).toHaveBeenCalledTimes(2)
+    expect(mocks.fetchPublicLabelsBundle).toHaveBeenLastCalledWith('/api/internal/public-labels', expect.objectContaining({ cache: 'no-store' }))
+  })
+
+  it('retries a policy-mismatched HTTP cache entry with a current labels bundle', async () => {
+    const deprecated = { deprecated: true, onchain: true, metadataOnly: true }
+    applyChainReadPolicy(1, deprecated)
+    mocks.fetchChainPolicy.mockResolvedValue({ chainId: 1, policy: deprecated })
+    mocks.fetchPublicLabelsBundle
+      .mockResolvedValueOnce(bundleFor(labelsFor('active-cache')))
+      .mockResolvedValueOnce({ ...bundleFor(labelsFor('metadata')), source: 'v3-metadata', chainPolicy: deprecated })
+    await useEulerLabels().loadLabels()
+    expect(currentProductKeys()).toEqual(['metadata'])
+    expect(useEulerLabels().isReady.value).toBe(true)
+  })
+
+  it('updates policy during a labels outage, revokes stale verification and reloads after recovery', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
+    try {
+      const labels = useEulerLabels()
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('same')))
+      await labels.loadLabels()
+      // Policy is refreshed even while the previous labels are still fresh.
+      clock.mockReturnValue(1_060_000)
+      const onchain = { deprecated: false, onchain: true, metadataOnly: false }
+      mocks.fetchChainPolicy.mockResolvedValue({ chainId: 1, policy: onchain })
+      mocks.fetchPublicLabelsBundle.mockRejectedValueOnce(new Error('labels unavailable'))
+      await labels.refreshLabelsIfStale()
+      expect(useChainConfig().onchainSdkChainIds).toEqual([1])
+      expect(labels.isReady.value).toBe(false)
+      expect(mocks.loadVaults).not.toHaveBeenCalled()
+      mocks.fetchPublicLabelsBundle.mockResolvedValueOnce({ ...bundleFor(labelsFor('same')), chainPolicy: onchain })
+      await labels.refreshLabelsIfStale()
+      expect(labels.isReady.value).toBe(true)
+      expect(mocks.loadVaults).toHaveBeenCalledExactlyOnceWith({ preserveRegistry: true })
+    }
+    finally { clock.mockRestore() }
+  })
+
+  it('does not restore verification from a request that crosses a policy transition', async () => {
+    const request = deferred<PublicLabelsBundle>()
+    mocks.fetchPublicLabelsBundle.mockReturnValue(request.promise)
+    const labels = useEulerLabels()
+    const pending = labels.loadLabels()
+    await vi.waitFor(() => expect(mocks.fetchPublicLabelsBundle).toHaveBeenCalledOnce())
+    applyChainReadPolicy(1, { deprecated: true, onchain: true, metadataOnly: true })
+    request.resolve(bundleFor(labelsFor('obsolete')))
+    await pending
+    expect(labels.isReady.value).toBe(false)
+    expect(currentProductKeys()).toEqual([])
+  })
+
+  it('reloads unchanged membership after deprecation and reactivation during an outage', async () => {
+    const labels = useEulerLabels()
+    mocks.fetchPublicLabelsBundle.mockImplementation(async () => bundleFor(labelsFor('same')))
+    await labels.loadLabels()
+    applyChainReadPolicy(1, { deprecated: true, onchain: true, metadataOnly: true })
+    expect(labels.isReady.value).toBe(false)
+    applyChainReadPolicy(1, { deprecated: false, onchain: false, metadataOnly: false })
+    expect(labels.isReady.value).toBe(false)
+    await labels.refreshLabelsIfStale()
+    expect(labels.isReady.value).toBe(true)
+    expect(mocks.loadVaults).toHaveBeenCalledExactlyOnceWith({ preserveRegistry: true })
+  })
+
+  it('clears another chain\'s labels while its independent policy read is pending', async () => {
+    const labels = useEulerLabels()
+    mocks.fetchPublicLabelsBundle.mockResolvedValue(bundleFor(labelsFor('chain-one')))
+    await labels.loadLabels()
+    const policy = deferred<{ chainId: number, policy: { deprecated: boolean, onchain: boolean, metadataOnly: boolean } }>()
+    mocks.fetchChainPolicy.mockReturnValueOnce(policy.promise)
+    currentChainId.value = 2
+    const pending = labels.loadLabels()
+    await vi.waitFor(() => expect(mocks.fetchChainPolicy).toHaveBeenCalledTimes(2))
+    expect(labels.isReady.value).toBe(false)
+    expect(currentProductKeys()).toEqual([])
+    policy.resolve({ chainId: 2, policy: { deprecated: false, onchain: false, metadataOnly: false } })
+    await pending
   })
 
   it('resolves EVK and Earn deprecation with their bundle reasons', () => {
@@ -284,8 +438,7 @@ describe('useEulerLabels chain-scoped loading', () => {
       const refreshed = deferred<PublicLabelsBundle>()
       mocks.fetchPublicLabelsBundle.mockReturnValueOnce(refreshed.promise)
       const pending = labels.loadLabels(true)
-      await Promise.resolve()
-      await Promise.resolve()
+      await vi.waitFor(() => expect(labels.isLoading.value).toBe(true))
       expect(labels.isLoading.value).toBe(true)
       expect(labels.loadError.value).toContain('Unable to load vault verification')
 
@@ -347,8 +500,7 @@ describe('useEulerLabels chain-scoped loading', () => {
       const refreshed = deferred<PublicLabelsBundle>()
       mocks.fetchPublicLabelsBundle.mockReturnValueOnce(refreshed.promise)
       const pending = labels.loadLabels(true)
-      await Promise.resolve()
-      await Promise.resolve()
+      await vi.waitFor(() => expect(labels.isLoading.value).toBe(true))
       expect(labels.isLoading.value).toBe(true)
 
       vi.advanceTimersByTime(1_000)
@@ -377,8 +529,7 @@ describe('useEulerLabels chain-scoped loading', () => {
       const refreshed = deferred<PublicLabelsBundle>()
       mocks.fetchPublicLabelsBundle.mockReturnValueOnce(refreshed.promise)
       const pending = labels.loadLabels(true)
-      await Promise.resolve()
-      await Promise.resolve()
+      await vi.waitFor(() => expect(labels.isLoading.value).toBe(true))
 
       expect(labels.isLoading.value).toBe(true)
       expect(labels.isReady.value).toBe(false)
@@ -405,8 +556,7 @@ describe('useEulerLabels chain-scoped loading', () => {
       const refreshed = deferred<PublicLabelsBundle>()
       mocks.fetchPublicLabelsBundle.mockReturnValueOnce(refreshed.promise)
       const pending = labels.refreshLabelsIfStale()
-      await Promise.resolve()
-      await Promise.resolve()
+      await vi.waitFor(() => expect(labels.isLoading.value).toBe(true))
 
       expect(labels.isLoading.value).toBe(true)
       expect(labels.isReady.value).toBe(false)
@@ -572,6 +722,23 @@ describe('useEulerLabels chain-scoped loading', () => {
     refreshed.resolve(bundleFor(labelsFor('refreshed')))
     await Promise.all([refreshLoad, joinedRefreshLoad])
 
+    expect(currentProductKeys()).toEqual(['refreshed'])
+    expect(labels.isLoading.value).toBe(false)
+    expect(labels.isReady.value).toBe(true)
+  })
+
+  it('joins a forced refresh even while the displayed snapshot is fresh', async () => {
+    const labels = useEulerLabels()
+    mocks.fetchPublicLabelsBundle.mockResolvedValueOnce(bundleFor(labelsFor('initial')))
+    await labels.loadLabels()
+    const request = deferred<PublicLabelsBundle>()
+    mocks.fetchPublicLabelsBundle.mockReturnValue(request.promise)
+    const forced = labels.loadLabels(true)
+    await vi.waitFor(() => expect(mocks.fetchPublicLabelsBundle).toHaveBeenCalledTimes(2))
+    const joined = labels.loadLabels()
+    await Promise.resolve()
+    request.resolve(bundleFor(labelsFor('refreshed')))
+    await Promise.all([forced, joined])
     expect(currentProductKeys()).toEqual(['refreshed'])
     expect(labels.isLoading.value).toBe(false)
     expect(labels.isReady.value).toBe(true)
