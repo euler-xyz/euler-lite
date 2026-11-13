@@ -362,8 +362,12 @@ describe('useEulerSdk', () => {
     ['https://custom-indexer.example.test', 'onchain', 'fallback', false],
     ['https://custom-indexer.example.test', 'onchain', 'onchain', false],
     ['https://custom-indexer.example.test', 'fallback', 'onchain', true],
+    ['https://catalog-fixture.euler.finance', 'fallback', 'onchain', false, { LABELS_IMAGE_ORIGINS: 'https://images.example.test/path' }],
+    ['https://custom-indexer.example.test', 'fallback', 'fallback', false, { LABELS_V3_SET: 'invalid/set' }],
+    ['https://catalog-fixture.euler.finance', 'v3', 'v3', false, { LABELS_V3_VERSION: 'draft' }],
+    ['https://custom-indexer.example.test', 'fallback', 'onchain', true, { STATIC_LABELS_BASE_URL: '' }],
   ] as const)(
-    'shares policy and isolates SDK caches for %s (browser=%s, server=%s, disableV3=%s)', async (upstream, browserSource, serverSource, disableV3) => {
+    'shares policy and isolates SDK caches for %s (browser=%s, server=%s, disableV3=%s, labels=%j)', async (upstream, browserSource, serverSource, disableV3, labelsOverrides: Record<string, string> = {}) => {
       const automatic = upstream !== 'https://custom-indexer.example.test' && !disableV3
       vi.useFakeTimers()
       for (const [key, value] of Object.entries({
@@ -371,6 +375,7 @@ describe('useEulerSdk', () => {
         SERVER_VAULT_CACHE_SOURCE: serverSource, NUXT_PUBLIC_BROWSER_VAULT_SOURCE: browserSource,
         STATIC_LABELS_BASE_URL: 'https://labels.example.test', RPC_URL_999: 'https://rpc.example.test',
         DEPRECATED_CHAINS: '', ONCHAIN_SDK_CHAINS: '',
+        ...labelsOverrides,
       })) vi.stubEnv(key, value)
       const manifest = [{ chainId: 999, status: 'deprecated' }]
       vi.doMock('~/server/api/internal/euler-chains.get', () => ({

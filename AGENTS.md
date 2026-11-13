@@ -73,8 +73,10 @@ Euler Lite is the only service. Standard commands live in `README.md` ("Availabl
     refreshes the catalog every five minutes, including when all configured chains are deprecated.
     outages never imply retirement. Without a usable required catalog, server data reads fail
     and existing browser policy stays unchanged. Cold HTML marks chains with unresolved registry
-    or catalog policy in `unresolvedChainIds`. Labels configuration errors also leave all enabled
-    chains unresolved while allowing HTML to render; strict policy/data reads retain their errors.
+    or catalog policy in `unresolvedChainIds`. Invalid `LABELS_SOURCE` also leaves all enabled
+    chains unresolved while allowing HTML to render; policy reads still reject the invalid mode.
+    Label publication, image-origin and static-source settings are validated within labels paths;
+    errors in those settings do not invalidate chain routing policy.
     Chain-aware SDK reads wait for policy, and label verification,
     snapshot hydration and direct V3 reads stay unavailable until it resolves. Open tabs refresh policy independently of labels via
     `/api/internal/chain-policy` (`no-store`), rebuild SDKs and advance query generations.
