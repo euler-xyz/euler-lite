@@ -40,6 +40,10 @@ This document covers the per-host proxies, the vault snapshot pipeline, the warm
 | `utils/snapshot-types.ts` | Wire-shape types shared client + server |
 | `utils/sdk-vault-meta-stub.ts` | Registry-backed `IVaultMetaService` for the client-side hydration two-pass |
 | `composables/useVaults.ts:hydrateFromServer` | Browser-side snapshot hydrate |
+| `server/utils/router-path.ts` | Decoded pathname without query (`getRouterPathname`) for CORS, geo-gate, body-limit, and `no-store` |
+| `server/plugins/sensitive-route-cache.ts` | Forces `Cache-Control: no-store` (plus CDN variants) on RPC, Tenderly, subgraph, Turtle, screening, and per-wallet reward paths |
+
+API middleware classifies encoded `/api` prefixes from h3's decoded `event.path`. Sensitive `no-store` matches path-segment prefixes after stripping a trailing slash (`/api/internal/rpc/1` yes, `/api/internal/rpcextra` no). Provider proxies still slice the remainder from the raw URL pathname and 404 a nested extra prefix before attaching credentials. Details and the encoded-path examples are in [Architecture → Server-Side API Protection](./architecture.md#server-side-api-protection).
 
 ## Per-Host Proxies
 
