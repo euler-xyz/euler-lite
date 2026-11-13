@@ -22,6 +22,30 @@ describe('useEulerVaultAssessments', () => {
     isV3EnabledForChain.mockReturnValue(true)
   })
 
+  it('drops pending assessments and unsupported-chain caches across policy changes', async () => {
+    const { useChainConfig, applyChainReadPolicy } = await import('~/composables/useChainConfig')
+    useChainConfig().enabledChainIds.push(1)
+    let finish!: (value: unknown) => void
+    fetchVaultAssessment.mockReturnValue(new Promise((resolve) => {
+      finish = resolve
+    }))
+    const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
+    const assessments = useEulerVaultAssessments()
+    const pending = assessments.loadVaultAssessment(1, ADDRESS, 'evk')
+    await vi.waitFor(() => expect(fetchVaultAssessment).toHaveBeenCalledOnce())
+    applyChainReadPolicy(1, { deprecated: true, onchain: true, metadataOnly: true })
+    applyChainReadPolicy(1, { deprecated: false, onchain: false, metadataOnly: false })
+    finish({ assessed: true })
+    await pending
+    expect(assessments.getEntry(1, ADDRESS, 'evk').status).toBe('idle')
+    fetchVaultAssessment.mockRejectedValue(new VaultAssessmentUnavailableError('chain-not-supported'))
+    await assessments.loadVaultAssessment(1, ADDRESS, 'evk')
+    expect(assessments.isAvailableForChain(1)).toBe(false)
+    applyChainReadPolicy(1, { deprecated: true, onchain: true, metadataOnly: true })
+    applyChainReadPolicy(1, { deprecated: false, onchain: false, metadataOnly: false })
+    expect(assessments.isAvailableForChain(1)).toBe(true)
+  })
+
   it('deduplicates requests and keeps entries by chain, family and lowercase address', async () => {
     fetchVaultAssessment.mockResolvedValue({ assessed: true })
     const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')

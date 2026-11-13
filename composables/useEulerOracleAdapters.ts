@@ -4,6 +4,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { getEulerSdkForChain } from '~/composables/useEulerSdk'
 import { useV3ChainGate } from '~/composables/useV3ChainGate'
+import { getChainPolicyGeneration, subscribeToChainPolicyChanges } from '~/composables/useChainConfig'
 import {
   type OracleAdapterCheckOutcome,
   type OracleAdapterMeta,
@@ -32,6 +33,22 @@ type OracleAdapterLoadResult = {
 }
 const pendingOracleAdapterLoads = new Map<string, Promise<OracleAdapterLoadResult>>()
 const pendingOracleAdapterListLoads = new Map<number, Promise<Record<string, OracleAdapterMeta>>>()
+
+subscribeToChainPolicyChanges((chainId) => {
+  oracleAdaptersByChain.delete(chainId)
+  oracleAssessmentsStatusByChain.delete(chainId)
+  oracleAdapterCatalogueLoadedAt.delete(chainId)
+  oracleAdapterCatalogueKeys.delete(chainId)
+  oracleAdapterPerAddressKeys.delete(chainId)
+  pendingOracleAdapterListLoads.delete(chainId)
+  for (const key of pendingOracleAdapterLoads.keys()) {
+    if (key.startsWith(`${chainId}:`)) pendingOracleAdapterLoads.delete(key)
+  }
+  if (oracleAdaptersChainId.value === chainId) {
+    oracleAdaptersRef.value = {}
+    oracleAssessmentsStatusRef.value = 'idle'
+  }
+})
 
 const toOptionalAddress = (value: unknown) =>
   typeof value === 'string' ? normalizeAddress(value) : undefined
@@ -157,6 +174,8 @@ const loadAllOracleAdapters = async (chainId: number): Promise<void> => {
     return
   }
 
+  const generation = getChainPolicyGeneration(chainId)
+  const isCurrent = () => generation === getChainPolicyGeneration(chainId) && isV3EnabledForChain(chainId)
   const promise = (async () => {
     try {
       const sdk = await getEulerSdkForChain(chainId)
@@ -167,11 +186,13 @@ const loadAllOracleAdapters = async (chainId: number): Promise<void> => {
       // router's fallback oracle are not flagged active; the per-address path in
       // loadOracleAdapter still resolves those on demand.
       const assessments = await sdk.oracleAdapterService.fetchOracleAdapterAssessments(chainId, { active: true })
+      if (!isCurrent()) return {}
       applyCatalogue(chainId, assessments)
       setAssessmentsAvailable(chainId, true)
       return oracleAdaptersByChain.get(chainId) ?? {}
     }
     catch (err) {
+      if (!isCurrent()) return {}
       setAssessmentsAvailable(chainId, false)
       logWarn('useEulerOracleAdapters', `Failed to load oracle adapter assessments for chain ${chainId}: ${err instanceof Error ? err.message : String(err)}`)
       return oracleAdaptersByChain.get(chainId) ?? {}
@@ -183,7 +204,7 @@ const loadAllOracleAdapters = async (chainId: number): Promise<void> => {
     await promise
   }
   finally {
-    pendingOracleAdapterListLoads.delete(chainId)
+    if (pendingOracleAdapterListLoads.get(chainId) === promise) pendingOracleAdapterListLoads.delete(chainId)
   }
 }
 
@@ -216,10 +237,13 @@ const loadOracleAdapterResult = async (
   const inflight = pendingOracleAdapterLoads.get(requestKey)
   if (inflight) return inflight
 
+  const generation = getChainPolicyGeneration(chainId)
+  const isCurrent = () => generation === getChainPolicyGeneration(chainId) && isV3EnabledForChain(chainId)
   const promise = (async () => {
     try {
       const sdk = await getEulerSdkForChain(chainId)
       const assessment = await sdk.oracleAdapterService.fetchOracleAdapterAssessment(chainId, address)
+      if (!isCurrent()) return { backendAvailable: false }
       if (!assessment) {
         removeAdapter(chainId, key)
         return { backendAvailable: true }
@@ -238,6 +262,7 @@ const loadOracleAdapterResult = async (
       return { meta, backendAvailable: true }
     }
     catch (err) {
+      if (!isCurrent()) return { backendAvailable: false }
       removeAdapter(chainId, key)
       logWarn('useEulerOracleAdapters', `Failed to load oracle adapter assessment ${address} on chain ${chainId}: ${err instanceof Error ? err.message : String(err)}`)
       return { backendAvailable: false }
@@ -249,16 +274,18 @@ const loadOracleAdapterResult = async (
     return await promise
   }
   finally {
-    pendingOracleAdapterLoads.delete(requestKey)
+    if (pendingOracleAdapterLoads.get(requestKey) === promise) pendingOracleAdapterLoads.delete(requestKey)
   }
 }
 
 const loadOracleAdapter = async (chainId: number, oracleAddress: string) => {
+  const generation = getChainPolicyGeneration(chainId)
   if (Number.isInteger(chainId) && chainId > 0) {
     activateChain(chainId)
     markAssessmentsLoading(chainId)
   }
   const result = await loadOracleAdapterResult(chainId, oracleAddress)
+  if (generation !== getChainPolicyGeneration(chainId)) return undefined
   if (Number.isInteger(chainId) && chainId > 0) {
     setAssessmentsAvailable(chainId, result.backendAvailable)
   }
@@ -266,6 +293,7 @@ const loadOracleAdapter = async (chainId: number, oracleAddress: string) => {
 }
 
 const loadOracleAdapters = async (chainId: number, addresses?: string[]) => {
+  const generation = getChainPolicyGeneration(chainId)
   if (!addresses?.length) {
     if (!Number.isInteger(chainId) || chainId <= 0) return
     activateChain(chainId)
@@ -279,6 +307,7 @@ const loadOracleAdapters = async (chainId: number, addresses?: string[]) => {
     markAssessmentsLoading(chainId)
   }
   const results = await Promise.all(addresses.map(address => loadOracleAdapterResult(chainId, address)))
+  if (generation !== getChainPolicyGeneration(chainId)) return
   setAssessmentsAvailable(chainId, results.every(result => result.backendAvailable))
 }
 
@@ -287,8 +316,10 @@ const loadOracleAdapters = async (chainId: number, addresses?: string[]) => {
 // the computed at construction time. Constructing it once with no active effect
 // keeps the subscription surface limited to actual assessment readers.
 const oracleAdapters = toReactive(computed(() => oracleAdaptersRef.value))
-const oracleAssessmentsStatus = computed(() => oracleAssessmentsStatusRef.value)
-const oracleAssessmentsAvailable = computed(() => oracleAssessmentsStatusRef.value === 'available')
+const oracleAssessmentsStatus = computed(() => oracleAdaptersChainId.value !== null && !isV3EnabledForChain(oracleAdaptersChainId.value)
+  ? 'unavailable'
+  : oracleAssessmentsStatusRef.value)
+const oracleAssessmentsAvailable = computed(() => oracleAssessmentsStatus.value === 'available')
 
 export const useEulerOracleAdapters = () => ({
   oracleAdapters,

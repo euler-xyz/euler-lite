@@ -6,6 +6,8 @@
  *
  * The actual builder lives in `server/utils/vaults-cache.ts`.
  */
+import type { ChainReadPolicy } from './chain-policy'
+
 export type SerialisedVaultKind = 'evk' | 'earn' | 'securitize' | 'escrow'
 
 export interface SerialisedVault {
@@ -17,6 +19,7 @@ export interface SerialisedVault {
 export interface SerialisedSnapshot {
   chainId: number
   fetchedAt: number
+  chainPolicy?: ChainReadPolicy
   evkVaults: SerialisedVault[]
   earnVaults: SerialisedVault[]
   securitizeVaults: SerialisedVault[]

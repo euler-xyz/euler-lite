@@ -6,20 +6,24 @@ import { resolveSubgraphSource, LiteSubgraphUnavailableError as SubgraphUnavaila
  * Used by:
  *   - `server/utils/labels-view.ts` (public labels endpoint surface)
  *   - `server/utils/vaults-cache.ts` (vault snapshot refresh, warmed every
- *     5 min by the warm-cache plugin and as the cold-path fallback for
+ *     1 min with V3 enabled or 5 min otherwise, excluding deprecated chains,
+ *     and as the request-time fallback for
  *     `/api/internal/vaults?chainId=N`)
  *
- * Each chain gets one SDK instance, cached at module scope; the promise is
+ * Each chain gets one SDK instance per current policy/configuration; the promise is
  * cleared on build failure so the next call retries instead of poisoning
  * the entry.
  *
  * Regular chains use `SERVER_VAULT_CACHE_SOURCE`:
  *   - `fallback` (default): V3 primary, onchain secondary. With no V3
  *     configured the SDK degrades to onchain via `disableV3: true`.
- *   - `onchain`: pin every service to onchain.
- *   - `v3`: pin to V3; SDK build throws when V3 is not configured.
+ *   - `onchain`: account/vault/Earn use RPC/subgraph; rewards use direct providers.
+ *     Labels and optional V3 utilities follow their own settings.
+ *   - `v3`: account/vault/Earn and rewards use V3 without onchain fallback.
+ *     An unset upstream URL resolves to Euler's hosted default.
  *
- * Chains listed in `ONCHAIN_SDK_CHAINS` always use the onchain config.
+ * Chains retired by the Euler V3 catalog and `ONCHAIN_SDK_CHAINS` overrides use
+ * the onchain config. A policy change replaces the cached SDK and its queries.
  *
  * Turtle Earn requires `X-API-Key` on every endpoint. The direct and
  * fallback rewards adapters call Turtle upstream themselves rather than via
@@ -45,7 +49,8 @@ import {
   readV3ApiUrl,
   type VaultDataSource,
 } from '~/utils/api-url-env'
-import { parseChainIds } from '~/utils/parseChainIds'
+import { loadServerChainReadPolicy } from './chain-policy'
+import { chainReadPolicyKey, type ChainReadPolicy } from '~/utils/chain-policy'
 import { LiteEulerLabelsService } from '~/utils/sdk-labels'
 import { getPublicLabelsBundle } from './public-labels-source'
 import { serverAbiService } from './sdk-abi-service'
@@ -70,7 +75,7 @@ const resolveServerSubgraphSource = async (chainId: number) => {
   }
 }
 
-const sdkByChain = new Map<number, Promise<EulerSDK>>()
+const sdkByChain = new Map<number, { key: string, promise: Promise<EulerSDK> }>()
 
 const fallbackAdapterConfig: Partial<EulerSDKConfig> = {
   accountServiceAdapter: 'fallback',
@@ -83,6 +88,7 @@ const onchainAdapterConfig: Partial<EulerSDKConfig> = {
   accountServiceAdapter: 'onchain',
   eVaultServiceAdapter: 'onchain',
   eulerEarnServiceAdapter: 'onchain',
+  vaultTypeAdapter: 'subgraph',
   rewardsServiceAdapter: 'direct',
 }
 
@@ -115,16 +121,13 @@ export const resolveServerTurtleRewardsConfig = (
   return { rewardsTurtleApiKey: apiKey, rewardsTurtleApiUrl: TURTLE_EARN_API_URL }
 }
 
-const isOnchainSdkChain = (chainId: number): boolean =>
-  parseChainIds(process.env.ONCHAIN_SDK_CHAINS, new Set([chainId])).includes(chainId)
-
-const buildServerSdkConfig = (chainId: number): EulerSDKConfig & { rpcUrls: Record<number, string> } => {
+const buildServerSdkConfig = (chainId: number, policy: ChainReadPolicy): EulerSDKConfig & { rpcUrls: Record<number, string> } => {
   const rpcUrl = resolveRpcUrl(chainId)
   if (!rpcUrl) throw new Error(`No RPC URL configured for chain ${chainId}`)
 
   const v3ApiUrl = readResolvedV3ApiUrl()
   const v3ApiKey = readV3ApiKey().trim()
-  const source = isOnchainSdkChain(chainId) ? 'onchain' : readServerVaultCacheSource()
+  const source = policy.onchain ? 'onchain' : readServerVaultCacheSource()
   const hasV3 = !!readV3ApiUrl()
 
   return {
@@ -140,10 +143,12 @@ const buildServerSdkConfig = (chainId: number): EulerSDKConfig & { rpcUrls: Reco
   }
 }
 
-export const getServerSdk = (chainId: number): Promise<EulerSDK> => {
+export const getServerSdk = async (chainId: number, policy?: ChainReadPolicy): Promise<EulerSDK> => {
+  const resolvedPolicy = policy ?? await loadServerChainReadPolicy(chainId)
+  const config = buildServerSdkConfig(chainId, resolvedPolicy)
+  const key = JSON.stringify([chainReadPolicyKey(resolvedPolicy), config])
   const existing = sdkByChain.get(chainId)
-  if (existing) return existing
-  const config = buildServerSdkConfig(chainId)
+  if (existing?.key === key) return existing.promise
   const disableV3 = readDisableV3()
   const promise = buildEulerSDK({
     config,
@@ -166,9 +171,9 @@ export const getServerSdk = (chainId: number): Promise<EulerSDK> => {
     if (disableV3) disableSdkV3Utilities(sdk)
     return sdk
   }).catch((err) => {
-    if (sdkByChain.get(chainId) === promise) sdkByChain.delete(chainId)
+    if (sdkByChain.get(chainId)?.promise === promise) sdkByChain.delete(chainId)
     throw err
   })
-  sdkByChain.set(chainId, promise)
+  sdkByChain.set(chainId, { key, promise })
   return promise
 }

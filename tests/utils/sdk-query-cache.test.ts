@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { advanceSdkQueryGeneration, clearSdkQueryFailureCacheForTest, clearSdkQueryGenerationsForTest, sdkBuildQuery, sdkQueryClient } from '~/utils/sdk-query-cache'
+import { advanceSdkQueryGeneration, clearSdkQueryFailureCacheForTest, clearSdkQueryGenerationsForTest, sdkBuildQuery, sdkFreshBuildQuery, sdkQueryClient, withSdkQueryScope } from '~/utils/sdk-query-cache'
 import { queryClient } from '~/utils/query-client'
 
 describe('sdkBuildQuery', () => {
@@ -78,6 +78,39 @@ describe('sdkBuildQuery', () => {
     await expect(wrapped(['0x01', '0x02'])).resolves.toBe('ok')
 
     expect(query).toHaveBeenCalledTimes(1)
+  })
+
+  it('isolates old SDK reads from a new policy, including queries started after the change', async () => {
+    let finishOld!: (value: string) => void
+    const oldFn = vi.fn().mockImplementationOnce(() => new Promise<string>((resolve) => {
+      finishOld = resolve
+    })).mockResolvedValue('old-late')
+    const newFn = vi.fn().mockResolvedValue('new-policy')
+    const old = withSdkQueryScope(sdkBuildQuery, 'policy:0')('queryAccountVaults', oldFn, {})
+    const current = withSdkQueryScope(sdkBuildQuery, 'policy:1')('queryAccountVaults', newFn, {})
+    const pending = old(999)
+    await advanceSdkQueryGeneration(['queryAccountVaults'])
+    // A retained old SDK can start a new read even after invalidation.
+    await expect(old(999)).resolves.toBe('old-late')
+    await expect(current(999)).resolves.toBe('new-policy')
+    finishOld('old-pending')
+    await expect(pending).resolves.toBe('old-pending')
+    await expect(current(999)).resolves.toBe('new-policy')
+    expect(newFn).toHaveBeenCalledOnce()
+  })
+
+  it('shares fresh SDK results within a policy and preserves SDK cache-key opt-outs', async () => {
+    const fresh = withSdkQueryScope(sdkFreshBuildQuery, 'policy:1')('queryAccountVaults', vi.fn().mockResolvedValue('fresh'), {})
+    const cachedFn = vi.fn().mockResolvedValue('cached')
+    const cached = withSdkQueryScope(sdkBuildQuery, 'policy:1')('queryAccountVaults', cachedFn, {})
+    await expect(fresh(999)).resolves.toBe('fresh')
+    await expect(cached(999)).resolves.toBe('fresh')
+    expect(cachedFn).not.toHaveBeenCalled()
+    const uncachedFn = vi.fn().mockResolvedValue(18)
+    const uncached = withSdkQueryScope(sdkBuildQuery, 'policy:1')('queryTokenDecimals', uncachedFn, {}, { getCacheKey: () => null })
+    await uncached()
+    await uncached()
+    expect(uncachedFn).toHaveBeenCalledTimes(2)
   })
 
   it('bypasses both success and failure caches when the SDK supplies a null key', async () => {

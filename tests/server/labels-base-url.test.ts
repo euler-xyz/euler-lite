@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { isLabelsOnchainVerificationChain, readHostedLabelImageOrigins, readLabelsSource, resolveLabelsBaseUrl, validateLabelsConfiguration } from '~/server/utils/labels-base-url'
+import { readHostedLabelImageOrigins, readLabelsSource, resolveLabelsBaseUrl, validateLabelsConfiguration } from '~/server/utils/labels-base-url'
 import { LabelsConfigurationError } from '~/server/utils/labels-configuration-error'
-import { readChainRegistry } from '~/utils/chain-status'
 
 describe('label source configuration', () => {
   afterEach(() => vi.unstubAllEnvs())
@@ -36,7 +35,7 @@ describe('label source configuration', () => {
     vi.stubEnv('RPC_URL_146', 'https://rpc.example')
     vi.stubEnv('DEPRECATED_CHAINS', '146')
     vi.stubEnv('ONCHAIN_SDK_CHAINS', '')
-    expect(() => validateLabelsConfiguration(readChainRegistry([{ chainId: 146, status: 'deprecated' }]))).not.toThrow()
+    expect(validateLabelsConfiguration).not.toThrow()
   })
   it('explains contradictory V3 selections', () => {
     vi.stubEnv('LABELS_SOURCE', 'v3')
@@ -55,36 +54,5 @@ describe('label source configuration', () => {
     expect(readHostedLabelImageOrigins()).toEqual(['https://cdn.fork.test', 'http://localhost:8080', 'https://v3.fork.test'])
     vi.stubEnv('LABELS_IMAGE_ORIGINS', 'https://cdn.fork.test/path')
     expect(readHostedLabelImageOrigins).toThrow('without paths')
-  })
-})
-
-describe('deprecated-chain labels verification selection', () => {
-  afterEach(() => vi.unstubAllEnvs())
-  it('selects enabled deprecated chains without changing active on-chain chains', () => {
-    vi.stubEnv('RPC_URL_146', 'https://rpc.example.test')
-    vi.stubEnv('RPC_URL_1', 'https://rpc.example.test')
-    vi.stubEnv('ONCHAIN_SDK_CHAINS', '1,146')
-    vi.stubEnv('DEPRECATED_CHAINS', '146,146')
-    expect(isLabelsOnchainVerificationChain(146, readChainRegistry(undefined))).toBe(true)
-    expect(isLabelsOnchainVerificationChain(1, readChainRegistry(undefined))).toBe(false)
-    vi.stubEnv('DEPRECATED_CHAINS', '')
-    expect(isLabelsOnchainVerificationChain(146, readChainRegistry([{ chainId: 146, status: 'deprecated' }]))).toBe(true)
-    expect(isLabelsOnchainVerificationChain(146, readChainRegistry([{ chainId: 146, status: 'production' }]))).toBe(false)
-  })
-  it('ignores deprecated chains without an enabled RPC', () => {
-    vi.stubEnv('RPC_URL_1923', '')
-    vi.stubEnv('ONCHAIN_SDK_CHAINS', '')
-    vi.stubEnv('DEPRECATED_CHAINS', '1923')
-    expect(isLabelsOnchainVerificationChain(1923, readChainRegistry([{ chainId: 1923, status: 'deprecated' }]))).toBe(false)
-  })
-  it('rejects an enabled deprecated chain without on-chain SDK reads', () => {
-    vi.stubEnv('RPC_URL_146', 'https://rpc.example.test')
-    vi.stubEnv('ONCHAIN_SDK_CHAINS', '1')
-    vi.stubEnv('DEPRECATED_CHAINS', '146')
-    expect(() => isLabelsOnchainVerificationChain(146, readChainRegistry(undefined))).toThrow('ONCHAIN_SDK_CHAINS: 146')
-    vi.stubEnv('DEPRECATED_CHAINS', '')
-    const registry = readChainRegistry([{ chainId: 146, status: 'deprecated' }])
-    expect(() => isLabelsOnchainVerificationChain(146, registry)).toThrow('ONCHAIN_SDK_CHAINS: 146')
-    expect(isLabelsOnchainVerificationChain(1, registry)).toBe(false)
   })
 })

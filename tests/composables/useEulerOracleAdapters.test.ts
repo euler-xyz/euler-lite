@@ -75,6 +75,48 @@ describe('useEulerOracleAdapters', () => {
     isV3EnabledForChain.mockReturnValue(true)
   })
 
+  it.each(['single', 'catalogue'])('rejects an in-flight %s assessment across deprecation and reactivation', async (kind) => {
+    const { useChainConfig, applyChainReadPolicy } = await import('~/composables/useChainConfig')
+    useChainConfig().enabledChainIds.push(1)
+    isV3EnabledForChain.mockImplementation(() => !useChainConfig().onchainSdkChainIds.includes(1))
+    const request = deferred<ReturnType<typeof assessment>>()
+    fetchOracleAdapterAssessment.mockReturnValue(request.promise)
+    fetchOracleAdapterAssessments.mockImplementation(() => request.promise.then(value => [value]))
+    const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
+    const adapters = useEulerOracleAdapters()
+    const pending = kind === 'single' ? adapters.loadOracleAdapter(1, KNOWN_ADAPTER) : adapters.loadAllOracleAdapters(1)
+    await vi.waitFor(() => expect(kind === 'single' ? fetchOracleAdapterAssessment : fetchOracleAdapterAssessments).toHaveBeenCalledOnce())
+    applyChainReadPolicy(1, { deprecated: true, onchain: true, metadataOnly: true })
+    expect(adapters.oracleAssessmentsAvailable.value).toBe(false)
+    applyChainReadPolicy(1, { deprecated: false, onchain: false, metadataOnly: false })
+    request.resolve(assessment())
+    await pending
+    expect(adapters.oracleAssessmentsAvailable.value).toBe(false)
+    expect(adapters.oracleAdapters[KNOWN_ADAPTER]).toBeUndefined()
+    fetchOracleAdapterAssessment.mockResolvedValue({ ...assessment(), provider: 'Pyth' })
+    await adapters.loadOracleAdapter(1, KNOWN_ADAPTER)
+    expect(adapters.oracleAdapters[KNOWN_ADAPTER]?.provider).toBe('Pyth')
+    expect(adapters.oracleAssessmentsAvailable.value).toBe(true)
+  })
+
+  it('immediately hides a warm catalogue and does not reuse it on reactivation', async () => {
+    const { useChainConfig, applyChainReadPolicy } = await import('~/composables/useChainConfig')
+    useChainConfig().enabledChainIds.push(1)
+    isV3EnabledForChain.mockImplementation(() => !useChainConfig().onchainSdkChainIds.includes(1))
+    fetchOracleAdapterAssessments.mockResolvedValue([assessment()])
+    const { useEulerOracleAdapters } = await import('~/composables/useEulerOracleAdapters')
+    const adapters = useEulerOracleAdapters()
+    await adapters.loadAllOracleAdapters(1)
+    expect(adapters.oracleAssessmentsAvailable.value).toBe(true)
+    applyChainReadPolicy(1, { deprecated: true, onchain: true, metadataOnly: true })
+    expect(adapters.oracleAssessmentsStatus.value).toBe('unavailable')
+    expect(adapters.oracleAdapters[KNOWN_ADAPTER]).toBeUndefined()
+    applyChainReadPolicy(1, { deprecated: false, onchain: false, metadataOnly: false })
+    fetchOracleAdapterAssessment.mockResolvedValue(assessment())
+    await adapters.loadOracleAdapter(1, KNOWN_ADAPTER)
+    expect(fetchOracleAdapterAssessment).toHaveBeenCalledOnce()
+  })
+
   it('loads single V3 assessments lazily and re-enters the SDK on later loads', async () => {
     fetchOracleAdapterAssessment
       .mockResolvedValueOnce(assessment())
