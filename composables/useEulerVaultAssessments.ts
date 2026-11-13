@@ -2,6 +2,7 @@ import { isVaultAssessmentUnavailableError, type VaultAssessment, type VaultAsse
 import { computed, shallowRef, ref } from 'vue'
 import { getEulerSdkForChain } from '~/composables/useEulerSdk'
 import { useV3ChainGate } from '~/composables/useV3ChainGate'
+import { getChainPolicyGeneration, subscribeToChainPolicyChanges } from '~/composables/useChainConfig'
 import { logWarn } from '~/utils/errorHandling'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 
@@ -19,6 +20,20 @@ const pending = new Map<string, Promise<VaultAssessmentEntry>>()
 const refreshTimers = new Map<string, ReturnType<typeof setInterval>>()
 const REFRESH_INTERVAL_MS = 20_000
 const REFRESH_WINDOW_MS = 2 * 60_000
+
+subscribeToChainPolicyChanges((chainId) => {
+  entriesByChain.value = Object.fromEntries(Object.entries(entriesByChain.value).filter(([id]) => Number(id) !== chainId))
+  unsupportedChainIds.value = new Set([...unsupportedChainIds.value].filter(id => id !== chainId))
+  for (const key of pending.keys()) {
+    if (key.startsWith(`${chainId}:`)) pending.delete(key)
+  }
+  for (const [key, timer] of refreshTimers) {
+    if (key.startsWith(`${chainId}:`)) {
+      clearInterval(timer)
+      refreshTimers.delete(key)
+    }
+  }
+})
 
 const activate = (chainId: number) => {
   if (activeChainId.value === chainId) return
@@ -51,15 +66,19 @@ const loadVaultAssessment = async (
   if (inflight) return inflight
   const previous = entriesByChain.value[chainId]?.[key]
   if (!previous || previous.status !== 'available') setEntry(chainId, key, { status: 'loading' })
+  const generation = getChainPolicyGeneration(chainId)
+  const isCurrent = () => generation === getChainPolicyGeneration(chainId) && isAvailableForChain(chainId)
   const promise = (async (): Promise<VaultAssessmentEntry> => {
     try {
       const sdk = await getEulerSdkForChain(chainId)
       const assessment = await sdk.vaultAssessmentService.fetchVaultAssessment(chainId, normalized, family, { fresh: options.fresh })
+      if (!isCurrent()) return { status: 'idle' }
       const entry: VaultAssessmentEntry = { status: 'available', assessment }
       setEntry(chainId, key, entry)
       return entry
     }
     catch (error) {
+      if (!isCurrent()) return { status: 'idle' }
       if (isVaultAssessmentUnavailableError(error, 'chain-not-supported')) {
         unsupportedChainIds.value = new Set([...unsupportedChainIds.value, chainId])
       }
@@ -74,7 +93,7 @@ const loadVaultAssessment = async (
     return await promise
   }
   finally {
-    pending.delete(requestKey)
+    if (pending.get(requestKey) === promise) pending.delete(requestKey)
   }
 }
 

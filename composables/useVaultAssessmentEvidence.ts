@@ -1,5 +1,6 @@
 import type { VaultAssessment, VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
 import { toValue, type MaybeRefOrGetter } from 'vue'
+import { getChainPolicyGeneration } from '~/composables/useChainConfig'
 
 export const useVaultAssessmentEvidence = (
   address: MaybeRefOrGetter<string>,
@@ -26,7 +27,7 @@ export const useVaultAssessmentEvidence = (
     return entry.value.status === 'available' || entry.value.status === 'unavailable'
   })
 
-  watch([canLoad, chainId, () => toValue(address)], ([enabled, id, target]) => {
+  watch([canLoad, chainId, () => toValue(address), () => getChainPolicyGeneration(chainId.value)], ([enabled, id, target]) => {
     if (enabled && id) void loadVaultAssessment(id, target, family)
   }, { immediate: true })
 

@@ -4,16 +4,16 @@ import { useChains } from '@wagmi/vue'
 const emits = defineEmits<{ close: [] }>()
 const chains = useChains()
 const { deprecatedChainIds } = useChainConfig()
-const deprecatedSet = new Set(deprecatedChainIds)
+const deprecatedSet = computed(() => new Set(deprecatedChainIds))
 
 const activeChains = computed(() =>
   [...chains.value]
-    .filter(c => !deprecatedSet.has(c.id))
+    .filter(c => !deprecatedSet.value.has(c.id))
     .sort((a, b) => a.id - b.id),
 )
 const deprecatedChains = computed(() =>
   [...chains.value]
-    .filter(c => deprecatedSet.has(c.id))
+    .filter(c => deprecatedSet.value.has(c.id))
     .sort((a, b) => a.id - b.id),
 )
 

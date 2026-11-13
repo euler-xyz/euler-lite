@@ -65,6 +65,28 @@ describe('useActivityAvailability', () => {
     expect(availability?.isSupported.value).toBe(false)
   })
 
+  it('rechecks activity when an unresolved or retired chain becomes eligible without navigation', async () => {
+    const enabled = ref(false)
+    const getEulerSdkForChain = vi.fn(async () => ({ activityService: {
+      getCapabilities: () => ({ configured: true, canQueryAccount: true, requestableVaultTypes: ['evk'] }),
+      getScopeSupport: () => 'unknown',
+    } }))
+    vi.stubGlobal('useV3ChainGate', () => ({ isV3EnabledForChain: () => enabled.value }))
+    vi.stubGlobal('useEulerSdk', () => ({ getEulerSdkForChain }))
+    const { useActivityAvailability } = await import('~/composables/useActivityAvailability')
+    scope = effectScope()
+    const availability = scope.run(() => useActivityAvailability({ kind: 'account' }, 1))!
+    expect(getEulerSdkForChain).not.toHaveBeenCalled()
+    enabled.value = true
+    await vi.waitFor(() => expect(availability.isSupported.value).toBe(true))
+    enabled.value = false
+    await nextTick()
+    expect(availability.shouldRender.value).toBe(false)
+    enabled.value = true
+    await vi.waitFor(() => expect(availability.isSupported.value).toBe(true))
+    expect(getEulerSdkForChain).toHaveBeenCalledTimes(2)
+  })
+
   it('ignores a capability result from a superseded chain', async () => {
     let resolveFirst: ((sdk: unknown) => void) | undefined
     const first = new Promise((resolve) => {

@@ -6,6 +6,7 @@ import type { PublicEulerLabelsData } from '~/utils/public-labels'
 import { __setEulerLabelsDataForTest, useEulerLabels } from '~/composables/useEulerLabels'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useVaults } from '~/composables/useVaults'
+import { useChainConfig } from '~/composables/useChainConfig'
 
 const LABELED_EVAULT = '0x0000000000000000000000000000000000000101'
 const DYNAMIC_EVAULT = '0x0000000000000000000000000000000000000102'
@@ -38,6 +39,7 @@ const chainId = ref(1)
 
 describe('useVaults EVault verification metadata', () => {
   beforeEach(() => {
+    useChainConfig().unresolvedChainIds = []
     fetchVaults.mockReset()
     fetchEarnVaults.mockReset()
     fetchEarnVault.mockReset()
@@ -104,6 +106,24 @@ describe('useVaults EVault verification metadata', () => {
     expect(registry.getVault(ESCROW_EVAULT)).toBeUndefined()
   })
 
+  it.each([undefined, { deprecated: false, onchain: false, metadataOnly: false }])('rejects a cached server snapshot with missing or mismatched policy: %s', async (chainPolicy) => {
+    vi.stubGlobal('useChainConfig', () => ({
+      deprecatedChainIds: [1], onchainSdkChainIds: [1], metadataOnlyChainIds: [1], eVaultFetchChunkChainIds: [],
+    }))
+    vi.stubGlobal('$fetch', vi.fn().mockResolvedValue({
+      chainId: 1, fetchedAt: Date.now(),
+      chainPolicy,
+      evkVaults: [{ kind: 'evk', data: {
+        address: DYNAMIC_EVAULT, collaterals: [], asset: { decimals: 18 }, shares: { decimals: 18 },
+      } }],
+      earnVaults: [], securitizeVaults: [], escrowVaults: [],
+    }))
+    __setEulerLabelsDataForTest({ verifiedVaultAddresses: [getAddress(LABELED_EVAULT)] })
+    await useVaults().loadVaults()
+    expect(useVaultRegistry().getVault(DYNAMIC_EVAULT)).toBeUndefined()
+    expect(fetchVaults.mock.calls.flatMap(call => call[1])).toContain(getAddress(LABELED_EVAULT))
+  })
+
   it('refreshes SDK classification without promoting an unverified vault', async () => {
     const registry = useVaultRegistry()
     registry.set(DYNAMIC_EVAULT, makeVault(DYNAMIC_EVAULT), 'evk')
@@ -116,6 +136,19 @@ describe('useVaults EVault verification metadata', () => {
     await useVaults().updateEVaults([DYNAMIC_EVAULT], undefined, true)
     expect(registry.getVaultCategory(DYNAMIC_EVAULT)).toBe('standard')
     expect(registry.get(DYNAMIC_EVAULT)?.verified).toBe(false)
+  })
+
+  it('cannot hydrate cached verified vaults while cold policy is unresolved', async () => {
+    useChainConfig().unresolvedChainIds!.push(1)
+    const fetch = vi.fn().mockResolvedValue({
+      chainId: 1, fetchedAt: Date.now(), chainPolicy: { deprecated: false, onchain: false, metadataOnly: false },
+      evkVaults: [{ kind: 'evk', data: { address: DYNAMIC_EVAULT, collaterals: [], asset: { decimals: 18 }, shares: { decimals: 18 } } }],
+      earnVaults: [], securitizeVaults: [], escrowVaults: [],
+    })
+    vi.stubGlobal('$fetch', fetch)
+    await useVaults().loadVaults()
+    expect(fetch).not.toHaveBeenCalled()
+    expect(useVaultRegistry().getVault(DYNAMIC_EVAULT)).toBeUndefined()
   })
 
   it('does not grant verification when refreshing an SDK-classified escrow outside the perspective', async () => {

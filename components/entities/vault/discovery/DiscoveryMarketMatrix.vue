@@ -6,6 +6,7 @@ import { buildOracleAdapterViews, collectOracleRouteSteps, type OracleAdapterVie
 import type { MarketGroup } from '~/entities/lend-discovery'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
+import { getChainPolicyGeneration } from '~/composables/useChainConfig'
 
 const props = defineProps<{
   market: MarketGroup
@@ -261,7 +262,7 @@ const onCellClick = (collateralAddr: string, liabilityAddr: string) => {
 // bounded caching, so returning to this view reuses fresh data within its TTL
 // and revalidates after expiry.
 watch(
-  [() => props.dotMetric, chainId],
+  [() => props.dotMetric, chainId, () => getChainPolicyGeneration(chainId.value)],
   ([metric, currentChainId]) => {
     if (metric !== 'oracle' || !currentChainId) return
     void loadAllOracleAdapters(currentChainId)

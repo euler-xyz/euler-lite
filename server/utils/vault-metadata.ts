@@ -2,6 +2,7 @@ import { resolveLabelLogo } from '~/utils/label-logo'
 import { readHostedLabelImageOrigins } from './labels-base-url'
 import type { Address } from 'viem'
 import { createTtlCache } from './cache'
+import { loadServerChainPolicyKey } from './chain-policy'
 import { tryChecksum } from './labels-helpers'
 import {
   buildLabelsView,
@@ -74,7 +75,7 @@ interface CachedVaultMetadata {
 }
 
 const cache = createTtlCache<CachedVaultMetadata>({ ttlMs: CACHE_TTL_MS, maxStaleMs: LABELS_MAX_STALE_MS, maxEntries: 64 })
-const inflight = new Map<number, Promise<Map<string, VaultMetadata>>>()
+const inflight = new Map<string, Promise<Map<string, VaultMetadata>>>()
 
 const currentMetadata = (snapshot: CachedVaultMetadata): Map<string, VaultMetadata> => {
   if (snapshot.labelsSource !== 'v3' && snapshot.labelsSource !== 'v3-metadata') return snapshot.data
@@ -287,15 +288,13 @@ function computeMetadata(ctx: BuildContext): Map<string, VaultMetadata> {
 }
 
 /**
- * Force-rebuild path used by the warm-cache plugin. Always rebuilds —
- * bypasses the fresh-cache short-circuit so the warmer can keep the cache
- * continuously fresh on its own schedule rather than waiting for a TTL
- * expiry. Falls back to stale data and re-throws on a hard rebuild failure,
- * matching the read path so a failed warm doesn't poison the cache.
+ * Rebuild on demand from shared labels/vault inputs, deduplicated by policy.
+ * Falls back to usable stale metadata only within the same policy and throws
+ * when no fallback is available.
  */
 export async function refreshChainVaultMetadata(chainId: number): Promise<Map<string, VaultMetadata>> {
-  const key = String(chainId)
-  const pending = inflight.get(chainId)
+  const key = await loadServerChainPolicyKey(chainId)
+  const pending = inflight.get(key)
   if (pending) return pending
 
   const task = (async () => {
@@ -312,26 +311,28 @@ export async function refreshChainVaultMetadata(chainId: number): Promise<Map<st
         labelsSource: view.labelsSource,
         sourceFetchedAt: view.sourceFetchedAt,
       }
+      if (key !== await loadServerChainPolicyKey(chainId)) throw new Error('Chain policy changed during metadata refresh')
       cache.set(key, snapshot)
       return currentMetadata(snapshot)
     }
     catch (err) {
       logger.warn({ ctx: 'vault-metadata', chainId, err }, 'rebuild failed')
+      if (key !== await loadServerChainPolicyKey(chainId)) throw err
       const stale = cache.getStale(key)
       if (stale) return currentMetadata(stale)
       throw err
     }
     finally {
-      inflight.delete(chainId)
+      inflight.delete(key)
     }
   })()
 
-  inflight.set(chainId, task)
+  inflight.set(key, task)
   return task
 }
 
 export async function getChainVaultMetadata(chainId: number): Promise<Map<string, VaultMetadata>> {
-  const fresh = cache.get(String(chainId))
+  const fresh = cache.get(await loadServerChainPolicyKey(chainId))
   if (fresh) return currentMetadata(fresh)
   return refreshChainVaultMetadata(chainId)
 }

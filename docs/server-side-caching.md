@@ -21,6 +21,8 @@ This document covers the per-host proxies, the vault snapshot pipeline, the warm
 | `server/api/internal/proxy/subgraph/[chainId].post.ts` | Proxies the chain's explicit subgraph URL or selected catalog endpoint (router param, per-chain source, not built with the factory) |
 | `server/api/internal/public-labels.get.ts` | Chain/version-scoped aggregate Public Labels endpoint |
 | `server/utils/public-labels-source.ts` | Public Labels V3 pagination, 5-minute cache, in-flight dedup, and bounded stale fallback |
+| `server/utils/v3-chain-catalog.ts` | Euler V3 indexing support, 5-minute cache, 24-hour maximum age, 30-second failure cooldown |
+| `server/api/internal/chain-policy.get.ts` | Uncached policy combining registry lifecycle, V3 indexing support and env overrides |
 | `server/api/internal/curator-profiles/[entityId].get.ts` | Chain-independent V3 entity profile |
 | `server/utils/curator-profile-source.ts` | 5-minute profile cache, 15 s timeout, 404 → empty V3 entity |
 | `server/api/internal/curator-networks/[entityId].get.ts` | Per-enabled-chain product / Earn counts for a managing entity |
@@ -100,7 +102,7 @@ The response budget is 8 MiB of decoded body bytes and 10 seconds total for fetc
 
 ### Public Labels
 
-`/api/internal/public-labels?chainId=N` is the browser's single label read. `server/utils/public-labels-source.ts` reads the admitted `EulerChains.json` manifest, then paginates vaults, products, entities, entity governance addresses, and geo policies directly from V3. Enabled deprecated chains use metadata with on-chain verification; other enabled chains use V3 visibility verdicts. Results are cached for five minutes by chain, version, and verification mode; concurrent misses share one in-flight operation. Bundle and geo-policy stale fallback is bounded to 24 hours. Geo separately retains a validated, fetchedAt-stamped disk checkpoint; cold starts without valid geo policies cannot publish a bundle. Mount `GEO_POLICY_CACHE_DIR` for cross-container persistence.
+`/api/internal/public-labels?chainId=N` is the browser's single label read. `server/utils/public-labels-source.ts` reads the admitted `EulerChains.json` manifest and, for Euler V3, its indexing catalog, then paginates vaults, products, entities, entity governance addresses, and geo policies directly from V3. Chains retired by the Euler V3 catalog use metadata with on-chain verification; indexed Euler chains and custom-provider chains use V3 visibility verdicts regardless of deprecation. Results are cached for five minutes by chain, version, and verification mode; concurrent misses share one in-flight operation. Bundle and geo-policy stale fallback is bounded to 24 hours. Geo separately retains a validated, fetchedAt-stamped disk checkpoint; cold starts without valid geo policies cannot publish a bundle. Mount `GEO_POLICY_CACHE_DIR` for cross-container persistence.
 
 `LABELS_SOURCE=v3` performs no label-file reads. `LABELS_SOURCE=static` reads the operator-owned authoring files on the same warm/refresh cycle and uses one atomic disk checkpoint for the entire collection. See [Static labels](./static-labels.md).
 
@@ -225,7 +227,7 @@ Troubleshooting quick checks:
 | `404 V3 path not allowed` | The browser is calling a path not declared in `GET_ONLY_PATHS`, `GET_ONLY_PATH_PATTERNS`, or `POST_ONLY_PATHS`. Add a narrow allowlist entry instead of forwarding a broad prefix. |
 | `405 Method not allowed` | The path exists but is being called with the wrong method, or an unsupported method was sent. |
 | Repeated `503 V3 upstream cooling down` | Search logs for the same `pathTemplate` and V3 context in the previous 10 seconds; the first retryable failure records the cooldown. |
-| V3-only charts or bad-debt sections are hidden | `useV3ChainGate()` requires `enableV3Backend` and excludes chains listed in `ONCHAIN_SDK_CHAINS`. Exposure displays can fall back to RPC-derived qualitative data, but bad debt and history have no on-chain equivalent. |
+| V3-only charts or bad-debt sections are hidden | `useV3ChainGate()` requires `enableV3Backend` and excludes chains in the resolved onchain SDK list (chains retired by the Euler V3 catalog plus explicit overrides). Exposure displays can fall back to RPC-derived qualitative data, but bad debt and history have no on-chain equivalent. |
 
 ## Vault Snapshot Pipeline
 
@@ -235,13 +237,14 @@ The largest win in this layer. The server pre-computes a consolidated snapshot o
 
 `server/utils/vaults-cache.ts:refreshChainVaults(chainId)` is the single refresh path. Used by:
 
-- **`server/plugins/warm-cache.ts`**: every minute (V3 configured) or every 5 minutes (V3 off), per-chain.
-- **`server/api/internal/vaults.get.ts`**: cold-path fallback when the cache is genuinely empty (process just started, before the first warm cycle completed). Steady-state, the handler is a pure read.
+- **`server/plugins/warm-cache.ts`**: every minute (V3 enabled) or every 5 minutes (V3 off), excluding deprecated chains.
+- **`server/api/internal/vaults.get.ts`**: request-time refresh when the current policy has no usable snapshot, including cold starts, policy transitions and entries beyond the stale ceiling. A usable cached snapshot is returned without refreshing vault data.
 
 Pipeline:
 
 ```text
-1. getServerSdk(chainId)          // lazy per-chain server SDK; reused across requests
+0. policy = await loadServerChainReadPolicy(chainId)
+1. getServerSdk(chainId, policy)  // reused within the current policy/configuration
 2. getPublicEulerLabelsData(chainId) // shared normalized Public Labels bundle
 3. sdk.eVaultService.fetchVerifiedVaultAddresses(chainId, [ESCROW])   // escrow set
 4. sdk.vaultMetaService.fetchVaultTypes(chainId, candidates)          // partition EVK vs Securitize vs Earn
@@ -251,8 +254,9 @@ Pipeline:
      sdk.securitizeVaultService.fetchVaults(securitizeAddrs, opts),
      sdk.eVaultService.fetchVaults(escrowAddrs, opts),
    ])
-6. encodeBigints(payload)         // tag bigints as { __bi: "<decimal>" }
-7. vaultsCache.set(String(chainId), payload)
+6. encodeBigints(payload)         // includes chainPolicy; tags bigints as { __bi: "<decimal>" }
+7. Recheck policy; reject the result if it changed during the refresh
+8. vaultsCache.set(vaultsCacheKey(chainId, policy), payload)
 ```
 
 Fetch options:
@@ -271,13 +275,13 @@ Fetch options:
 
 ### Server-side SDK builder
 
-`server/utils/sdk-server.ts:getServerSdk(chainId)` builds one SDK per chain, cached at module scope. The adapter chain is selected by `SERVER_VAULT_CACHE_SOURCE` (default `fallback`):
+`server/utils/sdk-server.ts:getServerSdk(chainId)` caches the current SDK per chain and rebuilds it when the resolved policy or configuration changes. Chains retired by the Euler V3 catalog and explicit onchain overrides use onchain adapters. Other chains, including custom-provider chains without an onchain override, follow `SERVER_VAULT_CACHE_SOURCE` (default `fallback`):
 
 | Value | Behavior |
 |---|---|
 | `fallback` *(default)* | V3 primary, on-chain secondary. With V3 configured: cheap/fast batched fetches. Without V3: `disableV3: true` short-circuits the fallback chain so the snapshot is built from onchain lens multicalls (slower but authoritative). |
-| `onchain` | Direct on-chain reads only — bypasses V3 entirely regardless of `V3_API_URL`. |
-| `v3` | V3 only; SDK build throws when no V3 endpoint is configured. |
+| `onchain` | Account/vault/Earn reads use RPC and subgraph discovery; rewards use direct providers. Labels and optional V3 utilities follow their own settings. |
+| `v3` | Account/vault/Earn and rewards use V3 without onchain fallback. An unset upstream URL resolves to Euler's hosted default. |
 
 A boot-time warning fires if `SERVER_VAULT_CACHE_SOURCE` (or `NUXT_PUBLIC_BROWSER_VAULT_SOURCE`) needs V3 but `V3_API_URL` is unset — see `utils/api-url-env.ts:warnIfVaultSourceNeedsV3`.
 
@@ -285,7 +289,7 @@ A boot-time warning fires if `SERVER_VAULT_CACHE_SOURCE` (or `NUXT_PUBLIC_BROWSE
 
 The server SDK's labels service reads `getPublicLabelsBundle` directly. The token-list route's SDK uses the same service; both follow `LABELS_SOURCE=v3` or `LABELS_SOURCE=static` and reject an expired hosted snapshot. Neither SDK uses the default file-based labels adapter.
 
-**Turtle rewards.** The direct Turtle rewards adapter inside the server SDK calls Turtle Earn upstream (not through `/api/internal/proxy/turtle`), and every Turtle endpoint requires `X-API-Key`. In fallback mode, the V3 rewards adapter sources campaigns from `euler-data-v3`. `resolveServerTurtleRewardsConfig()` therefore hands the SDK the same server-only `TURTLE_EARN_API_KEY` as `rewardsTurtleApiKey`, pinned to the same fixed upstream the proxy uses. When the key is unset or blank after trimming, the builder emits `rewardsEnableTurtle: false` so the direct adapter skips Turtle discovery rather than issuing guaranteed-401 requests. That flag gates only the direct adapter: in the default fallback mode the V3 adapter still returns Turtle campaigns it sourced from euler-data-v3, so those campaigns can remain in snapshots while the proof proxy answers 503. Missing Turtle campaigns are therefore not a reliable missing-key symptom, and visible campaigns do not prove the key is set. The SDK never follows redirects on credentialed Turtle requests. Because the SDK is cached per chain at first use, changing the key requires a restart.
+**Turtle rewards.** The direct Turtle rewards adapter inside the server SDK calls Turtle Earn upstream (not through `/api/internal/proxy/turtle`), and every Turtle endpoint requires `X-API-Key`. In fallback mode, the V3 rewards adapter sources campaigns from `euler-data-v3`. `resolveServerTurtleRewardsConfig()` therefore hands the SDK the same server-only `TURTLE_EARN_API_KEY` as `rewardsTurtleApiKey`, pinned to the same fixed upstream the proxy uses. When the key is unset or blank after trimming, the builder emits `rewardsEnableTurtle: false` so the direct adapter skips Turtle discovery rather than issuing guaranteed-401 requests. That flag gates only the direct adapter: in the default fallback mode the V3 adapter still returns Turtle campaigns it sourced from euler-data-v3, so those campaigns can remain in snapshots while the proof proxy answers 503. Missing Turtle campaigns are therefore not a reliable missing-key symptom, and visible campaigns do not prove the key is set. The SDK never follows redirects on credentialed Turtle requests. The key participates in the SDK configuration cache key. Restart the deployment to apply environment changes.
 
 Every server-side SDK build resolves the deployments manifest through the euler-chains cache chain rather than fetching euler-interfaces directly: `server/plugins/sdk-deployments.ts` installs `DeploymentService.setQueryDeployments(loadEulerChains)` at boot, so all server SDK builds share one cached copy with its 7-day stale window instead of issuing their own GitHub fetches.
 
@@ -321,7 +325,7 @@ Set `DISABLE_SERVER_VAULT_CACHE=true` to:
 - Skip the vault warm-cache cycle in `warm-cache.ts` (the labels / token-list / chains cycle still runs).
 - Make `/api/internal/vaults?chainId=N` respond `503 Vault snapshot disabled`.
 
-The browser's snapshot hydrate (`hydrateFromServer`) treats the 503 as a hydrate failure and falls through to the normal RPC pipeline — visually identical to the cold-snapshot path, just always taken. Useful when the host can't afford the snapshot's outbound V3/RPC fan-out, or when bot-management throttles bursty origin traffic.
+The browser's snapshot hydrate (`hydrateFromServer`) treats the 503 as a hydrate failure and loads through `getEulerSdkForChain`, using the resolved V3/onchain routing. Disabling snapshots does not force browser reads onchain. This setting is useful when the host cannot afford the snapshot's outbound V3/RPC fan-out, or when bot-management throttles bursty origin traffic.
 
 ### Wire format
 
@@ -340,9 +344,9 @@ The encoder walks class instances (vault entities are classes — `EVault`, `Eul
 
 `GET /api/internal/vaults?chainId=N`:
 
-- Returns the cached snapshot (5-min TTL with V3 off, 2-min TTL with V3 on). Stale ceiling 30 min.
-- `vaultsCache.get(...) ?? vaultsCache.getStale(...)` — handler never triggers a refresh on its own.
-- Cold-path fallback (empty cache): synchronously awaits `refreshChainVaults`. In-flight dedup collapses concurrent cold requests.
+- Resolves the current chain policy, then returns its cached snapshot (5-min TTL with V3 off, 2-min TTL with V3 enabled). Stale fallback lasts up to three times the TTL from fetch time: 6 min with V3 enabled, 15 min otherwise.
+- `vaultsCache.get(...) ?? vaultsCache.getStale(...)` serves usable snapshots without refreshing vault data.
+- When that policy has no usable snapshot, synchronously awaits `refreshChainVaults`. In-flight dedup is scoped to the chain and policy.
 - Response header: `Cache-Control: public, max-age=30, stale-while-revalidate=30`.
 
 ### Browser side
@@ -353,6 +357,7 @@ The encoder walks class instances (vault entities are classes — `EVault`, `Eul
 Phase 0: hydrateFromServer(chainId, generation)
   - $fetch('/api/internal/vaults?chainId=N')
   - decodeBigints(wire)
+  - reject malformed data, a different chain, or a missing/mismatched chainPolicy
   - reject if older than MAX_HYDRATION_AGE_MS (6 min)
   - Pass 1: instantiate every kind into its SDK class
             new EVault(args), new EulerEarn(args), new SecuritizeCollateralVault(args)
@@ -365,7 +370,7 @@ Phase 0: hydrateFromServer(chainId, generation)
             ])
   - Clear all loading/updating flags. UI renders.
 
-Phase 1+: existing RPC pipeline in silent mode
+Phase 1+: chain-aware browser SDK loads in silent mode (resolved V3/onchain routing)
   - updateEVaults / updateEarnVaults / updateSecuritizeVaults
   - silent=true → loading/updating flags stay false
   - Vue reactivity overwrites entries in place as fresh data arrives
@@ -387,14 +392,16 @@ Other methods on the stub (`fetchVaults`, `fetchVaultTypes`, etc.) throw — `po
 
 ### Hydrate failure modes
 
-The hydrate falls through to the RPC pipeline (driving loading flags normally) on any of:
+The hydrate falls through to the chain-aware browser SDK (driving loading flags normally) on any of:
 
 - `$fetch` fails (HTTP error, network failure)
 - `decodeBigints(wire)` produces a malformed shape (`isSerialisedSnapshot` returns false)
 - `snap.chainId` doesn't match the requested chainId
-- `Date.now() - snap.fetchedAt > MAX_HYDRATION_AGE_MS` (6 min stale ceiling on the client side, looser than the server's 5 min so warm-cycle hiccups don't immediately disable hydration)
+- `snap.chainPolicy` is missing or differs from the browser's current policy
+- A deprecated chain's snapshot contains no vaults
+- `Date.now() - snap.fetchedAt > MAX_HYDRATION_AGE_MS` (6 min on the client; the server can serve snapshots up to 6 min old with V3 enabled, or 15 min otherwise)
 
-The pipeline always succeeds eventually — the snapshot is the *fast path*, not a hard dependency.
+The snapshot is optional. The browser SDK path still depends on its configured data sources being available.
 
 ## Warm-Cache Plugin
 
@@ -403,7 +410,7 @@ The pipeline always succeeds eventually — the snapshot is the *fast path*, not
 ```text
 Global cycle (5 min)                   Vaults cycle (1 min if V3, else 5 min)
 ─────────────────────                  ──────────────────────────────────────
-- Euler Chains and runtime ABIs                         - refreshChainVaults(chain) for each
+- Euler Chains, V3 catalog, runtime ABIs        - refreshChainVaults(chain) for each
 - static source includes cross-chain assets     enabled non-deprecated chain
 - per-chain Public Labels bundle
 - per-chain labels snapshot
@@ -414,7 +421,7 @@ Global cycle (5 min)                   Vaults cycle (1 min if V3, else 5 min)
 
 Vault snapshot has its own faster timer because V3-backed refreshes are cheap — one batched POST per chain hitting V3's own cache. Pulling a fresh snapshot every minute keeps it tight without hammering upstream. Without V3, the snapshot is built from heavier onchain lens multicalls, so it falls back to the global 5-min cadence.
 
-When the two intervals are equal (V3 off), the timers naturally double-warm at every 5-min boundary; the in-flight dedup inside `refreshChainVaults` collapses the concurrent calls onto a single upstream pass.
+The global cycle warms labels and other shared inputs; only the vault cycle warms snapshots. Catalog warming calls `refreshV3ChainCatalog()` even when its cached entry is still fresh, and global warming continues when all configured chains are deprecated. Custom V3 and V3-disabled deployments skip the catalog fetch. In-flight dedup also coalesces a snapshot warm with a request-time refresh for the same chain and policy.
 
 ### Why warm directly (not via HTTP)
 
@@ -430,6 +437,14 @@ Per-chain selection also reads `deprecated` from the cached `EulerChains.json` (
 
 Chains are warmed sequentially, not in parallel. Cross-chain upstreams (DefiLlama, Pendle, etc.) dedupe via their own in-flight caches, so chains 2..N hit warm upstream caches rather than re-fetching. Parallel chain fan-out would trigger ~250 simultaneous HTTPS requests at cold boot (all chains × all upstream providers) and overshoot upstream timeouts on slow first-hit DNS/TLS handshakes.
 
+## V3 Chain Catalog
+
+`server/utils/v3-chain-catalog.ts` loads Euler V3 `GET /v3/chains` with the server-side API key. It treats the route as an unpaginated catalog and caches validated chain IDs with the `indexing` capability, independently of registry deprecation. Any pagination metadata supplied must describe a complete response; completeness fields are optional in the V3 contract. Health `status` and `labeling` are not retirement signals. A successful catalog without a chain, or without that chain's indexing capability, selects onchain routing; a valid empty catalog retires all enabled chains from V3 routing.
+
+The cache is scoped by upstream and credentials, fresh for five minutes, and usable for at most 24 hours after its last successful fetch. Reads return a usable last-good entry immediately and schedule one background refresh when it is stale; only cold or expired entries wait for upstream. Periodic warming refreshes the catalog independently of requests. Refreshes coalesce and have a ten-second total budget including the response body; expiry aborts the underlying request and body consumption. HTTP errors, malformed rows and incomplete pagination preserve the last-good snapshot without extending its age; failures have a 30-second retry cooldown, including warm-cycle attempts. Late responses cannot overwrite a newer snapshot. Without a usable required catalog, policy reads return `503`, server data reads cannot select a policy, and open tabs retain their existing routing. Cold HTML marks admitted chains in `unresolvedChainIds` while catalog support is unknown. Chain-aware SDK reads wait for an authoritative policy; cached label verification, snapshot hydration and direct V3 reads remain unavailable until it resolves. Initial resolution advances policy and query-cache generations even when the routing flags match the env defaults. Mounted assessment consumers reload on their chain's policy generation changes.
+
+The catalog is required for hosted labels or V3-backed data at configured HTTPS root URLs on `*.euler.finance` with the default HTTPS port, including the default `https://v3.euler.finance`. Every matching endpoint, including staging services, must serve its own catalog. Requests use the configured URL and server-side credentials; caches and pending refreshes are isolated by both. Other domains, the bare `euler.finance` host, non-default ports and non-root base paths count as custom: they skip catalog discovery, use the configured sources and `ONCHAIN_SDK_CHAINS`, and retain full hosted labels. They resolve policy as soon as the registry is available and do not inherit any cached Euler catalog. Static-label deployments with no configured V3 URL and no explicit `v3` source skip it, as do deployments with `DISABLE_V3=true`. Explicit `v3` sources use Euler's hosted default when the URL is unset. Registry admission, RPC provisioning and subgraph endpoint selection remain separate requirements.
+
 ## V3 Configuration Effects
 
 Whether `V3_API_URL` (or aliases) is set changes how the default `fallback` adapter chain behaves on both the server (snapshot builder) and the browser (fast SDK):
@@ -442,25 +457,27 @@ Whether `V3_API_URL` (or aliases) is set changes how the default `fallback` adap
 | Vault snapshot TTL | 2 min | 5 min |
 | Vault snapshot warm cadence | every 1 min | every 5 min |
 
-Pinning either source to `onchain` ignores V3 even when `V3_API_URL` is set. Pinning to `v3` requires `V3_API_URL` — the SDK build throws otherwise, and the boot warning surfaces this misconfiguration before warming starts.
+Pinning either source to `onchain` selects RPC/subgraph account/vault/Earn reads. Browser rewards keep fallback routing, while server rewards use direct providers. Labels and optional V3 utilities remain independently configured; `DISABLE_V3=true` is the explicit deployment-wide opt-out. Global source settings do not hide direct V3 UI features; the resolved per-chain onchain list gates them through `useV3ChainGate`. Pinning to `v3` selects V3 without onchain fallback. An unset V3 URL resolves to Euler's hosted default, and a boot warning asks operators to configure their intended source explicitly.
 
-Chains listed in `ONCHAIN_SDK_CHAINS` use onchain adapters for chain-aware browser SDK reads and server snapshot builds, so regular chains continue to follow the configured V3/fallback source while pinned chains avoid V3-backed account/vault/Earn reads. Independently, the warm-cache plugin skips per-chain warm work for chains listed in `DEPRECATED_CHAINS` or marked `deprecated` in the cached `EulerChains.json` (re-read every cycle); deprecated chains whose V3 data is gone should typically also be listed in `ONCHAIN_SDK_CHAINS`.
+With Euler V3, chains without catalog indexing support automatically use onchain account/vault/Earn adapters in chain-aware browser reads and server SDKs. Hosted labels use metadata-only verification for those chains; static labels retain authored membership. `ONCHAIN_SDK_CHAINS` adds explicit data overrides. Registry deprecation does not change data sources or label verification. The warm-cache plugin skips per-chain work for chains listed in `DEPRECATED_CHAINS` or marked `deprecated` in the cached registry.
+
+Vault snapshots, labels views, public verification sets and public metadata separate cached and in-flight results by resolved chain policy. A refresh that observes a changed policy before publication rejects its result and cannot fall back across policies. Snapshot responses carry the policy; browser hydration rejects mismatches. `/api/internal/chain-policy` responses use `no-store` and update the selected chain's reactive browser policy even when labels fail; the underlying registry and V3 catalog each use shared five-minute caches and bounded stale fallback. V3 catalog support is usable for up to 24 hours after the last successful fetch; failures do not extend its age. Without usable required catalog support, server policy/data reads fail and open tabs keep their existing policy. Policy changes rebuild SDK instances, advance query generations and invalidate pending registry resolutions, category caches, vault loads and assessment stores. Labels must match the current policy before label-derived verification becomes available and vaults reload. Each SDK keeps its original policy namespace, preventing retained instances from writing results into the current policy cache.
 
 Chains listed in `EVAULT_FETCH_CHUNK_CHAINS` split EVault list reads into small sequential SDK calls in both the browser loader and the server snapshot builder. This is a Lite-side throttle around SDK `eVaultService.fetchVaults` calls for chains whose RPC/lens path does not tolerate larger concurrent onchain EVault reads. It does not replace [server provider overrides](#server-provider-overrides): Sonic's Multicall byte cap is applied inside the server viem client, not by this env list.
 
-The snapshot remains active in all modes (unless `DISABLE_SERVER_VAULT_CACHE=true`). With V3 the snapshot is built quickly from V3's batched endpoints; without V3 it's built from onchain lens multicalls. Either way the browser sees the same wire-format payload and benefits identically.
+The snapshot remains available in all modes (unless `DISABLE_SERVER_VAULT_CACHE=true`). Its account/vault/Earn source follows the server's resolved routing, including onchain overrides when V3 is configured. The browser receives the same wire format in each mode; refresh cost and data freshness depend on the selected sources.
 
 ## Configuration Flags Summary
 
 | Env var | Side | Values | Default | Effect |
 |---|---|---|---|---|
-| `SERVER_VAULT_CACHE_SOURCE` | server | `fallback` \| `onchain` \| `v3` | `fallback` | Adapter chain in `server/utils/sdk-server.ts`; `ONCHAIN_SDK_CHAINS` chains use `onchain`. |
-| `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` | browser (exposed) | `fallback` \| `onchain` \| `v3` | `fallback` | Adapter chain in `composables/useEulerSdk.ts:getEulerSdk()`. `getEulerSdkForChain(chainId)` uses `onchain` for `ONCHAIN_SDK_CHAINS` chains. The "fresh" / plan-time SDK is always `onchain` regardless. |
-| `DEPRECATED_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Optional override for deprecated status. Enabled chains marked here or `deprecated` in `EulerChains.json` appear collapsed, skip per-chain warm-cache work, and use metadata-only labels with on-chain verification. |
-| `ONCHAIN_SDK_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Chains pinned to onchain adapters in chain-aware browser SDK reads and server snapshot builds. |
+| `SERVER_VAULT_CACHE_SOURCE` | server | `fallback` \| `onchain` \| `v3` | `fallback` | Adapter chain in `server/utils/sdk-server.ts`; resolved onchain chains use `onchain`. |
+| `NUXT_PUBLIC_BROWSER_VAULT_SOURCE` | browser (exposed) | `fallback` \| `onchain` \| `v3` | `fallback` | Adapter chain in `composables/useEulerSdk.ts:getEulerSdk()`. `getEulerSdkForChain(chainId)` uses `onchain` for chains retired by the Euler V3 catalog and explicit onchain overrides. The "fresh" / plan-time SDK is always `onchain` regardless. |
+| `DEPRECATED_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Optional override for deprecated status. Enabled chains marked here or `deprecated` in `EulerChains.json` appear collapsed and skip per-chain warm-cache work. Deprecation does not change data routing or label verification. |
+| `ONCHAIN_SDK_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Additional chains pinned to onchain account/vault/Earn adapters. Euler V3 automatically includes chains without catalog indexing support; custom V3 uses the explicit list. Indexed overrides with hosted labels use the full V3 labels bundle, including verification and visibility, regardless of deprecation. Direct vault/oracle assessment reads are disabled for chains in this list. |
 | `TURTLE_EARN_API_KEY` | server | Turtle Earn server key | unset | Passed to the server SDK as `rewardsTurtleApiKey` (and sent by the Turtle proxy). Unset or blank, the proxy answers 503 and the server SDK is built with `rewardsEnableTurtle: false`, which disables direct Turtle discovery only; V3-sourced Turtle campaigns may still be listed. |
 | `EVAULT_FETCH_CHUNK_CHAINS` | server + injected browser config | comma-separated chain ids | unset | Chains whose EVault list reads are split into small sequential SDK calls in Lite. |
-| `DISABLE_SERVER_VAULT_CACHE` | server | `true` \| `false` | `false` | When true: warm-cache skips the vault cycle, `/api/internal/vaults` returns 503, browser falls through to RPC pipeline. |
+| `DISABLE_SERVER_VAULT_CACHE` | server | `true` \| `false` | `false` | When true: warm-cache skips the vault cycle, `/api/internal/vaults` returns 503, browser loads through its chain-aware SDK. |
 | `V3_API_URL` *(plus aliases)* | server | URL | unset | Required upstream when any source ∈ `{fallback, v3}` actually needs V3. Boot warning fires when unset and a V3-requiring source is configured. |
 
 ## Verification

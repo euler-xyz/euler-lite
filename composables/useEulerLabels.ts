@@ -22,12 +22,14 @@ import { erc4626AssetAbi } from '~/abis/erc4626'
 import { buildBatchItem, evcBatchCall } from '~/utils/multicall'
 import { normalizeAddress } from '~/utils/normalizeAddress'
 import { isLabelsSnapshotUsable, LABELS_MAX_STALE_MS, LABELS_REFRESH_INTERVAL_MS } from '~/utils/labels-freshness'
+import { getChainPolicyGeneration, isChainReadPolicyReady, refreshChainReadPolicy, useChainConfig } from '~/composables/useChainConfig'
+import { chainReadPolicyKey, getChainReadPolicy } from '~/utils/chain-policy'
+import { loadBrowserLabelsBundle } from '~/utils/sdk-labels'
 import {
   normalizeLabelsBundle,
   getLabelVaultCandidates,
   getLabelsVaultLoadKey,
   type PublicEulerLabelsData,
-  type PublicLabelsBundle,
 } from '~/utils/public-labels'
 
 const createEmptyEulerLabelsData = (): PublicEulerLabelsData => ({
@@ -55,14 +57,21 @@ const labelsChainId = ref<number | null>(null)
 const labelsVersion = ref(0)
 const geoExpiryVersion = ref(0)
 const isLoading = ref(false)
-const isReady = ref(false)
+const snapshotReady = ref(false)
+const labelsPolicyKey = ref<string | null>(null)
+const labelsPolicyGeneration = ref<number | null>(null)
+const isReady = computed(() => snapshotReady.value && (labelsPolicyKey.value === null
+  || (labelsChainId.value !== null
+    && isChainReadPolicyReady(labelsChainId.value)
+    && labelsPolicyKey.value === chainReadPolicyKey(getChainReadPolicy(useChainConfig(), labelsChainId.value))
+    && labelsPolicyGeneration.value === getChainPolicyGeneration(labelsChainId.value))))
 const loadError = ref<string | undefined>()
 let lastSuccessfulLoadAt = 0
 let hasSuccessfulSnapshot = false
 let labelsExpiryTimer: ReturnType<typeof setTimeout> | undefined
 let geoExpiryTimer: ReturnType<typeof setTimeout> | undefined
-type LabelsFetch = { data: PublicEulerLabelsData, sourceFetchedAt: number }
-const pendingLabelsFetches = new Map<number, Promise<LabelsFetch>>()
+type LabelsFetch = { data: PublicEulerLabelsData, sourceFetchedAt: number, policyKey: string, policyGeneration: number }
+const pendingLabelsFetches = new Map<string, Promise<LabelsFetch>>()
 let labelsLoadGeneration = 0
 let wrapPairProbeGeneration = 0
 const wrapPairs = shallowReactive<Record<string, string>>({})
@@ -85,12 +94,12 @@ const scheduleLabelsExpiry = () => {
   clearTimeout(labelsExpiryTimer)
   const remainingMs = LABELS_MAX_STALE_MS - (Date.now() - lastSuccessfulLoadAt)
   if (remainingMs <= 0) {
-    isReady.value = false
+    snapshotReady.value = false
     loadError.value = 'Unable to load vault verification. Please retry.'
     return
   }
   labelsExpiryTimer = setTimeout(() => {
-    isReady.value = false
+    snapshotReady.value = false
     loadError.value = 'Unable to load vault verification. Please retry.'
   }, remainingMs)
 }
@@ -115,13 +124,15 @@ export const getEulerLabelsVersion = (): number => labelsVersion.value
 
 export const getEulerLabelWrapPairs = (): Record<string, string> => wrapPairs
 
-export const __setEulerLabelsDataForTest = (data: Partial<PublicEulerLabelsData> = {}) => {
+export const __setEulerLabelsDataForTest = (data: Partial<PublicEulerLabelsData> = {}, ready = true) => {
   labelsLoadGeneration += 1
   wrapPairProbeGeneration += 1
   pendingLabelsFetches.clear()
   clearTimeout(labelsExpiryTimer)
   labelsExpiryTimer = undefined
   lastSuccessfulLoadAt = 0
+  labelsPolicyKey.value = null
+  labelsPolicyGeneration.value = null
   Object.keys(wrapPairs).forEach(key => Reflect.deleteProperty(wrapPairs, key))
   setLabelsData({
     ...createEmptyEulerLabelsData(),
@@ -131,7 +142,7 @@ export const __setEulerLabelsDataForTest = (data: Partial<PublicEulerLabelsData>
     assetPatternRules: data.assetPatternRules ?? [],
     rawGeoPolicies: (data as Partial<PublicEulerLabelsData>).rawGeoPolicies ?? [],
   } as unknown as PublicEulerLabelsData, null)
-  isReady.value = true
+  snapshotReady.value = ready
   hasSuccessfulSnapshot = true
   loadError.value = undefined
   isLoading.value = false
@@ -163,32 +174,37 @@ const isCurrentLabelsLoad = (chainId: number, generation: number) => {
   return generation === labelsLoadGeneration && getCurrentChainConfig.value?.chainId === chainId
 }
 
+const labelsFetchKey = (chainId: number) => `${chainId}:${getChainPolicyGeneration(chainId)}:${chainReadPolicyKey(getChainReadPolicy(useChainConfig(), chainId))}`
+
 const getLabelsFetch = (chainId: number, forceRefresh: boolean) => {
-  const pendingFetch = pendingLabelsFetches.get(chainId)
+  const policy = getChainReadPolicy(useChainConfig(), chainId)
+  const policyKey = chainReadPolicyKey(policy)
+  const policyGeneration = getChainPolicyGeneration(chainId)
+  const key = labelsFetchKey(chainId)
+  const pendingFetch = pendingLabelsFetches.get(key)
   if (pendingFetch && !forceRefresh) return pendingFetch
 
   const fetchPromise = (async () => {
     try {
-      const bundle = await $fetch<PublicLabelsBundle>('/api/internal/public-labels', {
-        query: { chainId },
-        timeout: 35_000,
-        ...(forceRefresh && { headers: { 'cache-control': 'no-cache' } }),
-      })
+      if (!isChainReadPolicyReady(chainId)) throw new Error('Chain policy unavailable')
+      const bundle = await loadBrowserLabelsBundle(chainId, policy, forceRefresh)
       const now = Date.now()
       const sourceFetchedAt = bundle.source === 'static' ? now : bundle.sourceFetchedAt
       if (!Number.isSafeInteger(sourceFetchedAt) || sourceFetchedAt <= 0 || sourceFetchedAt > now
         || now - sourceFetchedAt >= LABELS_MAX_STALE_MS) {
         throw new Error('Vault verification snapshot is too old')
       }
-      return { data: normalizeLabelsBundle(chainId, bundle), sourceFetchedAt }
+      return { data: normalizeLabelsBundle(chainId, bundle), sourceFetchedAt, policyKey, policyGeneration }
     }
     catch (error) {
       logWarn('labels/public-v3', error)
       throw error
     }
-  })()
+  })().finally(() => {
+    if (pendingLabelsFetches.get(key) === fetchPromise) pendingLabelsFetches.delete(key)
+  })
 
-  pendingLabelsFetches.set(chainId, fetchPromise)
+  pendingLabelsFetches.set(key, fetchPromise)
   return fetchPromise
 }
 
@@ -197,36 +213,44 @@ const loadLabels = async (forceRefresh = false): Promise<void> => {
 
   const { getCurrentChainConfig } = useEulerAddresses()
   if (getCurrentChainConfig.value?.chainId !== chainId) return
-  const hasCurrentSnapshot = labelsChainId.value === chainId && hasSuccessfulSnapshot
-  if (!forceRefresh && hasCurrentSnapshot && isReady.value
-    && Date.now() - lastSuccessfulLoadAt < LABELS_REFRESH_INTERVAL_MS) return
-
   const generation = ++labelsLoadGeneration
   const isCurrentLoad = () => isCurrentLabelsLoad(chainId, generation)
+  if (labelsChainId.value !== chainId) {
+    hasSuccessfulSnapshot = false
+    snapshotReady.value = false
+    clearTimeout(labelsExpiryTimer)
+    labelsExpiryTimer = undefined
+    setLabelsData(createEmptyEulerLabelsData(), chainId)
+  }
+  try {
+    if (forceRefresh || !pendingLabelsFetches.has(labelsFetchKey(chainId))) await refreshChainReadPolicy(chainId)
+  }
+  catch (error) {
+    logWarn('labels/chain-policy', error)
+  }
   if (!isCurrentLoad()) return
+  const hasCurrentSnapshot = labelsChainId.value === chainId && hasSuccessfulSnapshot
+  if (!forceRefresh && !isLoading.value && hasCurrentSnapshot && isReady.value
+    && Date.now() - lastSuccessfulLoadAt < LABELS_REFRESH_INTERVAL_MS) return
 
   const hasUsableSnapshot = hasCurrentSnapshot && Date.now() - lastSuccessfulLoadAt < LABELS_MAX_STALE_MS
-  isReady.value = hasUsableSnapshot
+  snapshotReady.value = hasUsableSnapshot
   isLoading.value = true
   if (!hasCurrentSnapshot) loadError.value = undefined
   else if (!hasUsableSnapshot) loadError.value = 'Unable to load vault verification. Please retry.'
   const probeGeneration = ++wrapPairProbeGeneration
   Object.keys(wrapPairs).forEach(key => Reflect.deleteProperty(wrapPairs, key))
 
-  if (labelsChainId.value !== chainId && isCurrentLoad()) {
-    hasSuccessfulSnapshot = false
-    clearTimeout(labelsExpiryTimer)
-    labelsExpiryTimer = undefined
-    setLabelsData(createEmptyEulerLabelsData(), chainId)
-  }
-
-  // Only an explicit retry bypasses the server cache; the scheduled poll reads the
-  // warmed bundle so N open tabs cost one upstream read per refresh window.
+  // Scheduled reads use warmed bundles; explicit retries and policy mismatches
+  // bypass the HTTP cache.
   const fetchPromise = getLabelsFetch(chainId, forceRefresh)
 
   try {
-    const { data, sourceFetchedAt } = await fetchPromise
+    const { data, sourceFetchedAt, policyKey, policyGeneration } = await fetchPromise
     if (isCurrentLoad()) {
+      if (policyGeneration !== getChainPolicyGeneration(chainId)) throw new Error('Chain policy changed during labels load')
+      labelsPolicyKey.value = policyKey
+      labelsPolicyGeneration.value = policyGeneration
       setLabelsData(data, chainId)
       hasSuccessfulSnapshot = true
       lastSuccessfulLoadAt = sourceFetchedAt
@@ -247,28 +271,28 @@ const loadLabels = async (forceRefresh = false): Promise<void> => {
     logWarn('labels/load', e)
   }
   finally {
-    if (pendingLabelsFetches.get(chainId) === fetchPromise) {
-      pendingLabelsFetches.delete(chainId)
-    }
     if (isCurrentLoad()) {
       isLoading.value = false
-      isReady.value = hasSuccessfulSnapshot && Date.now() - lastSuccessfulLoadAt < LABELS_MAX_STALE_MS
+      snapshotReady.value = hasSuccessfulSnapshot && Date.now() - lastSuccessfulLoadAt < LABELS_MAX_STALE_MS
     }
   }
 }
 
 const refreshLabelsIfStale = async () => {
   if (hasSuccessfulSnapshot && Date.now() - lastSuccessfulLoadAt >= LABELS_MAX_STALE_MS) {
-    isReady.value = false
+    snapshotReady.value = false
     loadError.value = 'Unable to load vault verification. Please retry.'
   }
   if (isLoading.value) return
   const previous = labelsData.value
   const previousChain = labelsChainId.value
   const previousKey = getLabelsVaultLoadKey(previous)
+  const previousPolicyKey = labelsPolicyKey.value
+  const previousPolicyGeneration = labelsPolicyGeneration.value
   await loadLabels()
   if (isReady.value && previousChain === labelsChainId.value && previous !== labelsData.value
-    && previousKey !== getLabelsVaultLoadKey(labelsData.value)) {
+    && (previousKey !== getLabelsVaultLoadKey(labelsData.value) || previousPolicyKey !== labelsPolicyKey.value
+      || previousPolicyGeneration !== labelsPolicyGeneration.value)) {
     // Open forms may hold unlisted vaults which discovery does not reload.
     await useVaults().loadVaults({ preserveRegistry: true })
   }
