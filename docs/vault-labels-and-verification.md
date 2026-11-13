@@ -354,6 +354,33 @@ Lend (`pages/lend/index.vue`) and Borrow (`pages/borrow/index.vue`) use the same
 
 Vaults hidden from discovery are still accessible via direct URL and remain visible in the user's portfolio.
 
+### Explore graph edges
+
+`getMiniDiagram` (`utils/discoveryCalculations.ts`) draws **one undirected line per pair**. `displayEdges` includes every live LTV (`isLiveCollateralEdge`: borrow LTV > 0 or current liquidation LTV > 0). The "N pairs" headline is `pairCount`: directed currently-borrowable edges against **known** collateral only, so a winding-down line can appear without incrementing the count, and a missing-vault placeholder never inflates it.
+
+`MiniEdge` flags:
+
+| Flag | True when | Stroke |
+|---|---|---|
+| `mutual` | Live LTV exists in both directions | `stroke-width="1"` |
+| not `mutual` | Live LTV in one direction only | `stroke-width="0.5"` |
+| `borrowable` | Either direction has `borrowLTV > 0` | solid |
+| not `borrowable` | Neither direction opens new borrows (liquidation-only / ramp-down) | dashed |
+
+These match the Euler Toolbox line rules. Colour is not per-direction and is not a borrow-LTV heat map.
+
+**Idle (no vault selected)** — every line is `--graph-edge` (one grey) at opacity `0.9`, with no arrowheads.
+
+**Selected vault** (`DiscoveryMarketGraph.vue`):
+
+- Green (`--accent-500`) only for the lines that touch the selected node, still one line per pair.
+- Those lines grow arrowheads (both ways when `mutual`).
+- Every other line stays grey and fades to opacity `0.15`.
+
+The market-card preview (`DiscoveryMarketCard.vue`) uses the same grey, thickness, and dash rule, with a tighter dash (`3 2` vs the enlarged graph's `5 4`) and no selection colour or arrows.
+
+Do not colour idle edges, draw two overlapping one-way strokes for a two-way pair, or dash a pair that is still borrowable in one direction.
+
 ## Unknown Vault Resolution
 
 When a vault address is encountered that isn't in the registry (e.g. from a user's on-chain positions), it goes through resolution:

@@ -138,7 +138,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 - **SSR Disabled**: Client-side only SPA, SSR is not needed
 - **Auto-imports**: Reduces boilerplate and improves developer experience
 - **File-based Routing**: Simple and intuitive routing system
-- **Built-in Optimizations**: Automatic code splitting and optimization
+- **Built-in Optimizations**: Automatic code splitting and optimization. Hashed `/_nuxt/**` assets are cached as `immutable` for a year; `experimental.entryImportMap` is `false` so a stylesheet change still changes JavaScript chunk hashes and invalidates those URLs. `emitRouteChunkError: 'automatic-immediate'` reloads the app if a stale preload 404s after a deploy. See [Development Guide](./development-guide.md#troubleshooting).
 
 ### 2. Composition API Pattern
 
@@ -254,7 +254,7 @@ The `useMarketGroups` composable (`composables/useMarketGroups.ts`) implements a
 3. **Orphan clustering** — Vaults not assigned to any product are clustered using a BFS connected-component algorithm over their collateral relationships. This produces "Ungrouped" markets.
 4. **Async TVL resolution** — Group metrics (TVL, available liquidity, borrowed) are resolved asynchronously using USD pricing.
 
-A grouped product is not automatically listed. `groupHasExplorableMarket` drops collateral-only products (no lend-open member and no borrowable, borrow-open member). Explore then applies `isExploreListedMarket` once market data resolves: the card stays only while a member is a Lend-table vault or in a Borrow-table pair, except a fully deprecated market which stays listed last. `?showAll` keeps every grouped market and sets `showsAllMembers` so graphs keep hidden loan relationships. Listing predicates, Unknown-collateral exclusion, and the graph drop exception are in [Vault Labels → Discovery Page Filtering](./vault-labels-and-verification.md#discovery-page-filtering). Curator names on cards link to `/curators/{entityId}` when a single managing entity resolves; see [Curator profile pages](./vault-labels-and-verification.md#curator-profile-pages).
+A grouped product is not automatically listed. `groupHasExplorableMarket` drops collateral-only products (no lend-open member and no borrowable, borrow-open member). Explore then applies `isExploreListedMarket` once market data resolves: the card stays only while a member is a Lend-table vault or in a Borrow-table pair, except a fully deprecated market which stays listed last. `?showAll` keeps every grouped market and sets `showsAllMembers` so graphs keep hidden loan relationships. Listing predicates, Unknown-collateral exclusion, and the graph drop exception are in [Vault Labels → Discovery Page Filtering](./vault-labels-and-verification.md#discovery-page-filtering). Graph line colour, thickness, and dashes follow the Toolbox rules in [Explore graph edges](./vault-labels-and-verification.md#explore-graph-edges). Curator names on cards link to `/curators/{entityId}` when a single managing entity resolves; see [Curator profile pages](./vault-labels-and-verification.md#curator-profile-pages).
 
 ### Correlated Pairs, Max ROE, and Max Multiplier
 
@@ -378,8 +378,15 @@ The Nuxt server layer (`server/api/`) proxies requests to external services (RPC
 
 API guards and sensitive-cache checks classify requests with `getRouterPathname(event)`
 (`server/utils/router-path.ts`), using h3's decoded `event.path` without the query string.
-This keeps encoded API prefixes under the same checks as canonical routes. Proxy forwarding
-validation still inspects the raw URL, including V3's rejection of encoded path bytes.
+This keeps encoded API prefixes (`/%61pi/...`) under the same CORS, geo-gate, body-limit, and
+`no-store` checks as canonical routes. Do not decode a second time: `/%2561pi` is a 404.
+Sensitive `no-store` (`server/plugins/sensitive-route-cache.ts`) matches path-segment prefixes
+(`pathname === prefix || pathname.startsWith(prefix + '/')`) after stripping a trailing slash, so
+`/api/internal/rpc/1` is covered and `/api/internal/rpcextra` is not. Provider proxies still slice
+the remainder from the **raw** URL pathname; a nested extra prefix such as
+`/api/internal/proxy/merkl/api/internal/proxy/merkl/opportunities` fails the allowlist with 404
+before credentials are attached. V3 forwarding still inspects the raw URL and rejects encoded
+path bytes.
 
 #### JSON-RPC proxy
 
