@@ -81,6 +81,7 @@ export const openCowSwapReviewModal = <TExecuteParams>(
     executeParams: TExecuteParams
     quoteFetchedAt?: number | null
     logPrefix: string
+    validateBeforeConfirm?: () => void
   },
 ) => {
   modal.open(CowSwapReviewModal, {
@@ -100,9 +101,11 @@ export const openCowSwapReviewModal = <TExecuteParams>(
       quoteFetchedAt: options.quoteFetchedAt,
       onConfirm: async () => {
         try {
+          options.validateBeforeConfirm?.()
           await options.execution.executeAsync(options.executeParams)
         }
         catch (e) {
+          options.execution.error.value = e instanceof Error ? e : new Error(String(e))
           logWarn(`${options.logPrefix}/execute`, e)
         }
       },

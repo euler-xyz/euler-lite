@@ -20,7 +20,7 @@ import {
   type TransactionPlanPrepared,
   type VaultEntity,
 } from '@eulerxyz/euler-v2-sdk'
-import { erc20Abi, formatUnits, getAddress, maxUint256, zeroAddress, type Address, type StateOverride } from 'viem'
+import { formatUnits, getAddress, maxUint256, zeroAddress, type Address, type StateOverride } from 'viem'
 import { SlippageSettingsModal } from '#components'
 import type { DisabledReasonInfo } from '~/components/entities/vault/form/types'
 import { AAVE_CONNECTOR_ID, METAMORPHO_CONNECTOR_ID, MORPHO_CONNECTOR_ID } from '~/entities/migration/constants'
@@ -30,14 +30,14 @@ import { useSwapQuotesParallel, type SwapQuotePlanContext } from '~/composables/
 import { useReactiveMap } from '~/composables/useReactiveMap'
 import type { PlanRefinancePositionInput } from '~/composables/useEulerTx'
 import { getNewSubAccount } from '~/composables/useSubAccounts'
-import type { CowSwapCollateralSwapExecuteParams } from '~/composables/cowswap'
-import { useCowSwapCollateralSwapExecution, useCowSwapOrderStatus, openCowSwapReviewModal, buildApprovalSignSteps } from '~/composables/cowswap'
+import { useCowSwapCollateralSwapReview } from '~/composables/cowswap/useCowSwapCollateralSwapReview'
+import { useCowSwapCollateralSwapExecution, useCowSwapOrderStatus } from '~/composables/cowswap'
 import { POST_EXTERNAL_MIGRATION_REFRESH_DELAYS_MS, useExternalMigrationPositions, type ExternalMigrationCandidate } from '~/composables/useExternalMigrationPositions'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
 import { buildSwapRouteItems } from '~/utils/swapRouteItems'
 import { getQuoteAmount, getSwapInputAmount } from '~/utils/swapQuotes'
-import { isSameUnderlyingAsset, convertVaultSharesToAssets } from '~/utils/vault-utils'
+import { isSameUnderlyingAsset } from '~/utils/vault-utils'
 import { getRefinanceSlippageContext, type RefinanceSlippageLeg } from '~/utils/refinance-slippage'
 import { buildRefinanceIntentArgs } from '~/utils/refinance-intent'
 import { buildRefinanceProjectedRateRequests, getRefinanceRewardCollateralAddresses, getSameAssetRefinanceBorrowAmount, resolveRefinanceCollateralLegs } from '~/utils/refinance-apy'
@@ -64,7 +64,6 @@ import {
   COWSWAP_PROVIDER_EXTRA_DATA,
   buildCollateralSwapQuoteAppData,
   getCowSwapChainConfig,
-  getCowSwapQuoteOrderAmounts,
   isCowProviderOrQuote,
 } from '~/entities/cowswap'
 import { MODAL_CLOSE_REDIRECT_DELAY_MS } from '~/entities/tuning-constants'
@@ -3177,144 +3176,29 @@ const openSlippageSettings = () => {
   modal.open(SlippageSettingsModal)
 }
 
-const submitCowSwapCollateralSwap = async () => {
-  if (!sourceCollateralEVault.value || !targetCollateralEVault.value || !selectedCollateralQuote.value || !address.value) return
-  if (validationError.value) return
-
-  cowSwapExecution.reset()
-
-  const chainId = currentChainId.value ?? 0
-  const chainConfig = getCowSwapChainConfig(chainId)
-  if (!chainConfig) {
-    showError('CoW is not available on this network')
-    return
-  }
-
-  if (currentCollateralShares.value <= 0n) {
-    showError('Collateral share balance is unavailable')
-    return
-  }
-
-  const orderAmounts = getCowSwapQuoteOrderAmounts(selectedCollateralQuote.value, {
-    slippage: slippage.value,
-    slippageTarget: 'buyAmount',
-  })
-  if (!orderAmounts) {
-    showError('Invalid CoW quote: missing order amounts')
-    return
-  }
-  const { sellAmount, buyAmount } = orderAmounts
-
-  const sdkAccount = planAccount.value
-  if (!sdkAccount) {
-    showError('Account not ready')
-    return
-  }
-
-  const validTo = Math.floor(Date.now() / 1000) + COWSWAP_ORDER_DEADLINE_SECONDS
-  const cowParams: CowSwapCollateralSwapExecuteParams = {
-    chainId,
-    account: sdkAccount,
-    swapQuote: selectedCollateralQuote.value,
-    slippage: slippage.value,
-    validTo,
-    disableSourceCollateral: true,
-  }
-
-  let currentAllowance = 0n
-  try {
-    const client = rpcClient.value
-    if (client) {
-      currentAllowance = await client.readContract({
-        address: sourceCollateralEVault.value.address as Address,
-        abi: erc20Abi,
-        functionName: 'allowance',
-        args: [address.value as Address, chainConfig.vaultRelayer],
-        authorizationList: undefined,
-      }) as bigint
+const { submit: submitCowSwapCollateralSwap } = useCowSwapCollateralSwapReview({
+  getInput: () => {
+    if (!sourceCollateralEVault.value || !targetCollateralEVault.value || !selectedCollateralQuote.value
+      || !address.value || !planAccount.value || validationError.value || !canRequestCollateralCowSwap.value
+      || !isSelectedCollateralCowSwapProvider.value || isExternalSourceRoute.value
+      || isOperationBlocked.value || isGeoBlocked.value) return undefined
+    return {
+      chainId: currentChainId.value ?? 0,
+      owner: address.value as Address,
+      subAccount: subAccount.value,
+      account: planAccount.value,
+      fromVault: sourceCollateralEVault.value,
+      toVault: targetCollateralEVault.value,
+      quote: selectedCollateralQuote.value,
+      collateralShares: currentCollateralShares.value,
+      collateralAssets: currentCollateralAssets.value,
+      slippage: slippage.value,
+      quoteFetchedAt: collateralQuoteFetchedAt.value,
     }
-  }
-  catch {
-    // Default to showing the approval step.
-  }
-
-  const fromVault = sourceCollateralEVault.value
-  const toVault = targetCollateralEVault.value
-  const fromAsset = fromVault.asset
-  const toAsset = toVault.asset
-  const fromShareAmount = trimTrailingZeros(formatUnits(sellAmount, Number(fromAsset.decimals)))
-  const fromAssetAmount = trimTrailingZeros(formatUnits(convertVaultSharesToAssets(fromVault, sellAmount), Number(fromAsset.decimals)))
-  const quotedBuyAmount = parseCowProviderAmount(selectedCollateralQuote.value.providerData?.buyAmount) ?? buyAmount
-  const toAssetAmount = trimTrailingZeros(formatUnits(convertVaultSharesToAssets(toVault, quotedBuyAmount), Number(toAsset.decimals)))
-  const toAssetMinAmount = trimTrailingZeros(formatUnits(convertVaultSharesToAssets(toVault, buyAmount), Number(toAsset.decimals)))
-
-  const signSteps: DisplayStep[] = []
-  let signIdx = 1
-  const approval = buildApprovalSignSteps({
-    chainId,
-    tokenAddress: fromVault.address as Address,
-    currentAllowance,
-    requiredAmount: sellAmount,
-    label: 'Approve for swap',
-    assetInfo: {
-      symbol: fromAsset.symbol,
-      address: fromVault.address,
-      iconAddress: fromAsset.address,
-      amount: fromShareAmount,
-    },
-    startIndex: signIdx,
-  })
-  signSteps.push(...approval.steps)
-  signIdx = approval.nextIndex
-  signSteps.push({ index: signIdx++, label: 'Sign EVC permit', isSeparateTx: false })
-  signSteps.push({ index: signIdx++, label: 'Sign CoW order', isSeparateTx: false })
-
-  let wrapperIdx = 1
-  const wrapperSteps: DisplayStep[] = [
-    { index: wrapperIdx++, label: 'Enable collateral', labelSuffix: toAsset.symbol, isSeparateTx: false },
-    { index: wrapperIdx++, label: 'Disable source collateral', labelSuffix: fromAsset.symbol, isSeparateTx: false },
-    {
-      index: wrapperIdx++,
-      label: 'Transfer to wallet',
-      isSeparateTx: false,
-      assetInfo: {
-        symbol: fromAsset.symbol,
-        address: fromVault.address,
-        iconAddress: fromAsset.address,
-        amount: fromShareAmount,
-      },
-    },
-    {
-      index: wrapperIdx++,
-      label: 'Swap',
-      isSeparateTx: false,
-      assetInfo: { symbol: fromAsset.symbol, address: fromAsset.address, amount: fromAssetAmount },
-      toAssetInfo: { symbol: toAsset.symbol, address: toAsset.address, amount: toAssetAmount },
-    },
-    {
-      index: wrapperIdx++,
-      label: 'Verify min received',
-      isSeparateTx: false,
-      assetInfo: { symbol: toAsset.symbol, address: toAsset.address, amount: toAssetMinAmount },
-    },
-  ]
-
-  const walletWarningsDescription
-    = 'The CoW order and transfer steps use vault-share amounts. Swap and received amounts are shown in underlying assets. '
-      + 'The CoW order receiver is your sub-account, not your main wallet - your wallet may flag this as a mismatch. '
-      + 'You can verify the first 19 bytes (38 hex chars after "0x") of the receiver match your wallet address.'
-
-  openCowSwapReviewModal(modal, {
-    signSteps,
-    wrapperSteps,
-    walletWarningsDescription,
-    execution: cowSwapExecution,
-    orderStatus: cowSwapOrderStatus,
-    executeParams: cowParams,
-    quoteFetchedAt: collateralQuoteFetchedAt.value,
-    logPrefix: 'refinance/collateral-cowswap',
-  })
-}
+  },
+  execution: cowSwapExecution,
+  orderStatus: cowSwapOrderStatus,
+})
 
 function schedulePostMigrationRefreshes(refreshAddress: Address) {
   scheduleExternalMigrationRefreshes()
@@ -3714,8 +3598,6 @@ function parseUnsignedIntegerAmount(value: unknown): bigint | undefined {
   if (typeof value !== 'string' || !/^\d+$/.test(value)) return undefined
   return BigInt(value)
 }
-
-const parseCowProviderAmount = parseUnsignedIntegerAmount
 
 function buildQuoteSummary(
   quote: SwapQuote,
