@@ -30,8 +30,7 @@ import { useSwapQuotesParallel, type SwapQuotePlanContext } from '~/composables/
 import { useReactiveMap } from '~/composables/useReactiveMap'
 import type { PlanRefinancePositionInput } from '~/composables/useEulerTx'
 import { getNewSubAccount } from '~/composables/useSubAccounts'
-import { useCowSwapCollateralSwapReview } from '~/composables/cowswap/useCowSwapCollateralSwapReview'
-import { useCowSwapCollateralSwapExecution, useCowSwapOrderStatus } from '~/composables/cowswap'
+import { useCowSwapCollateralSwapExecution, useCowSwapCollateralSwapReview, useCowSwapOrderStatus } from '~/composables/cowswap'
 import { POST_EXTERNAL_MIGRATION_REFRESH_DELAYS_MS, useExternalMigrationPositions, type ExternalMigrationCandidate } from '~/composables/useExternalMigrationPositions'
 import { useModal } from '~/components/ui/composables/useModal'
 import { useToast } from '~/components/ui/composables/useToast'
@@ -3179,7 +3178,7 @@ const openSlippageSettings = () => {
 const { submit: submitCowSwapCollateralSwap } = useCowSwapCollateralSwapReview({
   getInput: () => {
     if (!sourceCollateralEVault.value || !targetCollateralEVault.value || !selectedCollateralQuote.value
-      || !address.value || !planAccount.value || validationError.value || !canRequestCollateralCowSwap.value
+      || !address.value || validationError.value || !canRequestCollateralCowSwap.value
       || !isSelectedCollateralCowSwapProvider.value || isExternalSourceRoute.value
       || isOperationBlocked.value || isGeoBlocked.value) return undefined
     return {
