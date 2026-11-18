@@ -92,7 +92,7 @@ const getLendPluginPrefetch = async (): Promise<PluginPrefetchData> => lendPlugi
 const { getVault, getSecuritizeVault, getEscrowVault, updateVault, isEscrowLoadedOnce, isMarketDataResolved } = useVaults()
 const { isReady: isLabelsReady } = useEulerLabels()
 const { get: registryGet, getVault: _registryGetVault, isKnownEscrowAddress } = useVaultRegistry()
-const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
+const { address, isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
 const { chainId } = useEulerAddresses()
 const shareLinkQuery = computed(() => {
   const network = route.query.network
@@ -874,7 +874,7 @@ const swapRouteItems = computed(() => {
 const requestSwapQuote = useDebounceFn(async () => {
   swapQuoteError.value = null
 
-  if (!selectedAsset.value || !asset.value || !needsSwap.value || !amount.value) {
+  if (!effectiveAddress.value || !chainId.value || !selectedAsset.value || !asset.value || !needsSwap.value || !amount.value) {
     resetSwapQuoteState()
     return
   }
@@ -885,11 +885,13 @@ const requestSwapQuote = useDebounceFn(async () => {
     return
   }
 
-  const userAddr = (effectiveAddress.value || zeroAddress) as Address
+  const userAddr = effectiveAddress.value as Address
   const swapTokenIn = isNativeCurrencyAddress(selectedAsset.value.address)
     ? resolveWrappedNativeAddress(chainId.value!) || selectedAsset.value.address
     : selectedAsset.value.address
   await requestSwapQuotes({
+    chainId: chainId.value,
+    origin: address.value || userAddr,
     tokenIn: swapTokenIn as Address,
     tokenOut: asset.value.address as Address,
     accountIn: zeroAddress as Address,
@@ -957,10 +959,6 @@ watch(
 )
 
 watch(selectedAsset, async () => {
-  if (needsSwap.value && amount.value) {
-    resetSwapQuoteState()
-    requestSwapQuote()
-  }
   if (selectedAsset.value?.address && (needsSwap.value || isNativeWrap.value)) {
     const priceAddr = isNativeCurrencyAddress(selectedAsset.value.address)
       ? resolveWrappedNativeAddress(chainId.value!) || selectedAsset.value.address
@@ -972,22 +970,26 @@ watch(selectedAsset, async () => {
   }
 })
 
-// Re-request quote when amount changes and swap is needed
-watch(amount, () => {
-  if (needsSwap.value) {
-    resetSwapQuoteState()
-    requestSwapQuote()
-  }
-})
-
-// Re-request quote when slippage changes
-watch(swapSlippage, () => {
+// Reset synchronously so neither selected quotes nor late responses can cross
+// an account/form change during the debounce before the next request starts.
+watch([
+  effectiveAddress,
+  address,
+  isSpyMode,
+  chainId,
+  () => asset.value?.address,
+  selectedAsset,
+  amount,
+  swapSlippage,
+], () => {
+  clearSimulationError()
+  resetSwapQuoteState()
+  plan.value = null
+  preparedPlan.value = null
   if (needsSwap.value && amount.value) {
-    clearSimulationError()
-    resetSwapQuoteState()
     requestSwapQuote()
   }
-})
+}, { flush: 'sync' })
 
 watch(swapSelectedQuote, () => {
   clearSimulationError()

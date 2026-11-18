@@ -48,6 +48,14 @@ const assertSemanticConstraints = (intent: OperationIntent) => {
     if (tokenIn.chainId !== intent.chainId || tokenOut.chainId !== intent.chainId) {
       throw new Error(`Intent ${intent.intentId}:${intent.revision} contains a cross-chain swap quote`)
     }
+    // Lend supplies to the wallet's own account. Position supplies can target
+    // a selected subaccount, so this restriction belongs to the Lend source.
+    if (intent.planner.name === 'deposit-with-swap' && intent.metadata.source === 'lend') {
+      if (getAddress(quote.accountOut as string) !== getAddress(intent.account)
+        || getAddress(verify.account as string) !== getAddress(intent.account)) {
+        throw new Error('Lend swap quote recipient does not match the supplying account. Refresh the quote.')
+      }
+    }
     assertConstraintPresent(intent, { kind: 'maximum-input', token: getAddress(tokenIn.address as string), amount: quote.amountInMax as bigint })
     assertConstraintPresent(intent, { kind: 'minimum-output', token: getAddress(tokenOut.address as string), amount: quote.amountOutMin as bigint })
     assertConstraintPresent(intent, { kind: 'deadline', timestamp: verify.deadline as number })
