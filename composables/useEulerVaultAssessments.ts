@@ -1,10 +1,12 @@
-import { isVaultAssessmentUnavailableError, type VaultAssessment, type VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
+import { isVaultAssessmentUnavailableError, parseVaultAssessment, type VaultAssessment, type VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
+import type { Address } from 'viem'
 import { computed, shallowRef, ref } from 'vue'
 import { getEulerSdkForChain } from '~/composables/useEulerSdk'
 import { useV3ChainGate } from '~/composables/useV3ChainGate'
 import { getChainPolicyGeneration, subscribeToChainPolicyChanges } from '~/composables/useChainConfig'
 import { logWarn } from '~/utils/errorHandling'
 import { normalizeAddress } from '~/utils/normalizeAddress'
+import { advanceSdkQueryGeneration } from '~/utils/sdk-query-cache'
 
 export type VaultAssessmentsStatus = 'idle' | 'loading' | 'available' | 'unavailable'
 type VaultAssessmentEntry = {
@@ -13,29 +15,34 @@ type VaultAssessmentEntry = {
   consistencyStatus?: string | null
 }
 
-type RawAssessmentQuery = {
-  queryV3VaultAssessment?: (chainId: number, address: string, family: VaultAssessmentFamily) => Promise<unknown>
+type AssessmentService = {
+  fetchVaultAssessment: (chainId: number, address: Address, family: VaultAssessmentFamily, options?: { fresh?: boolean }) => Promise<VaultAssessment | undefined>
+  queryV3VaultAssessment?: (chainId: number, address: Address, family: VaultAssessmentFamily) => Promise<unknown>
 }
 
-// The SDK's parsed assessment drops consistencyStatus; the raw query shares its cache, so this read is
-// served from the fetch above.
-const readConsistencyStatus = async (
-  service: object,
+const readRawConsistencyStatus = (raw: unknown): string | null => {
+  const status = raw && typeof raw === 'object' ? (raw as { consistencyStatus?: unknown }).consistencyStatus : undefined
+  return typeof status === 'string' ? status : null
+}
+
+/**
+ * The SDK's parsed assessment drops `consistencyStatus`, so both come from one raw body. A fresh read starts
+ * a new query generation first, which later cached reads then share.
+ */
+const fetchAssessment = async (
+  service: AssessmentService,
   chainId: number,
-  address: string,
+  address: Address,
   family: VaultAssessmentFamily,
-): Promise<string | null> => {
-  const query = service as RawAssessmentQuery
-  if (typeof query.queryV3VaultAssessment !== 'function') return null
-  try {
-    const raw = await query.queryV3VaultAssessment(chainId, address, family)
-    const status = raw && typeof raw === 'object' ? (raw as { consistencyStatus?: unknown }).consistencyStatus : undefined
-    return typeof status === 'string' ? status : null
+  fresh: boolean,
+): Promise<Pick<VaultAssessmentEntry, 'assessment' | 'consistencyStatus'>> => {
+  if (typeof service.queryV3VaultAssessment !== 'function') {
+    return { assessment: await service.fetchVaultAssessment(chainId, address, family, { fresh }), consistencyStatus: null }
   }
-  catch (error) {
-    logWarn('useEulerVaultAssessments', `Failed to read consistency status ${address} on chain ${chainId}: ${error instanceof Error ? error.message : String(error)}`)
-    return null
-  }
+  if (fresh) await advanceSdkQueryGeneration(['queryV3VaultAssessment'])
+  const raw = await service.queryV3VaultAssessment(chainId, address, family)
+  if (raw === undefined) return { assessment: undefined, consistencyStatus: null }
+  return { assessment: parseVaultAssessment(raw, chainId, address, family), consistencyStatus: readRawConsistencyStatus(raw) }
 }
 
 const activeChainId = ref<number | null>(null)
@@ -97,10 +104,13 @@ const loadVaultAssessment = async (
   const promise = (async (): Promise<VaultAssessmentEntry> => {
     try {
       const sdk = await getEulerSdkForChain(chainId)
-      const assessment = await sdk.vaultAssessmentService.fetchVaultAssessment(chainId, normalized, family, { fresh: options.fresh })
-      const consistencyStatus = assessment
-        ? await readConsistencyStatus(sdk.vaultAssessmentService, chainId, normalized, family)
-        : null
+      const { assessment, consistencyStatus } = await fetchAssessment(
+        sdk.vaultAssessmentService as AssessmentService,
+        chainId,
+        normalized,
+        family,
+        !!options.fresh,
+      )
       if (!isCurrent()) return { status: 'idle' }
       const entry: VaultAssessmentEntry = { status: 'available', assessment, consistencyStatus }
       setEntry(chainId, key, entry)

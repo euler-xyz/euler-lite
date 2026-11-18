@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { VaultAssessmentUnavailableError } from '@eulerxyz/euler-v2-sdk'
-import { getAddress } from 'viem'
+import { EUSDC_42 } from '~/tests/fixtures/liquity-hub'
+import { EUSDC_42_RAW_ASSESSMENT } from '~/tests/fixtures/v3-hidden-vault-assessments'
 
-const { fetchVaultAssessment, isV3EnabledForChain, service } = vi.hoisted(() => ({
+const { advanceSdkQueryGeneration, fetchVaultAssessment, isV3EnabledForChain, service } = vi.hoisted(() => ({
+  advanceSdkQueryGeneration: vi.fn(),
   fetchVaultAssessment: vi.fn(),
   isV3EnabledForChain: vi.fn(() => true),
   service: { queryV3VaultAssessment: undefined as undefined | ((...args: unknown[]) => Promise<unknown>) },
@@ -14,6 +16,10 @@ vi.mock('~/composables/useEulerSdk', () => ({
       ? { fetchVaultAssessment, queryV3VaultAssessment: service.queryV3VaultAssessment }
       : { fetchVaultAssessment },
   }),
+}))
+vi.mock('~/utils/sdk-query-cache', async importOriginal => ({
+  ...(await importOriginal<typeof import('~/utils/sdk-query-cache')>()),
+  advanceSdkQueryGeneration,
 }))
 vi.mock('~/composables/useV3ChainGate', () => ({
   useV3ChainGate: () => ({ isV3EnabledForChain }),
@@ -29,28 +35,53 @@ describe('useEulerVaultAssessments', () => {
     service.queryV3VaultAssessment = undefined
   })
 
-  it('keeps the consistency status that the parsed assessment drops', async () => {
-    fetchVaultAssessment.mockResolvedValue({ assessed: true })
-    const query = vi.fn().mockResolvedValue({ consistencyStatus: 'verified', configStatus: 'suspended' })
+  it('parses the assessment and its consistency status from one raw read', async () => {
+    const query = vi.fn().mockResolvedValue(EUSDC_42_RAW_ASSESSMENT)
     service.queryV3VaultAssessment = query
     const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
     const assessments = useEulerVaultAssessments()
-    await assessments.loadVaultAssessment(1, ADDRESS, 'evk')
-    expect(query).toHaveBeenCalledWith(1, getAddress(ADDRESS), 'evk')
-    expect(assessments.getEntry(1, ADDRESS, 'evk')).toMatchObject({ status: 'available', consistencyStatus: 'verified' })
+    await assessments.loadVaultAssessment(1, EUSDC_42, 'evk')
+    expect(query).toHaveBeenCalledOnce()
+    expect(query).toHaveBeenCalledWith(1, EUSDC_42, 'evk')
+    expect(fetchVaultAssessment).not.toHaveBeenCalled()
+    expect(advanceSdkQueryGeneration).not.toHaveBeenCalled()
+    expect(assessments.getEntry(1, EUSDC_42, 'evk')).toMatchObject({
+      status: 'available',
+      consistencyStatus: 'verified',
+      assessment: { configStatus: 'suspended', vaultAddress: EUSDC_42 },
+    })
   })
 
-  it('leaves the consistency status unknown when the raw read is missing or fails', async () => {
+  it('reads a fresh raw body after the user\'s own transaction, still in one read', async () => {
+    const before = { ...EUSDC_42_RAW_ASSESSMENT, configStatus: 'verified', consistencyStatus: 'verified' }
+    const after = { ...EUSDC_42_RAW_ASSESSMENT, configStatus: 'suspended', consistencyStatus: 'suspended' }
+    const query = vi.fn().mockResolvedValueOnce(before).mockResolvedValueOnce(after)
+    service.queryV3VaultAssessment = query
+    const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
+    const assessments = useEulerVaultAssessments()
+    await assessments.loadVaultAssessment(1, EUSDC_42, 'evk')
+    await assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { fresh: true })
+    expect(advanceSdkQueryGeneration).toHaveBeenCalledWith(['queryV3VaultAssessment'])
+    expect(query).toHaveBeenCalledTimes(2)
+    expect(fetchVaultAssessment).not.toHaveBeenCalled()
+    expect(assessments.getEntry(1, EUSDC_42, 'evk')).toMatchObject({
+      consistencyStatus: 'suspended',
+      assessment: { configStatus: 'suspended' },
+    })
+  })
+
+  it('leaves the consistency status unknown when the service has no raw read', async () => {
     fetchVaultAssessment.mockResolvedValue({ assessed: true })
     const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
     await useEulerVaultAssessments().loadVaultAssessment(1, ADDRESS, 'evk')
     expect(useEulerVaultAssessments().getEntry(1, ADDRESS, 'evk')).toMatchObject({ status: 'available', consistencyStatus: null })
+  })
 
-    vi.resetModules()
-    service.queryV3VaultAssessment = vi.fn().mockRejectedValue(new Error('503'))
-    const reloaded = await import('~/composables/useEulerVaultAssessments')
-    await reloaded.useEulerVaultAssessments().loadVaultAssessment(1, ADDRESS, 'evk')
-    expect(reloaded.useEulerVaultAssessments().getEntry(1, ADDRESS, 'evk')).toMatchObject({ status: 'available', consistencyStatus: null })
+  it('marks the entry unavailable when the raw body does not parse', async () => {
+    service.queryV3VaultAssessment = vi.fn().mockResolvedValue({ ...EUSDC_42_RAW_ASSESSMENT, configStatus: 'nonsense' })
+    const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
+    await useEulerVaultAssessments().loadVaultAssessment(1, EUSDC_42, 'evk')
+    expect(useEulerVaultAssessments().getEntry(1, EUSDC_42, 'evk').status).toBe('unavailable')
   })
 
   it('drops pending assessments and unsupported-chain caches across policy changes', async () => {
