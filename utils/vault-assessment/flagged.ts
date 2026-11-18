@@ -1,3 +1,5 @@
+import type { VaultAssessment, VaultAssessmentFinding } from '@eulerxyz/euler-v2-sdk'
+
 export interface VaultVerdictLike {
   status: string
   reason?: string | null
@@ -52,16 +54,40 @@ export const getFlaggedVerdict = (
   return verdict?.status === 'hidden' ? verdict : undefined
 }
 
-const NON_GOVERNANCE_HIDDEN_REASONS: ReadonlySet<string> = new Set([
-  'config-suspended',
-  'config-revoked',
-  'config-failed',
-  'not-explorable',
-])
+const CONFIG_HIDING_REASONS: ReadonlySet<string> = new Set(['config-suspended', 'config-failed', 'config-revoked'])
+const CLEAR_CONSISTENCY_STATUSES: ReadonlySet<string> = new Set(['verified', 'not_applicable'])
+const GOVERNANCE_FINDING_KEY = /^(scheduled\.)?governance\./
 
-/** Any other hidden reason, including one V3 adds later, keeps the curator blank. */
-export const isHiddenForNonGovernanceReason = (verdict: VaultVerdictLike | undefined): boolean =>
-  verdict?.status === 'hidden' && NON_GOVERNANCE_HIDDEN_REASONS.has(verdict.decidedBy ?? '')
+export interface VaultGovernanceEvidence {
+  status: string
+  assessment?: Pick<VaultAssessment, 'configContext' | 'consistencyContext'>
+  consistencyStatus?: string | null
+}
+
+const isUnresolvedFinding = (finding: VaultAssessmentFinding): boolean =>
+  !finding.exempted && (finding.outcome === 'fail' || finding.outcome === 'unknown')
+
+const isGovernanceFinding = (finding: VaultAssessmentFinding): boolean =>
+  GOVERNANCE_FINDING_KEY.test(finding.key)
+
+/**
+ * A configuration verdict can mask a consistency failure and Layer 1 holds governance rules, so the
+ * reason alone never proves the hiding is unrelated to governance: the assessment has to show it.
+ */
+export const isHiddenForNonGovernanceCause = (
+  verdict: VaultVerdictLike | undefined,
+  evidence: VaultGovernanceEvidence | undefined,
+): boolean => {
+  if (verdict?.status !== 'hidden' || !CONFIG_HIDING_REASONS.has(verdict.decidedBy ?? '')) return false
+  const configContext = evidence?.status === 'available' ? evidence.assessment?.configContext : null
+  if (!configContext || !CLEAR_CONSISTENCY_STATUSES.has(evidence?.consistencyStatus ?? '')) return false
+  const findings = [...configContext.findings, ...(evidence?.assessment?.consistencyContext?.findings ?? [])]
+  const governanceOpen = findings.some(finding => isGovernanceFinding(finding) && isUnresolvedFinding(finding)
+    && (finding.required || finding.key.startsWith('scheduled.')))
+  if (governanceOpen) return false
+  return configContext.findings.some(finding => finding.required && finding.outcome === 'fail' && !finding.exempted
+    && !isGovernanceFinding(finding) && !finding.key.startsWith('scheduled.'))
+}
 
 /** Without the label deprecation there is no Deprecated badge, so the verdict stays the only signal. */
 export const isDeprecationWarning = (verdict: VaultVerdictLike | undefined, deprecatedInLabels: boolean): boolean =>

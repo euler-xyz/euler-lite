@@ -1,13 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { VaultAssessmentUnavailableError } from '@eulerxyz/euler-v2-sdk'
+import { getAddress } from 'viem'
 
-const { fetchVaultAssessment, isV3EnabledForChain } = vi.hoisted(() => ({
+const { fetchVaultAssessment, isV3EnabledForChain, service } = vi.hoisted(() => ({
   fetchVaultAssessment: vi.fn(),
   isV3EnabledForChain: vi.fn(() => true),
+  service: { queryV3VaultAssessment: undefined as undefined | ((...args: unknown[]) => Promise<unknown>) },
 }))
 
 vi.mock('~/composables/useEulerSdk', () => ({
-  getEulerSdkForChain: async () => ({ vaultAssessmentService: { fetchVaultAssessment } }),
+  getEulerSdkForChain: async () => ({
+    vaultAssessmentService: service.queryV3VaultAssessment
+      ? { fetchVaultAssessment, queryV3VaultAssessment: service.queryV3VaultAssessment }
+      : { fetchVaultAssessment },
+  }),
 }))
 vi.mock('~/composables/useV3ChainGate', () => ({
   useV3ChainGate: () => ({ isV3EnabledForChain }),
@@ -20,6 +26,31 @@ describe('useEulerVaultAssessments', () => {
     vi.resetModules()
     vi.clearAllMocks()
     isV3EnabledForChain.mockReturnValue(true)
+    service.queryV3VaultAssessment = undefined
+  })
+
+  it('keeps the consistency status that the parsed assessment drops', async () => {
+    fetchVaultAssessment.mockResolvedValue({ assessed: true })
+    const query = vi.fn().mockResolvedValue({ consistencyStatus: 'verified', configStatus: 'suspended' })
+    service.queryV3VaultAssessment = query
+    const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
+    const assessments = useEulerVaultAssessments()
+    await assessments.loadVaultAssessment(1, ADDRESS, 'evk')
+    expect(query).toHaveBeenCalledWith(1, getAddress(ADDRESS), 'evk')
+    expect(assessments.getEntry(1, ADDRESS, 'evk')).toMatchObject({ status: 'available', consistencyStatus: 'verified' })
+  })
+
+  it('leaves the consistency status unknown when the raw read is missing or fails', async () => {
+    fetchVaultAssessment.mockResolvedValue({ assessed: true })
+    const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
+    await useEulerVaultAssessments().loadVaultAssessment(1, ADDRESS, 'evk')
+    expect(useEulerVaultAssessments().getEntry(1, ADDRESS, 'evk')).toMatchObject({ status: 'available', consistencyStatus: null })
+
+    vi.resetModules()
+    service.queryV3VaultAssessment = vi.fn().mockRejectedValue(new Error('503'))
+    const reloaded = await import('~/composables/useEulerVaultAssessments')
+    await reloaded.useEulerVaultAssessments().loadVaultAssessment(1, ADDRESS, 'evk')
+    expect(reloaded.useEulerVaultAssessments().getEntry(1, ADDRESS, 'evk')).toMatchObject({ status: 'available', consistencyStatus: null })
   })
 
   it('drops pending assessments and unsupported-chain caches across policy changes', async () => {

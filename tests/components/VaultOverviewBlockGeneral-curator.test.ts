@@ -17,6 +17,17 @@ import {
   liquityHubHiddenVerdict,
   makeEusdc42,
 } from '~/tests/fixtures/liquity-hub'
+import {
+  EUSDC_42_RAW_ASSESSMENT,
+  IDLE_CREDIT_VAULT,
+  IDLE_CREDIT_VAULT_RAW_ASSESSMENT,
+  IDLE_CREDIT_VAULT_VERDICT,
+  IDLE_ENTITY,
+  IDLE_GOVERNOR,
+  IDLE_PRODUCT,
+  assessmentEntry,
+  makeIdleCreditVault,
+} from '~/tests/fixtures/v3-hidden-vault-assessments'
 
 vi.mock('#components', () => ({ AccessControlBadge: {}, CyclicalNoteBadge: {}, GovernanceLimitedBadge: {}, KeyringBadge: {} }))
 vi.mock('~/utils/sdk-prices', async importOriginal => ({
@@ -25,14 +36,31 @@ vi.mock('~/utils/sdk-prices', async importOriginal => ({
 }))
 
 const k3 = { name: 'K3 Capital', addresses: { [LIQUITY_HUB_GOVERNOR]: 'K3 governor' } }
+const idle = { name: 'Idle DAO', addresses: { [IDLE_GOVERNOR]: 'Idle DAO Limited Governor' } }
 
-const setLabels = (decidedBy: string) => __setEulerLabelsDataForTest({
-  source: 'v3',
-  entities: { [LIQUITY_HUB_ENTITY]: k3 },
-  products: { [LIQUITY_HUB_PRODUCT]: { name: 'Liquity Hub', entity: LIQUITY_HUB_ENTITY, vaults: [EUSDC_42] } },
-  managingEntityByVault: { [EUSDC_42.toLowerCase()]: LIQUITY_HUB_ENTITY },
-  visibility: { [EUSDC_42.toLowerCase()]: liquityHubHiddenVerdict(decidedBy) },
-} as unknown as Partial<PublicEulerLabelsData>)
+const setLabels = (
+  verdicts: Record<string, unknown>,
+  entries: Record<string, ReturnType<typeof assessmentEntry>> = {},
+) => {
+  __setEulerLabelsDataForTest({
+    source: 'v3',
+    entities: { [LIQUITY_HUB_ENTITY]: k3, [IDLE_ENTITY]: idle },
+    products: {
+      [LIQUITY_HUB_PRODUCT]: { name: 'Liquity Hub', entity: LIQUITY_HUB_ENTITY, vaults: [EUSDC_42] },
+      [IDLE_PRODUCT]: { name: 'Idle Credit Vaults', entity: IDLE_ENTITY, vaults: [IDLE_CREDIT_VAULT] },
+    },
+    managingEntityByVault: { [EUSDC_42.toLowerCase()]: LIQUITY_HUB_ENTITY, [IDLE_CREDIT_VAULT.toLowerCase()]: IDLE_ENTITY },
+    visibility: verdicts,
+  } as unknown as Partial<PublicEulerLabelsData>)
+  vi.stubGlobal('useEulerLabels', () => ({
+    ...useEulerLabels(),
+    getVaultAssessmentEntry: (_chainId: number, address: string) => entries[address.toLowerCase()] ?? { status: 'idle' },
+  }))
+}
+const setEusdc42Labels = (decidedBy: string) => setLabels(
+  { [EUSDC_42.toLowerCase()]: liquityHubHiddenVerdict(decidedBy) },
+  { [EUSDC_42.toLowerCase()]: assessmentEntry(EUSDC_42_RAW_ASSESSMENT) },
+)
 
 const LabelValue = defineComponent({
   props: { label: String, value: String },
@@ -93,9 +121,9 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('curator and vault type of a hidden vault (K3 Liquity Hub eUSDC-42)', () => {
-  it('shows K3 Capital and the governed type when the vault is hidden because it is paused', async () => {
-    setLabels('config-suspended')
+describe('curator and vault type of a hidden vault', () => {
+  it('shows K3 Capital and the governed type when eUSDC-42 is hidden because it is paused', async () => {
+    setEusdc42Labels('config-suspended')
     const html = await render(makeEusdc42())
 
     expect(curatorCell(html)).toContain('data-test-curator="K3 Capital"')
@@ -104,12 +132,32 @@ describe('curator and vault type of a hidden vault (K3 Liquity Hub eUSDC-42)', (
   })
 
   it.each(['consistency-suspended', 'consistency-revoked'])('blanks the curator and vault type for the governance verdict %s', async (decidedBy) => {
-    setLabels(decidedBy)
+    setEusdc42Labels(decidedBy)
     const html = await render(makeEusdc42())
 
     expect(curatorCell(html)).toContain('Flagged')
     expect(curatorCell(html)).not.toContain('data-test-curator')
     expect(vaultTypeCell(html)).toContain('-')
     expect(vaultTypeCell(html)).not.toContain('data-test-chip')
+  })
+
+  it('blanks the curator of the Idle DAO credit vault, hidden by a governance rule inside config-failed', async () => {
+    setLabels(
+      { [IDLE_CREDIT_VAULT.toLowerCase()]: IDLE_CREDIT_VAULT_VERDICT },
+      { [IDLE_CREDIT_VAULT.toLowerCase()]: assessmentEntry(IDLE_CREDIT_VAULT_RAW_ASSESSMENT) },
+    )
+    const html = await render(makeIdleCreditVault())
+
+    expect(curatorCell(html)).toContain('Flagged')
+    expect(curatorCell(html)).not.toContain('Idle DAO')
+    expect(vaultTypeCell(html)).not.toContain('data-test-chip')
+  })
+
+  it('keeps the curator blank while the assessment has not loaded', async () => {
+    setLabels({ [EUSDC_42.toLowerCase()]: liquityHubHiddenVerdict('config-suspended') })
+    const html = await render(makeEusdc42())
+
+    expect(curatorCell(html)).toContain('Flagged')
+    expect(curatorCell(html)).not.toContain('data-test-curator')
   })
 })

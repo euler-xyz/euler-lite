@@ -14,6 +14,16 @@ import {
   liquityHubHiddenVerdict,
   makeEusdc42,
 } from '~/tests/fixtures/liquity-hub'
+import {
+  EUSDC_42_RAW_ASSESSMENT,
+  IDLE_CREDIT_VAULT,
+  IDLE_CREDIT_VAULT_RAW_ASSESSMENT,
+  IDLE_CREDIT_VAULT_VERDICT,
+  IDLE_ENTITY,
+  IDLE_GOVERNOR,
+  assessmentEntry,
+  makeIdleCreditVault,
+} from '~/tests/fixtures/v3-hidden-vault-assessments'
 
 const LABELED_EVAULT = '0x0000000000000000000000000000000000000101'
 const DYNAMIC_EVAULT = '0x0000000000000000000000000000000000000102'
@@ -454,50 +464,68 @@ describe('useVaults EVault verification metadata', () => {
     expect(registry.isVerifiedVault(LABELED_EVAULT)).toBe(false)
   })
 
-  describe('governor identity of a hidden vault (K3 Liquity Hub eUSDC-42)', () => {
+  describe('governor identity of a hidden vault', () => {
     const k3 = { name: 'K3 Capital', addresses: { [LIQUITY_HUB_GOVERNOR]: 'K3 governor' } }
-    const hostLabels = (decidedBy: string, entities: Record<string, unknown> = { [LIQUITY_HUB_ENTITY]: k3 }) =>
+    const idle = { name: 'Idle DAO', addresses: { [IDLE_GOVERNOR]: 'Idle DAO Limited Governor' } }
+    const hostLabels = (
+      verdicts: Record<string, unknown>,
+      entries: Record<string, ReturnType<typeof assessmentEntry> | { status: string }>,
+      entities: Record<string, unknown> = { [LIQUITY_HUB_ENTITY]: k3, [IDLE_ENTITY]: idle },
+    ) => {
       __setEulerLabelsDataForTest({
         source: 'v3',
         entities,
-        managingEntityByVault: { [EUSDC_42.toLowerCase()]: LIQUITY_HUB_ENTITY },
-        visibility: { [EUSDC_42.toLowerCase()]: liquityHubHiddenVerdict(decidedBy) },
+        managingEntityByVault: { [EUSDC_42.toLowerCase()]: LIQUITY_HUB_ENTITY, [IDLE_CREDIT_VAULT.toLowerCase()]: IDLE_ENTITY },
+        visibility: verdicts,
       } as unknown as Partial<PublicEulerLabelsData>)
+      vi.stubGlobal('useEulerLabels', () => ({
+        ...useEulerLabels(),
+        getVaultAssessmentEntry: (_chainId: number, address: string) => entries[address.toLowerCase()] ?? { status: 'idle' },
+      }))
+    }
+    const pausedEusdc42 = (decidedBy = 'config-suspended', entry: ReturnType<typeof assessmentEntry> | { status: string } = assessmentEntry(EUSDC_42_RAW_ASSESSMENT)) =>
+      hostLabels({ [EUSDC_42.toLowerCase()]: liquityHubHiddenVerdict(decidedBy) }, { [EUSDC_42.toLowerCase()]: entry })
 
-    it('names the curator when the vault is hidden for a non-governance reason and the governor matches', () => {
-      hostLabels('config-suspended')
+    it('names the curator of a paused vault whose assessment shows no governance cause', () => {
+      pausedEusdc42()
       expect(useVaults().isVaultGovernorVerified(makeEusdc42())).toBe(false)
       expect(useVaults().isVaultGovernorIdentified(makeEusdc42())).toBe(true)
     })
 
-    it.each(['consistency-suspended', 'consistency-revoked'])('keeps the curator blank for the governance verdict %s', (decidedBy) => {
-      hostLabels(decidedBy)
+    it('keeps the Idle DAO credit vault blank: hidden as config-failed by a deprecated governor', () => {
+      hostLabels(
+        { [IDLE_CREDIT_VAULT.toLowerCase()]: IDLE_CREDIT_VAULT_VERDICT },
+        { [IDLE_CREDIT_VAULT.toLowerCase()]: assessmentEntry(IDLE_CREDIT_VAULT_RAW_ASSESSMENT) },
+      )
+      expect(useVaults().isVaultGovernorIdentified(makeIdleCreditVault())).toBe(false)
+    })
+
+    it.each(['consistency-suspended', 'consistency-revoked', 'not-explorable'])('keeps the curator blank for %s', (decidedBy) => {
+      pausedEusdc42(decidedBy)
       expect(useVaults().isVaultGovernorIdentified(makeEusdc42())).toBe(false)
     })
 
-    it('keeps the curator blank when the on-chain governor is not the label entity', () => {
-      hostLabels('config-suspended', { [LIQUITY_HUB_ENTITY]: { ...k3, addresses: {} } })
+    it('keeps the curator blank while the assessment loads or when consistency is not clear', () => {
+      pausedEusdc42('config-suspended', { status: 'loading' })
+      expect(useVaults().isVaultGovernorIdentified(makeEusdc42())).toBe(false)
+      pausedEusdc42('config-suspended', assessmentEntry(EUSDC_42_RAW_ASSESSMENT, { consistencyStatus: 'suspended' }))
       expect(useVaults().isVaultGovernorIdentified(makeEusdc42())).toBe(false)
     })
 
-    it('keeps the curator blank when the router governor is not the label entity', () => {
-      hostLabels('config-suspended')
+    it('keeps the curator blank when the governor or router governor is not the label entity', () => {
+      hostLabels(
+        { [EUSDC_42.toLowerCase()]: liquityHubHiddenVerdict('config-suspended') },
+        { [EUSDC_42.toLowerCase()]: assessmentEntry(EUSDC_42_RAW_ASSESSMENT) },
+        { [LIQUITY_HUB_ENTITY]: { ...k3, addresses: {} } },
+      )
+      expect(useVaults().isVaultGovernorIdentified(makeEusdc42())).toBe(false)
+      pausedEusdc42()
       const vault = Object.assign(makeEusdc42(), { eulerRouterGovernor: getAddress('0x00000000000000000000000000000000000000ee') })
       expect(useVaults().isVaultGovernorIdentified(vault)).toBe(false)
     })
 
-    it('does not treat a pending-review vault as identified', () => {
-      __setEulerLabelsDataForTest({
-        source: 'v3',
-        entities: { [LIQUITY_HUB_ENTITY]: k3 },
-        managingEntityByVault: { [EUSDC_42.toLowerCase()]: LIQUITY_HUB_ENTITY },
-        visibility: { [EUSDC_42.toLowerCase()]: { status: 'pending_review', decidedBy: 'awaiting-verification', reason: null } },
-      } as unknown as Partial<PublicEulerLabelsData>)
-      expect(useVaults().isVaultGovernorIdentified(makeEusdc42())).toBe(false)
-    })
-
     it('does not change the vault it checks', () => {
-      hostLabels('config-suspended')
+      pausedEusdc42()
       const vault = makeEusdc42()
       useVaults().isVaultGovernorIdentified(vault)
       expect(vault).not.toHaveProperty('verified')
@@ -507,7 +535,7 @@ describe('useVaults EVault verification metadata', () => {
       ['config-suspended', true],
       ['consistency-suspended', false],
     ])('applies the same rule to Earn and Securitize vaults: %s', (decidedBy, identified) => {
-      hostLabels(decidedBy)
+      pausedEusdc42(decidedBy)
       const earn = { address: EUSDC_42, governance: { owner: LIQUITY_HUB_GOVERNOR } } as unknown as EulerEarn
       const securitize = { address: EUSDC_42, governor: LIQUITY_HUB_GOVERNOR } as unknown as Parameters<ReturnType<typeof useVaults>['isSecuritizeGovernorIdentified']>[0]
       expect(useVaults().isEarnVaultOwnerIdentified(earn)).toBe(identified)

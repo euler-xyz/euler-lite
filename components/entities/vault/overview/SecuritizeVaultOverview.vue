@@ -26,6 +26,8 @@ const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getSupplyRewardCampaigns, hasSupplyRewards } = useRewardsApy()
 const vaultAddress = computed(() => getAddress(vault.address))
 const isFlagged = useFlaggedVault(() => vault.address)
+// The assessment decides whether a hidden vault's curator can be named.
+useVaultAssessmentEvidence(() => vault.address, 'evk')
 const product = useEulerProductOfVault(vaultAddress)
 const description = computed(() => {
   return product.vaultOverrides?.[vaultAddress.value]?.description ?? product.description

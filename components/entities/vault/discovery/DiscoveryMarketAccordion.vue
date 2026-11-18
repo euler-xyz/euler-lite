@@ -29,6 +29,8 @@ import {
 import type { VaultBadDebtCacheEntry } from '~/utils/vault-bad-debt'
 import type { CollateralVaultResolver } from '~/utils/vault/collateral-exposure'
 import type { MarketGroup } from '~/entities/lend-discovery'
+import { getFlaggedVerdict } from '~/utils/vault-assessment/flagged'
+import { useDiscoveryVaultWarningDetails } from '~/composables/useDiscoveryVaultWarningDetails'
 import { maxUint256 } from 'viem'
 
 const props = defineProps<{
@@ -41,6 +43,8 @@ const { get: registryGet } = useVaultRegistry()
 const route = useRoute()
 const { chainId } = useEulerAddresses()
 const { badDebtByChain, isBadDebtEnabled, isBadDebtLoaded, isBadDebtLoading, loadBadDebtForChain } = useVaultBadDebt()
+const { source: labelsSource, visibility: labelsVisibility } = useEulerLabels()
+const { loadWarningDetails } = useDiscoveryVaultWarningDetails()
 const shareLinkQuery = computed(() => {
   const network = route.query.network
 
@@ -195,6 +199,16 @@ const onToggle = (market: MarketGroup) => {
     if (isBadDebtEnabled.value) void loadBadDebtForChain()
   }
 }
+
+// A hidden vault's curator is named only from its assessment, so expanded markets load them.
+watchEffect(() => {
+  for (const market of props.markets) {
+    if (!isExpanded(market.id)) continue
+    for (const vault of [...market.vaults, ...market.externalCollateral]) {
+      if (getFlaggedVerdict(vault.address, labelsSource.value, labelsVisibility.value)) loadWarningDetails(vault)
+    }
+  }
+})
 
 watch([() => props.markets, isMarketDataResolved, chainId], () => {
   void loadExpandedVaultUsdValues()

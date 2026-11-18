@@ -268,10 +268,7 @@ const cellDataValue = (cell: AttributeCell, vault: AttributeMatrixColumn): strin
                 </div>
               </template>
 
-              <!-- governor: same precedence as VaultOverviewBlockGeneral —
-                   unverified governor wins ("Unknown"), then entities, else
-                   "—". Escrow vaults pass `isVaultGovernorVerified` and have
-                   no labeled entities, so they fall through to "—". -->
+              <!-- Escrow vaults count as identified and have no labeled entities, so they read "—". -->
               <template v-else-if="col.cells[vaultIdx].kind === 'governor'">
                 <template v-if="isVaultType(vault.vault) && !isVaultGovernorIdentified(vault.vault)">
                   <VaultTypeChip

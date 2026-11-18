@@ -16,6 +16,8 @@ const vaultAddress = computed(() => getAddress(vault.address))
 const product = useEulerProductOfVault(vaultAddress)
 const entities = useEulerEntitiesOfEarnVault(vault)
 const isFlagged = useFlaggedVault(() => vault.address)
+// The assessment decides whether a hidden vault's curator can be named.
+useVaultAssessmentEvidence(() => vault.address, 'earn')
 const isOwnerIdentified = computed(() => isEarnVaultOwnerIdentified(vault))
 const earnDescription = computed(() => getEarnVaultDescription(vault.address))
 

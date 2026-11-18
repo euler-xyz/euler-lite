@@ -8,6 +8,7 @@ import type {
   IEulerEarn,
   IEVault,
   ISecuritizeCollateralVault,
+  VaultAssessmentFamily,
 } from '@eulerxyz/euler-v2-sdk'
 import {
   EVault,
@@ -44,7 +45,7 @@ import { chainReadPolicyKey, getChainReadPolicy } from '~/utils/chain-policy'
 import { isChainReadPolicyReady, subscribeToChainPolicyChanges } from '~/composables/useChainConfig'
 import { resolveEulerRouterGovernors, retainEulerRouterGovernor } from '~/utils/vault/euler-router-governance'
 import { governableGovernorAbi } from '~/abis/oracle'
-import { getFlaggedVerdict, isHiddenForNonGovernanceReason } from '~/utils/vault-assessment/flagged'
+import { getFlaggedVerdict, isHiddenForNonGovernanceCause } from '~/utils/vault-assessment/flagged'
 
 const isReady = ref(false)
 const isEVaultLoading = ref(false)
@@ -1312,25 +1313,31 @@ export const useVaults = () => {
     )
   }
 
-  const isHiddenOnlyByNonGovernanceRule = (address: string): boolean => {
-    const { isReady, source, visibility } = useEulerLabels()
-    return isReady.value && isHiddenForNonGovernanceReason(getFlaggedVerdict(address, source.value, visibility.value))
+  const isHiddenWithoutGovernanceCause = (address: string, family: VaultAssessmentFamily): boolean => {
+    const { chainId } = useEulerAddresses()
+    const { isReady, source, visibility, vaultAssessments, getVaultAssessmentEntry } = useEulerLabels()
+    if (!isReady.value || !chainId.value) return false
+    void vaultAssessments.value
+    return isHiddenForNonGovernanceCause(
+      getFlaggedVerdict(address, source.value, visibility.value),
+      getVaultAssessmentEntry(chainId.value, address, family),
+    )
   }
 
   // Identified answers who governs the vault; verified answers whether it is listed.
   const isVaultGovernorIdentified = (vault: EVault): boolean =>
     isVaultGovernorVerified(vault)
-    || (isHiddenOnlyByNonGovernanceRule(vault.address)
+    || (isHiddenWithoutGovernanceCause(vault.address, 'evk')
       && verifyVaultGovernor(Object.assign({}, vault, { verified: true }), buildVerificationLabels()))
 
   const isSecuritizeGovernorIdentified = (vault: SecuritizeCollateralVault): boolean =>
     isSecuritizeGovernorVerified(vault)
-    || (isHiddenOnlyByNonGovernanceRule(vault.address)
+    || (isHiddenWithoutGovernanceCause(vault.address, 'evk')
       && verifyVaultGovernor(Object.assign({}, vault, { verified: true }), buildVerificationLabels()))
 
   const isEarnVaultOwnerIdentified = (earnVault: EulerEarn): boolean =>
     isEarnVaultOwnerVerified(earnVault)
-    || (isHiddenOnlyByNonGovernanceRule(earnVault.address)
+    || (isHiddenWithoutGovernanceCause(earnVault.address, 'earn')
       && verifyEarnVaultOwner(Object.assign({}, earnVault, { verified: true }), buildVerificationLabels()))
 
   return {

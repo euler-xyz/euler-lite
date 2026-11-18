@@ -7,8 +7,15 @@ import {
   getFlaggedVerdict,
   getVaultOpeningNotice,
   isDeprecationWarning,
-  isHiddenForNonGovernanceReason,
+  isHiddenForNonGovernanceCause,
 } from '~/utils/vault-assessment/flagged'
+import { liquityHubHiddenVerdict } from '~/tests/fixtures/liquity-hub'
+import {
+  EUSDC_42_RAW_ASSESSMENT,
+  IDLE_CREDIT_VAULT_RAW_ASSESSMENT,
+  IDLE_CREDIT_VAULT_VERDICT,
+  assessmentEntry,
+} from '~/tests/fixtures/v3-hidden-vault-assessments'
 
 const FLAGGED = '0x00000000000000000000000000000000000000a1'
 const PENDING = '0x00000000000000000000000000000000000000a2'
@@ -113,17 +120,51 @@ describe('isDeprecationWarning', () => {
   })
 })
 
-describe('hidden reasons that leave the curator to the governor check', () => {
-  it.each(['config-suspended', 'config-revoked', 'config-failed', 'not-explorable'])('does not blank the curator for %s', (decidedBy) => {
-    expect(isHiddenForNonGovernanceReason({ status: 'hidden', decidedBy })).toBe(true)
+describe('a hidden vault whose assessment shows no governance cause', () => {
+  const paused = liquityHubHiddenVerdict('config-suspended')
+  const withFindings = (findings: Array<Record<string, unknown>>) => ({
+    ...EUSDC_42_RAW_ASSESSMENT,
+    configContext: { ...EUSDC_42_RAW_ASSESSMENT.configContext, findings: [...EUSDC_42_RAW_ASSESSMENT.configContext.findings, ...findings] },
+  }) as typeof EUSDC_42_RAW_ASSESSMENT
+
+  it('accepts a paused vault whose governance findings pass and whose consistency is verified', () => {
+    expect(isHiddenForNonGovernanceCause(paused, assessmentEntry(EUSDC_42_RAW_ASSESSMENT))).toBe(true)
+    expect(isHiddenForNonGovernanceCause(paused, assessmentEntry(EUSDC_42_RAW_ASSESSMENT, { consistencyStatus: 'not_applicable' }))).toBe(true)
   })
 
-  it.each(['consistency-suspended', 'consistency-revoked', 'a-reason-v3-adds-later', undefined, null])('blanks the curator for %s', (decidedBy) => {
-    expect(isHiddenForNonGovernanceReason({ status: 'hidden', decidedBy })).toBe(false)
+  it('rejects the Idle DAO credit vault, hidden as config-failed by a deprecated governor', () => {
+    expect(isHiddenForNonGovernanceCause(IDLE_CREDIT_VAULT_VERDICT, assessmentEntry(IDLE_CREDIT_VAULT_RAW_ASSESSMENT))).toBe(false)
   })
 
-  it.each(['pending_review', 'warning', 'visible'])('only applies to a hidden verdict, not %s', (status) => {
-    expect(isHiddenForNonGovernanceReason({ status, decidedBy: 'config-suspended' })).toBe(false)
-    expect(isHiddenForNonGovernanceReason(undefined)).toBe(false)
+  it.each([
+    ['a failing scheduled governance change', { key: 'scheduled.governance.timelock', outcome: 'fail', required: false, description: 'Timelock', cause: null }],
+    ['a required governance rule that could not run', { key: 'governance.router', outcome: 'unknown', required: true, description: 'Router', cause: null }],
+  ])('rejects %s', (_label, finding) => {
+    expect(isHiddenForNonGovernanceCause(paused, assessmentEntry(withFindings([finding])))).toBe(false)
+  })
+
+  it.each(['suspended', 'revoked', 'pending', null])('rejects consistency %s, which a config verdict can mask', (consistencyStatus) => {
+    expect(isHiddenForNonGovernanceCause(paused, assessmentEntry(EUSDC_42_RAW_ASSESSMENT, { consistencyStatus }))).toBe(false)
+  })
+
+  it('keeps the curator blank while the assessment loads or is unavailable', () => {
+    expect(isHiddenForNonGovernanceCause(paused, { status: 'loading' })).toBe(false)
+    expect(isHiddenForNonGovernanceCause(paused, { status: 'unavailable' })).toBe(false)
+    expect(isHiddenForNonGovernanceCause(paused, undefined)).toBe(false)
+  })
+
+  it.each(['not-explorable', 'consistency-suspended', 'consistency-revoked', 'a-reason-v3-adds-later', undefined])('rejects the hidden reason %s', (decidedBy) => {
+    expect(isHiddenForNonGovernanceCause({ ...paused, decidedBy }, assessmentEntry(EUSDC_42_RAW_ASSESSMENT))).toBe(false)
+  })
+
+  it('accepts config-revoked only when a non-governance failure explains it', () => {
+    const revoked = liquityHubHiddenVerdict('config-revoked')
+    const clean = { ...EUSDC_42_RAW_ASSESSMENT, configContext: { ...EUSDC_42_RAW_ASSESSMENT.configContext, findings: [] } }
+    expect(isHiddenForNonGovernanceCause(revoked, assessmentEntry(clean))).toBe(false)
+    expect(isHiddenForNonGovernanceCause(revoked, assessmentEntry(EUSDC_42_RAW_ASSESSMENT))).toBe(true)
+  })
+
+  it('only applies to a hidden verdict', () => {
+    expect(isHiddenForNonGovernanceCause({ ...paused, status: 'warning' }, assessmentEntry(EUSDC_42_RAW_ASSESSMENT))).toBe(false)
   })
 })
