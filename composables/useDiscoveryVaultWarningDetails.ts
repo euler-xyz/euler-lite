@@ -1,11 +1,12 @@
-import { isEulerEarn, isEVault, type VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
+import { isEulerEarn, isEVault, isSecuritizeCollateralVault, type VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
 import type { AnyVault } from '~/composables/useVaultRegistry'
 import { useEulerLabels } from '~/composables/useEulerLabels'
 import { getVaultCheckFindings, hasOnlyAcceptedVaultCheckFindings, type VaultCheckLine } from '~/utils/vault-assessment/presentation'
 import { useVaultReferences } from '~/composables/useVaultReferences'
 
+// Securitize vaults are assessed on the EVK route.
 const getAssessmentFamily = (vault: AnyVault): VaultAssessmentFamily | null =>
-  isEulerEarn(vault) ? 'earn' : isEVault(vault) ? 'evk' : null
+  isEulerEarn(vault) ? 'earn' : isEVault(vault) || isSecuritizeCollateralVault(vault) ? 'evk' : null
 
 export const useDiscoveryVaultWarningDetails = () => {
   const {
