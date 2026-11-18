@@ -52,17 +52,26 @@ const PAUSE_CAUSE_CODES: ReadonlySet<string> = new Set(['exit-operations-disable
 
 export interface VaultPauseEvidence {
   family: 'evk' | 'earn' | null
-  onchainPaused: boolean
+  /** Undefined when the vault's hooks are not loaded; the assessment then stands in for them. */
+  onchainPaused?: boolean
   assessment?: Pick<VaultAssessment, 'configContext'>
+}
+
+const ZERO_ADDRESS_PATTERN = /^0x0{40}$/i
+
+const isPauseFinding = (finding: VaultAssessmentFinding): boolean => {
+  if (finding.outcome !== 'fail' || !PAUSE_CAUSE_CODES.has(finding.cause?.code ?? '')) return false
+  if (finding.cause?.code !== 'exit-operations-disabled') return true
+  const governor = (finding.observed as { governorAdmin?: unknown } | undefined)?.governorAdmin
+  return typeof governor === 'string' && /^0x[0-9a-f]{40}$/i.test(governor) && !ZERO_ADDRESS_PATTERN.test(governor)
 }
 
 /** Any configuration verdict can come from a pause, and none proves one, so the pause itself must be seen. */
 export const isPausedVerdict = (verdict: VaultVerdictLike | undefined, evidence: VaultPauseEvidence): boolean => {
   if (verdict?.status !== 'hidden' || !CONFIG_HIDING_REASONS.has(verdict.decidedBy ?? '')) return false
   if (evidence.family === 'earn') return false
-  if (evidence.onchainPaused) return true
-  return evidence.assessment?.configContext?.findings
-    .some(finding => finding.outcome === 'fail' && PAUSE_CAUSE_CODES.has(finding.cause?.code ?? '')) ?? false
+  if (evidence.onchainPaused !== undefined) return evidence.onchainPaused
+  return evidence.assessment?.configContext?.findings.some(isPauseFinding) ?? false
 }
 const CLEAR_CONSISTENCY_STATUSES: ReadonlySet<string> = new Set(['verified', 'not_applicable'])
 const REQUIRED_GOVERNANCE_RULES: Readonly<Record<string, readonly string[]>> = {

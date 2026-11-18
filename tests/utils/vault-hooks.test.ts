@@ -18,6 +18,7 @@ import {
   areAllUserOpsHooked,
   decodeHookedOperationsMask,
   isVaultExitPaused,
+  isVaultPausedByGovernor,
   findBlockingDisabledOp,
   formatHookedOpsSummary,
   getHookedOperationMetas,
@@ -176,6 +177,15 @@ describe('isVaultExitPaused', () => {
   })
   it('is false when a hook target decides, even over exits', () => {
     expect(isVaultExitPaused(vault([OP_WITHDRAW, OP_REDEEM], HOOK_TARGET))).toBe(false)
+  })
+})
+
+describe('isVaultPausedByGovernor', () => {
+  it('needs a governor that can lift the pause', () => {
+    const paused = vault([OP_WITHDRAW], zeroAddress)
+    expect(isVaultPausedByGovernor({ ...paused, governorAdmin: HOOK_TARGET } as unknown as EVault)).toBe(true)
+    expect(isVaultPausedByGovernor({ ...paused, governorAdmin: zeroAddress } as unknown as EVault)).toBe(false)
+    expect(isVaultPausedByGovernor({ ...paused, governorAdmin: undefined } as unknown as EVault)).toBe(false)
   })
 })
 

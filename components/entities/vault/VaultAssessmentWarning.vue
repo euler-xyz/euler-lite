@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { getChainPolicyGeneration } from '~/composables/useChainConfig'
 import { isEVault, isEulerEarn, type VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
-import { isVaultExitPaused } from '~/utils/vault-hooks'
+import { isVaultPausedByGovernor } from '~/utils/vault-hooks'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { hasOnlyAcceptedVaultCheckFindings } from '~/utils/vault-assessment/presentation'
 import {
@@ -41,7 +41,7 @@ const pauseEntry = computed(() => {
   void vaultAssessments.value
   return chainId.value && pauseFamily.value ? getVaultAssessmentEntry(chainId.value, address, pauseFamily.value) : { status: 'idle' as const }
 })
-const isOnchainPaused = computed(() => isEVault(registryVault.value) && isVaultExitPaused(registryVault.value))
+const isOnchainPaused = computed(() => isEVault(registryVault.value) ? isVaultPausedByGovernor(registryVault.value) : undefined)
 const isPaused = computed(() => isPausedVerdict(verdict.value, {
   family: pauseFamily.value ? 'evk' : 'earn',
   onchainPaused: isOnchainPaused.value,
@@ -50,7 +50,7 @@ const isPaused = computed(() => isPausedVerdict(verdict.value, {
 watch(
   () => [chainId.value, address, pauseFamily.value, verdict.value?.status, verdict.value?.decidedBy, isOnchainPaused.value] as const,
   ([id, vaultAddress, selectedFamily, status, decidedBy, onchainPaused]) => {
-    if (id && selectedFamily && !onchainPaused && status === 'hidden' && decidedBy?.startsWith('config-')
+    if (id && selectedFamily && onchainPaused === undefined && status === 'hidden' && decidedBy?.startsWith('config-')
       && pauseEntry.value.status === 'idle') {
       void loadVaultAssessment(id, vaultAddress, selectedFamily)
     }

@@ -202,13 +202,17 @@ describe('paused verdict', () => {
 
   it.each(['config-suspended', 'config-failed', 'config-revoked'])('needs on-chain or assessment pause evidence for %s', (decidedBy) => {
     expect(isPausedVerdict(hidden(decidedBy), { family: 'evk', onchainPaused: true })).toBe(true)
-    expect(isPausedVerdict(hidden(decidedBy), { family: 'evk', onchainPaused: false, assessment: exitsOff })).toBe(true)
-    expect(isPausedVerdict(hidden(decidedBy), { family: 'evk', onchainPaused: false })).toBe(false)
+    expect(isPausedVerdict(hidden(decidedBy), { family: 'evk', assessment: exitsOff })).toBe(true)
+    expect(isPausedVerdict(hidden(decidedBy), { family: 'evk' })).toBe(false)
   })
 
   it('does not take an untrusted hook target or an unrelated failure as a pause', () => {
     const otherFailure = assessmentEntry(IDLE_CREDIT_VAULT_RAW_ASSESSMENT).assessment
-    expect(isPausedVerdict(hidden('config-failed'), { family: 'evk', onchainPaused: false, assessment: otherFailure })).toBe(false)
+    expect(isPausedVerdict(hidden('config-failed'), { family: 'evk', assessment: otherFailure })).toBe(false)
+  })
+
+  it('lets the loaded vault decide over an assessment that may be older', () => {
+    expect(isPausedVerdict(hidden('config-failed'), { family: 'evk', onchainPaused: false, assessment: exitsOff })).toBe(false)
   })
 
   it('never calls an Earn vault paused', () => {

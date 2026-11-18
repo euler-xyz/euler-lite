@@ -145,6 +145,24 @@ describe('paused vault badge', () => {
     expect(await renderWarning(true, { status: 'hidden', decidedBy: 'config-failed', vault: exitsOff })).toMatch(/\sPaused<\/span>/)
   })
 
+  it('keeps an ungoverned vault with its exits hooked flagged, since nobody can lift the pause', async () => {
+    const ungoverned = Object.assign(
+      makeEusdc42({ hookedOperations: { ...NO_OPERATIONS_HOOKED, withdraw: true, redeem: true } }),
+      { governorAdmin: '0x0000000000000000000000000000000000000000' },
+    )
+    const html = await renderWarning(true, { status: 'hidden', decidedBy: 'config-failed', vault: ungoverned })
+    expect(html).toMatch(/\sFlagged<\/span>/)
+    expect(html).not.toContain('Paused')
+  })
+
+  it('keeps the exit-operations-disabled cause of an ungoverned vault flagged', async () => {
+    const raw = structuredClone(EUSDC_95_RAW_ASSESSMENT)
+    const hooks = raw.configContext.findings.find(finding => finding.key === 'hooks.zero-or-trusted') as { observed?: { governorAdmin?: string } }
+    hooks.observed = { ...hooks.observed, governorAdmin: '0x0000000000000000000000000000000000000000' }
+    const entry = { status: 'available', assessment: parseVaultAssessment(raw, 1, EUSDC_95, 'evk') }
+    expect(await renderWarning(true, { status: 'hidden', decidedBy: 'config-failed', entry })).toMatch(/\sFlagged<\/span>/)
+  })
+
   it('accepts the exit-operations-disabled cause when the vault object is not loaded', async () => {
     expect(await renderWarning(true, { status: 'hidden', decidedBy: 'config-failed', entry: exitPausedCause })).toMatch(/\sPaused<\/span>/)
   })

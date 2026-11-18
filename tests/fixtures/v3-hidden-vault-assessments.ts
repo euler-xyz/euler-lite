@@ -39,6 +39,12 @@ export const EUSDC_42_RAW_ASSESSMENT = {
         outcome: 'fail',
         required: true,
         description: 'Hooked operations require a trusted hook target, or only entry-side operations disabled',
+        observed: {
+          hookTarget: '0x0000000000000000000000000000000000000000',
+          governorAdmin: '0xdd84a24eedde63f10ec3e928f1c8302a47538b6b',
+          hookedOperations: ['deposit', 'mint', 'withdraw', 'redeem', 'transfer', 'skim', 'borrow', 'repay', 'repayWithShares', 'pullDebt', 'convertFees', 'liquidate', 'flashloan', 'touch', 'vaultStatusCheck'],
+          hookTargetTrusted: false,
+        },
         cause: {
           code: 'exit-operations-disabled',
           subject: 'withdraw,redeem,transfer,repay,repayWithShares,liquidate,vaultStatusCheck',
@@ -208,6 +214,12 @@ export const EUSDC_95_RAW_ASSESSMENT = {
         outcome: 'fail',
         required: true,
         description: 'Hooked operations require a trusted hook target, or only entry-side operations disabled',
+        observed: {
+          hookTarget: '0x0000000000000000000000000000000000000000',
+          governorAdmin: '0xfcad670592a3b24869c0b51a6c6fded4f95d6975',
+          hookedOperations: ['deposit', 'mint', 'withdraw', 'redeem', 'borrow', 'liquidate'],
+          hookTargetTrusted: false,
+        },
         cause: {
           code: 'exit-operations-disabled',
           subject: 'withdraw,redeem,liquidate',
