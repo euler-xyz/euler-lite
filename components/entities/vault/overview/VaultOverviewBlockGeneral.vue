@@ -7,7 +7,7 @@ import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerEntitiesOfVault, useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { getProductByVault, getProductKeyByVault, isVaultGovernanceLimited } from '~/utils/eulerLabelsUtils'
 import { autoLink } from '~/utils/autoLink'
-import { formatMarketAvailability } from '~/utils/vault-display'
+import { formatVaultBorrowAvailability } from '~/utils/vault-display'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import type { VaultTypeBadge } from '~/composables/useVaultTypeBadges'
 import { AccessControlBadge, CyclicalNoteBadge, GovernanceLimitedBadge, KeyringBadge } from '#components'
@@ -54,10 +54,7 @@ const governorSafeEvidence = computed(() => assessment.value || fallbackReady.va
   ? getAssessmentSafeEvidence(assessment.value, vault.governorAdmin)
   : null)
 
-// Count how many borrow pairs have this vault as the liability (borrow) side
-const borrowCount = computed(() => {
-  return vault.collaterals.filter(ltv => ltv.borrowLTV > 0).length
-})
+const borrowAvailability = computed(() => formatVaultBorrowAvailability(vault))
 const hasBorrowSideExposure = computed(() => isVaultBorrowable(vault))
 // Only show "Current exposure" when something is currently borrowed against
 // collateral — idle supply is not exposure, so a vault with nothing utilized
@@ -250,10 +247,10 @@ watchEffect(() => {
         <div class="flex min-w-0 items-center gap-8">
           <UiIcon
             class="shrink-0"
-            :name="borrowCount ? 'green-tick' : 'red-cross'"
+            :name="borrowAvailability.canBorrow ? 'green-tick' : 'red-cross'"
           />
           <span class="text-p2 text-content-primary">
-            {{ formatMarketAvailability(borrowCount) }}
+            {{ borrowAvailability.label }}
           </span>
         </div>
       </VaultOverviewLabelValue>

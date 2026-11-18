@@ -9,13 +9,23 @@ export type VaultVisibilityMap = Readonly<Record<string, VaultVerdictLike>> | un
 export const FLAGGED_VAULT_LABEL = 'Flagged'
 export const FLAGGED_VAULT_TITLE = 'Vault flagged'
 export const FLAGGED_VAULT_ACTION = 'Review flagged vault'
+export const PAUSED_VAULT_LABEL = 'Paused'
+export const PAUSED_VAULT_TITLE = 'Vault paused'
+export const PAUSED_VAULT_FALLBACK_REASON = 'This vault is paused.'
 
 export type VaultPairSide = 'collateral' | 'borrow'
 
-export const PAIR_SIDE_BADGE_LABELS: Readonly<Record<VaultPairSide, { warning: string, flagged: string }>> = {
-  collateral: { warning: 'Collateral warning', flagged: 'Collateral flagged' },
-  borrow: { warning: 'Borrow warning', flagged: 'Borrow flagged' },
+export const PAIR_SIDE_BADGE_LABELS: Readonly<Record<VaultPairSide, { warning: string, flagged: string, paused: string }>> = {
+  collateral: { warning: 'Collateral warning', flagged: 'Collateral flagged', paused: 'Collateral paused' },
+  borrow: { warning: 'Borrow warning', flagged: 'Borrow flagged', paused: 'Borrow paused' },
 }
+
+/**
+ * V3 hides a verified vault that fails a required configuration rule as `config-suspended`; a paused vault
+ * fails `hooks.zero-or-trusted`. The verdict does not name the rule, so other configuration failures read the same.
+ */
+export const isPausedVerdict = (verdict: VaultVerdictLike | undefined): boolean =>
+  verdict?.status === 'hidden' && verdict.decidedBy === 'config-suspended'
 
 const withReason = (lead: string, reason?: string | null): string => {
   const text = reason?.trim()

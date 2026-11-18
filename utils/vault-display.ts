@@ -1,4 +1,6 @@
+import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
+import { isVaultBorrowPaused } from '~/utils/vault/classification'
 
 export const getVaultSupplyApy = (vault: any): number => {
   if (!vault) return 0
@@ -49,4 +51,10 @@ export const getVaultUtilization = (vault: any): number => {
 
 export const formatMarketAvailability = (count: number) => {
   return count ? `Yes in ${count} ${count === 1 ? 'market' : 'markets'}` : 'No'
+}
+
+export const formatVaultBorrowAvailability = (vault: EVault): { canBorrow: boolean, label: string } => {
+  if (isVaultBorrowPaused(vault)) return { canBorrow: false, label: 'Paused' }
+  const count = vault.collaterals.filter(ltv => ltv.borrowLTV > 0).length
+  return { canBorrow: count > 0, label: formatMarketAvailability(count) }
 }

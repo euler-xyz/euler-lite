@@ -92,3 +92,30 @@ describe('borrow pair badge', () => {
     expect(warning).not.toContain('flagged')
   })
 })
+
+describe('paused vault badge', () => {
+  const pausedReason = 'The vault is paused: withdraw, redeem, transfer and 4 more are off, so depositors cannot get out until its governor turns them back on.'
+
+  it('calls a vault hidden as config-suspended paused and keeps the V3 reason', async () => {
+    const html = await renderWarning(true, { status: 'hidden', decidedBy: 'config-suspended', reason: pausedReason })
+    expect(html).toMatch(/\sPaused<\/span>/)
+    expect(html).toContain('data-title="Vault paused"')
+    expect(html).toContain(`data-text="${pausedReason}"`)
+    expect(html).not.toContain('Flagged')
+  })
+
+  it.each(['config-failed', 'config-revoked', 'consistency-suspended', 'consistency-revoked', 'not-explorable'])('keeps every other hidden reason flagged: %s', async (decidedBy) => {
+    const html = await renderWarning(true, { status: 'hidden', decidedBy, reason: 'A required check failed.' })
+    expect(html).toMatch(/\sFlagged<\/span>/)
+    expect(html).not.toContain('Paused')
+  })
+
+  it.each([
+    ['collateral', 'Collateral'],
+    ['borrow', 'Borrow'],
+  ] as const)('names a paused %s side paused', async (pairSide, label) => {
+    const html = await renderWarning(true, { status: 'hidden', decidedBy: 'config-suspended', reason: pausedReason, pairSide })
+    expect(html).toMatch(new RegExp(`\\s${label} paused</span>`))
+    expect(html).toContain('data-title="Vault paused"')
+  })
+})

@@ -2,7 +2,17 @@
 import { getChainPolicyGeneration } from '~/composables/useChainConfig'
 import type { VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
 import { hasOnlyAcceptedVaultCheckFindings } from '~/utils/vault-assessment/presentation'
-import { FLAGGED_VAULT_LABEL, FLAGGED_VAULT_TITLE, PAIR_SIDE_BADGE_LABELS, getFlaggedVaultLine, type VaultPairSide } from '~/utils/vault-assessment/flagged'
+import {
+  FLAGGED_VAULT_LABEL,
+  FLAGGED_VAULT_TITLE,
+  PAIR_SIDE_BADGE_LABELS,
+  PAUSED_VAULT_FALLBACK_REASON,
+  PAUSED_VAULT_LABEL,
+  PAUSED_VAULT_TITLE,
+  getFlaggedVaultLine,
+  isPausedVerdict,
+  type VaultPairSide,
+} from '~/utils/vault-assessment/flagged'
 
 const { address, hideDeprecated = false, hideChecks = false, pairSide, family = 'evk' } = defineProps<{
   address: string
@@ -51,6 +61,12 @@ const warning = computed(() => {
       description: verdict.value.reason || 'Some checks could not be completed for this vault.',
     }
   }
+  if (isPausedVerdict(verdict.value)) {
+    return {
+      title: PAUSED_VAULT_TITLE,
+      description: verdict.value.reason || PAUSED_VAULT_FALLBACK_REASON,
+    }
+  }
   if (verdict.value.status === 'hidden') {
     return {
       title: FLAGGED_VAULT_TITLE,
@@ -63,9 +79,11 @@ const warning = computed(() => {
   }
 })
 const badgeLabel = computed(() => {
+  const paused = isPausedVerdict(verdict.value)
   const flagged = verdict.value?.status === 'hidden'
-  if (pairSide) return PAIR_SIDE_BADGE_LABELS[pairSide][flagged ? 'flagged' : 'warning']
+  if (pairSide) return PAIR_SIDE_BADGE_LABELS[pairSide][paused ? 'paused' : flagged ? 'flagged' : 'warning']
   if (verdict.value?.decidedBy === 'deprecated') return 'Deprecated'
+  if (paused) return PAUSED_VAULT_LABEL
   return flagged ? FLAGGED_VAULT_LABEL : 'Warning'
 })
 </script>
