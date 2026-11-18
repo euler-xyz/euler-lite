@@ -102,6 +102,23 @@ describe('useVaultBadDebt after a failed load', () => {
     stop()
   })
 
+  it('gives up on a response whose body stalls', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => ({
+      ok: true,
+      status: 200,
+      json: () => new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+      }),
+    }))
+    const badDebt = await setup(fetchMock)
+    const pending = badDebt.loadBadDebtForChain()
+    await vi.advanceTimersByTimeAsync(15_000)
+    await pending
+    expect(badDebt.isBadDebtLoading.value).toBe(false)
+    expect(badDebt.badDebtError.value).toBeInstanceOf(Error)
+  })
+
   it('gives up on a request that does not answer and stops reporting loading', async () => {
     vi.useFakeTimers()
     const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {

@@ -14,11 +14,13 @@ const failedAtByChain = new Map<number, number>()
 const BAD_DEBT_RETRY_AFTER_MS = 60_000
 const BAD_DEBT_TIMEOUT_MS = 15_000
 
-const fetchWithTimeout = async (url: string): Promise<Response> => {
+const fetchJsonWithTimeout = async (url: string): Promise<unknown> => {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), BAD_DEBT_TIMEOUT_MS)
   try {
-    return await fetch(url, { headers: { accept: 'application/json' }, signal: controller.signal })
+    const response = await fetch(url, { headers: { accept: 'application/json' }, signal: controller.signal })
+    if (!response.ok) throw new Error(`Bad debt fetch failed with ${response.status}`)
+    return await response.json()
   }
   finally {
     clearTimeout(timer)
@@ -63,12 +65,7 @@ const fetchBadDebtRows = async (
   const rows: V3VaultBadDebtRow[] = []
 
   while (true) {
-    const response = await fetchWithTimeout(buildBadDebtUrl(baseUrl, chainId, offset, limit))
-    if (!response.ok) {
-      throw new Error(`Bad debt fetch failed with ${response.status}`)
-    }
-
-    const body = await response.json()
+    const body = await fetchJsonWithTimeout(buildBadDebtUrl(baseUrl, chainId, offset, limit))
     const page = parseBadDebtResponse(body)
     rows.push(...page)
     if (page.length < limit) return rows
