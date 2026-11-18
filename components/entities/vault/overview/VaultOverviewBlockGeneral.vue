@@ -40,7 +40,7 @@ const vaultRef = computed(() => vault)
 const product = useEulerProductOfVault(vaultAddress)
 const entities = useEulerEntitiesOfVault(vault)
 const isFlagged = useFlaggedVault(() => vault.address)
-const { badges, governanceType, isVerified: isGovernorVerified, verificationVault } = useVaultTypeBadges(vaultRef)
+const { badges, governanceType, isGovernanceIdentified, verificationVault } = useVaultTypeBadges(vaultRef)
 const governanceVault = computed(() => verificationVault.value as EVault)
 const marketProductKey = computed(() => getProductKeyByVault(vault.address))
 const marketProductName = computed(() => getProductByVault(vault.address).name)
@@ -48,7 +48,7 @@ const description = computed(() => {
   return product.vaultOverrides?.[vaultAddress.value]?.description ?? product.description
 })
 
-const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
+const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernanceIdentified.value)
 const { assessment, fallbackReady } = useVaultAssessmentEvidence(() => vault.address, 'evk')
 const governorSafeEvidence = computed(() => assessment.value || fallbackReady.value
   ? getAssessmentSafeEvidence(assessment.value, vault.governorAdmin)
@@ -172,7 +172,7 @@ watchEffect(() => {
         label="Vault type"
       >
         <span
-          v-if="isFlagged && governanceType !== 'ungoverned' && governanceType !== 'escrow'"
+          v-if="isFlagged && !isGovernanceIdentified && governanceType !== 'ungoverned' && governanceType !== 'escrow'"
           class="text-p2 text-content-tertiary"
         >-</span>
         <VaultTypeChip
@@ -210,14 +210,14 @@ watchEffect(() => {
           class="w-fit"
         />
         <VaultTypeChip
-          v-else-if="!isGovernorVerified && !isFlagged"
+          v-else-if="!isGovernanceIdentified && !isFlagged"
           :vault="governanceVault"
           type="unknown"
           nudge
           class="w-fit"
         />
         <div
-          v-else-if="isGovernorVerified && entities.length"
+          v-else-if="isGovernanceIdentified && entities.length"
           class="flex flex-col gap-8"
         >
           <div

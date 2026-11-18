@@ -35,7 +35,7 @@ defineEmits<{
   selectHeader: [address: string, axis: 'row' | 'column']
 }>()
 
-const { isVaultGovernorVerified } = useVaults()
+const { isVaultGovernorIdentified } = useVaults()
 const {
   load: loadOpenInterest,
   getOpenInterestForVault,
@@ -273,7 +273,7 @@ const cellDataValue = (cell: AttributeCell, vault: AttributeMatrixColumn): strin
                    "—". Escrow vaults pass `isVaultGovernorVerified` and have
                    no labeled entities, so they fall through to "—". -->
               <template v-else-if="col.cells[vaultIdx].kind === 'governor'">
-                <template v-if="isVaultType(vault.vault) && !isVaultGovernorVerified(vault.vault)">
+                <template v-if="isVaultType(vault.vault) && !isVaultGovernorIdentified(vault.vault)">
                   <VaultTypeChip
                     :vault="vault.vault"
                     type="unknown"

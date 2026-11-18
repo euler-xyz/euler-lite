@@ -44,6 +44,7 @@ import { chainReadPolicyKey, getChainReadPolicy } from '~/utils/chain-policy'
 import { isChainReadPolicyReady, subscribeToChainPolicyChanges } from '~/composables/useChainConfig'
 import { resolveEulerRouterGovernors, retainEulerRouterGovernor } from '~/utils/vault/euler-router-governance'
 import { governableGovernorAbi } from '~/abis/oracle'
+import { getFlaggedVerdict, isHiddenForNonGovernanceReason } from '~/utils/vault-assessment/flagged'
 
 const isReady = ref(false)
 const isEVaultLoading = ref(false)
@@ -1311,6 +1312,27 @@ export const useVaults = () => {
     )
   }
 
+  const isHiddenOnlyByNonGovernanceRule = (address: string): boolean => {
+    const { isReady, source, visibility } = useEulerLabels()
+    return isReady.value && isHiddenForNonGovernanceReason(getFlaggedVerdict(address, source.value, visibility.value))
+  }
+
+  // Identified answers who governs the vault; verified answers whether it is listed.
+  const isVaultGovernorIdentified = (vault: EVault): boolean =>
+    isVaultGovernorVerified(vault)
+    || (isHiddenOnlyByNonGovernanceRule(vault.address)
+      && verifyVaultGovernor(Object.assign({}, vault, { verified: true }), buildVerificationLabels()))
+
+  const isSecuritizeGovernorIdentified = (vault: SecuritizeCollateralVault): boolean =>
+    isSecuritizeGovernorVerified(vault)
+    || (isHiddenOnlyByNonGovernanceRule(vault.address)
+      && verifyVaultGovernor(Object.assign({}, vault, { verified: true }), buildVerificationLabels()))
+
+  const isEarnVaultOwnerIdentified = (earnVault: EulerEarn): boolean =>
+    isEarnVaultOwnerVerified(earnVault)
+    || (isHiddenOnlyByNonGovernanceRule(earnVault.address)
+      && verifyEarnVaultOwner(Object.assign({}, earnVault, { verified: true }), buildVerificationLabels()))
+
   return {
     // State
     isReady,
@@ -1354,6 +1376,9 @@ export const useVaults = () => {
     isVaultGovernorVerified,
     isSecuritizeGovernorVerified,
     isEarnVaultOwnerVerified,
+    isVaultGovernorIdentified,
+    isSecuritizeGovernorIdentified,
+    isEarnVaultOwnerIdentified,
 
     // Business logic computed (kept for complex queries)
     borrowList,

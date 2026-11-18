@@ -7,6 +7,13 @@ import { __setEulerLabelsDataForTest, useEulerLabels } from '~/composables/useEu
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useVaults } from '~/composables/useVaults'
 import { useChainConfig } from '~/composables/useChainConfig'
+import {
+  EUSDC_42,
+  LIQUITY_HUB_ENTITY,
+  LIQUITY_HUB_GOVERNOR,
+  liquityHubHiddenVerdict,
+  makeEusdc42,
+} from '~/tests/fixtures/liquity-hub'
 
 const LABELED_EVAULT = '0x0000000000000000000000000000000000000101'
 const DYNAMIC_EVAULT = '0x0000000000000000000000000000000000000102'
@@ -445,6 +452,67 @@ describe('useVaults EVault verification metadata', () => {
     // A stale registry flag cannot revive verification when V3 has no verdict.
     __setEulerLabelsDataForTest({ source: 'v3' })
     expect(registry.isVerifiedVault(LABELED_EVAULT)).toBe(false)
+  })
+
+  describe('governor identity of a hidden vault (K3 Liquity Hub eUSDC-42)', () => {
+    const k3 = { name: 'K3 Capital', addresses: { [LIQUITY_HUB_GOVERNOR]: 'K3 governor' } }
+    const hostLabels = (decidedBy: string, entities: Record<string, unknown> = { [LIQUITY_HUB_ENTITY]: k3 }) =>
+      __setEulerLabelsDataForTest({
+        source: 'v3',
+        entities,
+        managingEntityByVault: { [EUSDC_42.toLowerCase()]: LIQUITY_HUB_ENTITY },
+        visibility: { [EUSDC_42.toLowerCase()]: liquityHubHiddenVerdict(decidedBy) },
+      } as unknown as Partial<PublicEulerLabelsData>)
+
+    it('names the curator when the vault is hidden for a non-governance reason and the governor matches', () => {
+      hostLabels('config-suspended')
+      expect(useVaults().isVaultGovernorVerified(makeEusdc42())).toBe(false)
+      expect(useVaults().isVaultGovernorIdentified(makeEusdc42())).toBe(true)
+    })
+
+    it.each(['consistency-suspended', 'consistency-revoked'])('keeps the curator blank for the governance verdict %s', (decidedBy) => {
+      hostLabels(decidedBy)
+      expect(useVaults().isVaultGovernorIdentified(makeEusdc42())).toBe(false)
+    })
+
+    it('keeps the curator blank when the on-chain governor is not the label entity', () => {
+      hostLabels('config-suspended', { [LIQUITY_HUB_ENTITY]: { ...k3, addresses: {} } })
+      expect(useVaults().isVaultGovernorIdentified(makeEusdc42())).toBe(false)
+    })
+
+    it('keeps the curator blank when the router governor is not the label entity', () => {
+      hostLabels('config-suspended')
+      const vault = Object.assign(makeEusdc42(), { eulerRouterGovernor: getAddress('0x00000000000000000000000000000000000000ee') })
+      expect(useVaults().isVaultGovernorIdentified(vault)).toBe(false)
+    })
+
+    it('does not treat a pending-review vault as identified', () => {
+      __setEulerLabelsDataForTest({
+        source: 'v3',
+        entities: { [LIQUITY_HUB_ENTITY]: k3 },
+        managingEntityByVault: { [EUSDC_42.toLowerCase()]: LIQUITY_HUB_ENTITY },
+        visibility: { [EUSDC_42.toLowerCase()]: { status: 'pending_review', decidedBy: 'awaiting-verification', reason: null } },
+      } as unknown as Partial<PublicEulerLabelsData>)
+      expect(useVaults().isVaultGovernorIdentified(makeEusdc42())).toBe(false)
+    })
+
+    it('does not change the vault it checks', () => {
+      hostLabels('config-suspended')
+      const vault = makeEusdc42()
+      useVaults().isVaultGovernorIdentified(vault)
+      expect(vault).not.toHaveProperty('verified')
+    })
+
+    it.each([
+      ['config-suspended', true],
+      ['consistency-suspended', false],
+    ])('applies the same rule to Earn and Securitize vaults: %s', (decidedBy, identified) => {
+      hostLabels(decidedBy)
+      const earn = { address: EUSDC_42, governance: { owner: LIQUITY_HUB_GOVERNOR } } as unknown as EulerEarn
+      const securitize = { address: EUSDC_42, governor: LIQUITY_HUB_GOVERNOR } as unknown as Parameters<ReturnType<typeof useVaults>['isSecuritizeGovernorIdentified']>[0]
+      expect(useVaults().isEarnVaultOwnerIdentified(earn)).toBe(identified)
+      expect(useVaults().isSecuritizeGovernorIdentified(securitize)).toBe(identified)
+    })
   })
 
   it('clears stale Earn verification when a vault is removed from curation', async () => {

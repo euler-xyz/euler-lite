@@ -7,6 +7,7 @@ import {
   getFlaggedVerdict,
   getVaultOpeningNotice,
   isDeprecationWarning,
+  isHiddenForNonGovernanceReason,
 } from '~/utils/vault-assessment/flagged'
 
 const FLAGGED = '0x00000000000000000000000000000000000000a1'
@@ -109,5 +110,20 @@ describe('isDeprecationWarning', () => {
   it('keeps hidden verdicts and missing verdicts out', () => {
     expect(isDeprecationWarning({ status: 'hidden', decidedBy: 'deprecated', reason: null }, true)).toBe(false)
     expect(isDeprecationWarning(undefined, true)).toBe(false)
+  })
+})
+
+describe('hidden reasons that leave the curator to the governor check', () => {
+  it.each(['config-suspended', 'config-revoked', 'config-failed', 'not-explorable'])('does not blank the curator for %s', (decidedBy) => {
+    expect(isHiddenForNonGovernanceReason({ status: 'hidden', decidedBy })).toBe(true)
+  })
+
+  it.each(['consistency-suspended', 'consistency-revoked', 'a-reason-v3-adds-later', undefined, null])('blanks the curator for %s', (decidedBy) => {
+    expect(isHiddenForNonGovernanceReason({ status: 'hidden', decidedBy })).toBe(false)
+  })
+
+  it.each(['pending_review', 'warning', 'visible'])('only applies to a hidden verdict, not %s', (status) => {
+    expect(isHiddenForNonGovernanceReason({ status, decidedBy: 'config-suspended' })).toBe(false)
+    expect(isHiddenForNonGovernanceReason(undefined)).toBe(false)
   })
 })

@@ -11,12 +11,12 @@ import { FLAGGED_VAULT_LABEL } from '~/utils/vault-assessment/flagged'
 const { vault, defaultOpen = true } = defineProps<{ vault: EulerEarn, defaultOpen?: boolean }>()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
 
-const { isEarnVaultOwnerVerified } = useVaults()
+const { isEarnVaultOwnerIdentified } = useVaults()
 const vaultAddress = computed(() => getAddress(vault.address))
 const product = useEulerProductOfVault(vaultAddress)
 const entities = useEulerEntitiesOfEarnVault(vault)
 const isFlagged = useFlaggedVault(() => vault.address)
-const isOwnerVerified = computed(() => isEarnVaultOwnerVerified(vault))
+const isOwnerIdentified = computed(() => isEarnVaultOwnerIdentified(vault))
 const earnDescription = computed(() => getEarnVaultDescription(vault.address))
 
 const priceDisplay = ref('-')
@@ -73,7 +73,7 @@ const feeDisplay = computed(() => {
         label="Curator"
       >
         <div
-          v-if="entities.length && isOwnerVerified"
+          v-if="entities.length && isOwnerIdentified"
           class="flex flex-col gap-8"
         >
           <div
@@ -101,7 +101,7 @@ const feeDisplay = computed(() => {
         label="Vault type"
       >
         <VaultTypeBadges
-          v-if="!isFlagged"
+          v-if="!isFlagged || isOwnerIdentified"
           :vault="vault"
           nudge
         />

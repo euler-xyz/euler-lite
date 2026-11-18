@@ -39,7 +39,7 @@ const renderStatsMatrix = (
   resolveVault: CollateralVaultResolver,
   { badDebtCache = new Map<string, VaultBadDebtCacheEntry>(), isBadDebtLoading = false } = {},
 ) => {
-  vi.stubGlobal('useVaults', () => ({ isVaultGovernorVerified: () => true }))
+  vi.stubGlobal('useVaults', () => ({ isVaultGovernorIdentified: () => true }))
   vi.stubGlobal('useVaultRegistry', () => ({ getVaultCategory: () => 'standard' }))
   vi.stubGlobal('useCollateralOpenInterest', () => ({
     load: vi.fn(),

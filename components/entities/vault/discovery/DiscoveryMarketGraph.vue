@@ -49,7 +49,7 @@ const isNodeCyclicalNote = (address: string): boolean => {
   return isVaultCyclicalNote(address)
 }
 
-const { isVaultGovernorVerified, isSecuritizeGovernorVerified, isEarnVaultOwnerVerified } = useVaults()
+const { isVaultGovernorIdentified, isSecuritizeGovernorIdentified, isEarnVaultOwnerIdentified } = useVaults()
 const { isReady, source, visibility } = useEulerLabels()
 const { getWarningText, loadWarningDetails, isAcceptedOnlyWarning } = useDiscoveryVaultWarningDetails()
 const getNodeWarning = (address: string) => {
@@ -79,13 +79,13 @@ const loadNodeWarningDetails = (address: string) =>
 const isNodeCuratorUnknown = (address: string): boolean => {
   const vault = findVault(props.market, address)
   if (!vault) return false
-  if (isEulerEarn(vault)) return !isEarnVaultOwnerVerified(vault)
-  if (isSecuritizeCollateralVault(vault)) return !isSecuritizeGovernorVerified(vault)
+  if (isEulerEarn(vault)) return !isEarnVaultOwnerIdentified(vault)
+  if (isSecuritizeCollateralVault(vault)) return !isSecuritizeGovernorIdentified(vault)
   // Governance can be unresolved on lazily-hydrated collateral vaults — the
   // guard is VALUE-based because SDK EVault instances always own the
   // property. Don't flag what simply hasn't been fetched yet.
   if (!hasResolvedGovernorAdmin(vault)) return false
-  return !isVaultGovernorVerified(vault)
+  return !isVaultGovernorIdentified(vault)
 }
 </script>
 

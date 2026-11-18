@@ -52,6 +52,17 @@ export const getFlaggedVerdict = (
   return verdict?.status === 'hidden' ? verdict : undefined
 }
 
+const NON_GOVERNANCE_HIDDEN_REASONS: ReadonlySet<string> = new Set([
+  'config-suspended',
+  'config-revoked',
+  'config-failed',
+  'not-explorable',
+])
+
+/** Any other hidden reason, including one V3 adds later, keeps the curator blank. */
+export const isHiddenForNonGovernanceReason = (verdict: VaultVerdictLike | undefined): boolean =>
+  verdict?.status === 'hidden' && NON_GOVERNANCE_HIDDEN_REASONS.has(verdict.decidedBy ?? '')
+
 /** Without the label deprecation there is no Deprecated badge, so the verdict stays the only signal. */
 export const isDeprecationWarning = (verdict: VaultVerdictLike | undefined, deprecatedInLabels: boolean): boolean =>
   verdict?.status === 'warning' && verdict.decidedBy === 'deprecated' && deprecatedInLabels
