@@ -11,6 +11,7 @@ import {
   getCollateralMatrix,
   findVault,
   getAttributeMatrix,
+  getMarketVaultResolver,
   isMatrixCompatibleVault,
   formatCapDisplay,
   isAttributeMatrixView,
@@ -26,6 +27,7 @@ import {
   type VaultApyCacheEntry,
 } from '~/utils/discoveryCalculations'
 import type { VaultBadDebtCacheEntry } from '~/utils/vault-bad-debt'
+import type { CollateralVaultResolver } from '~/utils/vault/collateral-exposure'
 import type { MarketGroup } from '~/entities/lend-discovery'
 import { maxUint256 } from 'viem'
 
@@ -35,6 +37,7 @@ const props = defineProps<{
 }>()
 
 const { isMarketDataResolved } = useVaults()
+const { get: registryGet } = useVaultRegistry()
 const route = useRoute()
 const { chainId } = useEulerAddresses()
 const { badDebtByChain, isBadDebtEnabled, isBadDebtLoaded, loadBadDebtForChain } = useVaultBadDebt()
@@ -277,6 +280,13 @@ const vaultApyCache = computed<Map<string, VaultApyCacheEntry>>(() => {
     enableRewardsApy: enableRewardsApy.value,
   })
 })
+
+const resolveRegistryVault: CollateralVaultResolver = address =>
+  registryGet(address)?.vault as EVault | SecuritizeCollateralVault | undefined
+
+const vaultResolverMap = computed((): Map<string, CollateralVaultResolver> =>
+  new Map(props.markets.map(market => [market.id, getMarketVaultResolver(market, resolveRegistryVault)])),
+)
 
 const vaultBadDebtCache = computed<Map<string, VaultBadDebtCacheEntry>>(() =>
   badDebtByChain.value.get(chainId.value) ?? new Map(),
@@ -697,6 +707,7 @@ onMounted(() => {
               :apy-cache="vaultApyCache"
               :bad-debt-cache="vaultBadDebtCache"
               :show-bad-debt-column="isBadDebtEnabled && isBadDebtLoaded"
+              :resolve-vault="vaultResolverMap.get(market.id) ?? resolveRegistryVault"
               :selected-header="selectedMatrixHeader?.marketId === market.id ? { address: selectedMatrixHeader.address, axis: selectedMatrixHeader.axis } : null"
               @select-header="(addr: string, axis: 'row' | 'column') => toggleMatrixHeader(market.id, addr, axis)"
             />

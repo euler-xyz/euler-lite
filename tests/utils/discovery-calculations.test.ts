@@ -11,6 +11,7 @@ import {
   getDisplayedMembers,
   getMiniDiagram,
   getMarketEntities,
+  getMarketVaultResolver,
   isNodeRampingDown,
   type VaultApyCacheEntry,
   type VaultUsdCacheEntry,
@@ -20,6 +21,18 @@ import type { MarketGroup } from '~/entities/lend-discovery'
 import type { EVault, EVaultCollateral, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { VaultRewardInfo } from '@eulerxyz/euler-v2-sdk'
 import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
+import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
+import { resolveVaultExposureDisplay } from '~/utils/vault/exposure-display'
+import {
+  BOLD,
+  EBOLD_1,
+  EUSDC_42,
+  EUSDC_42_OPEN_INTEREST_USD,
+  EUSDC_42_TOTAL_SUPPLY_USD,
+  EUSDC_42_UTILIZATION,
+  SBOLD,
+  makeLiquityHubOnDemandMarket,
+} from '~/tests/fixtures/liquity-hub'
 
 vi.mock('~/entities/euler/labels', () => ({
   getEulerLabelEntityLogo: (logo: string) => logo,
@@ -847,5 +860,53 @@ describe('buildVaultApyCache', () => {
     expect(entry).toBeDefined()
     expect(entry!.supplyApy).toBeCloseTo(3 + (1 + 3 / 100) * 1 + 0.5)
     expect(entry!.borrowApy).toBeCloseTo(5 + (1 + 5 / 100) * 1 - 0.25)
+  })
+})
+
+describe('on-demand market collateral resolution', () => {
+  const emptyRegistry = () => undefined
+
+  const resolveEusdc42Exposure = (resolveVault: Parameters<typeof getCollateralExposurePairs>[1]) => {
+    const market = makeLiquityHubOnDemandMarket()
+    const eusdc42 = market.vaults.find(vault => vault.address === EUSDC_42) as EVault
+    return resolveVaultExposureDisplay({
+      openInterestEnabled: true,
+      openInterestLoaded: true,
+      hasOpenInterestError: false,
+      getCollateralGroups: () => getCollateralExposureGroups(
+        getCollateralExposurePairs(eusdc42, resolveVault),
+        EUSDC_42_OPEN_INTEREST_USD,
+      ),
+      totalExposureUsd: EUSDC_42_TOTAL_SUPPLY_USD,
+      totalSupplyState: 'ready',
+      utilization: EUSDC_42_UTILIZATION,
+      acceptedCollateralCount: eusdc42.collaterals.length,
+    })
+  }
+
+  it('resolves collaterals that exist only as members of the market group', () => {
+    const market = makeLiquityHubOnDemandMarket()
+    const resolve = getMarketVaultResolver(market, emptyRegistry)
+
+    expect(resolve(EBOLD_1)?.address).toBe(EBOLD_1)
+    expect(resolve(EBOLD_1.toLowerCase())?.address).toBe(EBOLD_1)
+    expect(resolve('0x00000000000000000000000000000000000000ff')).toBeUndefined()
+  })
+
+  it('falls back to the registry for a collateral outside the market', () => {
+    const outside = makeVault('0x00000000000000000000000000000000000000ff', [])
+    const resolve = getMarketVaultResolver(makeLiquityHubOnDemandMarket(), address =>
+      address.toLowerCase() === outside.address ? outside : undefined)
+
+    expect(resolve(outside.address)).toBe(outside)
+  })
+
+  it('gives an on-demand vault a non-empty exposure split when its collaterals are members only', () => {
+    expect(resolveEusdc42Exposure(emptyRegistry)).toEqual({ valueState: 'unavailable', items: [] })
+
+    const display = resolveEusdc42Exposure(getMarketVaultResolver(makeLiquityHubOnDemandMarket(), emptyRegistry))
+
+    expect(display.valueState).toBe('ready')
+    expect(display.items.map(item => item.asset.symbol)).toEqual([BOLD.symbol, SBOLD.symbol])
   })
 })

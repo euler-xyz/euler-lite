@@ -17,6 +17,7 @@ import { getMaxLiquidationDiscountDisplayPercent } from '~/utils/vault/liquidati
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import { formatBadDebtHint, formatBadDebtUsd, type VaultBadDebtCacheEntry } from '~/utils/vault-bad-debt'
 import { getRingBlocks, getRingSlots, type RingLink, type RingSlots } from '~/utils/discovery-graph-layout'
+import type { CollateralVaultResolver } from '~/utils/vault/collateral-exposure'
 
 // ============================================================
 // Types & Constants
@@ -266,6 +267,13 @@ export const findVault = (market: MarketGroup, address: string): EVault | Securi
   }
   return null
 }
+
+/** Members of an on-demand market are never written to the vault registry, so the market answers first. */
+export const getMarketVaultResolver = (
+  market: MarketGroup,
+  fallback: CollateralVaultResolver,
+): CollateralVaultResolver =>
+  address => findVault(market, address) ?? fallback(address)
 
 // ============================================================
 // Mini Relationship Graph
