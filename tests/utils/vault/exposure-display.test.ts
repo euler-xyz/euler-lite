@@ -5,7 +5,7 @@ import {
   buildFallbackVaultExposureDisplay,
   combineVaultExposureDisplays,
   getExposureLead,
-  getHeldUncoveredDebtUsd,
+  getHeldSupplyShare,
   mergeVaultExposureDisplayItems,
   getVaultBackingLead,
   getVaultHeaderAssets,
@@ -558,7 +558,7 @@ describe('exposure with uncovered bad debt (K3 Liquity Hub eUSDC-42)', () => {
     backing(PT_SBOLD_27NOV2025, 0),
   ]
   const coveredUsd = EUSDC_42_OPEN_INTEREST_USD[EBOLD_1] + EUSDC_42_OPEN_INTEREST_USD[ESBOLD_1]
-  const snapshotUtilizedUsd = coveredUsd + EUSDC_42_BAD_DEBT_USD
+  const liveUtilizedUsd = EUSDC_42_TOTAL_SUPPLY_USD * EUSDC_42_UTILIZATION / 100
   const live = {
     openInterestEnabled: true,
     openInterestLoaded: true,
@@ -566,76 +566,138 @@ describe('exposure with uncovered bad debt (K3 Liquity Hub eUSDC-42)', () => {
     totalSupplyState: 'ready' as const,
     acceptedCollateralCount: 4,
   }
+  const eusdc42 = {
+    ...live,
+    getCollateralGroups: eusdc42Groups,
+    totalExposureUsd: EUSDC_42_TOTAL_SUPPLY_USD,
+    utilization: EUSDC_42_UTILIZATION,
+    vaultShare: 1,
+  }
   const valueOf = (items: ReturnType<typeof buildAllocatedVaultExposureDisplayItems>, label: string) =>
-    items.find(item => (item.label ?? item.asset.symbol) === label)?.valueUsd
+    items.find(item => (item.label ?? item.asset.symbol) === label)?.valueUsd ?? 0
+  const sum = (items: ReturnType<typeof buildAllocatedVaultExposureDisplayItems>) => items.reduce((total, item) => total + item.valueUsd, 0)
 
-  it('adds an uncovered item equal to the bad debt and splits only the covered remainder', () => {
-    const items = buildAllocatedVaultExposureDisplayItems({
-      collateralGroups: eusdc42Groups(),
-      totalExposureUsd: snapshotUtilizedUsd,
-      utilization: 100,
-      uncoveredDebtUsd: EUSDC_42_BAD_DEBT_USD,
-    })
-
-    expect(valueOf(items, UNCOVERED_EXPOSURE_LABEL)).toBeCloseTo(17_556.3, 1)
-    expect(valueOf(items, 'BOLD')).toBeCloseTo(1.29, 2)
-    expect(valueOf(items, 'sBOLD')).toBeLessThan(1e-9)
-    expect(items.find(item => item.kind === 'uncovered')?.label).toBe(UNCOVERED_EXPOSURE_LABEL)
-    expect(items.reduce((sum, item) => sum + item.valueUsd, 0)).toBeCloseTo(snapshotUtilizedUsd, 6)
-  })
-
-  it('does not stretch the covered split over the uncovered debt on the live supply', () => {
-    const { valueState, items } = resolveVaultExposureDisplay({
-      ...live,
-      getCollateralGroups: eusdc42Groups,
-      totalExposureUsd: EUSDC_42_TOTAL_SUPPLY_USD,
-      utilization: EUSDC_42_UTILIZATION,
-      uncoveredDebtUsd: EUSDC_42_BAD_DEBT_USD,
-    })
-    const utilizedUsd = EUSDC_42_TOTAL_SUPPLY_USD * EUSDC_42_UTILIZATION / 100
+  it('splits the live utilized amount by the V3 ratio of bad debt to covered debt', () => {
+    const { valueState, items } = resolveVaultExposureDisplay({ ...eusdc42, badDebtUsd: EUSDC_42_BAD_DEBT_USD })
 
     expect(valueState).toBe('ready')
-    expect(valueOf(items, UNCOVERED_EXPOSURE_LABEL)).toBeCloseTo(EUSDC_42_BAD_DEBT_USD, 6)
-    expect(valueOf(items, 'BOLD')).toBeCloseTo(utilizedUsd - EUSDC_42_BAD_DEBT_USD, 6)
-    expect(valueOf(items, 'BOLD')).toBeLessThan(2)
+    expect(valueOf(items, UNCOVERED_EXPOSURE_LABEL)).toBeCloseTo(liveUtilizedUsd * EUSDC_42_BAD_DEBT_USD / (EUSDC_42_BAD_DEBT_USD + coveredUsd), 6)
+    expect(valueOf(items, UNCOVERED_EXPOSURE_LABEL)).toBeCloseTo(17_556, 0)
+    expect(valueOf(items, 'BOLD')).toBeCloseTo(1.29, 2)
+    expect(valueOf(items, 'sBOLD')).toBeLessThan(1e-9)
+    expect(sum(items)).toBeCloseTo(liveUtilizedUsd, 6)
+    expect(items.find(item => item.kind === 'uncovered')?.label).toBe(UNCOVERED_EXPOSURE_LABEL)
     expect(sortVaultExposureDisplayItems(items)[0].kind).toBe('uncovered')
   })
 
-  it('keeps the current split when there is no bad debt', () => {
-    const input = {
-      ...live,
-      getCollateralGroups: eusdc42Groups,
-      totalExposureUsd: EUSDC_42_TOTAL_SUPPLY_USD,
-      utilization: EUSDC_42_UTILIZATION,
-    }
-    const withoutData = resolveVaultExposureDisplay(input)
+  it('never shows more uncovered debt than is utilized', () => {
+    const items = buildAllocatedVaultExposureDisplayItems({
+      collateralGroups: [backing(BOLD, 20)],
+      totalExposureUsd: 100,
+      utilization: 50,
+      badDebtUsd: 1_000,
+    })
 
-    expect(resolveVaultExposureDisplay({ ...input, uncoveredDebtUsd: 0 })).toEqual(withoutData)
-    expect(withoutData.items.some(item => item.kind === 'uncovered')).toBe(false)
-    expect(valueOf(withoutData.items, 'BOLD')).toBeCloseTo(EUSDC_42_TOTAL_SUPPLY_USD * EUSDC_42_UTILIZATION / 100, 1)
+    expect(valueOf(items, UNCOVERED_EXPOSURE_LABEL)).toBeLessThanOrEqual(50)
+    expect(sum(items)).toBeCloseTo(50, 9)
   })
 
-  it('shows only the uncovered item when the bad debt covers the whole utilized amount', () => {
+  it('shows only the uncovered item when V3 has no covered debt left', () => {
     const { valueState, items } = resolveVaultExposureDisplay({
       ...live,
       getCollateralGroups: () => [backing(SBOLD, 0)],
       totalExposureUsd: 100,
       utilization: 50,
-      uncoveredDebtUsd: 50,
+      badDebtUsd: 40,
     })
 
     expect(valueState).toBe('ready')
     expect(items).toEqual([expect.objectContaining({ kind: 'uncovered', label: UNCOVERED_EXPOSURE_LABEL, valueUsd: 50 })])
   })
 
-  it('waits for the bad debt before splitting a vault with live open interest', () => {
-    expect(resolveVaultExposureDisplay({
+  it('keeps the current split when there is no bad debt', () => {
+    const { vaultShare: _vaultShare, ...withoutBadDebtInputs } = eusdc42
+    const before = resolveVaultExposureDisplay(withoutBadDebtInputs)
+
+    expect(resolveVaultExposureDisplay({ ...eusdc42, badDebtUsd: 0 })).toEqual(before)
+    expect(before.items.some(item => item.kind === 'uncovered')).toBe(false)
+    expect(valueOf(before.items, 'BOLD')).toBeCloseTo(liveUtilizedUsd, 1)
+  })
+
+  // Euler V3 open interest and bad debt on Ethereum, 2026-11-18.
+  it.each([
+    ['K3 Prime eUSDC-2', 0.00272283633032408, 1_537_490.973406, 1_669_987.6063580355, 92.99634],
+    ['AlphaGrowth RWA eUSDT-33', 0.0040186849302, 0, 110.15630363209499, 0.0036480476],
+    ['K3 Yield eUSDC-22', 0.021893873308238165, 119_623.011958, 423_249.37329449086, 28.147542],
+  ])('ignores dust bad debt on %s', (_name, badDebtUsd, openInterestUsd, supplyUsd, utilization) => {
+    const input = {
       ...live,
-      getCollateralGroups: eusdc42Groups,
-      totalExposureUsd: EUSDC_42_TOTAL_SUPPLY_USD,
-      utilization: EUSDC_42_UTILIZATION,
-      uncoveredDebtLoading: true,
-    })).toEqual({ valueState: 'loading', items: [] })
+      getCollateralGroups: () => [backing(USDC, openInterestUsd)],
+      totalExposureUsd: supplyUsd,
+      utilization,
+      vaultShare: 1,
+    }
+    const display = resolveVaultExposureDisplay({ ...input, badDebtUsd })
+
+    expect(display.items.some(item => item.kind === 'uncovered')).toBe(false)
+    expect(display).toEqual(resolveVaultExposureDisplay(input))
+  })
+
+  it('still shows the uncovered debt of eBOLD-1, all of its 4.70 USD of debt', () => {
+    const { items } = resolveVaultExposureDisplay({
+      ...live,
+      getCollateralGroups: () => [backing(SBOLD, 9.216926737779122e-18)],
+      totalExposureUsd: 505.4210635310829,
+      utilization: 0.92940135,
+      badDebtUsd: 4.6974371328630715,
+    })
+
+    expect(valueOf(items, UNCOVERED_EXPOSURE_LABEL)).toBeCloseTo(505.4210635310829 * 0.0092940135, 6)
+  })
+
+  it('gives an Earn allocation its pro rata share of the uncovered debt', () => {
+    const whole = resolveVaultExposureDisplay({ ...eusdc42, badDebtUsd: EUSDC_42_BAD_DEBT_USD })
+    const share = getHeldSupplyShare(25n, 100n)
+    const quarter = resolveVaultExposureDisplay({
+      ...eusdc42,
+      totalExposureUsd: EUSDC_42_TOTAL_SUPPLY_USD * share,
+      vaultShare: share,
+      badDebtUsd: EUSDC_42_BAD_DEBT_USD,
+    })
+
+    expect(share).toBe(0.25)
+    expect(valueOf(quarter.items, UNCOVERED_EXPOSURE_LABEL)).toBeCloseTo(valueOf(whole.items, UNCOVERED_EXPOSURE_LABEL) / 4, 6)
+    expect(valueOf(quarter.items, 'BOLD')).toBeCloseTo(valueOf(whole.items, 'BOLD') / 4, 9)
+    expect(getHeldSupplyShare(25n, 0n)).toBe(0)
+  })
+
+  it('subtracts known uncovered debt from the exact single-collateral fallback', () => {
+    const input = {
+      openInterestEnabled: false,
+      openInterestLoaded: false,
+      hasOpenInterestError: false,
+      totalSupplyState: 'ready' as const,
+      getCollateralGroups: () => [backing(BOLD, 0)],
+      acceptedCollateralCount: 1,
+      totalExposureUsd: 100,
+      utilization: 50,
+      badDebtUsd: 30,
+    }
+
+    const { valueState, items } = resolveVaultExposureDisplay({ ...input, vaultShare: 1 })
+    expect(valueState).toBe('ready')
+    expect(valueOf(items, UNCOVERED_EXPOSURE_LABEL)).toBeCloseTo(30, 9)
+    expect(valueOf(items, 'BOLD')).toBeCloseTo(20, 9)
+
+    const quarter = resolveVaultExposureDisplay({ ...input, totalExposureUsd: 25, vaultShare: 0.25 })
+    expect(valueOf(quarter.items, UNCOVERED_EXPOSURE_LABEL)).toBeCloseTo(7.5, 9)
+
+    const unscaled = resolveVaultExposureDisplay(input)
+    expect(unscaled.items.some(item => item.kind === 'uncovered')).toBe(false)
+  })
+
+  it('waits for the bad debt before splitting a vault with live open interest', () => {
+    expect(resolveVaultExposureDisplay({ ...eusdc42, badDebtLoading: true })).toEqual({ valueState: 'loading', items: [] })
   })
 
   it('does not say "Backed by BOLD" when most of the debt is uncovered', () => {
@@ -646,7 +708,7 @@ describe('exposure with uncovered bad debt (K3 Liquity Hub eUSDC-42)', () => {
       getCollateralGroups: eusdc42Groups,
       utilization: EUSDC_42_UTILIZATION,
       acceptedCollateralCount: 4,
-      uncoveredDebtUsd: EUSDC_42_BAD_DEBT_USD / EUSDC_42_TOTAL_SUPPLY_USD,
+      badDebtUsd: EUSDC_42_BAD_DEBT_USD,
     })
 
     expect(lead?.label).toBe('Mostly uncovered debt; rest backed by BOLD, sBOLD')
@@ -669,15 +731,9 @@ describe('exposure with uncovered bad debt (K3 Liquity Hub eUSDC-42)', () => {
       { utilization: 50, collaterals: [{}], asset: usdc },
       { enabled: true, loaded: true, hasError: false },
       () => [backing(SBOLD, 0)],
-      0.5,
+      40,
     )
 
     expect(header).toEqual({ assets: [usdc], label: 'Mostly uncovered debt' })
-  })
-
-  it('carries a pro rata share of the bad debt for a part of the supply', () => {
-    expect(getHeldUncoveredDebtUsd(EUSDC_42_BAD_DEBT_USD, 25n, 100n)).toBeCloseTo(EUSDC_42_BAD_DEBT_USD / 4, 6)
-    expect(getHeldUncoveredDebtUsd(undefined, 25n, 100n)).toBe(0)
-    expect(getHeldUncoveredDebtUsd(EUSDC_42_BAD_DEBT_USD, 25n, 0n)).toBe(0)
   })
 })

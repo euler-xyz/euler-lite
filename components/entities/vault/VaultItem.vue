@@ -73,8 +73,9 @@ const exposureDisplay = computed<VaultExposureDisplay>(() =>
     totalSupplyState: priceValues.value.totalSupplyState,
     utilization: vault.utilization,
     acceptedCollateralCount: vault.collaterals.length,
-    uncoveredDebtUsd: getVaultBadDebt(vault.address)?.badDebtUsd,
-    uncoveredDebtLoading: isBadDebtLoading.value,
+    badDebtUsd: getVaultBadDebt(vault.address)?.badDebtUsd,
+    badDebtLoading: isBadDebtLoading.value,
+    vaultShare: 1,
   }),
 )
 const exposureValueState = computed(() => exposureDisplay.value.valueState)

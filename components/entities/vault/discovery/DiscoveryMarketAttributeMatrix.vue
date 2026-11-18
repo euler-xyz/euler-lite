@@ -111,8 +111,9 @@ const exposureByVault = computed(() => {
       totalSupplyState,
       utilization: columnVault.utilization,
       acceptedCollateralCount: columnVault.collaterals.length,
-      uncoveredDebtUsd: props.badDebtCache.get(column.address)?.badDebtUsd,
-      uncoveredDebtLoading: props.isBadDebtLoading,
+      badDebtUsd: props.badDebtCache.get(column.address)?.badDebtUsd,
+      badDebtLoading: props.isBadDebtLoading,
+      vaultShare: 1,
     }))
   }
   return result

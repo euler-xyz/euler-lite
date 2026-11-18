@@ -16,7 +16,7 @@ import {
 } from '~/utils/vault/collateral-exposure'
 import {
   combineVaultExposureDisplays,
-  getHeldUncoveredDebtUsd,
+  getHeldSupplyShare,
   resolveVaultExposureDisplay,
   type ExposureValueState,
   type VaultExposureDisplay,
@@ -110,12 +110,9 @@ const strategyExposureDisplays = computed<VaultExposureDisplay[]>(() =>
       totalSupplyState: allocation.valueState,
       utilization: strategyVault.utilization,
       acceptedCollateralCount: strategyVault.collaterals.length,
-      uncoveredDebtUsd: getHeldUncoveredDebtUsd(
-        getVaultBadDebt(strategyVault.address)?.badDebtUsd,
-        strategy.allocatedAssets,
-        strategyVault.totalAssets,
-      ),
-      uncoveredDebtLoading: isBadDebtLoading.value,
+      badDebtUsd: getVaultBadDebt(strategyVault.address)?.badDebtUsd,
+      badDebtLoading: isBadDebtLoading.value,
+      vaultShare: getHeldSupplyShare(strategy.allocatedAssets, strategyVault.totalAssets),
     })]
   }),
 )
