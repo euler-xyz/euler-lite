@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { getChainPolicyGeneration } from '~/composables/useChainConfig'
-import type { VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, isEulerEarn, type VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
+import { isVaultExitPaused } from '~/utils/vault-hooks'
+import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { hasOnlyAcceptedVaultCheckFindings } from '~/utils/vault-assessment/presentation'
 import {
   FLAGGED_VAULT_LABEL,
@@ -24,6 +26,7 @@ const { address, hideDeprecated = false, hideChecks = false, pairSide, family = 
 
 const { chainId } = useEulerAddresses()
 const { isReady, source, visibility, vaultAssessments, getVaultAssessmentEntry, loadVaultAssessment } = useEulerLabels()
+const { get: registryGet } = useVaultRegistry()
 const verdict = computed(() => isReady.value && source.value === 'v3'
   ? visibility.value?.[address.toLowerCase()]
   : undefined)
@@ -31,6 +34,29 @@ const assessmentEntry = computed(() => {
   void vaultAssessments.value
   return chainId.value && family ? getVaultAssessmentEntry(chainId.value, address, family) : { status: 'idle' as const }
 })
+const registryVault = computed(() => registryGet(address)?.vault)
+// Securitize vaults pass no family but are assessed on the EVK route, which carries their pause rule.
+const pauseFamily = computed((): VaultAssessmentFamily | null => family === 'earn' || isEulerEarn(registryVault.value) ? null : 'evk')
+const pauseEntry = computed(() => {
+  void vaultAssessments.value
+  return chainId.value && pauseFamily.value ? getVaultAssessmentEntry(chainId.value, address, pauseFamily.value) : { status: 'idle' as const }
+})
+const isOnchainPaused = computed(() => isEVault(registryVault.value) && isVaultExitPaused(registryVault.value))
+const isPaused = computed(() => isPausedVerdict(verdict.value, {
+  family: pauseFamily.value ? 'evk' : 'earn',
+  onchainPaused: isOnchainPaused.value,
+  assessment: pauseEntry.value.status === 'available' ? pauseEntry.value.assessment : undefined,
+}))
+watch(
+  () => [chainId.value, address, pauseFamily.value, verdict.value?.status, verdict.value?.decidedBy, isOnchainPaused.value] as const,
+  ([id, vaultAddress, selectedFamily, status, decidedBy, onchainPaused]) => {
+    if (id && selectedFamily && !onchainPaused && status === 'hidden' && decidedBy?.startsWith('config-')
+      && pauseEntry.value.status === 'idle') {
+      void loadVaultAssessment(id, vaultAddress, selectedFamily)
+    }
+  },
+  { immediate: true },
+)
 const acceptedOnly = computed(() => verdict.value?.status === 'warning' && verdict.value.decidedBy === 'advisories'
   && assessmentEntry.value.status === 'available'
   && !!assessmentEntry.value.assessment && hasOnlyAcceptedVaultCheckFindings(assessmentEntry.value.assessment))
@@ -61,7 +87,7 @@ const warning = computed(() => {
       description: verdict.value.reason || 'Some checks could not be completed for this vault.',
     }
   }
-  if (isPausedVerdict(verdict.value)) {
+  if (isPaused.value) {
     return {
       title: PAUSED_VAULT_TITLE,
       description: verdict.value.reason || PAUSED_VAULT_FALLBACK_REASON,
@@ -79,7 +105,7 @@ const warning = computed(() => {
   }
 })
 const badgeLabel = computed(() => {
-  const paused = isPausedVerdict(verdict.value)
+  const paused = isPaused.value
   const flagged = verdict.value?.status === 'hidden'
   if (pairSide) return PAIR_SIDE_BADGE_LABELS[pairSide][paused ? 'paused' : flagged ? 'flagged' : 'warning']
   if (verdict.value?.decidedBy === 'deprecated') return 'Deprecated'

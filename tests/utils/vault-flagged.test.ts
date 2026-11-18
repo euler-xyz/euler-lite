@@ -8,10 +8,12 @@ import {
   getVaultOpeningNotice,
   isDeprecationWarning,
   isHiddenForNonGovernanceCause,
+  isPausedVerdict,
 } from '~/utils/vault-assessment/flagged'
 import { liquityHubHiddenVerdict } from '~/tests/fixtures/liquity-hub'
 import {
   EUSDC_42_RAW_ASSESSMENT,
+  EUSDC_95_RAW_ASSESSMENT,
   IDLE_CREDIT_VAULT_RAW_ASSESSMENT,
   IDLE_CREDIT_VAULT_VERDICT,
   assessmentEntry,
@@ -166,5 +168,29 @@ describe('a hidden vault whose assessment shows no governance cause', () => {
 
   it('only applies to a hidden verdict', () => {
     expect(isHiddenForNonGovernanceCause({ ...paused, status: 'warning' }, assessmentEntry(EUSDC_42_RAW_ASSESSMENT))).toBe(false)
+  })
+})
+
+describe('paused verdict', () => {
+  const hidden = (decidedBy: string) => ({ status: 'hidden', decidedBy })
+  const exitsOff = assessmentEntry(EUSDC_95_RAW_ASSESSMENT).assessment
+
+  it.each(['config-suspended', 'config-failed', 'config-revoked'])('needs on-chain or assessment pause evidence for %s', (decidedBy) => {
+    expect(isPausedVerdict(hidden(decidedBy), { family: 'evk', onchainPaused: true })).toBe(true)
+    expect(isPausedVerdict(hidden(decidedBy), { family: 'evk', onchainPaused: false, assessment: exitsOff })).toBe(true)
+    expect(isPausedVerdict(hidden(decidedBy), { family: 'evk', onchainPaused: false })).toBe(false)
+  })
+
+  it('does not take an untrusted hook target or an unrelated failure as a pause', () => {
+    const otherFailure = assessmentEntry(IDLE_CREDIT_VAULT_RAW_ASSESSMENT).assessment
+    expect(isPausedVerdict(hidden('config-failed'), { family: 'evk', onchainPaused: false, assessment: otherFailure })).toBe(false)
+  })
+
+  it('never calls an Earn vault paused', () => {
+    expect(isPausedVerdict(hidden('config-suspended'), { family: 'earn', onchainPaused: true, assessment: exitsOff })).toBe(false)
+  })
+
+  it.each(['consistency-suspended', 'not-explorable'])('keeps %s flagged', (decidedBy) => {
+    expect(isPausedVerdict(hidden(decidedBy), { family: 'evk', onchainPaused: true })).toBe(false)
   })
 })

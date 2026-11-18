@@ -22,13 +22,6 @@ export const PAIR_SIDE_BADGE_LABELS: Readonly<Record<VaultPairSide, { warning: s
   borrow: { warning: 'Borrow warning', flagged: 'Borrow flagged', paused: 'Borrow paused' },
 }
 
-/**
- * V3 hides a verified vault that fails a required configuration rule as `config-suspended`; a paused vault
- * fails `hooks.zero-or-trusted`. The verdict does not name the rule, so other configuration failures read the same.
- */
-export const isPausedVerdict = (verdict: VaultVerdictLike | undefined): boolean =>
-  verdict?.status === 'hidden' && verdict.decidedBy === 'config-suspended'
-
 const withReason = (lead: string, reason?: string | null): string => {
   const text = reason?.trim()
   if (!text) return `${lead}.`
@@ -55,6 +48,22 @@ export const getFlaggedVerdict = (
 }
 
 const CONFIG_HIDING_REASONS: ReadonlySet<string> = new Set(['config-suspended', 'config-failed', 'config-revoked'])
+const PAUSE_CAUSE_CODES: ReadonlySet<string> = new Set(['exit-operations-disabled', 'vault-paused'])
+
+export interface VaultPauseEvidence {
+  family: 'evk' | 'earn' | null
+  onchainPaused: boolean
+  assessment?: Pick<VaultAssessment, 'configContext'>
+}
+
+/** Any configuration verdict can come from a pause, and none proves one, so the pause itself must be seen. */
+export const isPausedVerdict = (verdict: VaultVerdictLike | undefined, evidence: VaultPauseEvidence): boolean => {
+  if (verdict?.status !== 'hidden' || !CONFIG_HIDING_REASONS.has(verdict.decidedBy ?? '')) return false
+  if (evidence.family === 'earn') return false
+  if (evidence.onchainPaused) return true
+  return evidence.assessment?.configContext?.findings
+    .some(finding => finding.outcome === 'fail' && PAUSE_CAUSE_CODES.has(finding.cause?.code ?? '')) ?? false
+}
 const CLEAR_CONSISTENCY_STATUSES: ReadonlySet<string> = new Set(['verified', 'not_applicable'])
 const GOVERNANCE_FINDING_KEY = /^(scheduled\.)?governance\./
 
