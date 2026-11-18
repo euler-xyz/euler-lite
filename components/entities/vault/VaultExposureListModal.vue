@@ -2,6 +2,7 @@
 import { compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import {
   sortVaultExposureDisplayItems,
+  UNCOVERED_EXPOSURE_NOTE,
   type ExposureValueState,
   type VaultExposureDisplayItem,
 } from '~/utils/vault/exposure-display'
@@ -65,7 +66,12 @@ const itemKey = (item: VaultExposureDisplayItem) => `${item.asset.address}:${dis
         :key="itemKey(item)"
         class="grid min-w-0 grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-x-10 gap-y-6 rounded-8 border border-line-subtle bg-surface px-10 py-8"
       >
+        <VaultExposureUncoveredIcon
+          v-if="item.kind === 'uncovered'"
+          size="20"
+        />
         <AssetAvatar
+          v-else
           class="shrink-0"
           :asset="item.asset"
           size="20"
@@ -73,7 +79,8 @@ const itemKey = (item: VaultExposureDisplayItem) => `${item.asset.address}:${dis
         <div class="min-w-0 flex-1">
           <div class="flex min-w-0 items-center gap-6">
             <span
-              class="truncate text-p2 font-semibold text-content-primary"
+              class="truncate text-p2 font-semibold"
+              :class="item.kind === 'uncovered' ? 'text-warning-500' : 'text-content-primary'"
               :title="displayLabel(item)"
             >
               {{ displayLabel(item) }}
@@ -86,7 +93,13 @@ const itemKey = (item: VaultExposureDisplayItem) => `${item.asset.address}:${dis
             </span>
           </div>
           <div
-            v-if="item.asset.name && item.asset.name !== item.asset.symbol"
+            v-if="item.kind === 'uncovered'"
+            class="text-p5 text-content-secondary"
+          >
+            {{ UNCOVERED_EXPOSURE_NOTE }}
+          </div>
+          <div
+            v-else-if="item.asset.name && item.asset.name !== item.asset.symbol"
             class="truncate text-p5 text-content-secondary"
             :title="item.asset.name"
           >
@@ -108,7 +121,8 @@ const itemKey = (item: VaultExposureDisplayItem) => `${item.asset.address}:${dis
           <UiRadialProgress
             :value="getPercent(item)"
             :max="100"
-            class="shrink-0 [--ui-radial-progress-active-color:var(--accent-600)] [--ui-radial-progress-background-color:var(--neutral-100)]"
+            class="shrink-0 [--ui-radial-progress-background-color:var(--neutral-100)]"
+            :class="item.kind === 'uncovered' ? '[--ui-radial-progress-active-color:var(--warning-500)]' : '[--ui-radial-progress-active-color:var(--accent-600)]'"
           />
         </div>
       </div>

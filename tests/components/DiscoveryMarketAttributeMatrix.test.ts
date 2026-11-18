@@ -4,9 +4,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import DiscoveryMarketAttributeMatrix from '~/components/entities/vault/discovery/DiscoveryMarketAttributeMatrix.vue'
 import { getAttributeMatrix, getMarketVaultResolver, type VaultUsdCacheEntry } from '~/utils/discoveryCalculations'
 import type { CollateralVaultResolver } from '~/utils/vault/collateral-exposure'
-import type { VaultExposureDisplayItem } from '~/utils/vault/exposure-display'
+import { UNCOVERED_EXPOSURE_LABEL, type VaultExposureDisplayItem } from '~/utils/vault/exposure-display'
+import type { VaultBadDebtCacheEntry } from '~/utils/vault-bad-debt'
 import {
   EUSDC_42,
+  EUSDC_42_BAD_DEBT_USD,
   EUSDC_42_OPEN_INTEREST_USD,
   EUSDC_42_TOTAL_SUPPLY_USD,
   makeLiquityHubOnDemandMarket,
@@ -29,7 +31,14 @@ const usdEntry = (supplyUsd: number): VaultUsdCacheEntry => ({
   borrowCapUsd: undefined,
 })
 
-const renderStatsMatrix = (resolveVault: CollateralVaultResolver) => {
+const eusdc42BadDebt = {
+  badDebtUsd: EUSDC_42_BAD_DEBT_USD,
+} as VaultBadDebtCacheEntry
+
+const renderStatsMatrix = (
+  resolveVault: CollateralVaultResolver,
+  { badDebtCache = new Map<string, VaultBadDebtCacheEntry>(), isBadDebtLoading = false } = {},
+) => {
   vi.stubGlobal('useVaults', () => ({ isVaultGovernorVerified: () => true }))
   vi.stubGlobal('useVaultRegistry', () => ({ getVaultCategory: () => 'standard' }))
   vi.stubGlobal('useCollateralOpenInterest', () => ({
@@ -46,7 +55,8 @@ const renderStatsMatrix = (resolveVault: CollateralVaultResolver) => {
       view: 'stats',
       usdCache: new Map([[EUSDC_42.toLowerCase(), usdEntry(EUSDC_42_TOTAL_SUPPLY_USD)]]),
       apyCache: new Map(),
-      badDebtCache: new Map(),
+      badDebtCache,
+      isBadDebtLoading,
       showBadDebtColumn: false,
       selectedHeader: null,
       resolveVault,
@@ -77,5 +87,23 @@ describe('attribute matrix exposure on an on-demand market', () => {
     const html = await renderStatsMatrix(() => undefined)
 
     expect(html).toContain('data-test-exposure="none" data-test-state="unavailable"')
+  })
+})
+
+describe('attribute matrix exposure with uncovered bad debt', () => {
+  const resolveMembers = () => getMarketVaultResolver(makeLiquityHubOnDemandMarket(), () => undefined)
+
+  it('lists the uncovered bad debt next to the covered collateral', async () => {
+    const html = await renderStatsMatrix(resolveMembers(), {
+      badDebtCache: new Map([[EUSDC_42.toLowerCase(), eusdc42BadDebt]]),
+    })
+
+    expect(html).toContain(`data-test-exposure="BOLD,sBOLD,${UNCOVERED_EXPOSURE_LABEL}" data-test-state="ready"`)
+  })
+
+  it('waits for the bad debt before showing the split', async () => {
+    const html = await renderStatsMatrix(resolveMembers(), { isBadDebtLoading: true })
+
+    expect(html).not.toContain('data-test-state="ready"')
   })
 })

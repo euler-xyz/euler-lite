@@ -16,6 +16,7 @@ import {
 } from '~/utils/vault/collateral-exposure'
 import {
   combineVaultExposureDisplays,
+  getHeldUncoveredDebtUsd,
   resolveVaultExposureDisplay,
   type ExposureValueState,
   type VaultExposureDisplay,
@@ -34,6 +35,7 @@ const {
   isLoaded: isOpenInterestLoaded,
   isOpenInterestEnabled,
 } = useCollateralOpenInterest()
+const { getVaultBadDebt, isBadDebtEnabled, isBadDebtLoading, loadBadDebtForChain } = useVaultBadDebt()
 const entities = useEulerEntitiesOfEarnVault(vault)
 const isOwnerVerified = computed(() => isEarnVaultOwnerVerified(vault))
 const entityName = computed(() => {
@@ -108,6 +110,12 @@ const strategyExposureDisplays = computed<VaultExposureDisplay[]>(() =>
       totalSupplyState: allocation.valueState,
       utilization: strategyVault.utilization,
       acceptedCollateralCount: strategyVault.collaterals.length,
+      uncoveredDebtUsd: getHeldUncoveredDebtUsd(
+        getVaultBadDebt(strategyVault.address)?.badDebtUsd,
+        strategy.allocatedAssets,
+        strategyVault.totalAssets,
+      ),
+      uncoveredDebtLoading: isBadDebtLoading.value,
     })]
   }),
 )
@@ -116,8 +124,9 @@ const exposureValueState = computed(() => exposureDisplay.value.valueState)
 const exposureDisplayItems = computed(() => exposureDisplay.value.items)
 
 watchEffect(() => {
-  if (!vault.strategies.length || !isOpenInterestEnabled.value) return
-  void loadOpenInterest()
+  if (!vault.strategies.length) return
+  if (isOpenInterestEnabled.value) void loadOpenInterest()
+  if (isBadDebtEnabled.value) void loadBadDebtForChain()
 })
 
 watchEffect(async () => {

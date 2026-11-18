@@ -16,6 +16,7 @@ import {
   type CollateralExposureGroup,
 } from '~/utils/vault/collateral-exposure'
 import {
+  getHeldUncoveredDebtUsd,
   getVaultHeaderAssets,
   resolveVaultExposureDisplay,
   type ExposureValueState,
@@ -39,6 +40,7 @@ const {
   isLoaded: isOpenInterestLoaded,
   isOpenInterestEnabled,
 } = useCollateralOpenInterest()
+const { getVaultBadDebt, isBadDebtEnabled, isBadDebtLoading, loadBadDebtForChain } = useVaultBadDebt()
 const { isEscrowLoadedOnce, isMarketDataResolved } = useVaults()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -163,6 +165,14 @@ const getStrategyCollateralGroups = (strategyVault: EVault | undefined): Collate
   )
 }
 
+const getStrategyUncoveredDebtUsd = (exposure: EulerEarnStrategyInfo, strategyVault: EVault): number =>
+  getHeldUncoveredDebtUsd(getVaultBadDebt(strategyVault.address)?.badDebtUsd, exposure.allocatedAssets, strategyVault.totalAssets)
+
+const getStrategyUncoveredSupplyShare = (exposure: EulerEarnStrategyInfo, strategyVault: EVault): number => {
+  const allocationUsd = exposureUsdPrices.value.get(strategyVault.address.toLowerCase()) ?? 0
+  return allocationUsd > 0 ? getStrategyUncoveredDebtUsd(exposure, strategyVault) / allocationUsd : 0
+}
+
 const collateralExposureGroupsByStrategy = computed(() => {
   const groupsByStrategy = new Map<string, CollateralExposureGroup[]>()
   for (const row of exposureRows.value) {
@@ -198,6 +208,8 @@ const strategyExposureDisplayByAddress = computed(() => {
       totalSupplyState,
       utilization: strategyVault.utilization,
       acceptedCollateralCount: strategyVault.collaterals.length,
+      uncoveredDebtUsd: getStrategyUncoveredDebtUsd(row.exposure, strategyVault),
+      uncoveredDebtLoading: isBadDebtLoading.value,
     }))
   }
   return result
@@ -213,8 +225,9 @@ watch(isMarketDataResolved, () => {
 })
 
 watchEffect(() => {
-  if (!exposureRows.value.length || !isOpenInterestEnabled.value) return
-  void loadOpenInterest()
+  if (!exposureRows.value.length) return
+  if (isOpenInterestEnabled.value) void loadOpenInterest()
+  if (isBadDebtEnabled.value) void loadBadDebtForChain()
 })
 
 const getAllocationPercentage = (exposure: EulerEarnStrategyInfo) => {
@@ -239,14 +252,15 @@ const getStrategySupplyApyModalData = (strategyVault: EVault) => ({
   },
 })
 
-const strategyHeaderAssets = (strategyVault: EVault) => getVaultHeaderAssets(
+const strategyHeaderAssets = (exposure: EulerEarnStrategyInfo, strategyVault: EVault) => getVaultHeaderAssets(
   strategyVault,
   { enabled: isOpenInterestEnabled.value, loaded: isOpenInterestLoaded.value, hasError: hasOpenInterestError.value },
   () => collateralExposureGroupsByStrategy.value.get(getAddress(strategyVault.address)) ?? [],
+  getStrategyUncoveredSupplyShare(exposure, strategyVault),
 )
 
 const headerAssetsByStrategy = computed(() => new Map(exposureRows.value
-  .flatMap(row => row.vault ? [[row.vault.address.toLowerCase(), strategyHeaderAssets(row.vault)] as const] : [])))
+  .flatMap(row => row.vault ? [[row.vault.address.toLowerCase(), strategyHeaderAssets(row.exposure, row.vault)] as const] : [])))
 
 const hasExposureUsdPrice = (exposure: typeof exposureList.value[0]) => {
   return exposureUsdPrices.value.has(exposure.address.toLowerCase())

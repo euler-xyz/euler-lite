@@ -25,6 +25,7 @@ const props = defineProps<{
   usdCache: Map<string, VaultUsdCacheEntry>
   apyCache: Map<string, VaultApyCacheEntry>
   badDebtCache: Map<string, VaultBadDebtCacheEntry>
+  isBadDebtLoading: boolean
   showBadDebtColumn: boolean
   selectedHeader: { address: string, axis: 'row' | 'column' } | null
   resolveVault: CollateralVaultResolver
@@ -110,6 +111,8 @@ const exposureByVault = computed(() => {
       totalSupplyState,
       utilization: columnVault.utilization,
       acceptedCollateralCount: columnVault.collaterals.length,
+      uncoveredDebtUsd: props.badDebtCache.get(column.address)?.badDebtUsd,
+      uncoveredDebtLoading: props.isBadDebtLoading,
     }))
   }
   return result

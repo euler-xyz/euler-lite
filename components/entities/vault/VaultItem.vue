@@ -31,6 +31,7 @@ const {
   isLoaded: isOpenInterestLoaded,
   isOpenInterestEnabled,
 } = useCollateralOpenInterest()
+const { getVaultBadDebt, isBadDebtEnabled, isBadDebtLoading, loadBadDebtForChain } = useVaultBadDebt()
 const isUnverified = computed(() => !isVerifiedVault(vault.address))
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault))
 const isUngoverned = computed(() => vault.governorAdmin?.toLowerCase() === zeroAddress)
@@ -72,14 +73,17 @@ const exposureDisplay = computed<VaultExposureDisplay>(() =>
     totalSupplyState: priceValues.value.totalSupplyState,
     utilization: vault.utilization,
     acceptedCollateralCount: vault.collaterals.length,
+    uncoveredDebtUsd: getVaultBadDebt(vault.address)?.badDebtUsd,
+    uncoveredDebtLoading: isBadDebtLoading.value,
   }),
 )
 const exposureValueState = computed(() => exposureDisplay.value.valueState)
 const exposureDisplayItems = computed(() => exposureDisplay.value.items)
 
 watchEffect(() => {
-  if (!isBorrowable.value || !isOpenInterestEnabled.value) return
-  void loadOpenInterest()
+  if (!isBorrowable.value) return
+  if (isOpenInterestEnabled.value) void loadOpenInterest()
+  if (isBadDebtEnabled.value) void loadBadDebtForChain()
 })
 
 const balance = computed(() =>

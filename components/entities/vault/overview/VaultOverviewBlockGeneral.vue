@@ -31,6 +31,7 @@ const {
   isLoaded: isOpenInterestLoaded,
   isOpenInterestEnabled,
 } = useCollateralOpenInterest()
+const { getVaultBadDebt, isBadDebtEnabled, isBadDebtLoading, loadBadDebtForChain } = useVaultBadDebt()
 
 type VaultPropertyBadge = Extract<VaultTypeBadge, 'private' | 'accessControl' | 'governanceLimited' | 'cyclicalNote'>
 
@@ -86,6 +87,8 @@ const exposureDisplay = computed<VaultExposureDisplay>(() =>
     totalSupplyState: totalSupplyState.value,
     utilization: vault.utilization,
     acceptedCollateralCount: vault.collaterals.length,
+    uncoveredDebtUsd: getVaultBadDebt(vault.address)?.badDebtUsd,
+    uncoveredDebtLoading: isBadDebtLoading.value,
   }),
 )
 const exposureValueState = computed(() => exposureDisplay.value.valueState)
@@ -139,8 +142,9 @@ watchEffect(async () => {
 })
 
 watchEffect(() => {
-  if (!hasBorrowSideExposure.value || !isOpenInterestEnabled.value) return
-  void loadOpenInterest()
+  if (!hasBorrowSideExposure.value) return
+  if (isOpenInterestEnabled.value) void loadOpenInterest()
+  if (isBadDebtEnabled.value) void loadBadDebtForChain()
 })
 </script>
 

@@ -40,7 +40,7 @@ const { isMarketDataResolved } = useVaults()
 const { get: registryGet } = useVaultRegistry()
 const route = useRoute()
 const { chainId } = useEulerAddresses()
-const { badDebtByChain, isBadDebtEnabled, isBadDebtLoaded, loadBadDebtForChain } = useVaultBadDebt()
+const { badDebtByChain, isBadDebtEnabled, isBadDebtLoaded, isBadDebtLoading, loadBadDebtForChain } = useVaultBadDebt()
 const shareLinkQuery = computed(() => {
   const network = route.query.network
 
@@ -706,6 +706,7 @@ onMounted(() => {
               :usd-cache="vaultUsdCache"
               :apy-cache="vaultApyCache"
               :bad-debt-cache="vaultBadDebtCache"
+              :is-bad-debt-loading="isBadDebtLoading"
               :show-bad-debt-column="isBadDebtEnabled && isBadDebtLoaded"
               :resolve-vault="vaultResolverMap.get(market.id) ?? resolveRegistryVault"
               :selected-header="selectedMatrixHeader?.marketId === market.id ? { address: selectedMatrixHeader.address, axis: selectedMatrixHeader.axis } : null"
