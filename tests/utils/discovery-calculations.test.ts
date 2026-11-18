@@ -12,6 +12,7 @@ import {
   getMiniDiagram,
   getMarketEntities,
   getMarketVaultResolver,
+  isMarketPairPaused,
   isNodeRampingDown,
   type VaultApyCacheEntry,
   type VaultUsdCacheEntry,
@@ -26,12 +27,15 @@ import { resolveVaultExposureDisplay } from '~/utils/vault/exposure-display'
 import {
   BOLD,
   EBOLD_1,
+  ESBOLD_1,
   EUSDC_42,
+  NO_OPERATIONS_HOOKED,
   EUSDC_42_OPEN_INTEREST_USD,
   EUSDC_42_TOTAL_SUPPLY_USD,
   EUSDC_42_UTILIZATION,
   SBOLD,
   makeLiquityHubOnDemandMarket,
+  makeLiquityHubVaults,
 } from '~/tests/fixtures/liquity-hub'
 
 vi.mock('~/entities/euler/labels', () => ({
@@ -908,5 +912,19 @@ describe('on-demand market collateral resolution', () => {
 
     expect(display.valueState).toBe('ready')
     expect(display.items.map(item => item.asset.symbol)).toEqual([BOLD.symbol, SBOLD.symbol])
+  })
+})
+
+describe('paused pairs in the pair matrix', () => {
+  it('marks every pair of a paused product as paused', () => {
+    const market = makeLiquityHubOnDemandMarket()
+    expect(isMarketPairPaused(market, ESBOLD_1.toLowerCase(), EBOLD_1.toLowerCase())).toBe(true)
+    expect(isMarketPairPaused(market, EBOLD_1, EUSDC_42)).toBe(true)
+  })
+
+  it('leaves live pairs and unknown vaults alone', () => {
+    const market = makeLiquityHubOnDemandMarket(makeLiquityHubVaults({ hookedOperations: NO_OPERATIONS_HOOKED }))
+    expect(isMarketPairPaused(market, ESBOLD_1, EBOLD_1)).toBe(false)
+    expect(isMarketPairPaused(market, '0x00000000000000000000000000000000000000ff', EBOLD_1)).toBe(false)
   })
 })

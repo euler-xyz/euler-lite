@@ -54,7 +54,7 @@ export const formatMarketAvailability = (count: number) => {
 }
 
 export const formatVaultBorrowAvailability = (vault: EVault): { canBorrow: boolean, label: string } => {
-  if (isVaultBorrowPaused(vault)) return { canBorrow: false, label: 'Paused' }
   const count = vault.collaterals.filter(ltv => ltv.borrowLTV > 0).length
+  if (count > 0 && isVaultBorrowPaused(vault)) return { canBorrow: false, label: 'Paused' }
   return { canBorrow: count > 0, label: formatMarketAvailability(count) }
 }

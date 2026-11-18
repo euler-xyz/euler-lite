@@ -273,8 +273,8 @@ The correlation decision is shared across discovery, borrow, and portfolio surfa
 
 | Surface | Correlated assets | Uncorrelated assets |
 |---|---|---|
-| Explore market card (`useBestMaxROE`) | Best Max ROE across eligible LTV pairs, skipping pairs whose liability has borrow disabled or whose collateral has deposit disabled by a zero-target hook (`isBorrowPairPaused`) | Best visible Net APY fallback, with the same pairs skipped |
-| Explore matrix (`DiscoveryMarketMatrix.vue`) | Numeric cells in `roe` and `multiplier` views | `-` cell with unavailable-metric tooltip and accordion notice |
+| Explore market card (`useBestMaxROE`) | Best Max ROE across eligible LTV pairs, skipping pairs whose liability has borrow disabled or whose collateral has deposit or skim disabled by a zero-target hook (`isBorrowPairPaused`) | Best visible Net APY fallback, with the same pairs skipped |
+| Explore matrix (`DiscoveryMarketMatrix.vue`) | Numeric cells in `roe` and `multiplier` views; a paused pair (`isMarketPairPaused`) shows `-` with a paused tooltip | `-` cell with unavailable-metric tooltip and accordion notice |
 | Borrow pair card (`VaultBorrowItem.vue`) | Max ROE headline, correlated-category badge, Max multiplier column, Multiply tab link | Net APY headline; multiplier column and Multiply tab shortcut are hidden |
 | Portfolio borrow card (`PortfolioBorrowItem.vue`) | Position ROE when all collateral vaults resolve and share the category | Net APY path |
 

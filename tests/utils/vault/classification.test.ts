@@ -109,5 +109,6 @@ describe('a paused vault (K3 Liquity Hub)', () => {
     expect(isBorrowPairPaused(makeEbold1(), makeEsbold1(live))).toBe(true)
     expect(isBorrowPairPaused(makeEbold1(live), makeEsbold1(live))).toBe(false)
     expect(isBorrowPairPaused(makeEbold1(live), { type: 'SecuritizeCollateral' })).toBe(false)
+    expect(isBorrowPairPaused(makeEbold1(live), makeEsbold1({ hookedOperations: { ...NO_OPERATIONS_HOOKED, skim: true } }))).toBe(true)
   })
 })

@@ -42,6 +42,11 @@ describe('formatVaultBorrowAvailability', () => {
     expect(formatVaultBorrowAvailability(makeEusdc42())).toEqual({ canBorrow: false, label: 'Paused' })
   })
 
+  it('keeps "No" for a paused vault that lends to no market', () => {
+    const noMarkets = Object.assign(makeEusdc42(), { collaterals: [] })
+    expect(formatVaultBorrowAvailability(noMarkets)).toEqual({ canBorrow: false, label: 'No' })
+  })
+
   it('counts the markets a live vault lends to', () => {
     expect(formatVaultBorrowAvailability(makeEusdc42({ hookedOperations: NO_OPERATIONS_HOOKED })))
       .toEqual({ canBorrow: true, label: 'Yes in 4 markets' })

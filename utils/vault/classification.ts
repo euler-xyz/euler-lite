@@ -1,6 +1,6 @@
 import { isEVault, type EVault, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
-import { isOpDisabled, OP_BORROW, OP_DEPOSIT } from '~/utils/vault-hooks'
+import { isOpDisabled, OP_BORROW, OP_DEPOSIT, OP_SKIM } from '~/utils/vault-hooks'
 
 /**
  * Should borrow-side UI / aggregation treat this vault as borrowable?
@@ -23,9 +23,10 @@ export const isVaultBorrowable = (
 /** A zero-target hook on borrow, or on the vault status check, reverts every new borrow. */
 export const isVaultBorrowPaused = (vault: EVault): boolean => isOpDisabled(vault, OP_BORROW)
 
-/** Opening a position deposits the collateral and borrows the liability, so either op disabled closes the pair. */
+/** Opening a position borrows the liability and deposits or, when multiplying, skims the collateral. */
 export const isBorrowPairPaused = (liability: EVault, collateral: unknown): boolean =>
-  isVaultBorrowPaused(liability) || (isEVault(collateral) && isOpDisabled(collateral, OP_DEPOSIT))
+  isVaultBorrowPaused(liability)
+  || (isEVault(collateral) && (isOpDisabled(collateral, OP_DEPOSIT) || isOpDisabled(collateral, OP_SKIM)))
 
 export const isCyclicalNoteVault = (
   vault: EVault | SecuritizeCollateralVault | null | undefined,

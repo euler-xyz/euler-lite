@@ -14,7 +14,7 @@ import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
 import { getVaultBorrowApy, getVaultSupplyApy } from '~/utils/vault-display'
 import { computeSupplyApy, computeBorrowApy, type ApyVisibilitySettings } from '~/utils/collateralOptions'
 import { getMaxLiquidationDiscountDisplayPercent } from '~/utils/vault/liquidation'
-import { isVaultBorrowable } from '~/utils/vault/classification'
+import { isBorrowPairPaused, isVaultBorrowable } from '~/utils/vault/classification'
 import { formatBadDebtHint, formatBadDebtUsd, type VaultBadDebtCacheEntry } from '~/utils/vault-bad-debt'
 import { getRingBlocks, getRingSlots, type RingLink, type RingSlots } from '~/utils/discovery-graph-layout'
 import type { CollateralVaultResolver } from '~/utils/vault/collateral-exposure'
@@ -266,6 +266,11 @@ export const findVault = (market: MarketGroup, address: string): EVault | Securi
     if (getVaultAddress(v).toLowerCase() === normalized) return v as EVault | SecuritizeCollateralVault
   }
   return null
+}
+
+export const isMarketPairPaused = (market: MarketGroup, collateralAddr: string, liabilityAddr: string): boolean => {
+  const liability = findVault(market, liabilityAddr)
+  return !!liability && isEVault(liability) && isBorrowPairPaused(liability, findVault(market, collateralAddr))
 }
 
 /** Members of an on-demand market are never written to the vault registry, so the market answers first. */
