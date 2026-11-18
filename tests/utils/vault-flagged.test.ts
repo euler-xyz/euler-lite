@@ -166,6 +166,31 @@ describe('a hidden vault whose assessment shows no governance cause', () => {
     expect(isHiddenForNonGovernanceCause(revoked, assessmentEntry(EUSDC_42_RAW_ASSESSMENT))).toBe(true)
   })
 
+  const withContext = (configContext: Record<string, unknown>) => ({
+    ...EUSDC_42_RAW_ASSESSMENT,
+    configContext: { ...EUSDC_42_RAW_ASSESSMENT.configContext, ...configContext },
+  }) as typeof EUSDC_42_RAW_ASSESSMENT
+  const failing = (key: string) => ({ key, outcome: 'fail', required: true, description: key, cause: null })
+  const passing = (key: string) => ({ key, outcome: 'pass', required: true, description: key, cause: null })
+
+  it('rejects an assessment where the governance rules never ran', () => {
+    const lensOnly = withContext({ findings: [failing('configuration.lens-readable')] })
+    expect(isHiddenForNonGovernanceCause(paused, assessmentEntry(lensOnly))).toBe(false)
+  })
+
+  it.each([
+    ['euler-evk', [passing('governance.no-deprecated-governor')], false],
+    ['euler-evk', [passing('governance.no-deprecated-governor'), passing('governance.router')], true],
+    ['euler-securitize', [passing('governance.no-deprecated-governor')], true],
+    ['euler-securitize', [], false],
+    ['euler-earn', [], false],
+    ['euler-earn', [{ ...passing('governance.timelock'), outcome: 'not_applicable' }], true],
+    ['a-policy-lite-does-not-know', [passing('governance.no-deprecated-governor'), passing('governance.router')], false],
+  ])('requires the %s governance rules to be present: %#', (policyId, governance, expected) => {
+    const context = withContext({ policyId, findings: [failing('hooks.zero-or-trusted'), ...governance] })
+    expect(isHiddenForNonGovernanceCause(paused, assessmentEntry(context))).toBe(expected)
+  })
+
   it('only applies to a hidden verdict', () => {
     expect(isHiddenForNonGovernanceCause({ ...paused, status: 'warning' }, assessmentEntry(EUSDC_42_RAW_ASSESSMENT))).toBe(false)
   })

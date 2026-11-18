@@ -1,4 +1,4 @@
-import type { VaultAssessment, VaultAssessmentFinding } from '@eulerxyz/euler-v2-sdk'
+import type { VaultAssessment, VaultAssessmentContext, VaultAssessmentFinding } from '@eulerxyz/euler-v2-sdk'
 
 export interface VaultVerdictLike {
   status: string
@@ -65,6 +65,11 @@ export const isPausedVerdict = (verdict: VaultVerdictLike | undefined, evidence:
     .some(finding => finding.outcome === 'fail' && PAUSE_CAUSE_CODES.has(finding.cause?.code ?? '')) ?? false
 }
 const CLEAR_CONSISTENCY_STATUSES: ReadonlySet<string> = new Set(['verified', 'not_applicable'])
+const REQUIRED_GOVERNANCE_RULES: Readonly<Record<string, readonly string[]>> = {
+  'euler-evk': ['governance.no-deprecated-governor', 'governance.router'],
+  'euler-securitize': ['governance.no-deprecated-governor'],
+  'euler-earn': ['governance.timelock'],
+}
 const GOVERNANCE_FINDING_KEY = /^(scheduled\.)?governance\./
 
 export interface VaultGovernanceEvidence {
@@ -79,6 +84,12 @@ const isUnresolvedFinding = (finding: VaultAssessmentFinding): boolean =>
 const isGovernanceFinding = (finding: VaultAssessmentFinding): boolean =>
   GOVERNANCE_FINDING_KEY.test(finding.key)
 
+const hasPolicyGovernanceRules = (configContext: VaultAssessmentContext): boolean => {
+  const rules = REQUIRED_GOVERNANCE_RULES[typeof configContext.policyId === 'string' ? configContext.policyId : '']
+  return !!rules && rules.every(key => configContext.findings.some(finding => finding.key === key
+    && (finding.outcome === 'pass' || finding.outcome === 'not_applicable' || !!finding.exempted)))
+}
+
 /**
  * A configuration verdict can mask a consistency failure and Layer 1 holds governance rules, so the
  * reason alone never proves the hiding is unrelated to governance: the assessment has to show it.
@@ -90,6 +101,7 @@ export const isHiddenForNonGovernanceCause = (
   if (verdict?.status !== 'hidden' || !CONFIG_HIDING_REASONS.has(verdict.decidedBy ?? '')) return false
   const configContext = evidence?.status === 'available' ? evidence.assessment?.configContext : null
   if (!configContext || !CLEAR_CONSISTENCY_STATUSES.has(evidence?.consistencyStatus ?? '')) return false
+  if (!hasPolicyGovernanceRules(configContext)) return false
   const findings = [...configContext.findings, ...(evidence?.assessment?.consistencyContext?.findings ?? [])]
   const governanceOpen = findings.some(finding => isGovernanceFinding(finding) && isUnresolvedFinding(finding)
     && (finding.required || finding.key.startsWith('scheduled.')))
