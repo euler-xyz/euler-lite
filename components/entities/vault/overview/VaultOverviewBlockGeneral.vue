@@ -11,7 +11,7 @@ import { formatVaultBorrowAvailability } from '~/utils/vault-display'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import type { VaultTypeBadge } from '~/composables/useVaultTypeBadges'
 import { AccessControlBadge, CyclicalNoteBadge, GovernanceLimitedBadge, KeyringBadge } from '#components'
-import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
+import { getCollateralExposureGroups, getCollateralExposurePairs, sumOpenInterestUsd } from '~/utils/vault/collateral-exposure'
 import { resolveVaultExposureDisplay, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
 import { getAssessmentSafeEvidence } from '~/utils/vault-assessment/evidence'
 import { FLAGGED_VAULT_LABEL } from '~/utils/vault-assessment/flagged'
@@ -86,6 +86,7 @@ const exposureDisplay = computed<VaultExposureDisplay>(() =>
     acceptedCollateralCount: vault.collaterals.length,
     badDebtUsd: getVaultBadDebt(vault.address)?.badDebtUsd,
     badDebtLoading: isBadDebtLoading.value,
+    openInterestTotalUsd: sumOpenInterestUsd(getOpenInterestForVault(vault.address)),
     vaultShare: 1,
   }),
 )

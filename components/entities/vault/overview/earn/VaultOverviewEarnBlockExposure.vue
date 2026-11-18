@@ -13,6 +13,7 @@ import { getAssetUsdValue } from '~/utils/sdk-prices'
 import {
   getCollateralExposureGroups,
   getCollateralExposurePairs,
+  sumOpenInterestUsd,
   type CollateralExposureGroup,
 } from '~/utils/vault/collateral-exposure'
 import {
@@ -202,6 +203,7 @@ const strategyExposureDisplayByAddress = computed(() => {
       acceptedCollateralCount: strategyVault.collaterals.length,
       badDebtUsd: getVaultBadDebt(strategyVault.address)?.badDebtUsd,
       badDebtLoading: isBadDebtLoading.value,
+      openInterestTotalUsd: sumOpenInterestUsd(getOpenInterestForVault(strategyVault.address)),
       vaultShare: getHeldSupplyShare(row.exposure.allocatedAssets, strategyVault.totalAssets),
     }))
   }
@@ -249,7 +251,10 @@ const strategyHeaderAssets = (strategyVault: EVault) => getVaultHeaderAssets(
   strategyVault,
   { enabled: isOpenInterestEnabled.value, loaded: isOpenInterestLoaded.value, hasError: hasOpenInterestError.value },
   () => collateralExposureGroupsByStrategy.value.get(getAddress(strategyVault.address)) ?? [],
-  getVaultBadDebt(strategyVault.address)?.badDebtUsd,
+  {
+    badDebtUsd: getVaultBadDebt(strategyVault.address)?.badDebtUsd,
+    openInterestTotalUsd: sumOpenInterestUsd(getOpenInterestForVault(strategyVault.address)),
+  },
 )
 
 const headerAssetsByStrategy = computed(() => new Map(exposureRows.value

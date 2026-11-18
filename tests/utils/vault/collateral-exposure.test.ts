@@ -4,6 +4,7 @@ import {
   getCollateralExposurePairs,
   hasCollateralExposure,
   type CollateralVaultResolver,
+  sumOpenInterestUsd,
 } from '~/utils/vault/collateral-exposure'
 import type { EVault, SecuritizeCollateralVault, EVaultCollateral } from '@eulerxyz/euler-v2-sdk'
 
@@ -284,5 +285,12 @@ describe('getCollateralExposureGroups', () => {
     expect(groups[0].items).toHaveLength(2)
     expect(groups[0].maxCurrentLiquidationLTV).toBe(0.82)
     expect(groups[1].asset.symbol).toBe('WETH')
+  })
+})
+
+describe('sumOpenInterestUsd', () => {
+  it('adds every open-interest row, resolved collateral or not, and skips invalid values', () => {
+    expect(sumOpenInterestUsd({ '0x01': 1_000_000, '0x02': 9_000_000, '0x03': Number.NaN, '0x04': -5 })).toBe(10_000_000)
+    expect(sumOpenInterestUsd({})).toBe(0)
   })
 })

@@ -591,15 +591,102 @@ describe('exposure with uncovered bad debt (K3 Liquity Hub eUSDC-42)', () => {
   })
 
   it('never shows more uncovered debt than is utilized', () => {
-    const items = buildAllocatedVaultExposureDisplayItems({
-      collateralGroups: [backing(BOLD, 20)],
+    const { items } = resolveVaultExposureDisplay({
+      ...live,
+      getCollateralGroups: () => [backing(BOLD, 20)],
       totalExposureUsd: 100,
       utilization: 50,
+      vaultShare: 1,
       badDebtUsd: 1_000,
     })
 
     expect(valueOf(items, UNCOVERED_EXPOSURE_LABEL)).toBeLessThanOrEqual(50)
     expect(sum(items)).toBeCloseTo(50, 9)
+  })
+
+  it('ignores bad debt that is dust against live borrows when the open-interest rows lag', () => {
+    const input = {
+      ...live,
+      getCollateralGroups: () => [backing(USDC, 0)],
+      openInterestTotalUsd: 0,
+      totalExposureUsd: 20_000_000,
+      utilization: 50,
+      vaultShare: 1,
+    }
+    const display = resolveVaultExposureDisplay({ ...input, badDebtUsd: 5 })
+
+    expect(display.items.some(item => item.kind === 'uncovered')).toBe(false)
+    expect(display).toEqual(resolveVaultExposureDisplay(input))
+  })
+
+  it('does the same for an Earn allocation of that vault', () => {
+    const input = {
+      ...live,
+      getCollateralGroups: () => [backing(USDC, 0)],
+      openInterestTotalUsd: 0,
+      totalExposureUsd: 5_000_000,
+      utilization: 50,
+      vaultShare: 0.25,
+    }
+
+    expect(resolveVaultExposureDisplay({ ...input, badDebtUsd: 5 }).items.some(item => item.kind === 'uncovered')).toBe(false)
+  })
+
+  it('counts open interest on collaterals lite did not resolve', () => {
+    const { valueState, items } = resolveVaultExposureDisplay({
+      ...live,
+      getCollateralGroups: () => [backing(BOLD, 1_000_000)],
+      openInterestTotalUsd: 10_000_000,
+      totalExposureUsd: 22_000_000,
+      utilization: 50,
+      vaultShare: 1,
+      badDebtUsd: 1_000_000,
+    })
+
+    expect(valueState).toBe('ready')
+    expect(valueOf(items, UNCOVERED_EXPOSURE_LABEL)).toBeCloseTo(1_000_000, 3)
+    expect(sum(items)).toBeCloseTo(11_000_000, 3)
+  })
+
+  // Euler V3 bad debt and live borrows on Ethereum, 2026-11-18: eUSDC-75 and ewstUSR-1 have no open-interest rows.
+  it('calls all borrows uncovered when V3 has no covered debt and the bad debt matches the live borrows', () => {
+    const { valueState, items } = resolveVaultExposureDisplay({
+      ...live,
+      getCollateralGroups: () => [backing(USDC, 0)],
+      openInterestTotalUsd: 0,
+      totalExposureUsd: 108.5739,
+      utilization: 100,
+      vaultShare: 1,
+      badDebtUsd: 108.5704,
+    })
+
+    expect(valueState).toBe('ready')
+    expect(items).toEqual([expect.objectContaining({ kind: 'uncovered', valueUsd: 108.5739 })])
+  })
+
+  it('keeps the uncovered marker on the qualitative list when the covered rest cannot be placed', () => {
+    const { valueState, items } = resolveVaultExposureDisplay({
+      ...live,
+      getCollateralGroups: () => [backing(USDC, 0), backing(SBOLD, 0)],
+      openInterestTotalUsd: 0,
+      totalExposureUsd: 83.2965,
+      utilization: 100,
+      vaultShare: 1,
+      badDebtUsd: 81.8247,
+    })
+
+    expect(valueState).toBe('unavailable')
+    expect(items.map(item => item.label ?? item.asset.symbol)).toEqual(['USDC', 'sBOLD', UNCOVERED_EXPOSURE_LABEL])
+  })
+
+  it('sizes the strategy lead on V3 bad debt plus the raw open interest', () => {
+    expect(getVaultBackingLead({
+      ...live,
+      getCollateralGroups: () => [backing(BOLD, 1_000_000)],
+      openInterestTotalUsd: 10_000_000,
+      utilization: 50,
+      badDebtUsd: 1_500_000,
+    })?.label).toBe('Backed by BOLD')
   })
 
   it('shows only the uncovered item when V3 has no covered debt left', () => {
@@ -731,7 +818,7 @@ describe('exposure with uncovered bad debt (K3 Liquity Hub eUSDC-42)', () => {
       { utilization: 50, collaterals: [{}], asset: usdc },
       { enabled: true, loaded: true, hasError: false },
       () => [backing(SBOLD, 0)],
-      40,
+      { badDebtUsd: 40, openInterestTotalUsd: 0 },
     )
 
     expect(header).toEqual({ assets: [usdc], label: 'Mostly uncovered debt' })

@@ -13,6 +13,7 @@ import { VaultApyModal, UiModalPreviewTrigger } from '#components'
 import {
   getCollateralExposureGroups,
   getCollateralExposurePairs,
+  sumOpenInterestUsd,
 } from '~/utils/vault/collateral-exposure'
 import {
   combineVaultExposureDisplays,
@@ -112,6 +113,7 @@ const strategyExposureDisplays = computed<VaultExposureDisplay[]>(() =>
       acceptedCollateralCount: strategyVault.collaterals.length,
       badDebtUsd: getVaultBadDebt(strategyVault.address)?.badDebtUsd,
       badDebtLoading: isBadDebtLoading.value,
+      openInterestTotalUsd: sumOpenInterestUsd(getOpenInterestForVault(strategyVault.address)),
       vaultShare: getHeldSupplyShare(strategy.allocatedAssets, strategyVault.totalAssets),
     })]
   }),

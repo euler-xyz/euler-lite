@@ -33,11 +33,33 @@ const buildUncoveredExposureItem = (valueUsd: number): VaultExposureDisplayItem 
 const BAD_DEBT_FLOOR_USD = 1
 const BAD_DEBT_FLOOR_SHARE = 0.0001
 
-/** Bad debt under max($1, 0.01% of the vault's debt) is rounding noise, not exposure. */
-const getUncoveredShareOfDebt = (badDebtUsd: number | undefined, vaultDebtUsd: number): number => {
-  if (badDebtUsd === undefined || !Number.isFinite(badDebtUsd) || !Number.isFinite(vaultDebtUsd) || vaultDebtUsd <= 0) return 0
-  if (badDebtUsd < Math.max(BAD_DEBT_FLOOR_USD, BAD_DEBT_FLOOR_SHARE * vaultDebtUsd)) return 0
-  return Math.min(1, badDebtUsd / vaultDebtUsd)
+const getBadDebtFloorUsd = (vaultDebtUsd: number): number =>
+  Math.max(BAD_DEBT_FLOOR_USD, BAD_DEBT_FLOOR_SHARE * vaultDebtUsd)
+
+const readUsd = (value: number | undefined): number | undefined =>
+  value !== undefined && Number.isFinite(value) && value > 0 ? value : undefined
+
+/**
+ * The vault's debt is V3's bad debt plus its raw open interest (every collateral, resolved or not), or the
+ * live borrows when they exceed that snapshot by more than the dust floor, as when open-interest rows lag.
+ * Bad debt under the floor of that debt is noise.
+ */
+const getUncoveredShareOfDebt = ({ badDebtUsd, openInterestTotalUsd, liveDebtUsd }: {
+  badDebtUsd: number | undefined
+  openInterestTotalUsd: number | undefined
+  liveDebtUsd: number | undefined
+}): number => {
+  const badDebt = readUsd(badDebtUsd)
+  if (badDebt === undefined) return 0
+  const snapshotDebt = openInterestTotalUsd !== undefined && Number.isFinite(openInterestTotalUsd)
+    ? badDebt + Math.max(0, openInterestTotalUsd)
+    : undefined
+  const liveDebt = readUsd(liveDebtUsd)
+  const vaultDebt = liveDebt !== undefined && (snapshotDebt === undefined || liveDebt - snapshotDebt > getBadDebtFloorUsd(liveDebt))
+    ? liveDebt
+    : snapshotDebt
+  if (vaultDebt === undefined || badDebt < getBadDebtFloorUsd(vaultDebt)) return 0
+  return Math.min(1, badDebt / vaultDebt)
 }
 
 /** The fraction of a vault's supply that a holding of `heldAssets` is, e.g. an Earn allocation. */
@@ -114,27 +136,22 @@ export const hasMissingUtilizedExposureSplit = (
   return collateralTotalUsd <= 0 && clampPercentFraction(utilization) > 0
 }
 
-/**
- * `badDebtUsd` is the whole vault's V3 bad debt. Open interest is collateral-covered debt from the same
- * snapshot, so bad debt over bad debt plus open interest is the uncovered share of the vault's debt; it
- * applies to the live utilized amount whatever part of the vault `totalExposureUsd` prices.
- */
+/** `uncoveredShare` is the part of the vault's debt that no collateral covers; the rest is split by open interest. */
 export const buildAllocatedVaultExposureDisplayItems = ({
   collateralGroups,
   totalExposureUsd,
   utilization,
-  badDebtUsd,
+  uncoveredShare = 0,
 }: {
   collateralGroups: CollateralExposureGroup[]
   totalExposureUsd: number
   utilization: number
-  badDebtUsd?: number
+  uncoveredShare?: number
 }): VaultExposureDisplayItem[] => {
   if (!Number.isFinite(totalExposureUsd) || totalExposureUsd <= 0) return []
 
   const collateralTotalUsd = collateralGroups.reduce((sum, group) => sum + group.openInterestUsd, 0)
   const utilizedExposureUsd = totalExposureUsd * clampPercentFraction(utilization)
-  const uncoveredShare = getUncoveredShareOfDebt(badDebtUsd, (badDebtUsd ?? 0) + collateralTotalUsd)
   const coveredExposureUsd = utilizedExposureUsd * (1 - uncoveredShare)
   if (collateralTotalUsd <= 0 && coveredExposureUsd > 0) return []
 
@@ -164,16 +181,19 @@ export interface VaultExposureDisplay {
   items: VaultExposureDisplayItem[]
 }
 
-const buildQualitativeExposureDisplay = (collateralGroups: CollateralExposureGroup[]): VaultExposureDisplay => ({
-  valueState: 'unavailable',
-  items: mergeVaultExposureDisplayItems(
+const buildQualitativeExposureDisplay = (
+  collateralGroups: CollateralExposureGroup[],
+  hasUncoveredDebt = false,
+): VaultExposureDisplay => {
+  const items = mergeVaultExposureDisplayItems(
     collateralGroups.map(group => ({
       asset: group.asset,
       valueUsd: 0,
       vaultCount: group.vaultCount,
     })),
-  ),
-})
+  )
+  return { valueState: 'unavailable', items: hasUncoveredDebt ? [...items, buildUncoveredExposureItem(0)] : items }
+}
 
 /**
  * Build the exposure display when the per-collateral open-interest split is
@@ -195,8 +215,8 @@ const buildQualitativeExposureDisplay = (collateralGroups: CollateralExposureGro
  *
  * Idle (un-utilized) supply is never listed: it is not collateral exposure.
  *
- * Without open interest the uncovered share needs the vault's whole debt, so the exact split takes
- * known bad debt off only when `vaultShare` says what part of the vault `totalExposureUsd` prices.
+ * `uncoveredShare` comes from the caller; the exact split gives that part to an uncovered item and the
+ * qualitative list keeps an uncovered marker.
  */
 export const buildFallbackVaultExposureDisplay = ({
   collateralGroups,
@@ -204,16 +224,14 @@ export const buildFallbackVaultExposureDisplay = ({
   totalSupplyState,
   utilization,
   acceptedCollateralCount,
-  badDebtUsd,
-  vaultShare,
+  uncoveredShare = 0,
 }: {
   collateralGroups: CollateralExposureGroup[]
   totalExposureUsd: number
   totalSupplyState: ExposureValueState
   utilization: number
   acceptedCollateralCount: number
-  badDebtUsd?: number
-  vaultShare?: number
+  uncoveredShare?: number
 }): VaultExposureDisplay => {
   if (totalSupplyState === 'loading') return { valueState: 'loading', items: [] }
 
@@ -240,9 +258,6 @@ export const buildFallbackVaultExposureDisplay = ({
       // The split is known, so drop collaterals with no current exposure ($0) —
       // same rule as the allocated builder. When nothing is utilized every
       // collateral is $0, so this collapses to an empty ready split ("-").
-      const uncoveredShare = vaultShare && vaultShare > 0
-        ? getUncoveredShareOfDebt(badDebtUsd, utilizedExposureUsd / vaultShare)
-        : 0
       const collateralItems = collateralGroups
         .map(group => ({
           asset: group.asset,
@@ -260,7 +275,7 @@ export const buildFallbackVaultExposureDisplay = ({
     }
   }
 
-  return buildQualitativeExposureDisplay(collateralGroups)
+  return buildQualitativeExposureDisplay(collateralGroups, uncoveredShare > 0)
 }
 
 /**
@@ -273,10 +288,11 @@ export const buildFallbackVaultExposureDisplay = ({
  * `getCollateralGroups` is a thunk so the (non-trivial) grouping work is skipped
  * entirely while open interest is still loading.
  *
- * `badDebtUsd` is the whole vault's V3 bad debt; while it is still loading the
- * live split waits for it. `vaultShare` is the part of the vault's supply that
+ * `badDebtUsd` is the whole vault's V3 bad debt and `openInterestTotalUsd` the
+ * sum of all its open-interest rows; while bad debt is still loading the live
+ * split waits for it. `vaultShare` is the part of the vault's supply that
  * `totalExposureUsd` prices (1 for the vault itself, an allocation's share for
- * Earn).
+ * Earn), which turns the utilized amount into the vault's live borrows.
  */
 export const resolveVaultExposureDisplay = ({
   openInterestEnabled,
@@ -289,6 +305,7 @@ export const resolveVaultExposureDisplay = ({
   acceptedCollateralCount,
   badDebtUsd,
   badDebtLoading = false,
+  openInterestTotalUsd,
   vaultShare,
 }: {
   openInterestEnabled: boolean
@@ -301,6 +318,7 @@ export const resolveVaultExposureDisplay = ({
   acceptedCollateralCount: number
   badDebtUsd?: number
   badDebtLoading?: boolean
+  openInterestTotalUsd?: number
   vaultShare?: number
 }): VaultExposureDisplay => {
   if (openInterestEnabled && !hasOpenInterestError && !openInterestLoaded) {
@@ -314,12 +332,17 @@ export const resolveVaultExposureDisplay = ({
     return { valueState: 'loading', items: [] }
   }
 
-  const collateralTotalUsd = collateralGroups.reduce((sum, group) => sum + group.openInterestUsd, 0)
-  const hasUncoveredDebt = getUncoveredShareOfDebt(badDebtUsd, (badDebtUsd ?? 0) + collateralTotalUsd) > 0
+  const resolvedOpenInterestUsd = collateralGroups.reduce((sum, group) => sum + group.openInterestUsd, 0)
+  const utilizedExposureUsd = totalSupplyState === 'ready' ? totalExposureUsd * clampPercentFraction(utilization) : 0
+  const uncoveredShare = getUncoveredShareOfDebt({
+    badDebtUsd,
+    openInterestTotalUsd: hasLiveExposureData ? openInterestTotalUsd ?? resolvedOpenInterestUsd : undefined,
+    liveDebtUsd: vaultShare && vaultShare > 0 ? utilizedExposureUsd / vaultShare : undefined,
+  })
   if (
     hasLiveExposureData
     && totalSupplyState === 'ready'
-    && (hasUncoveredDebt || !hasMissingUtilizedExposureSplit(collateralGroups, utilization))
+    && (uncoveredShare >= 1 || !hasMissingUtilizedExposureSplit(collateralGroups, utilization))
   ) {
     return {
       valueState: 'ready',
@@ -327,7 +350,7 @@ export const resolveVaultExposureDisplay = ({
         collateralGroups,
         totalExposureUsd,
         utilization,
-        badDebtUsd,
+        uncoveredShare,
       }),
     }
   }
@@ -340,8 +363,7 @@ export const resolveVaultExposureDisplay = ({
     totalSupplyState,
     utilization,
     acceptedCollateralCount,
-    badDebtUsd,
-    vaultShare,
+    uncoveredShare,
   })
 }
 
@@ -414,7 +436,7 @@ export const getExposureLead = (
  * With nothing borrowed the split is empty, so the lead names the collaterals a new borrow can use instead.
  */
 export const getVaultBackingLead = (
-  input: Omit<Parameters<typeof resolveVaultExposureDisplay>[0], 'totalExposureUsd' | 'totalSupplyState'>,
+  input: Omit<Parameters<typeof resolveVaultExposureDisplay>[0], 'totalExposureUsd' | 'totalSupplyState' | 'vaultShare'>,
 ): ReturnType<typeof getExposureLead> => {
   const display = resolveVaultExposureDisplay({ ...input, totalExposureUsd: 1, totalSupplyState: 'ready' })
   const hasNoBorrows = display.valueState === 'ready' && clampPercentFraction(input.utilization) <= 0
@@ -433,7 +455,7 @@ export const getVaultHeaderAssets = (
   vault: { utilization: number, collaterals: readonly unknown[], asset: VaultAsset },
   openInterest: { enabled: boolean, loaded: boolean, hasError: boolean },
   getCollateralGroups: () => CollateralExposureGroup[],
-  badDebtUsd?: number,
+  badDebt: { badDebtUsd?: number, openInterestTotalUsd?: number } = {},
 ): VaultHeaderAssets => {
   const lead = getVaultBackingLead({
     openInterestEnabled: openInterest.enabled,
@@ -442,7 +464,7 @@ export const getVaultHeaderAssets = (
     getCollateralGroups,
     utilization: vault.utilization,
     acceptedCollateralCount: vault.collaterals.length,
-    badDebtUsd,
+    ...badDebt,
   })
   const { address, decimals, name, symbol } = vault.asset
   if (!lead) return { assets: [{ address, decimals, name, symbol }] }

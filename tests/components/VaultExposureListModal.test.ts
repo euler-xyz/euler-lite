@@ -33,7 +33,7 @@ describe('exposure list with uncovered bad debt', () => {
       }],
       totalExposureUsd: EUSDC_42_BAD_DEBT_USD + 1.29,
       utilization: 100,
-      badDebtUsd: EUSDC_42_BAD_DEBT_USD,
+      uncoveredShare: EUSDC_42_BAD_DEBT_USD / (EUSDC_42_BAD_DEBT_USD + 1.29),
     }))
 
     expect(html).toContain(UNCOVERED_EXPOSURE_LABEL)

@@ -16,7 +16,7 @@ import type { VaultBadDebtCacheEntry } from '~/utils/vault-bad-debt'
 import { getEntitiesByVault } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { VaultHooksInfoModal } from '#components'
-import { getCollateralExposureGroups, getCollateralExposurePairs, type CollateralVaultResolver } from '~/utils/vault/collateral-exposure'
+import { getCollateralExposureGroups, getCollateralExposurePairs, sumOpenInterestUsd, type CollateralVaultResolver } from '~/utils/vault/collateral-exposure'
 import { resolveVaultExposureDisplay, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
 
 const props = defineProps<{
@@ -113,6 +113,7 @@ const exposureByVault = computed(() => {
       acceptedCollateralCount: columnVault.collaterals.length,
       badDebtUsd: props.badDebtCache.get(column.address)?.badDebtUsd,
       badDebtLoading: props.isBadDebtLoading,
+      openInterestTotalUsd: sumOpenInterestUsd(getOpenInterestForVault(column.address)),
       vaultShare: 1,
     }))
   }

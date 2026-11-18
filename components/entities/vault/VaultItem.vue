@@ -11,7 +11,7 @@ import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { VaultApyModal, UiModalPreviewTrigger } from '#components'
 import { isVaultBorrowable } from '~/utils/vault/classification'
-import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
+import { getCollateralExposureGroups, getCollateralExposurePairs, sumOpenInterestUsd } from '~/utils/vault/collateral-exposure'
 import { resolveVaultExposureDisplay, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
 import { getCriticalAssessmentWarning, getUnknownVaultCause } from '~/utils/vault-assessment/presentation'
 import { zeroAddress } from 'viem'
@@ -75,6 +75,7 @@ const exposureDisplay = computed<VaultExposureDisplay>(() =>
     acceptedCollateralCount: vault.collaterals.length,
     badDebtUsd: getVaultBadDebt(vault.address)?.badDebtUsd,
     badDebtLoading: isBadDebtLoading.value,
+    openInterestTotalUsd: sumOpenInterestUsd(getOpenInterestForVault(vault.address)),
     vaultShare: 1,
   }),
 )
