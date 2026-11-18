@@ -2,6 +2,7 @@ export { useCowSwapExecutionCore } from './useCowSwapExecutionCore'
 export { useCowSwapOpenPositionExecution } from './useCowSwapOpenPositionExecution'
 export { useCowSwapClosePositionExecution } from './useCowSwapClosePositionExecution'
 export { useCowSwapCollateralSwapExecution } from './useCowSwapCollateralSwapExecution'
+export { useCowSwapCollateralSwapReview } from './useCowSwapCollateralSwapReview'
 export { useCowSwapOrderStatus } from './useCowSwapOrderStatus'
 export { openCowSwapReviewModal, buildApprovalSignSteps } from './openCowSwapReviewModal'
 
