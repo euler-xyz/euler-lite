@@ -10,6 +10,20 @@ const badDebtByChain = shallowRef<Map<number, Map<string, VaultBadDebtCacheEntry
 const loadingChains = shallowRef<Set<number>>(new Set())
 const errorByChain = shallowRef<Map<number, Error>>(new Map())
 const inFlight = new Map<number, Promise<void>>()
+const failedAtByChain = new Map<number, number>()
+const BAD_DEBT_RETRY_AFTER_MS = 60_000
+const BAD_DEBT_TIMEOUT_MS = 15_000
+
+const fetchWithTimeout = async (url: string): Promise<Response> => {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), BAD_DEBT_TIMEOUT_MS)
+  try {
+    return await fetch(url, { headers: { accept: 'application/json' }, signal: controller.signal })
+  }
+  finally {
+    clearTimeout(timer)
+  }
+}
 
 const setChainLoading = (chainId: number, loading: boolean) => {
   const next = new Set(loadingChains.value)
@@ -49,9 +63,7 @@ const fetchBadDebtRows = async (
   const rows: V3VaultBadDebtRow[] = []
 
   while (true) {
-    const response = await fetch(buildBadDebtUrl(baseUrl, chainId, offset, limit), {
-      headers: { accept: 'application/json' },
-    })
+    const response = await fetchWithTimeout(buildBadDebtUrl(baseUrl, chainId, offset, limit))
     if (!response.ok) {
       throw new Error(`Bad debt fetch failed with ${response.status}`)
     }
@@ -80,6 +92,8 @@ export const useVaultBadDebt = () => {
       return
     }
     if (!force && badDebtByChain.value.has(targetChainId) && !errorByChain.value.has(targetChainId)) return
+    const failedAt = failedAtByChain.get(targetChainId)
+    if (!force && failedAt !== undefined && Date.now() - failedAt < BAD_DEBT_RETRY_AFTER_MS) return
     const existing = inFlight.get(targetChainId)
     if (existing) return existing
 
@@ -88,9 +102,11 @@ export const useVaultBadDebt = () => {
       setChainError(targetChainId, null)
       try {
         const rows = await fetchBadDebtRows(envConfig.v3ApiUrl, targetChainId)
+        failedAtByChain.delete(targetChainId)
         setChainCache(targetChainId, buildBadDebtCache(rows))
       }
       catch (err) {
+        failedAtByChain.set(targetChainId, Date.now())
         setChainError(targetChainId, err instanceof Error ? err : new Error(String(err)))
       }
       finally {
