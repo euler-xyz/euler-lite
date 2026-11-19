@@ -292,7 +292,8 @@ export const buildFallbackVaultExposureDisplay = ({
  * sum of all its open-interest rows; while bad debt is still loading the live
  * split waits for it. `vaultShare` is the part of the vault's supply that
  * `totalExposureUsd` prices (1 for the vault itself, an allocation's share for
- * Earn), which turns the utilized amount into the vault's live borrows.
+ * Earn), which turns the utilized amount into the vault's live borrows;
+ * `liveDebtUsd` gives those borrows directly where the supply is nominal.
  */
 export const resolveVaultExposureDisplay = ({
   openInterestEnabled,
@@ -307,6 +308,7 @@ export const resolveVaultExposureDisplay = ({
   badDebtLoading = false,
   openInterestTotalUsd,
   vaultShare,
+  liveDebtUsd,
 }: {
   openInterestEnabled: boolean
   openInterestLoaded: boolean
@@ -320,6 +322,7 @@ export const resolveVaultExposureDisplay = ({
   badDebtLoading?: boolean
   openInterestTotalUsd?: number
   vaultShare?: number
+  liveDebtUsd?: number
 }): VaultExposureDisplay => {
   if (openInterestEnabled && !hasOpenInterestError && !openInterestLoaded) {
     return { valueState: 'loading', items: [] }
@@ -337,7 +340,7 @@ export const resolveVaultExposureDisplay = ({
   const uncoveredShare = getUncoveredShareOfDebt({
     badDebtUsd,
     openInterestTotalUsd: hasLiveExposureData ? openInterestTotalUsd ?? resolvedOpenInterestUsd : undefined,
-    liveDebtUsd: vaultShare && vaultShare > 0 ? utilizedExposureUsd / vaultShare : undefined,
+    liveDebtUsd: liveDebtUsd ?? (vaultShare && vaultShare > 0 ? utilizedExposureUsd / vaultShare : undefined),
   })
   if (
     hasLiveExposureData
@@ -432,7 +435,8 @@ export const getExposureLead = (
 }
 
 /**
- * The split is built on a nominal supply of one, so only its order and labels are read, never its amounts.
+ * The split is built on a nominal supply of one, so only its order and labels are read, never its amounts;
+ * `liveDebtUsd`, the vault's whole live borrows, keeps the uncovered share on the breakdown's denominator.
  * With nothing borrowed the split is empty, so the lead names the collaterals a new borrow can use instead.
  */
 export const getVaultBackingLead = (
@@ -455,7 +459,7 @@ export const getVaultHeaderAssets = (
   vault: { utilization: number, collaterals: readonly unknown[], asset: VaultAsset },
   openInterest: { enabled: boolean, loaded: boolean, hasError: boolean },
   getCollateralGroups: () => CollateralExposureGroup[],
-  badDebt: { badDebtUsd?: number, openInterestTotalUsd?: number } = {},
+  badDebt: { badDebtUsd?: number, openInterestTotalUsd?: number, liveDebtUsd?: number } = {},
 ): VaultHeaderAssets => {
   const lead = getVaultBackingLead({
     openInterestEnabled: openInterest.enabled,

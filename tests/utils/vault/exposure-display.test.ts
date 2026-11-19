@@ -812,6 +812,46 @@ describe('exposure with uncovered bad debt (K3 Liquity Hub eUSDC-42)', () => {
     })?.label).toBe('Backed by BOLD')
   })
 
+  describe('the strategy header agrees with the breakdown', () => {
+    const usdc = { ...USDC }
+    const strategy = { utilization: 50, collaterals: [{}], asset: usdc }
+    const breakdownAndHeader = (badDebtUsd: number, openInterestTotalUsd: number, liveDebtUsd?: number) => {
+      const groups = () => [backing(BOLD, openInterestTotalUsd)]
+      const { items } = resolveVaultExposureDisplay({
+        ...live,
+        getCollateralGroups: groups,
+        totalExposureUsd: 2_000,
+        utilization: 50,
+        vaultShare: 1,
+        badDebtUsd,
+        openInterestTotalUsd,
+      })
+      const header = getVaultHeaderAssets(strategy, { enabled: true, loaded: true, hasError: false }, groups, { badDebtUsd, openInterestTotalUsd, liveDebtUsd })
+      return { uncovered: valueOf(items, UNCOVERED_EXPOSURE_LABEL), covered: valueOf(items, 'BOLD'), label: header.label }
+    }
+
+    it('uses the live borrows when the open-interest rows lag', () => {
+      const lagging = breakdownAndHeader(80, 20, 1_000)
+      expect(lagging.uncovered).toBeCloseTo(80, 6)
+      expect(lagging.covered).toBeCloseTo(920, 6)
+      expect(lagging.label).toBe('Backed by BOLD')
+    })
+
+    it('keeps the snapshot ratio without a live-debt input', () => {
+      expect(breakdownAndHeader(80, 20).label).toBe('Mostly uncovered debt; rest backed by BOLD')
+    })
+
+    it.each([
+      [80, 920, 'Backed by BOLD'],
+      [900, 100, 'Mostly uncovered debt; rest backed by BOLD'],
+    ])('matches the breakdown when the rows are current: %s bad debt against %s open interest', (badDebtUsd, openInterestTotalUsd, label) => {
+      const current = breakdownAndHeader(badDebtUsd, openInterestTotalUsd, 1_000)
+      expect(current.uncovered).toBeCloseTo(badDebtUsd, 6)
+      expect(current.covered).toBeCloseTo(openInterestTotalUsd, 6)
+      expect(current.label).toBe(label)
+    })
+  })
+
   it('names the uncovered debt alone and falls back to the strategy asset when nothing covers it', () => {
     const usdc = { ...USDC }
     const header = getVaultHeaderAssets(

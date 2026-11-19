@@ -52,6 +52,7 @@ const isLoading = ref(false)
 const exposureUsdPrices = ref<Map<string, number>>(new Map())
 const unavailableExposureUsdPrices = ref<Set<string>>(new Set())
 const exposureCapUsdPrices = ref<Map<string, number>>(new Map())
+const strategyBorrowsUsd = ref<Map<string, number>>(new Map())
 let priceLoadId = 0
 
 const UINT136_MAX = 2n ** 136n - 1n
@@ -103,24 +104,27 @@ const loadExposureUsdPrices = async () => {
     const exposureVault = getExposureVaultByAddress(exposure.address)
     if (!exposureVault) return null
 
-    const [allocationUsd, capUsd] = await Promise.all([
+    const [allocationUsd, capUsd, borrowsUsd] = await Promise.all([
       getAssetUsdValue(exposure.allocatedAssets, exposureVault, 'off-chain'),
       isUnlimitedCap(exposure)
         ? Promise.resolve(undefined)
         : getAssetUsdValue(exposure.allocationCap.current, exposureVault, 'off-chain'),
+      getAssetUsdValue(exposureVault.totalBorrowed, exposureVault, 'off-chain'),
     ])
 
-    return { exposure, allocationUsd, capUsd }
+    return { exposure, allocationUsd, capUsd, borrowsUsd }
   }))
   if (loadId !== priceLoadId) return
 
   const newPrices = new Map<string, number>()
   const newUnavailablePrices = new Set<string>()
   const newCapPrices = new Map<string, number>()
+  const newBorrowsUsd = new Map<string, number>()
   results.forEach((result) => {
     if (!result) return
 
-    const { exposure, allocationUsd, capUsd } = result
+    const { exposure, allocationUsd, capUsd, borrowsUsd } = result
+    if (borrowsUsd !== undefined) newBorrowsUsd.set(exposure.address.toLowerCase(), borrowsUsd)
     if (allocationUsd !== undefined) {
       newPrices.set(exposure.address.toLowerCase(), allocationUsd)
     }
@@ -134,6 +138,7 @@ const loadExposureUsdPrices = async () => {
   exposureUsdPrices.value = newPrices
   unavailableExposureUsdPrices.value = newUnavailablePrices
   exposureCapUsdPrices.value = newCapPrices
+  strategyBorrowsUsd.value = newBorrowsUsd
 }
 
 const getExposureVaultByAddress = (address: string) => {
@@ -254,6 +259,7 @@ const strategyHeaderAssets = (strategyVault: EVault) => getVaultHeaderAssets(
   {
     badDebtUsd: getVaultBadDebt(strategyVault.address)?.badDebtUsd,
     openInterestTotalUsd: sumOpenInterestUsd(getOpenInterestForVault(strategyVault.address)),
+    liveDebtUsd: strategyBorrowsUsd.value.get(strategyVault.address.toLowerCase()),
   },
 )
 
