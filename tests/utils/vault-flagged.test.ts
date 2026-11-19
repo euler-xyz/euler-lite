@@ -141,8 +141,15 @@ describe('a hidden vault whose assessment shows no governance cause', () => {
   it.each([
     ['a failing scheduled governance change', { key: 'scheduled.governance.timelock', outcome: 'fail', required: false, description: 'Timelock', cause: null }],
     ['a required governance rule that could not run', { key: 'governance.router', outcome: 'unknown', required: true, description: 'Router', cause: null }],
+    ['an advisory governance rule that could not run', { key: 'governance.curator-registered', outcome: 'unknown', required: false, description: 'Curator', cause: null }],
+    ['an advisory governance rule that failed', { key: 'governance.curator-registered', outcome: 'fail', required: false, description: 'Curator', cause: null }],
   ])('rejects %s', (_label, finding) => {
     expect(isHiddenForNonGovernanceCause(paused, assessmentEntry(withFindings([finding])))).toBe(false)
+  })
+
+  it('accepts an advisory governance failure that the platform exempted', () => {
+    const exempted = { key: 'governance.curator-registered', outcome: 'fail', required: false, description: 'Curator', cause: null, exempted: true }
+    expect(isHiddenForNonGovernanceCause(paused, assessmentEntry(withFindings([exempted])))).toBe(true)
   })
 
   it.each(['suspended', 'revoked', 'pending', null])('rejects consistency %s, which a config verdict can mask', (consistencyStatus) => {

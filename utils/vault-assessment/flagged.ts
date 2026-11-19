@@ -112,9 +112,7 @@ export const isHiddenForNonGovernanceCause = (
   if (!configContext || !CLEAR_CONSISTENCY_STATUSES.has(evidence?.consistencyStatus ?? '')) return false
   if (!hasPolicyGovernanceRules(configContext)) return false
   const findings = [...configContext.findings, ...(evidence?.assessment?.consistencyContext?.findings ?? [])]
-  const governanceOpen = findings.some(finding => isGovernanceFinding(finding) && isUnresolvedFinding(finding)
-    && (finding.required || finding.key.startsWith('scheduled.')))
-  if (governanceOpen) return false
+  if (findings.some(finding => isGovernanceFinding(finding) && isUnresolvedFinding(finding))) return false
   return configContext.findings.some(finding => finding.required && finding.outcome === 'fail' && !finding.exempted
     && !isGovernanceFinding(finding) && !finding.key.startsWith('scheduled.'))
 }
