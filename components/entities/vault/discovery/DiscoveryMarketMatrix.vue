@@ -158,13 +158,16 @@ const isUnavailableMultiplierCell = (
   && !!props.matrix.cells.get(collateralAddr)?.get(liabilityAddr)
   && !isCorrelatedCell(collateralAddr, liabilityAddr)
 
+const isPausedMetricCell = (collateralAddr: string, liabilityAddr: string): boolean =>
+  (props.dotMetric === 'roe' || props.dotMetric === 'multiplier')
+  && !!props.matrix.cells.get(collateralAddr)?.get(liabilityAddr)
+  && isMarketPairPaused(props.market, collateralAddr, liabilityAddr)
+
 const getUnavailableMetricLabel = (
   collateralAddr: string,
   liabilityAddr: string,
 ): string | undefined => {
-  if ((props.dotMetric === 'roe' || props.dotMetric === 'multiplier')
-    && !!props.matrix.cells.get(collateralAddr)?.get(liabilityAddr)
-    && isMarketPairPaused(props.market, collateralAddr, liabilityAddr)) return pausedPairCellLabel
+  if (isPausedMetricCell(collateralAddr, liabilityAddr)) return pausedPairCellLabel
   if (isUnavailableRoeCell(collateralAddr, liabilityAddr)) return unavailableRoeCellLabel
   if (isUnavailableMultiplierCell(collateralAddr, liabilityAddr)) return unavailableMultiplierCellLabel
   return undefined
@@ -511,8 +514,16 @@ watch(
                     name="sparks"
                     class="!w-10 !h-10 text-accent-500 shrink-0"
                   />
+                  <UiHoverPreviewTooltip
+                    v-if="isPausedMetricCell(row.address, col.address)"
+                    title="Pair paused"
+                    :text="pausedPairCellLabel"
+                    placement="top-start"
+                  >
+                    <span class="text-p5 whitespace-nowrap text-content-muted">-</span>
+                  </UiHoverPreviewTooltip>
                   <span
-                    v-if="isUnavailableMetricCell(row.address, col.address)"
+                    v-else-if="isUnavailableMetricCell(row.address, col.address)"
                     class="text-p5 whitespace-nowrap text-content-muted"
                   >
                     -
