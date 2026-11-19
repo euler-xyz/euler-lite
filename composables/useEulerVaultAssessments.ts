@@ -16,6 +16,10 @@ type VaultAssessmentEntry = {
   verdictKey?: string
 }
 
+type VaultVerdict = { key: string, hidden: boolean }
+type LoadOptions = { fresh?: boolean, background?: boolean, getVerdict?: () => VaultVerdict }
+type AssessmentRead = { verdictKey?: string, upstream: boolean }
+
 type AssessmentService = {
   fetchVaultAssessment: (chainId: number, address: Address, family: VaultAssessmentFamily, options?: { fresh?: boolean }) => Promise<VaultAssessment | undefined>
   queryV3VaultAssessment?: (chainId: number, address: Address, family: VaultAssessmentFamily) => Promise<unknown>
@@ -50,7 +54,10 @@ const activeChainId = ref<number | null>(null)
 const entriesByChain = shallowRef<Record<number, Record<string, VaultAssessmentEntry>>>({})
 const entries = computed(() => activeChainId.value === null ? {} : entriesByChain.value[activeChainId.value] ?? {})
 const unsupportedChainIds = shallowRef<Set<number>>(new Set())
-const pending = new Map<string, { promise: Promise<VaultAssessmentEntry>, verdictKey: string | undefined }>()
+const pending = new Map<string, AssessmentRead & { promise: Promise<VaultAssessmentEntry> }>()
+/** Verdict key of each vault's last upstream read, dropped once a load sees another verdict or a read has none.
+ * The query cache outlives the entries, so a hidden vault reads upstream until this matches the verdict now shown. */
+const upstreamVerdictKeys = new Map<string, string>()
 const refreshTimers = new Map<string, ReturnType<typeof setInterval>>()
 const REFRESH_INTERVAL_MS = 20_000
 const REFRESH_WINDOW_MS = 2 * 60_000
@@ -60,6 +67,9 @@ subscribeToChainPolicyChanges((chainId) => {
   unsupportedChainIds.value = new Set([...unsupportedChainIds.value].filter(id => id !== chainId))
   for (const key of pending.keys()) {
     if (key.startsWith(`${chainId}:`)) pending.delete(key)
+  }
+  for (const key of upstreamVerdictKeys.keys()) {
+    if (key.startsWith(`${chainId}:`)) upstreamVerdictKeys.delete(key)
   }
   for (const [key, timer] of refreshTimers) {
     if (key.startsWith(`${chainId}:`)) {
@@ -83,11 +93,16 @@ const setEntry = (chainId: number, key: string, entry: VaultAssessmentEntry) => 
 const isAvailableForChain = (chainId: number) =>
   useV3ChainGate().isV3EnabledForChain(chainId) && !unsupportedChainIds.value.has(chainId)
 
+const needsUpstreamRead = (requestKey: string, verdict: VaultVerdict | undefined, fresh?: boolean) =>
+  !!fresh || (!!verdict?.hidden && upstreamVerdictKeys.get(requestKey) !== verdict.key)
+const answersVerdict = (read: AssessmentRead, verdict: VaultVerdict | undefined, upstreamWanted: boolean) =>
+  read.verdictKey === verdict?.key && (read.upstream || !upstreamWanted)
+
 const loadVaultAssessment = async (
   chainId: number,
   address: string,
   family: VaultAssessmentFamily,
-  options: { fresh?: boolean, background?: boolean, getVerdictKey?: () => string } = {},
+  options: LoadOptions = {},
 ): Promise<VaultAssessmentEntry> => {
   if (!Number.isSafeInteger(chainId) || chainId <= 0 || !isAvailableForChain(chainId)) {
     return { status: 'idle' }
@@ -96,15 +111,20 @@ const loadVaultAssessment = async (
   const normalized = normalizeAddress(address)
   const key = keyFor(family, normalized)
   const requestKey = `${chainId}:${key}`
-  const verdictKey = options.getVerdictKey?.()
+  const verdict = options.getVerdict?.()
+  if (verdict && upstreamVerdictKeys.get(requestKey) !== verdict.key) upstreamVerdictKeys.delete(requestKey)
+  const upstream = needsUpstreamRead(requestKey, verdict, options.fresh)
   const inflight = pending.get(requestKey)
-  if (inflight && inflight.verdictKey === verdictKey) return inflight.promise
+  if (inflight && answersVerdict(inflight, verdict, upstream)) return inflight.promise
   if (inflight) {
-    // The joined read answers an earlier verdict: once it settles, read again unless that verdict is back.
+    // A read made under another verdict, or one the cache may have answered, cannot stand for this verdict.
     const settled = await inflight.promise
-    if (settled.verdictKey === options.getVerdictKey?.()) return settled
-    return loadVaultAssessment(chainId, address, family, { ...options, fresh: true })
+    const current = options.getVerdict?.()
+    const read = { verdictKey: settled.verdictKey, upstream: inflight.upstream }
+    if (answersVerdict(read, current, needsUpstreamRead(requestKey, current, options.fresh))) return settled
+    return loadVaultAssessment(chainId, address, family, options)
   }
+  const verdictKey = verdict?.key
   const previous = entriesByChain.value[chainId]?.[key]
   if (!previous || previous.status !== 'available') setEntry(chainId, key, { status: 'loading' })
   const generation = getChainPolicyGeneration(chainId)
@@ -117,9 +137,11 @@ const loadVaultAssessment = async (
         chainId,
         normalized,
         family,
-        !!options.fresh,
+        upstream,
       )
       if (!isCurrent()) return { status: 'idle' }
+      if (upstream && verdictKey !== undefined) upstreamVerdictKeys.set(requestKey, verdictKey)
+      else if (upstream) upstreamVerdictKeys.delete(requestKey)
       const entry: VaultAssessmentEntry = { status: 'available', assessment, consistencyStatus, verdictKey }
       setEntry(chainId, key, entry)
       return entry
@@ -135,7 +157,7 @@ const loadVaultAssessment = async (
       return entry
     }
   })()
-  pending.set(requestKey, { promise, verdictKey })
+  pending.set(requestKey, { promise, verdictKey, upstream })
   try {
     return await promise
   }
@@ -148,23 +170,27 @@ const refreshAfterOwnTransaction = (
   chainId: number,
   address: string,
   family: VaultAssessmentFamily,
-  getVerdictKey?: () => string,
+  getVerdict?: () => VaultVerdict,
 ) => {
   if (!isAvailableForChain(chainId)) return
   const key = `${chainId}:${keyFor(family, address)}`
   const previous = refreshTimers.get(key)
   if (previous) clearInterval(previous)
   const stopAt = Date.now() + REFRESH_WINDOW_MS
-  void loadVaultAssessment(chainId, address, family, { fresh: true, background: true, getVerdictKey })
+  void loadVaultAssessment(chainId, address, family, { fresh: true, background: true, getVerdict })
   const timer = setInterval(() => {
     if (Date.now() >= stopAt) {
       clearInterval(timer)
       refreshTimers.delete(key)
       return
     }
-    void loadVaultAssessment(chainId, address, family, { fresh: true, background: true, getVerdictKey })
+    void loadVaultAssessment(chainId, address, family, { fresh: true, background: true, getVerdict })
   }, REFRESH_INTERVAL_MS)
   refreshTimers.set(key, timer)
+}
+
+export const __clearVaultAssessmentEntriesForTest = () => {
+  entriesByChain.value = {}
 }
 
 export const useEulerVaultAssessments = () => ({

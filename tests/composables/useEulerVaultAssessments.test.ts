@@ -81,13 +81,13 @@ describe('useEulerVaultAssessments', () => {
     const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
     const assessments = useEulerVaultAssessments()
     let verdict = 'paused'
-    const getVerdictKey = () => verdict
+    const getVerdict = () => ({ key: verdict, hidden: true })
 
-    const first = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdictKey })
+    const first = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
     await vi.waitFor(() => expect(query).toHaveBeenCalledOnce())
-    const sameVerdict = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdictKey })
+    const sameVerdict = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
     verdict = 'deprecated-governor'
-    const joined = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdictKey })
+    const joined = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
     release(EUSDC_42_RAW_ASSESSMENT)
     await Promise.all([first, sameVerdict, joined])
 
@@ -105,18 +105,77 @@ describe('useEulerVaultAssessments', () => {
     const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
     const assessments = useEulerVaultAssessments()
     let verdict = 'paused'
-    const getVerdictKey = () => verdict
+    const getVerdict = () => ({ key: verdict, hidden: true })
 
-    const first = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdictKey })
+    const first = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
     await vi.waitFor(() => expect(query).toHaveBeenCalledOnce())
     verdict = 'deprecated-governor'
-    const joined = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdictKey })
+    const joined = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
     verdict = 'paused'
     release(EUSDC_42_RAW_ASSESSMENT)
     await Promise.all([first, joined])
 
     expect(query).toHaveBeenCalledOnce()
     expect(assessments.getEntry(1, EUSDC_42, 'evk').verdictKey).toBe('paused')
+  })
+
+  it('never answers a read that must reach upstream with a cached read in flight', async () => {
+    let release!: (value: unknown) => void
+    const query = vi.fn()
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        release = resolve
+      }))
+      .mockResolvedValue(EUSDC_42_RAW_ASSESSMENT)
+    service.queryV3VaultAssessment = query
+    const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
+    const assessments = useEulerVaultAssessments()
+    const getVerdict = () => ({ key: 'listed', hidden: false })
+
+    const cached = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
+    await vi.waitFor(() => expect(query).toHaveBeenCalledOnce())
+    expect(advanceSdkQueryGeneration).not.toHaveBeenCalled()
+    const fresh = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { fresh: true, getVerdict })
+    release(EUSDC_42_RAW_ASSESSMENT)
+    await Promise.all([cached, fresh])
+
+    expect(query).toHaveBeenCalledTimes(2)
+    expect(advanceSdkQueryGeneration).toHaveBeenCalledOnce()
+  })
+
+  it('reads a hidden vault upstream until a read under its current verdict has landed', async () => {
+    const query = vi.fn().mockResolvedValue(EUSDC_42_RAW_ASSESSMENT)
+    service.queryV3VaultAssessment = query
+    const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
+    const assessments = useEulerVaultAssessments()
+    let verdict = { key: 'paused', hidden: true }
+    const getVerdict = () => verdict
+
+    await assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
+    await assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
+    expect(advanceSdkQueryGeneration).toHaveBeenCalledOnce()
+    verdict = { key: 'deprecated-governor', hidden: true }
+    await assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
+    expect(advanceSdkQueryGeneration).toHaveBeenCalledTimes(2)
+    verdict = { key: 'listed', hidden: false }
+    await assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
+    expect(advanceSdkQueryGeneration).toHaveBeenCalledTimes(2)
+    expect(query).toHaveBeenCalledTimes(4)
+  })
+
+  it.each([
+    ['a load sees another verdict', { getVerdict: () => ({ key: 'listed', hidden: false }) }],
+    ['a read is made without a verdict', { fresh: true }],
+  ])('forgets the upstream read of a hidden vault once %s', async (_label, between) => {
+    service.queryV3VaultAssessment = vi.fn().mockResolvedValue(EUSDC_42_RAW_ASSESSMENT)
+    const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
+    const assessments = useEulerVaultAssessments()
+    const getVerdict = () => ({ key: 'paused', hidden: true })
+
+    await assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
+    await assessments.loadVaultAssessment(1, EUSDC_42, 'evk', between)
+    const bumps = advanceSdkQueryGeneration.mock.calls.length
+    await assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
+    expect(advanceSdkQueryGeneration).toHaveBeenCalledTimes(bumps + 1)
   })
 
   it('leaves the consistency status unknown when the service has no raw read', async () => {

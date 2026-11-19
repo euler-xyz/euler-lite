@@ -13,7 +13,11 @@ import {
   liquityHubHiddenVerdict,
   makeEusdc42,
 } from '~/tests/fixtures/liquity-hub'
-import { EUSDC_42_RAW_ASSESSMENT } from '~/tests/fixtures/v3-hidden-vault-assessments'
+import {
+  EUSDC_42_DEPRECATED_GOVERNOR_RAW_ASSESSMENT,
+  EUSDC_42_DEPRECATED_GOVERNOR_VERDICT,
+  EUSDC_42_RAW_ASSESSMENT,
+} from '~/tests/fixtures/v3-hidden-vault-assessments'
 import { getVaultVerdictKey } from '~/utils/vault-assessment/flagged'
 
 const sdk = vi.hoisted(() => ({ query: vi.fn(), fetch: vi.fn() }))
@@ -28,19 +32,6 @@ vi.mock('~/composables/useEulerSdk', () => ({
 vi.mock('~/composables/useV3ChainGate', () => ({
   useV3ChainGate: () => ({ isV3EnabledForChain: () => true }),
 }))
-
-const DEPRECATED_GOVERNOR_REASON = 'Governance runs through 0xdd84a2…8b6b, a deprecated governor contract.'
-const DEPRECATED_GOVERNOR_RAW = {
-  ...EUSDC_42_RAW_ASSESSMENT,
-  configStatus: 'unverified',
-  configReason: DEPRECATED_GOVERNOR_REASON,
-  configContext: {
-    ...EUSDC_42_RAW_ASSESSMENT.configContext,
-    findings: EUSDC_42_RAW_ASSESSMENT.configContext.findings.map(finding => finding.key === 'governance.no-deprecated-governor'
-      ? { ...finding, outcome: 'fail', cause: { code: 'deprecated-governor-contract', subject: LIQUITY_HUB_GOVERNOR.toLowerCase(), summary: DEPRECATED_GOVERNOR_REASON, remedy: 'replace-the-deprecated-governor' } }
-      : finding),
-  },
-}
 
 const setVerdict = (verdict: Record<string, unknown>) => __setEulerLabelsDataForTest({
   source: 'v3',
@@ -77,7 +68,7 @@ describe('governor identity when the labels verdict of a hidden vault changes (e
   })
 
   it('stops naming the curator at once and re-reads the assessment past the cache', async () => {
-    sdk.query.mockResolvedValueOnce(EUSDC_42_RAW_ASSESSMENT).mockResolvedValueOnce(DEPRECATED_GOVERNOR_RAW)
+    sdk.query.mockResolvedValueOnce(EUSDC_42_RAW_ASSESSMENT).mockResolvedValueOnce(EUSDC_42_DEPRECATED_GOVERNOR_RAW_ASSESSMENT)
     setVerdict(liquityHubHiddenVerdict('config-suspended'))
     const scope = trackedScope()
     scope.run(() => useVaultAssessmentEvidence(EUSDC_42, 'evk'))
@@ -85,7 +76,7 @@ describe('governor identity when the labels verdict of a hidden vault changes (e
     await vi.waitFor(() => expect(isIdentified()).toBe(true))
     expect(sdk.query).toHaveBeenCalledTimes(1)
 
-    setVerdict({ status: 'hidden', decidedBy: 'config-failed', reason: DEPRECATED_GOVERNOR_REASON, explorableLend: false, explorableBorrow: false })
+    setVerdict(EUSDC_42_DEPRECATED_GOVERNOR_VERDICT)
     expect(isIdentified()).toBe(false)
 
     await vi.waitFor(() => expect(sdk.query).toHaveBeenCalledTimes(2))
@@ -95,7 +86,6 @@ describe('governor identity when the labels verdict of a hidden vault changes (e
   })
 
   describe('a verdict change while the first read is in flight', () => {
-    const deprecatedVerdict = { status: 'hidden', decidedBy: 'config-failed', reason: DEPRECATED_GOVERNOR_REASON, explorableLend: false, explorableBorrow: false }
     const held = () => {
       let release!: (value: unknown) => void
       sdk.query.mockImplementationOnce(() => new Promise((resolve) => {
@@ -105,8 +95,8 @@ describe('governor identity when the labels verdict of a hidden vault changes (e
     }
 
     it.each([
-      ['becomes identified once the clear read for the new verdict lands', deprecatedVerdict, DEPRECATED_GOVERNOR_RAW, liquityHubHiddenVerdict('config-suspended'), EUSDC_42_RAW_ASSESSMENT, true],
-      ['stays blank once the read for the governance verdict lands', liquityHubHiddenVerdict('config-suspended'), EUSDC_42_RAW_ASSESSMENT, deprecatedVerdict, DEPRECATED_GOVERNOR_RAW, false],
+      ['becomes identified once the clear read for the new verdict lands', EUSDC_42_DEPRECATED_GOVERNOR_VERDICT, EUSDC_42_DEPRECATED_GOVERNOR_RAW_ASSESSMENT, liquityHubHiddenVerdict('config-suspended'), EUSDC_42_RAW_ASSESSMENT, true],
+      ['stays blank once the read for the governance verdict lands', liquityHubHiddenVerdict('config-suspended'), EUSDC_42_RAW_ASSESSMENT, EUSDC_42_DEPRECATED_GOVERNOR_VERDICT, EUSDC_42_DEPRECATED_GOVERNOR_RAW_ASSESSMENT, false],
     ])('%s', async (_label, firstVerdict, firstRaw, nextVerdict, nextRaw, identified) => {
       const releaseFirst = held()
       sdk.query.mockResolvedValueOnce(nextRaw)
@@ -130,7 +120,7 @@ describe('governor identity when the labels verdict of a hidden vault changes (e
     it('keeps blank identity while the joined read for the old verdict settles', async () => {
       const releaseFirst = held()
       const releaseSecond = held()
-      setVerdict(deprecatedVerdict)
+      setVerdict(EUSDC_42_DEPRECATED_GOVERNOR_VERDICT)
       const scope = trackedScope()
       scope.run(() => useVaultAssessmentEvidence(EUSDC_42, 'evk'))
       await vi.waitFor(() => expect(sdk.query).toHaveBeenCalledTimes(1))

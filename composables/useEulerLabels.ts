@@ -385,20 +385,23 @@ const probeWrapPairs = async (startChainId: number, loadGeneration: number, prob
 export const useEulerLabels = () => {
   const oracleAdapters = useEulerOracleAdapters()
   const vaultAssessments = useEulerVaultAssessments()
-  const getVerdictKeyFor = (address: string) => getVaultVerdictKey(visibility.value?.[address.toLowerCase()])
+  const getVerdictFor = (address: string) => {
+    const verdict = visibility.value?.[address.toLowerCase()]
+    return { key: getVaultVerdictKey(verdict), hidden: verdict?.status === 'hidden' }
+  }
   const loadVaultAssessment = (
     chainId: number,
     address: string,
     family: VaultAssessmentFamily,
     options: { fresh?: boolean, background?: boolean } = {},
-  ) => vaultAssessments.loadVaultAssessment(chainId, address, family, { ...options, getVerdictKey: () => getVerdictKeyFor(address) })
-  // Identity and pause evidence trust only an assessment loaded under the hidden verdict now shown, so a
-  // changed verdict re-reads it past the query cache.
+  ) => vaultAssessments.loadVaultAssessment(chainId, address, family, { ...options, getVerdict: () => getVerdictFor(address) })
+  // Identity and pause evidence trust only an assessment loaded under the hidden verdict now shown.
   const ensureVaultAssessment = (chainId: number, address: string, family: VaultAssessmentFamily) => {
     const entry = vaultAssessments.getEntry(chainId, address, family)
     if (entry.status === 'idle') return loadVaultAssessment(chainId, address, family)
-    if (entry.status === 'loading' || visibility.value?.[address.toLowerCase()]?.status !== 'hidden') return
-    if (entry.verdictKey !== getVerdictKeyFor(address)) return loadVaultAssessment(chainId, address, family, { fresh: true })
+    const verdict = getVerdictFor(address)
+    if (entry.status === 'loading' || !verdict.hidden) return
+    if (entry.verdictKey !== verdict.key) return loadVaultAssessment(chainId, address, family)
   }
 
   return {
@@ -421,7 +424,7 @@ export const useEulerLabels = () => {
     getVaultAssessmentEntry: vaultAssessments.getEntry,
     isVaultAssessmentAvailableForChain: vaultAssessments.isAvailableForChain,
     refreshVaultAssessmentAfterOwnTransaction: (chainId: number, address: string, family: VaultAssessmentFamily) =>
-      vaultAssessments.refreshAfterOwnTransaction(chainId, address, family, () => getVerdictKeyFor(address)),
+      vaultAssessments.refreshAfterOwnTransaction(chainId, address, family, () => getVerdictFor(address)),
     earnVaults,
     geoPolicies,
     visibility,

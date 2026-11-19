@@ -1,7 +1,7 @@
 import { parseVaultAssessment, type EVault } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, zeroAddress } from 'viem'
 import { getVaultVerdictKey, type VaultVerdictLike } from '~/utils/vault-assessment/flagged'
-import { liquityHubHiddenVerdict } from '~/tests/fixtures/liquity-hub'
+import { LIQUITY_HUB_GOVERNOR, liquityHubHiddenVerdict } from '~/tests/fixtures/liquity-hub'
 
 // Raw `/v3/evk/vaults/1/<vault>/assessment` bodies as Euler V3 served them on 2026-11-18, cut to the
 // governance findings and the findings that did not pass. Visibility verdicts are from the matching
@@ -246,6 +246,28 @@ export const EUSDC_95_RAW_ASSESSMENT = {
     ],
   },
   consistencyContext: null,
+}
+
+const DEPRECATED_GOVERNOR_REASON = 'Governance runs through 0xdd84a2…8b6b, a deprecated governor contract.'
+
+// Synthetic: eUSDC-42 with its governor listed as deprecated, the verdict and body V3 gives a governance-hidden vault.
+export const EUSDC_42_DEPRECATED_GOVERNOR_VERDICT = {
+  status: 'hidden',
+  decidedBy: 'config-failed',
+  reason: DEPRECATED_GOVERNOR_REASON,
+  explorableLend: false,
+  explorableBorrow: false,
+}
+export const EUSDC_42_DEPRECATED_GOVERNOR_RAW_ASSESSMENT = {
+  ...EUSDC_42_RAW_ASSESSMENT,
+  configStatus: 'unverified',
+  configReason: DEPRECATED_GOVERNOR_REASON,
+  configContext: {
+    ...EUSDC_42_RAW_ASSESSMENT.configContext,
+    findings: EUSDC_42_RAW_ASSESSMENT.configContext.findings.map(finding => finding.key === 'governance.no-deprecated-governor'
+      ? { ...finding, outcome: 'fail', cause: { code: 'deprecated-governor-contract', subject: LIQUITY_HUB_GOVERNOR.toLowerCase(), summary: DEPRECATED_GOVERNOR_REASON, remedy: 'replace-the-deprecated-governor' } }
+      : finding),
+  },
 }
 
 type RawAssessment = typeof EUSDC_42_RAW_ASSESSMENT | typeof IDLE_CREDIT_VAULT_RAW_ASSESSMENT | typeof EUSDC_95_RAW_ASSESSMENT
