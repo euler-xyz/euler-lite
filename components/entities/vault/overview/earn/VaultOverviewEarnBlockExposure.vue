@@ -100,8 +100,7 @@ const load = async () => {
 
 const loadExposureUsdPrices = async () => {
   const loadId = ++priceLoadId
-  const results = await Promise.all(exposureList.value.map(async (exposure) => {
-    const exposureVault = getExposureVaultByAddress(exposure.address)
+  const results = await Promise.all(exposureRows.value.map(async ({ exposure, vault: exposureVault }) => {
     if (!exposureVault) return null
 
     const [allocationUsd, capUsd, borrowsUsd] = await Promise.all([
@@ -219,10 +218,16 @@ const getStrategyExposureDisplay = (strategyVault: EVault | undefined): VaultExp
   (strategyVault && strategyExposureDisplayByAddress.value.get(strategyVault.address.toLowerCase()))
   || { valueState: 'unavailable', items: [] }
 
-watch(isMarketDataResolved, () => {
-  if (!exposureVaults.value.length) return
-  void loadExposureUsdPrices()
-})
+const repriceExposures = () => {
+  if (!exposureRows.value.some(row => row.vault)) return
+  loadExposureUsdPrices().catch(e => logWarn('VaultOverviewEarnBlockExposure/loadExposureUsdPrices', e))
+}
+
+watch(isMarketDataResolved, repriceExposures)
+watch(
+  () => exposureRows.value.map(row => [row.vault, row.vault?.totalBorrowed, row.vault?.totalAssets, row.exposure.allocatedAssets, row.exposure.allocationCap.current]),
+  repriceExposures,
+)
 
 watchEffect(() => {
   if (!exposureRows.value.length) return
