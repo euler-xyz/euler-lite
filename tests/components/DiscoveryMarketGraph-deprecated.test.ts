@@ -48,9 +48,9 @@ const renderGraph = (
   warnings.text = options.warningText ?? ''
   warnings.acceptedOnly = options.acceptedOnly ?? false
   vi.stubGlobal('useVaults', () => ({
-    isVaultGovernorVerified: () => true,
-    isSecuritizeGovernorVerified: () => true,
-    isEarnVaultOwnerVerified: () => true,
+    isVaultGovernorIdentified: () => true,
+    isSecuritizeGovernorIdentified: () => true,
+    isEarnVaultOwnerIdentified: () => true,
   }))
   vi.stubGlobal('useEulerLabels', () => ({
     isReady: ref(options.ready ?? true),

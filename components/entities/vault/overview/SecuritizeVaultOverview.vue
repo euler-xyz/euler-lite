@@ -20,20 +20,23 @@ const emit = defineEmits<{
 const route = useRoute()
 const { enableEntityBranding: enableEntityBrandingDisplay, enableVaultType: enableVaultTypeDisplay } = useDeployConfig()
 
-const { borrowList: _borrowList, isSecuritizeGovernorVerified } = useVaults()
+const { borrowList: _borrowList, isSecuritizeGovernorVerified, isSecuritizeGovernorIdentified } = useVaults()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
 const { getSupplyRewardApy, getSupplyRewardCampaigns, hasSupplyRewards } = useRewardsApy()
 const vaultAddress = computed(() => getAddress(vault.address))
 const isFlagged = useFlaggedVault(() => vault.address)
+// The assessment decides whether a hidden vault's curator can be named.
+useVaultAssessmentEvidence(() => vault.address, 'evk')
 const product = useEulerProductOfVault(vaultAddress)
 const description = computed(() => {
   return product.vaultOverrides?.[vaultAddress.value]?.description ?? product.description
 })
 const entities = computed(() => getEntitiesByVault(vault as unknown as EVault))
 const isGovernorVerified = computed(() => isSecuritizeGovernorVerified(vault))
+const isGovernanceIdentified = computed(() => isSecuritizeGovernorIdentified(vault))
 const isUngoverned = computed(() => vault.governor?.toLowerCase() === zeroAddress)
-const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
+const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernanceIdentified.value)
 const marketProductKey = computed(() => getProductKeyByVault(vault.address))
 const marketProductName = computed(() => getProductByVault(vault.address).name)
 const isRestricted = computed(() => isVaultBlockedByCountry(vault.address))
@@ -171,7 +174,7 @@ const supplyCapPercentageDisplay = computed(() => {
           nudge
         />
         <div
-          v-else-if="entities.length && isGovernorVerified"
+          v-else-if="entities.length && isGovernanceIdentified"
           class="flex flex-col gap-16"
         >
           <div
@@ -187,7 +190,7 @@ const supplyCapPercentageDisplay = computed(() => {
           </div>
         </div>
         <VaultTypeChip
-          v-else-if="!isGovernorVerified && !isFlagged"
+          v-else-if="!isGovernanceIdentified && !isFlagged"
           :vault="vault"
           type="unknown"
           nudge
@@ -201,7 +204,7 @@ const supplyCapPercentageDisplay = computed(() => {
         label="Vault type"
       >
         <VaultTypeBadges
-          v-if="!isFlagged || isUngoverned"
+          v-if="!isFlagged || isUngoverned || isGovernanceIdentified"
           :vault="vault"
           nudge
         />

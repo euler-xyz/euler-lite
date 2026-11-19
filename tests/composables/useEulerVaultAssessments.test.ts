@@ -1,13 +1,25 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { VaultAssessmentUnavailableError } from '@eulerxyz/euler-v2-sdk'
+import { EUSDC_42 } from '~/tests/fixtures/liquity-hub'
+import { EUSDC_42_RAW_ASSESSMENT } from '~/tests/fixtures/v3-hidden-vault-assessments'
 
-const { fetchVaultAssessment, isV3EnabledForChain } = vi.hoisted(() => ({
+const { advanceSdkQueryGeneration, fetchVaultAssessment, isV3EnabledForChain, service } = vi.hoisted(() => ({
+  advanceSdkQueryGeneration: vi.fn(),
   fetchVaultAssessment: vi.fn(),
   isV3EnabledForChain: vi.fn(() => true),
+  service: { queryV3VaultAssessment: undefined as undefined | ((...args: unknown[]) => Promise<unknown>) },
 }))
 
 vi.mock('~/composables/useEulerSdk', () => ({
-  getEulerSdkForChain: async () => ({ vaultAssessmentService: { fetchVaultAssessment } }),
+  getEulerSdkForChain: async () => ({
+    vaultAssessmentService: service.queryV3VaultAssessment
+      ? { fetchVaultAssessment, queryV3VaultAssessment: service.queryV3VaultAssessment }
+      : { fetchVaultAssessment },
+  }),
+}))
+vi.mock('~/utils/sdk-query-cache', async importOriginal => ({
+  ...(await importOriginal<typeof import('~/utils/sdk-query-cache')>()),
+  advanceSdkQueryGeneration,
 }))
 vi.mock('~/composables/useV3ChainGate', () => ({
   useV3ChainGate: () => ({ isV3EnabledForChain }),
@@ -20,6 +32,164 @@ describe('useEulerVaultAssessments', () => {
     vi.resetModules()
     vi.clearAllMocks()
     isV3EnabledForChain.mockReturnValue(true)
+    service.queryV3VaultAssessment = undefined
+  })
+
+  it('parses the assessment and its consistency status from one raw read', async () => {
+    const query = vi.fn().mockResolvedValue(EUSDC_42_RAW_ASSESSMENT)
+    service.queryV3VaultAssessment = query
+    const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
+    const assessments = useEulerVaultAssessments()
+    await assessments.loadVaultAssessment(1, EUSDC_42, 'evk')
+    expect(query).toHaveBeenCalledOnce()
+    expect(query).toHaveBeenCalledWith(1, EUSDC_42, 'evk')
+    expect(fetchVaultAssessment).not.toHaveBeenCalled()
+    expect(advanceSdkQueryGeneration).not.toHaveBeenCalled()
+    expect(assessments.getEntry(1, EUSDC_42, 'evk')).toMatchObject({
+      status: 'available',
+      consistencyStatus: 'verified',
+      assessment: { configStatus: 'suspended', vaultAddress: EUSDC_42 },
+    })
+  })
+
+  it('reads a fresh raw body after the user\'s own transaction, still in one read', async () => {
+    const before = { ...EUSDC_42_RAW_ASSESSMENT, configStatus: 'verified', consistencyStatus: 'verified' }
+    const after = { ...EUSDC_42_RAW_ASSESSMENT, configStatus: 'suspended', consistencyStatus: 'suspended' }
+    const query = vi.fn().mockResolvedValueOnce(before).mockResolvedValueOnce(after)
+    service.queryV3VaultAssessment = query
+    const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
+    const assessments = useEulerVaultAssessments()
+    await assessments.loadVaultAssessment(1, EUSDC_42, 'evk')
+    await assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { fresh: true })
+    expect(advanceSdkQueryGeneration).toHaveBeenCalledWith(['queryV3VaultAssessment'])
+    expect(query).toHaveBeenCalledTimes(2)
+    expect(fetchVaultAssessment).not.toHaveBeenCalled()
+    expect(assessments.getEntry(1, EUSDC_42, 'evk')).toMatchObject({
+      consistencyStatus: 'suspended',
+      assessment: { configStatus: 'suspended' },
+    })
+  })
+
+  it('reads again after joining a request made under another verdict, unless that verdict is back', async () => {
+    let release!: (value: unknown) => void
+    const query = vi.fn()
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        release = resolve
+      }))
+      .mockResolvedValue(EUSDC_42_RAW_ASSESSMENT)
+    service.queryV3VaultAssessment = query
+    const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
+    const assessments = useEulerVaultAssessments()
+    let verdict = 'paused'
+    const getVerdict = () => ({ key: verdict, hidden: true })
+
+    const first = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
+    await vi.waitFor(() => expect(query).toHaveBeenCalledOnce())
+    const sameVerdict = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
+    verdict = 'deprecated-governor'
+    const joined = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
+    release(EUSDC_42_RAW_ASSESSMENT)
+    await Promise.all([first, sameVerdict, joined])
+
+    expect(query).toHaveBeenCalledTimes(2)
+    expect(advanceSdkQueryGeneration).toHaveBeenCalledWith(['queryV3VaultAssessment'])
+    expect(assessments.getEntry(1, EUSDC_42, 'evk').verdictKey).toBe('deprecated-governor')
+  })
+
+  it('does not read again when the verdict returns before the joined request settles', async () => {
+    let release!: (value: unknown) => void
+    const query = vi.fn().mockImplementationOnce(() => new Promise((resolve) => {
+      release = resolve
+    }))
+    service.queryV3VaultAssessment = query
+    const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
+    const assessments = useEulerVaultAssessments()
+    let verdict = 'paused'
+    const getVerdict = () => ({ key: verdict, hidden: true })
+
+    const first = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
+    await vi.waitFor(() => expect(query).toHaveBeenCalledOnce())
+    verdict = 'deprecated-governor'
+    const joined = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
+    verdict = 'paused'
+    release(EUSDC_42_RAW_ASSESSMENT)
+    await Promise.all([first, joined])
+
+    expect(query).toHaveBeenCalledOnce()
+    expect(assessments.getEntry(1, EUSDC_42, 'evk').verdictKey).toBe('paused')
+  })
+
+  it('never answers a read that must reach upstream with a cached read in flight', async () => {
+    let release!: (value: unknown) => void
+    const query = vi.fn()
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        release = resolve
+      }))
+      .mockResolvedValue(EUSDC_42_RAW_ASSESSMENT)
+    service.queryV3VaultAssessment = query
+    const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
+    const assessments = useEulerVaultAssessments()
+    const getVerdict = () => ({ key: 'listed', hidden: false })
+
+    const cached = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
+    await vi.waitFor(() => expect(query).toHaveBeenCalledOnce())
+    expect(advanceSdkQueryGeneration).not.toHaveBeenCalled()
+    const fresh = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { fresh: true, getVerdict })
+    release(EUSDC_42_RAW_ASSESSMENT)
+    await Promise.all([cached, fresh])
+
+    expect(query).toHaveBeenCalledTimes(2)
+    expect(advanceSdkQueryGeneration).toHaveBeenCalledOnce()
+  })
+
+  it('reads a hidden vault upstream until a read under its current verdict has landed', async () => {
+    const query = vi.fn().mockResolvedValue(EUSDC_42_RAW_ASSESSMENT)
+    service.queryV3VaultAssessment = query
+    const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
+    const assessments = useEulerVaultAssessments()
+    let verdict = { key: 'paused', hidden: true }
+    const getVerdict = () => verdict
+
+    await assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
+    await assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
+    expect(advanceSdkQueryGeneration).toHaveBeenCalledOnce()
+    verdict = { key: 'deprecated-governor', hidden: true }
+    await assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
+    expect(advanceSdkQueryGeneration).toHaveBeenCalledTimes(2)
+    verdict = { key: 'listed', hidden: false }
+    await assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
+    expect(advanceSdkQueryGeneration).toHaveBeenCalledTimes(2)
+    expect(query).toHaveBeenCalledTimes(4)
+  })
+
+  it.each([
+    ['a load sees another verdict', { getVerdict: () => ({ key: 'listed', hidden: false }) }],
+    ['a read is made without a verdict', { fresh: true }],
+  ])('forgets the upstream read of a hidden vault once %s', async (_label, between) => {
+    service.queryV3VaultAssessment = vi.fn().mockResolvedValue(EUSDC_42_RAW_ASSESSMENT)
+    const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
+    const assessments = useEulerVaultAssessments()
+    const getVerdict = () => ({ key: 'paused', hidden: true })
+
+    await assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
+    await assessments.loadVaultAssessment(1, EUSDC_42, 'evk', between)
+    const bumps = advanceSdkQueryGeneration.mock.calls.length
+    await assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdict })
+    expect(advanceSdkQueryGeneration).toHaveBeenCalledTimes(bumps + 1)
+  })
+
+  it('leaves the consistency status unknown when the service has no raw read', async () => {
+    fetchVaultAssessment.mockResolvedValue({ assessed: true })
+    const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
+    await useEulerVaultAssessments().loadVaultAssessment(1, ADDRESS, 'evk')
+    expect(useEulerVaultAssessments().getEntry(1, ADDRESS, 'evk')).toMatchObject({ status: 'available', consistencyStatus: null })
+  })
+
+  it('marks the entry unavailable when the raw body does not parse', async () => {
+    service.queryV3VaultAssessment = vi.fn().mockResolvedValue({ ...EUSDC_42_RAW_ASSESSMENT, configStatus: 'nonsense' })
+    const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
+    await useEulerVaultAssessments().loadVaultAssessment(1, EUSDC_42, 'evk')
+    expect(useEulerVaultAssessments().getEntry(1, EUSDC_42, 'evk').status).toBe('unavailable')
   })
 
   it('drops pending assessments and unsupported-chain caches across policy changes', async () => {

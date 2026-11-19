@@ -8,6 +8,7 @@ import type {
   IEulerEarn,
   IEVault,
   ISecuritizeCollateralVault,
+  VaultAssessmentFamily,
 } from '@eulerxyz/euler-v2-sdk'
 import {
   EVault,
@@ -44,6 +45,7 @@ import { chainReadPolicyKey, getChainReadPolicy } from '~/utils/chain-policy'
 import { isChainReadPolicyReady, subscribeToChainPolicyChanges } from '~/composables/useChainConfig'
 import { resolveEulerRouterGovernors, retainEulerRouterGovernor } from '~/utils/vault/euler-router-governance'
 import { governableGovernorAbi } from '~/abis/oracle'
+import { getFlaggedVerdict, isHiddenForNonGovernanceCause } from '~/utils/vault-assessment/flagged'
 
 const isReady = ref(false)
 const isEVaultLoading = ref(false)
@@ -1311,6 +1313,33 @@ export const useVaults = () => {
     )
   }
 
+  const isHiddenWithoutGovernanceCause = (address: string, family: VaultAssessmentFamily): boolean => {
+    const { chainId } = useEulerAddresses()
+    const { isReady, source, visibility, vaultAssessments, getVaultAssessmentEntry } = useEulerLabels()
+    if (!isReady.value || !chainId.value) return false
+    void vaultAssessments.value
+    return isHiddenForNonGovernanceCause(
+      getFlaggedVerdict(address, source.value, visibility.value),
+      getVaultAssessmentEntry(chainId.value, address, family),
+    )
+  }
+
+  // Identified answers who governs the vault; verified answers whether it is listed.
+  const isVaultGovernorIdentified = (vault: EVault): boolean =>
+    isVaultGovernorVerified(vault)
+    || (isHiddenWithoutGovernanceCause(vault.address, 'evk')
+      && verifyVaultGovernor(Object.assign({}, vault, { verified: true }), buildVerificationLabels()))
+
+  const isSecuritizeGovernorIdentified = (vault: SecuritizeCollateralVault): boolean =>
+    isSecuritizeGovernorVerified(vault)
+    || (isHiddenWithoutGovernanceCause(vault.address, 'evk')
+      && verifyVaultGovernor(Object.assign({}, vault, { verified: true }), buildVerificationLabels()))
+
+  const isEarnVaultOwnerIdentified = (earnVault: EulerEarn): boolean =>
+    isEarnVaultOwnerVerified(earnVault)
+    || (isHiddenWithoutGovernanceCause(earnVault.address, 'earn')
+      && verifyEarnVaultOwner(Object.assign({}, earnVault, { verified: true }), buildVerificationLabels()))
+
   return {
     // State
     isReady,
@@ -1354,6 +1383,9 @@ export const useVaults = () => {
     isVaultGovernorVerified,
     isSecuritizeGovernorVerified,
     isEarnVaultOwnerVerified,
+    isVaultGovernorIdentified,
+    isSecuritizeGovernorIdentified,
+    isEarnVaultOwnerIdentified,
 
     // Business logic computed (kept for complex queries)
     borrowList,

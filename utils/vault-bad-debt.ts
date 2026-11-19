@@ -91,33 +91,46 @@ export const parseBadDebtResponse = (body: unknown): V3VaultBadDebtRow[] => {
   return Array.isArray(response.data) ? response.data : []
 }
 
-export const getBadDebtBorrowRatio = (
-  badDebt: VaultBadDebtCacheEntry,
-  totalBorrowUsd: number | undefined,
-): number | undefined => {
-  if (totalBorrowUsd === undefined || totalBorrowUsd <= 0) return undefined
-  return (badDebt.badDebtUsd / totalBorrowUsd) * 100
+export interface BadDebtDenominators {
+  supplyUsd: number | undefined
+  borrowsUsd: number | undefined
 }
+
+/** Lenders carry bad debt against the vault's supply, so supply is the headline share; borrows are context. */
+export const getBadDebtShare = (badDebt: VaultBadDebtCacheEntry, denominatorUsd: number | undefined): number | undefined => {
+  if (denominatorUsd === undefined || !Number.isFinite(denominatorUsd) || denominatorUsd <= 0) return undefined
+  return (badDebt.badDebtUsd / denominatorUsd) * 100
+}
+
+const formatBadDebtShare = (share: number | undefined, of: 'supply' | 'borrows'): string | undefined =>
+  share === undefined ? undefined : `${formatNumber(share, 2, 0)}% of ${of}`
 
 export const formatBadDebtUsd = (badDebt: VaultBadDebtCacheEntry): string =>
   formatCompactUsdValue(badDebt.badDebtUsd)
 
-export const formatBadDebtOverviewValue = (
+export const formatBadDebtOverview = (
   badDebt: VaultBadDebtCacheEntry,
-  totalBorrowUsd: number | undefined,
-): string => {
-  const ratio = getBadDebtBorrowRatio(badDebt, totalBorrowUsd)
+  { supplyUsd, borrowsUsd }: BadDebtDenominators,
+): { value: string, borrowShare: string | undefined } => {
+  const supplyShare = formatBadDebtShare(getBadDebtShare(badDebt, supplyUsd), 'supply')
   const value = formatBadDebtUsd(badDebt)
-  return ratio === undefined ? value : `${value} (${formatNumber(ratio, 2, 0)}%)`
+  return {
+    value: supplyShare ? `${value} (${supplyShare})` : value,
+    borrowShare: formatBadDebtShare(getBadDebtShare(badDebt, borrowsUsd), 'borrows'),
+  }
 }
 
 export const formatBadDebtHint = (
   badDebt: VaultBadDebtCacheEntry,
-  totalBorrowUsd: number | undefined,
+  { supplyUsd, borrowsUsd }: BadDebtDenominators,
 ): string => {
   const parts = [`${formatCompactUsdValue(badDebt.badDebtUsd)} bad debt`]
-  const ratio = getBadDebtBorrowRatio(badDebt, totalBorrowUsd)
-  if (ratio !== undefined) parts.push(`${formatNumber(ratio, 2, 0)}% of total borrows`)
+  for (const share of [
+    formatBadDebtShare(getBadDebtShare(badDebt, supplyUsd), 'supply'),
+    formatBadDebtShare(getBadDebtShare(badDebt, borrowsUsd), 'borrows'),
+  ]) {
+    if (share) parts.push(share)
+  }
   if (badDebt.accountCount > 0) {
     parts.push(`${badDebt.accountCount} underwater ${badDebt.accountCount === 1 ? 'account' : 'accounts'}`)
   }

@@ -61,7 +61,12 @@ const modalData = computed(() => ({
         :key="itemKey(item)"
         class="vault-exposure-summary__avatar"
       >
+        <VaultExposureUncoveredIcon
+          v-if="item.kind === 'uncovered'"
+          :size="avatarSize"
+        />
         <AssetAvatar
+          v-else
           :asset="item.asset"
           :size="avatarSize"
         />

@@ -53,6 +53,10 @@ const readOpenInterestUsd = (
   return entry?.[1] ?? 0
 }
 
+export const sumOpenInterestUsd = (openInterestUsdByCollateral: Record<string, number>): number =>
+  Object.values(openInterestUsdByCollateral)
+    .reduce((sum, value) => sum + (Number.isFinite(value) && value > 0 ? value : 0), 0)
+
 /**
  * Internal predicate: is this collateral/LTV combination "live" — i.e. does it
  * represent active or residual borrow-side exposure against the vault?

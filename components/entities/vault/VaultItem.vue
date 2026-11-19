@@ -11,7 +11,7 @@ import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { VaultApyModal, UiModalPreviewTrigger } from '#components'
 import { isVaultBorrowable } from '~/utils/vault/classification'
-import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
+import { getCollateralExposureGroups, getCollateralExposurePairs, sumOpenInterestUsd } from '~/utils/vault/collateral-exposure'
 import { resolveVaultExposureDisplay, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
 import { getCriticalAssessmentWarning, getUnknownVaultCause } from '~/utils/vault-assessment/presentation'
 import { zeroAddress } from 'viem'
@@ -31,6 +31,7 @@ const {
   isLoaded: isOpenInterestLoaded,
   isOpenInterestEnabled,
 } = useCollateralOpenInterest()
+const { getVaultBadDebt, isBadDebtEnabled, isBadDebtLoading, loadBadDebtForChain } = useVaultBadDebt()
 const isUnverified = computed(() => !isVerifiedVault(vault.address))
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault))
 const isUngoverned = computed(() => vault.governorAdmin?.toLowerCase() === zeroAddress)
@@ -72,14 +73,19 @@ const exposureDisplay = computed<VaultExposureDisplay>(() =>
     totalSupplyState: priceValues.value.totalSupplyState,
     utilization: vault.utilization,
     acceptedCollateralCount: vault.collaterals.length,
+    badDebtUsd: getVaultBadDebt(vault.address)?.badDebtUsd,
+    badDebtLoading: isBadDebtLoading.value,
+    openInterestTotalUsd: sumOpenInterestUsd(getOpenInterestForVault(vault.address)),
+    vaultShare: 1,
   }),
 )
 const exposureValueState = computed(() => exposureDisplay.value.valueState)
 const exposureDisplayItems = computed(() => exposureDisplay.value.items)
 
 watchEffect(() => {
-  if (!isBorrowable.value || !isOpenInterestEnabled.value) return
-  void loadOpenInterest()
+  if (!isBorrowable.value) return
+  if (isOpenInterestEnabled.value) void loadOpenInterest()
+  if (isBadDebtEnabled.value) void loadBadDebtForChain()
 })
 
 const balance = computed(() =>
