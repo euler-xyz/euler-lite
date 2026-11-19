@@ -391,7 +391,7 @@ export const useEulerLabels = () => {
     address: string,
     family: VaultAssessmentFamily,
     options: { fresh?: boolean, background?: boolean } = {},
-  ) => vaultAssessments.loadVaultAssessment(chainId, address, family, { ...options, verdictKey: getVerdictKeyFor(address) })
+  ) => vaultAssessments.loadVaultAssessment(chainId, address, family, { ...options, getVerdictKey: () => getVerdictKeyFor(address) })
   // Identity and pause evidence trust only an assessment loaded under the hidden verdict now shown, so a
   // changed verdict re-reads it past the query cache.
   const ensureVaultAssessment = (chainId: number, address: string, family: VaultAssessmentFamily) => {

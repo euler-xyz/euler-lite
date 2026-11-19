@@ -70,6 +70,55 @@ describe('useEulerVaultAssessments', () => {
     })
   })
 
+  it('reads again after joining a request made under another verdict, unless that verdict is back', async () => {
+    let release!: (value: unknown) => void
+    const query = vi.fn()
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        release = resolve
+      }))
+      .mockResolvedValue(EUSDC_42_RAW_ASSESSMENT)
+    service.queryV3VaultAssessment = query
+    const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
+    const assessments = useEulerVaultAssessments()
+    let verdict = 'paused'
+    const getVerdictKey = () => verdict
+
+    const first = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdictKey })
+    await vi.waitFor(() => expect(query).toHaveBeenCalledOnce())
+    const sameVerdict = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdictKey })
+    verdict = 'deprecated-governor'
+    const joined = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdictKey })
+    release(EUSDC_42_RAW_ASSESSMENT)
+    await Promise.all([first, sameVerdict, joined])
+
+    expect(query).toHaveBeenCalledTimes(2)
+    expect(advanceSdkQueryGeneration).toHaveBeenCalledWith(['queryV3VaultAssessment'])
+    expect(assessments.getEntry(1, EUSDC_42, 'evk').verdictKey).toBe('deprecated-governor')
+  })
+
+  it('does not read again when the verdict returns before the joined request settles', async () => {
+    let release!: (value: unknown) => void
+    const query = vi.fn().mockImplementationOnce(() => new Promise((resolve) => {
+      release = resolve
+    }))
+    service.queryV3VaultAssessment = query
+    const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')
+    const assessments = useEulerVaultAssessments()
+    let verdict = 'paused'
+    const getVerdictKey = () => verdict
+
+    const first = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdictKey })
+    await vi.waitFor(() => expect(query).toHaveBeenCalledOnce())
+    verdict = 'deprecated-governor'
+    const joined = assessments.loadVaultAssessment(1, EUSDC_42, 'evk', { getVerdictKey })
+    verdict = 'paused'
+    release(EUSDC_42_RAW_ASSESSMENT)
+    await Promise.all([first, joined])
+
+    expect(query).toHaveBeenCalledOnce()
+    expect(assessments.getEntry(1, EUSDC_42, 'evk').verdictKey).toBe('paused')
+  })
+
   it('leaves the consistency status unknown when the service has no raw read', async () => {
     fetchVaultAssessment.mockResolvedValue({ assessed: true })
     const { useEulerVaultAssessments } = await import('~/composables/useEulerVaultAssessments')

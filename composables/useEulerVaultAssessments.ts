@@ -50,7 +50,7 @@ const activeChainId = ref<number | null>(null)
 const entriesByChain = shallowRef<Record<number, Record<string, VaultAssessmentEntry>>>({})
 const entries = computed(() => activeChainId.value === null ? {} : entriesByChain.value[activeChainId.value] ?? {})
 const unsupportedChainIds = shallowRef<Set<number>>(new Set())
-const pending = new Map<string, Promise<VaultAssessmentEntry>>()
+const pending = new Map<string, { promise: Promise<VaultAssessmentEntry>, verdictKey: string | undefined }>()
 const refreshTimers = new Map<string, ReturnType<typeof setInterval>>()
 const REFRESH_INTERVAL_MS = 20_000
 const REFRESH_WINDOW_MS = 2 * 60_000
@@ -87,7 +87,7 @@ const loadVaultAssessment = async (
   chainId: number,
   address: string,
   family: VaultAssessmentFamily,
-  options: { fresh?: boolean, background?: boolean, verdictKey?: string } = {},
+  options: { fresh?: boolean, background?: boolean, getVerdictKey?: () => string } = {},
 ): Promise<VaultAssessmentEntry> => {
   if (!Number.isSafeInteger(chainId) || chainId <= 0 || !isAvailableForChain(chainId)) {
     return { status: 'idle' }
@@ -96,8 +96,15 @@ const loadVaultAssessment = async (
   const normalized = normalizeAddress(address)
   const key = keyFor(family, normalized)
   const requestKey = `${chainId}:${key}`
+  const verdictKey = options.getVerdictKey?.()
   const inflight = pending.get(requestKey)
-  if (inflight) return inflight
+  if (inflight && inflight.verdictKey === verdictKey) return inflight.promise
+  if (inflight) {
+    // The joined read answers an earlier verdict: once it settles, read again unless that verdict is back.
+    const settled = await inflight.promise
+    if (settled.verdictKey === options.getVerdictKey?.()) return settled
+    return loadVaultAssessment(chainId, address, family, { ...options, fresh: true })
+  }
   const previous = entriesByChain.value[chainId]?.[key]
   if (!previous || previous.status !== 'available') setEntry(chainId, key, { status: 'loading' })
   const generation = getChainPolicyGeneration(chainId)
@@ -113,7 +120,7 @@ const loadVaultAssessment = async (
         !!options.fresh,
       )
       if (!isCurrent()) return { status: 'idle' }
-      const entry: VaultAssessmentEntry = { status: 'available', assessment, consistencyStatus, verdictKey: options.verdictKey }
+      const entry: VaultAssessmentEntry = { status: 'available', assessment, consistencyStatus, verdictKey }
       setEntry(chainId, key, entry)
       return entry
     }
@@ -122,18 +129,18 @@ const loadVaultAssessment = async (
       if (isVaultAssessmentUnavailableError(error, 'chain-not-supported')) {
         unsupportedChainIds.value = new Set([...unsupportedChainIds.value, chainId])
       }
-      const entry: VaultAssessmentEntry = { status: 'unavailable', verdictKey: options.verdictKey }
+      const entry: VaultAssessmentEntry = { status: 'unavailable', verdictKey }
       setEntry(chainId, key, entry)
       logWarn('useEulerVaultAssessments', `Failed to load assessment ${normalized} on chain ${chainId}: ${error instanceof Error ? error.message : String(error)}`)
       return entry
     }
   })()
-  pending.set(requestKey, promise)
+  pending.set(requestKey, { promise, verdictKey })
   try {
     return await promise
   }
   finally {
-    if (pending.get(requestKey) === promise) pending.delete(requestKey)
+    if (pending.get(requestKey)?.promise === promise) pending.delete(requestKey)
   }
 }
 
@@ -148,14 +155,14 @@ const refreshAfterOwnTransaction = (
   const previous = refreshTimers.get(key)
   if (previous) clearInterval(previous)
   const stopAt = Date.now() + REFRESH_WINDOW_MS
-  void loadVaultAssessment(chainId, address, family, { fresh: true, background: true, verdictKey: getVerdictKey?.() })
+  void loadVaultAssessment(chainId, address, family, { fresh: true, background: true, getVerdictKey })
   const timer = setInterval(() => {
     if (Date.now() >= stopAt) {
       clearInterval(timer)
       refreshTimers.delete(key)
       return
     }
-    void loadVaultAssessment(chainId, address, family, { fresh: true, background: true, verdictKey: getVerdictKey?.() })
+    void loadVaultAssessment(chainId, address, family, { fresh: true, background: true, getVerdictKey })
   }, REFRESH_INTERVAL_MS)
   refreshTimers.set(key, timer)
 }
