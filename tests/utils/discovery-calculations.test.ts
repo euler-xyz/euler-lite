@@ -700,7 +700,7 @@ describe('attribute stats matrix', () => {
 
     expect(cell.display).toBe('$125')
     expect(cell.numeric).toBe(125)
-    expect(cell.hint).toContain('25% of total borrows')
+    expect(cell.hint).toContain('12.5% of supply - 25% of borrows')
     expect(cell.hint).toContain('2 underwater accounts')
     expect(cell.hint).toContain('$25 bad debt in positions with unpriced collateral (1 unpriced collateral position valued at $0)')
   })

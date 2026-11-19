@@ -1061,7 +1061,10 @@ export const STATS_ROWS: AttributeRow[] = [
       return {
         display: formatBadDebtUsd(badDebt),
         numeric: badDebt.badDebtUsd,
-        hint: formatBadDebtHint(badDebt, usd?.borrowUsd),
+        hint: formatBadDebtHint(badDebt, {
+          supplyUsd: usd?.supplyHasPrice ? usd.supplyUsd : undefined,
+          borrowsUsd: usd?.supplyHasPrice ? usd.borrowUsd : undefined,
+        }),
         kind: 'text',
       }
     },
