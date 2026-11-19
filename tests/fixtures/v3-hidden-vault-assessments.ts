@@ -1,5 +1,7 @@
 import { parseVaultAssessment, type EVault } from '@eulerxyz/euler-v2-sdk'
 import { getAddress, zeroAddress } from 'viem'
+import { getVaultVerdictKey, type VaultVerdictLike } from '~/utils/vault-assessment/flagged'
+import { liquityHubHiddenVerdict } from '~/tests/fixtures/liquity-hub'
 
 // Raw `/v3/evk/vaults/1/<vault>/assessment` bodies as Euler V3 served them on 2026-11-18, cut to the
 // governance findings and the findings that did not pass. Visibility verdicts are from the matching
@@ -248,10 +250,15 @@ export const EUSDC_95_RAW_ASSESSMENT = {
 
 type RawAssessment = typeof EUSDC_42_RAW_ASSESSMENT | typeof IDLE_CREDIT_VAULT_RAW_ASSESSMENT | typeof EUSDC_95_RAW_ASSESSMENT
 
-export const assessmentEntry = (raw: RawAssessment, overrides: { consistencyStatus?: string | null } = {}) => ({
+/** Stamped with the verdict it was loaded under: eUSDC-42's paused verdict unless another is given. */
+export const assessmentEntry = (
+  raw: RawAssessment,
+  overrides: { consistencyStatus?: string | null, verdict?: VaultVerdictLike } = {},
+) => ({
   status: 'available' as const,
   assessment: parseVaultAssessment(raw, raw.chainId, getAddress(raw.vaultAddress), 'evk'),
   consistencyStatus: 'consistencyStatus' in overrides ? overrides.consistencyStatus : raw.consistencyStatus,
+  verdictKey: getVaultVerdictKey(overrides.verdict ?? liquityHubHiddenVerdict('config-suspended')),
 })
 
 export const makeIdleCreditVault = (): EVault => ({

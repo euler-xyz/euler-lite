@@ -25,7 +25,7 @@ const { address, hideDeprecated = false, hideChecks = false, pairSide, family = 
 }>()
 
 const { chainId } = useEulerAddresses()
-const { isReady, source, visibility, vaultAssessments, getVaultAssessmentEntry, loadVaultAssessment } = useEulerLabels()
+const { isReady, source, visibility, vaultAssessments, getVaultAssessmentEntry, loadVaultAssessment, ensureVaultAssessment } = useEulerLabels()
 const { get: registryGet } = useVaultRegistry()
 const verdict = computed(() => isReady.value && source.value === 'v3'
   ? visibility.value?.[address.toLowerCase()]
@@ -46,17 +46,15 @@ const isPaused = computed(() => isPausedVerdict(verdict.value, {
   family: pauseFamily.value ? 'evk' : 'earn',
   onchainPaused: isOnchainPaused.value,
   assessment: pauseEntry.value.status === 'available' ? pauseEntry.value.assessment : undefined,
+  assessmentVerdictKey: pauseEntry.value.verdictKey,
 }))
-watch(
-  () => [chainId.value, address, pauseFamily.value, verdict.value?.status, verdict.value?.decidedBy, isOnchainPaused.value] as const,
-  ([id, vaultAddress, selectedFamily, status, decidedBy, onchainPaused]) => {
-    if (id && selectedFamily && onchainPaused === undefined && status === 'hidden' && decidedBy?.startsWith('config-')
-      && pauseEntry.value.status === 'idle') {
-      void loadVaultAssessment(id, vaultAddress, selectedFamily)
-    }
-  },
-  { immediate: true },
-)
+watchEffect(() => {
+  const id = chainId.value
+  const selectedFamily = pauseFamily.value
+  if (!id || !selectedFamily || isOnchainPaused.value !== undefined) return
+  if (verdict.value?.status !== 'hidden' || !verdict.value.decidedBy?.startsWith('config-')) return
+  void ensureVaultAssessment(id, address, selectedFamily)
+})
 const acceptedOnly = computed(() => verdict.value?.status === 'warning' && verdict.value.decidedBy === 'advisories'
   && assessmentEntry.value.status === 'available'
   && !!assessmentEntry.value.assessment && hasOnlyAcceptedVaultCheckFindings(assessmentEntry.value.assessment))

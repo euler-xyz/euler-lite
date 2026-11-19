@@ -7,6 +7,7 @@ import {
   getFlaggedVerdict,
   getVaultOpeningNotice,
   isDeprecationWarning,
+  getVaultVerdictKey,
   isHiddenForNonGovernanceCause,
   isPausedVerdict,
 } from '~/utils/vault-assessment/flagged'
@@ -135,7 +136,15 @@ describe('a hidden vault whose assessment shows no governance cause', () => {
   })
 
   it('rejects the Idle DAO credit vault, hidden as config-failed by a deprecated governor', () => {
-    expect(isHiddenForNonGovernanceCause(IDLE_CREDIT_VAULT_VERDICT, assessmentEntry(IDLE_CREDIT_VAULT_RAW_ASSESSMENT))).toBe(false)
+    expect(isHiddenForNonGovernanceCause(IDLE_CREDIT_VAULT_VERDICT, assessmentEntry(IDLE_CREDIT_VAULT_RAW_ASSESSMENT, { verdict: IDLE_CREDIT_VAULT_VERDICT }))).toBe(false)
+  })
+
+  it('distrusts an assessment loaded under another verdict', () => {
+    const deprecatedGovernor = { ...paused, decidedBy: 'config-failed', reason: 'Governance runs through a deprecated governor contract.' }
+    const loadedWhilePaused = assessmentEntry(EUSDC_42_RAW_ASSESSMENT)
+    expect(isHiddenForNonGovernanceCause(paused, loadedWhilePaused)).toBe(true)
+    expect(isHiddenForNonGovernanceCause(deprecatedGovernor, loadedWhilePaused)).toBe(false)
+    expect(isHiddenForNonGovernanceCause(paused, { ...loadedWhilePaused, verdictKey: undefined })).toBe(false)
   })
 
   it.each([
@@ -170,7 +179,7 @@ describe('a hidden vault whose assessment shows no governance cause', () => {
     const revoked = liquityHubHiddenVerdict('config-revoked')
     const clean = { ...EUSDC_42_RAW_ASSESSMENT, configContext: { ...EUSDC_42_RAW_ASSESSMENT.configContext, findings: [] } }
     expect(isHiddenForNonGovernanceCause(revoked, assessmentEntry(clean))).toBe(false)
-    expect(isHiddenForNonGovernanceCause(revoked, assessmentEntry(EUSDC_42_RAW_ASSESSMENT))).toBe(true)
+    expect(isHiddenForNonGovernanceCause(revoked, assessmentEntry(EUSDC_42_RAW_ASSESSMENT, { verdict: revoked }))).toBe(true)
   })
 
   const withContext = (configContext: Record<string, unknown>) => ({
@@ -206,16 +215,18 @@ describe('a hidden vault whose assessment shows no governance cause', () => {
 describe('paused verdict', () => {
   const hidden = (decidedBy: string) => ({ status: 'hidden', decidedBy })
   const exitsOff = assessmentEntry(EUSDC_95_RAW_ASSESSMENT).assessment
+  const loadedUnder = (decidedBy: string) => getVaultVerdictKey(hidden(decidedBy))
 
   it.each(['config-suspended', 'config-failed', 'config-revoked'])('needs on-chain or assessment pause evidence for %s', (decidedBy) => {
     expect(isPausedVerdict(hidden(decidedBy), { family: 'evk', onchainPaused: true })).toBe(true)
-    expect(isPausedVerdict(hidden(decidedBy), { family: 'evk', assessment: exitsOff })).toBe(true)
+    expect(isPausedVerdict(hidden(decidedBy), { family: 'evk', assessment: exitsOff, assessmentVerdictKey: loadedUnder(decidedBy) })).toBe(true)
+    expect(isPausedVerdict(hidden(decidedBy), { family: 'evk', assessment: exitsOff, assessmentVerdictKey: loadedUnder('config-revoked-earlier') })).toBe(false)
     expect(isPausedVerdict(hidden(decidedBy), { family: 'evk' })).toBe(false)
   })
 
   it('does not take an untrusted hook target or an unrelated failure as a pause', () => {
     const otherFailure = assessmentEntry(IDLE_CREDIT_VAULT_RAW_ASSESSMENT).assessment
-    expect(isPausedVerdict(hidden('config-failed'), { family: 'evk', assessment: otherFailure })).toBe(false)
+    expect(isPausedVerdict(hidden('config-failed'), { family: 'evk', assessment: otherFailure, assessmentVerdictKey: loadedUnder('config-failed') })).toBe(false)
   })
 
   it('lets the loaded vault decide over an assessment that may be older', () => {

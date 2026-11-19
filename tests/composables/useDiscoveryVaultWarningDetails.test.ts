@@ -5,7 +5,7 @@ import type { AnyVault } from '~/composables/useVaultRegistry'
 
 const labels = vi.hoisted(() => ({
   getVaultAssessmentEntry: vi.fn(() => ({ status: 'idle' })),
-  loadVaultAssessment: vi.fn(),
+  ensureVaultAssessment: vi.fn(),
 }))
 
 vi.mock('~/composables/useEulerLabels', () => ({
@@ -14,7 +14,7 @@ vi.mock('~/composables/useEulerLabels', () => ({
     source: ref('v3'),
     vaultAssessments: ref({}),
     getVaultAssessmentEntry: labels.getVaultAssessmentEntry,
-    loadVaultAssessment: labels.loadVaultAssessment,
+    ensureVaultAssessment: labels.ensureVaultAssessment,
   }),
 }))
 vi.mock('~/composables/useVaultReferences', () => ({ useVaultReferences: () => ({ describe: () => ({ label: '' }) }) }))
@@ -30,6 +30,6 @@ describe('discovery warning details', () => {
 
     useDiscoveryVaultWarningDetails().loadWarningDetails(securitize)
 
-    expect(labels.loadVaultAssessment).toHaveBeenCalledWith(1, SECURITIZE, 'evk')
+    expect(labels.ensureVaultAssessment).toHaveBeenCalledWith(1, SECURITIZE, 'evk')
   })
 })

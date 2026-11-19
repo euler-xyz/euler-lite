@@ -8,7 +8,7 @@ export const useVaultAssessmentEvidence = (
 ) => {
   const { chainId } = useEulerAddresses()
   const {
-    source, vaultAssessments, loadVaultAssessment,
+    source, vaultAssessments, loadVaultAssessment, ensureVaultAssessment,
     getVaultAssessmentEntry, isVaultAssessmentAvailableForChain,
   } = useEulerLabels()
   const canLoad = computed(() => !!chainId.value && source.value === 'v3'
@@ -30,6 +30,9 @@ export const useVaultAssessmentEvidence = (
   watch([canLoad, chainId, () => toValue(address), () => getChainPolicyGeneration(chainId.value)], ([enabled, id, target]) => {
     if (enabled && id) void loadVaultAssessment(id, target, family)
   }, { immediate: true })
+  watchEffect(() => {
+    if (canLoad.value && chainId.value) void ensureVaultAssessment(chainId.value, toValue(address), family)
+  })
 
   return { assessment, fallbackReady }
 }

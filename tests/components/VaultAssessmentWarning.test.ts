@@ -2,6 +2,7 @@ import { createSSRApp, defineComponent, h, ref } from 'vue'
 import { renderToString } from '@vue/server-renderer'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseVaultAssessment } from '@eulerxyz/euler-v2-sdk'
+import { getVaultVerdictKey } from '~/utils/vault-assessment/flagged'
 import VaultAssessmentWarning from '~/components/entities/vault/VaultAssessmentWarning.vue'
 import { NO_OPERATIONS_HOOKED, makeEusdc42 } from '~/tests/fixtures/liquity-hub'
 import { EUSDC_95, EUSDC_95_RAW_ASSESSMENT } from '~/tests/fixtures/v3-hidden-vault-assessments'
@@ -24,6 +25,7 @@ type RenderOptions = {
   family?: 'evk' | 'earn' | null
   vault?: unknown
   entry?: unknown
+  ensure?: ReturnType<typeof vi.fn>
 }
 
 const renderWarning = (ready: boolean, options: RenderOptions = {}) => {
@@ -34,6 +36,7 @@ const renderWarning = (ready: boolean, options: RenderOptions = {}) => {
     loadError: ref(options.loadError === undefined ? 'Unable to load vault verification. Please retry.' : options.loadError),
     source: ref('v3'),
     vaultAssessments: ref({}),
+    ensureVaultAssessment: options.ensure ?? vi.fn(),
     getVaultAssessmentEntry: () => options.entry ?? (options.findings
       ? { status: 'available', assessment: { assessed: true, configStatus: 'verified', checksStatus: 'warning', configContext: { outcome: 'pass', findings: options.findings }, consistencyContext: null } }
       : { status: 'idle' }),
@@ -122,9 +125,11 @@ describe('borrow pair badge', () => {
 
 describe('paused vault badge', () => {
   const pausedReason = 'The vault is paused: withdraw, redeem, transfer and 4 more are off, so depositors cannot get out until its governor turns them back on.'
-  const exitPausedCause = { status: 'available', assessment: parseVaultAssessment(EUSDC_95_RAW_ASSESSMENT, 1, EUSDC_95, 'evk') }
+  const loadedUnder = (decidedBy: string) => getVaultVerdictKey({ status: 'hidden', decidedBy, reason: 'Review the oracle.' })
+  const exitPausedCause = { status: 'available', assessment: parseVaultAssessment(EUSDC_95_RAW_ASSESSMENT, 1, EUSDC_95, 'evk'), verdictKey: loadedUnder('config-failed') }
   const securitizePausedCause = {
     status: 'available',
+    verdictKey: loadedUnder('config-suspended'),
     assessment: { configContext: { findings: [{ key: 'operations.not-paused', outcome: 'fail', required: true, description: 'The vault is not paused', cause: { code: 'vault-paused', subject: null, summary: 'The vault is paused.', remedy: null } }] } },
   }
   const untrustedHook = makeEusdc42({
@@ -159,12 +164,20 @@ describe('paused vault badge', () => {
     const raw = structuredClone(EUSDC_95_RAW_ASSESSMENT)
     const hooks = raw.configContext.findings.find(finding => finding.key === 'hooks.zero-or-trusted') as { observed?: { governorAdmin?: string } }
     hooks.observed = { ...hooks.observed, governorAdmin: '0x0000000000000000000000000000000000000000' }
-    const entry = { status: 'available', assessment: parseVaultAssessment(raw, 1, EUSDC_95, 'evk') }
+    const entry = { status: 'available', assessment: parseVaultAssessment(raw, 1, EUSDC_95, 'evk'), verdictKey: loadedUnder('config-failed') }
     expect(await renderWarning(true, { status: 'hidden', decidedBy: 'config-failed', entry })).toMatch(/\sFlagged<\/span>/)
   })
 
   it('accepts the exit-operations-disabled cause when the vault object is not loaded', async () => {
     expect(await renderWarning(true, { status: 'hidden', decidedBy: 'config-failed', entry: exitPausedCause })).toMatch(/\sPaused<\/span>/)
+  })
+
+  it('distrusts a pause cause loaded under another verdict and re-reads it', async () => {
+    const ensure = vi.fn()
+    const staleCause = { ...exitPausedCause, verdictKey: loadedUnder('config-suspended') }
+    const html = await renderWarning(true, { status: 'hidden', decidedBy: 'config-failed', entry: staleCause, ensure })
+    expect(html).toMatch(/\sFlagged<\/span>/)
+    expect(ensure).toHaveBeenCalledWith(1, address, 'evk')
   })
 
   it('accepts the Securitize vault-paused cause', async () => {

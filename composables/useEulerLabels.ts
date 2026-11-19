@@ -7,6 +7,7 @@ import {
   type EulerEarn,
   type EulerLabelsData,
   type EVault,
+  type VaultAssessmentFamily,
 } from '@eulerxyz/euler-v2-sdk'
 import { toReactive, until } from '@vueuse/core'
 import { decodeFunctionResult, encodeFunctionData, type Hex, type PublicClient } from 'viem'
@@ -25,6 +26,7 @@ import { isLabelsSnapshotUsable, LABELS_MAX_STALE_MS, LABELS_REFRESH_INTERVAL_MS
 import { getChainPolicyGeneration, isChainReadPolicyReady, refreshChainReadPolicy, useChainConfig } from '~/composables/useChainConfig'
 import { chainReadPolicyKey, getChainReadPolicy } from '~/utils/chain-policy'
 import { loadBrowserLabelsBundle } from '~/utils/sdk-labels'
+import { getVaultVerdictKey } from '~/utils/vault-assessment/flagged'
 import {
   normalizeLabelsBundle,
   getLabelVaultCandidates,
@@ -383,6 +385,21 @@ const probeWrapPairs = async (startChainId: number, loadGeneration: number, prob
 export const useEulerLabels = () => {
   const oracleAdapters = useEulerOracleAdapters()
   const vaultAssessments = useEulerVaultAssessments()
+  const getVerdictKeyFor = (address: string) => getVaultVerdictKey(visibility.value?.[address.toLowerCase()])
+  const loadVaultAssessment = (
+    chainId: number,
+    address: string,
+    family: VaultAssessmentFamily,
+    options: { fresh?: boolean, background?: boolean } = {},
+  ) => vaultAssessments.loadVaultAssessment(chainId, address, family, { ...options, verdictKey: getVerdictKeyFor(address) })
+  // Identity and pause evidence trust only an assessment loaded under the hidden verdict now shown, so a
+  // changed verdict re-reads it past the query cache.
+  const ensureVaultAssessment = (chainId: number, address: string, family: VaultAssessmentFamily) => {
+    const entry = vaultAssessments.getEntry(chainId, address, family)
+    if (entry.status === 'idle') return loadVaultAssessment(chainId, address, family)
+    if (entry.status === 'loading' || visibility.value?.[address.toLowerCase()]?.status !== 'hidden') return
+    if (entry.verdictKey !== getVerdictKeyFor(address)) return loadVaultAssessment(chainId, address, family, { fresh: true })
+  }
 
   return {
     isLoading,
@@ -399,10 +416,12 @@ export const useEulerLabels = () => {
     oracleAssessmentsAvailable: oracleAdapters.oracleAssessmentsAvailable,
     vaultAssessments: vaultAssessments.entries,
     vaultAssessmentsChainId: vaultAssessments.activeChainId,
-    loadVaultAssessment: vaultAssessments.loadVaultAssessment,
+    loadVaultAssessment,
+    ensureVaultAssessment,
     getVaultAssessmentEntry: vaultAssessments.getEntry,
     isVaultAssessmentAvailableForChain: vaultAssessments.isAvailableForChain,
-    refreshVaultAssessmentAfterOwnTransaction: vaultAssessments.refreshAfterOwnTransaction,
+    refreshVaultAssessmentAfterOwnTransaction: (chainId: number, address: string, family: VaultAssessmentFamily) =>
+      vaultAssessments.refreshAfterOwnTransaction(chainId, address, family, () => getVerdictKeyFor(address)),
     earnVaults,
     geoPolicies,
     visibility,

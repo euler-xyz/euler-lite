@@ -13,6 +13,7 @@ type VaultAssessmentEntry = {
   status: VaultAssessmentsStatus
   assessment?: VaultAssessment
   consistencyStatus?: string | null
+  verdictKey?: string
 }
 
 type AssessmentService = {
@@ -86,7 +87,7 @@ const loadVaultAssessment = async (
   chainId: number,
   address: string,
   family: VaultAssessmentFamily,
-  options: { fresh?: boolean, background?: boolean } = {},
+  options: { fresh?: boolean, background?: boolean, verdictKey?: string } = {},
 ): Promise<VaultAssessmentEntry> => {
   if (!Number.isSafeInteger(chainId) || chainId <= 0 || !isAvailableForChain(chainId)) {
     return { status: 'idle' }
@@ -112,7 +113,7 @@ const loadVaultAssessment = async (
         !!options.fresh,
       )
       if (!isCurrent()) return { status: 'idle' }
-      const entry: VaultAssessmentEntry = { status: 'available', assessment, consistencyStatus }
+      const entry: VaultAssessmentEntry = { status: 'available', assessment, consistencyStatus, verdictKey: options.verdictKey }
       setEntry(chainId, key, entry)
       return entry
     }
@@ -121,7 +122,7 @@ const loadVaultAssessment = async (
       if (isVaultAssessmentUnavailableError(error, 'chain-not-supported')) {
         unsupportedChainIds.value = new Set([...unsupportedChainIds.value, chainId])
       }
-      const entry: VaultAssessmentEntry = { status: 'unavailable' }
+      const entry: VaultAssessmentEntry = { status: 'unavailable', verdictKey: options.verdictKey }
       setEntry(chainId, key, entry)
       logWarn('useEulerVaultAssessments', `Failed to load assessment ${normalized} on chain ${chainId}: ${error instanceof Error ? error.message : String(error)}`)
       return entry
@@ -136,20 +137,25 @@ const loadVaultAssessment = async (
   }
 }
 
-const refreshAfterOwnTransaction = (chainId: number, address: string, family: VaultAssessmentFamily) => {
+const refreshAfterOwnTransaction = (
+  chainId: number,
+  address: string,
+  family: VaultAssessmentFamily,
+  getVerdictKey?: () => string,
+) => {
   if (!isAvailableForChain(chainId)) return
   const key = `${chainId}:${keyFor(family, address)}`
   const previous = refreshTimers.get(key)
   if (previous) clearInterval(previous)
   const stopAt = Date.now() + REFRESH_WINDOW_MS
-  void loadVaultAssessment(chainId, address, family, { fresh: true, background: true })
+  void loadVaultAssessment(chainId, address, family, { fresh: true, background: true, verdictKey: getVerdictKey?.() })
   const timer = setInterval(() => {
     if (Date.now() >= stopAt) {
       clearInterval(timer)
       refreshTimers.delete(key)
       return
     }
-    void loadVaultAssessment(chainId, address, family, { fresh: true, background: true })
+    void loadVaultAssessment(chainId, address, family, { fresh: true, background: true, verdictKey: getVerdictKey?.() })
   }, REFRESH_INTERVAL_MS)
   refreshTimers.set(key, timer)
 }

@@ -8,6 +8,10 @@ export interface VaultVerdictLike {
 
 export type VaultVisibilityMap = Readonly<Record<string, VaultVerdictLike>> | undefined
 
+/** The labels verdict an assessment was loaded under; evidence read under another verdict is stale. */
+export const getVaultVerdictKey = (verdict: VaultVerdictLike | undefined): string =>
+  JSON.stringify([verdict?.status ?? null, verdict?.decidedBy ?? null, verdict?.reason ?? null])
+
 export const FLAGGED_VAULT_LABEL = 'Flagged'
 export const FLAGGED_VAULT_TITLE = 'Vault flagged'
 export const FLAGGED_VAULT_ACTION = 'Review flagged vault'
@@ -55,6 +59,7 @@ export interface VaultPauseEvidence {
   /** Undefined when the vault's hooks are not loaded; the assessment then stands in for them. */
   onchainPaused?: boolean
   assessment?: Pick<VaultAssessment, 'configContext'>
+  assessmentVerdictKey?: string
 }
 
 const ZERO_ADDRESS_PATTERN = /^0x0{40}$/i
@@ -71,6 +76,7 @@ export const isPausedVerdict = (verdict: VaultVerdictLike | undefined, evidence:
   if (verdict?.status !== 'hidden' || !CONFIG_HIDING_REASONS.has(verdict.decidedBy ?? '')) return false
   if (evidence.family === 'earn') return false
   if (evidence.onchainPaused !== undefined) return evidence.onchainPaused
+  if (evidence.assessmentVerdictKey !== getVaultVerdictKey(verdict)) return false
   return evidence.assessment?.configContext?.findings.some(isPauseFinding) ?? false
 }
 const CLEAR_CONSISTENCY_STATUSES: ReadonlySet<string> = new Set(['verified', 'not_applicable'])
@@ -85,6 +91,7 @@ export interface VaultGovernanceEvidence {
   status: string
   assessment?: Pick<VaultAssessment, 'configContext' | 'consistencyContext'>
   consistencyStatus?: string | null
+  verdictKey?: string
 }
 
 const isUnresolvedFinding = (finding: VaultAssessmentFinding): boolean =>
@@ -108,7 +115,8 @@ export const isHiddenForNonGovernanceCause = (
   evidence: VaultGovernanceEvidence | undefined,
 ): boolean => {
   if (verdict?.status !== 'hidden' || !CONFIG_HIDING_REASONS.has(verdict.decidedBy ?? '')) return false
-  const configContext = evidence?.status === 'available' ? evidence.assessment?.configContext : null
+  if (evidence?.verdictKey !== getVaultVerdictKey(verdict)) return false
+  const configContext = evidence.status === 'available' ? evidence.assessment?.configContext : null
   if (!configContext || !CLEAR_CONSISTENCY_STATUSES.has(evidence?.consistencyStatus ?? '')) return false
   if (!hasPolicyGovernanceRules(configContext)) return false
   const findings = [...configContext.findings, ...(evidence?.assessment?.consistencyContext?.findings ?? [])]

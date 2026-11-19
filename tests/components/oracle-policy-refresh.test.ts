@@ -120,7 +120,7 @@ it.each(['card', 'warning', 'evidence'])('reloads mounted vault %s assessments w
     ...useEulerOracleAdapters(),
     isReady: ref(true), source: ref('v3'), vaultAssessments: ref({}),
     visibility: ref({ [BASE]: { status: 'warning', decidedBy: 'advisories' } }),
-    loadVaultAssessment: load, getVaultAssessmentEntry: () => ({ status: 'idle' }),
+    loadVaultAssessment: load, ensureVaultAssessment: vi.fn(), getVaultAssessmentEntry: () => ({ status: 'idle' }),
     isVaultAssessmentAvailableForChain: () => true,
   }))
   vi.stubGlobal('useActivityNowMs', () => ref(Date.now()))

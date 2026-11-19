@@ -11,7 +11,7 @@ const getAssessmentFamily = (vault: AnyVault): VaultAssessmentFamily | null =>
 export const useDiscoveryVaultWarningDetails = () => {
   const {
     isReady, source, vaultAssessments,
-    getVaultAssessmentEntry, loadVaultAssessment,
+    getVaultAssessmentEntry, ensureVaultAssessment,
   } = useEulerLabels()
   const { describe } = useVaultReferences()
   const lineText = (line: VaultCheckLine) => line.parts
@@ -45,9 +45,7 @@ export const useDiscoveryVaultWarningDetails = () => {
   const loadWarningDetails = (vault: AnyVault | undefined) => {
     const family = vault && getAssessmentFamily(vault)
     if (!vault || !family || !isReady.value || source.value !== 'v3') return
-    if (getVaultAssessmentEntry(vault.chainId, vault.address, family).status === 'idle') {
-      void loadVaultAssessment(vault.chainId, vault.address, family)
-    }
+    void ensureVaultAssessment(vault.chainId, vault.address, family)
   }
 
   return { getWarningText, loadWarningDetails, isAcceptedOnlyWarning }
