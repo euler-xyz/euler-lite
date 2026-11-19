@@ -3,7 +3,7 @@ import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
-import { formatBadDebtOverviewValue } from '~/utils/vault-bad-debt'
+import { formatBadDebtOverview } from '~/utils/vault-bad-debt'
 import { VaultApyModal, UiModalPreviewTrigger } from '#components'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { isVaultBorrowable } from '~/utils/vault/classification'
@@ -60,10 +60,12 @@ const totalSupplyDisplay = ref('-')
 const totalBorrowedDisplay = ref('-')
 const availableLiquidityDisplay = ref('-')
 const totalBorrowedUsd = ref<number | undefined>(undefined)
+const totalSupplyUsd = ref<number | undefined>(undefined)
 
 watchEffect(async () => {
   const price = await formatAssetValue(vault.totalAssets, vault, 'off-chain')
   totalSupplyDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
+  totalSupplyUsd.value = price.hasPrice ? price.usdValue : undefined
 })
 
 watchEffect(async () => {
@@ -82,12 +84,12 @@ watchEffect(() => {
   if (isBorrowable.value && isBadDebtEnabled.value) void loadBadDebtForChain()
 })
 
-const badDebtDisplay = computed(() => {
+const badDebtDisplay = computed((): { value: string, borrowShare?: string } | null => {
   if (!isBorrowable.value || !isBadDebtEnabled.value) return null
   const badDebt = getVaultBadDebt(vault.address)
-  if (badDebt) return formatBadDebtOverviewValue(badDebt, totalBorrowedUsd.value)
-  if (isBadDebtLoading.value) return '...'
-  return isBadDebtLoaded.value ? '$0' : null
+  if (badDebt) return formatBadDebtOverview(badDebt, { supplyUsd: totalSupplyUsd.value, borrowsUsd: totalBorrowedUsd.value })
+  if (isBadDebtLoading.value) return { value: '...' }
+  return isBadDebtLoaded.value ? { value: '$0' } : null
 })
 </script>
 
@@ -112,9 +114,19 @@ const badDebtDisplay = computed(() => {
     <VaultOverviewLabelValue
       v-if="badDebtDisplay"
       label="Pending bad debt"
-      :value="badDebtDisplay"
+      :value="badDebtDisplay.value"
       orientation="horizontal"
-    />
+    >
+      <span class="flex items-center gap-4">
+        {{ badDebtDisplay.value }}
+        <UiHoverPreviewTooltip
+          v-if="badDebtDisplay.borrowShare"
+          title="Pending bad debt"
+          :text="`Bad debt is ${badDebtDisplay.borrowShare}.`"
+          placement="top-end"
+        />
+      </span>
+    </VaultOverviewLabelValue>
     <VaultOverviewLabelValue
       v-if="isBorrowable"
       label="Available liquidity"

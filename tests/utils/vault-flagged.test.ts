@@ -7,7 +7,18 @@ import {
   getFlaggedVerdict,
   getVaultOpeningNotice,
   isDeprecationWarning,
+  getVaultVerdictKey,
+  isHiddenForNonGovernanceCause,
+  isPausedVerdict,
 } from '~/utils/vault-assessment/flagged'
+import { liquityHubHiddenVerdict } from '~/tests/fixtures/liquity-hub'
+import {
+  EUSDC_42_RAW_ASSESSMENT,
+  EUSDC_95_RAW_ASSESSMENT,
+  IDLE_CREDIT_VAULT_RAW_ASSESSMENT,
+  IDLE_CREDIT_VAULT_VERDICT,
+  assessmentEntry,
+} from '~/tests/fixtures/v3-hidden-vault-assessments'
 
 const FLAGGED = '0x00000000000000000000000000000000000000a1'
 const PENDING = '0x00000000000000000000000000000000000000a2'
@@ -109,5 +120,124 @@ describe('isDeprecationWarning', () => {
   it('keeps hidden verdicts and missing verdicts out', () => {
     expect(isDeprecationWarning({ status: 'hidden', decidedBy: 'deprecated', reason: null }, true)).toBe(false)
     expect(isDeprecationWarning(undefined, true)).toBe(false)
+  })
+})
+
+describe('a hidden vault whose assessment shows no governance cause', () => {
+  const paused = liquityHubHiddenVerdict('config-suspended')
+  const withFindings = (findings: Array<Record<string, unknown>>) => ({
+    ...EUSDC_42_RAW_ASSESSMENT,
+    configContext: { ...EUSDC_42_RAW_ASSESSMENT.configContext, findings: [...EUSDC_42_RAW_ASSESSMENT.configContext.findings, ...findings] },
+  }) as typeof EUSDC_42_RAW_ASSESSMENT
+
+  it('accepts a paused vault whose governance findings pass and whose consistency is verified', () => {
+    expect(isHiddenForNonGovernanceCause(paused, assessmentEntry(EUSDC_42_RAW_ASSESSMENT))).toBe(true)
+    expect(isHiddenForNonGovernanceCause(paused, assessmentEntry(EUSDC_42_RAW_ASSESSMENT, { consistencyStatus: 'not_applicable' }))).toBe(true)
+  })
+
+  it('rejects the Idle DAO credit vault, hidden as config-failed by a deprecated governor', () => {
+    expect(isHiddenForNonGovernanceCause(IDLE_CREDIT_VAULT_VERDICT, assessmentEntry(IDLE_CREDIT_VAULT_RAW_ASSESSMENT, { verdict: IDLE_CREDIT_VAULT_VERDICT }))).toBe(false)
+  })
+
+  it('distrusts an assessment loaded under another verdict', () => {
+    const deprecatedGovernor = { ...paused, decidedBy: 'config-failed', reason: 'Governance runs through a deprecated governor contract.' }
+    const loadedWhilePaused = assessmentEntry(EUSDC_42_RAW_ASSESSMENT)
+    expect(isHiddenForNonGovernanceCause(paused, loadedWhilePaused)).toBe(true)
+    expect(isHiddenForNonGovernanceCause(deprecatedGovernor, loadedWhilePaused)).toBe(false)
+    expect(isHiddenForNonGovernanceCause(paused, { ...loadedWhilePaused, verdictKey: undefined })).toBe(false)
+  })
+
+  it.each([
+    ['a failing scheduled governance change', { key: 'scheduled.governance.timelock', outcome: 'fail', required: false, description: 'Timelock', cause: null }],
+    ['a required governance rule that could not run', { key: 'governance.router', outcome: 'unknown', required: true, description: 'Router', cause: null }],
+    ['an advisory governance rule that could not run', { key: 'governance.curator-registered', outcome: 'unknown', required: false, description: 'Curator', cause: null }],
+    ['an advisory governance rule that failed', { key: 'governance.curator-registered', outcome: 'fail', required: false, description: 'Curator', cause: null }],
+  ])('rejects %s', (_label, finding) => {
+    expect(isHiddenForNonGovernanceCause(paused, assessmentEntry(withFindings([finding])))).toBe(false)
+  })
+
+  it('accepts an advisory governance failure that the platform exempted', () => {
+    const exempted = { key: 'governance.curator-registered', outcome: 'fail', required: false, description: 'Curator', cause: null, exempted: true }
+    expect(isHiddenForNonGovernanceCause(paused, assessmentEntry(withFindings([exempted])))).toBe(true)
+  })
+
+  it.each(['suspended', 'revoked', 'pending', null])('rejects consistency %s, which a config verdict can mask', (consistencyStatus) => {
+    expect(isHiddenForNonGovernanceCause(paused, assessmentEntry(EUSDC_42_RAW_ASSESSMENT, { consistencyStatus }))).toBe(false)
+  })
+
+  it('keeps the curator blank while the assessment loads or is unavailable', () => {
+    expect(isHiddenForNonGovernanceCause(paused, { status: 'loading' })).toBe(false)
+    expect(isHiddenForNonGovernanceCause(paused, { status: 'unavailable' })).toBe(false)
+    expect(isHiddenForNonGovernanceCause(paused, undefined)).toBe(false)
+  })
+
+  it.each(['not-explorable', 'consistency-suspended', 'consistency-revoked', 'a-reason-v3-adds-later', undefined])('rejects the hidden reason %s', (decidedBy) => {
+    expect(isHiddenForNonGovernanceCause({ ...paused, decidedBy }, assessmentEntry(EUSDC_42_RAW_ASSESSMENT))).toBe(false)
+  })
+
+  it('accepts config-revoked only when a non-governance failure explains it', () => {
+    const revoked = liquityHubHiddenVerdict('config-revoked')
+    const clean = { ...EUSDC_42_RAW_ASSESSMENT, configContext: { ...EUSDC_42_RAW_ASSESSMENT.configContext, findings: [] } }
+    expect(isHiddenForNonGovernanceCause(revoked, assessmentEntry(clean))).toBe(false)
+    expect(isHiddenForNonGovernanceCause(revoked, assessmentEntry(EUSDC_42_RAW_ASSESSMENT, { verdict: revoked }))).toBe(true)
+  })
+
+  const withContext = (configContext: Record<string, unknown>) => ({
+    ...EUSDC_42_RAW_ASSESSMENT,
+    configContext: { ...EUSDC_42_RAW_ASSESSMENT.configContext, ...configContext },
+  }) as typeof EUSDC_42_RAW_ASSESSMENT
+  const failing = (key: string) => ({ key, outcome: 'fail', required: true, description: key, cause: null })
+  const passing = (key: string) => ({ key, outcome: 'pass', required: true, description: key, cause: null })
+
+  it('rejects an assessment where the governance rules never ran', () => {
+    const lensOnly = withContext({ findings: [failing('configuration.lens-readable')] })
+    expect(isHiddenForNonGovernanceCause(paused, assessmentEntry(lensOnly))).toBe(false)
+  })
+
+  it.each([
+    ['euler-evk', [passing('governance.no-deprecated-governor')], false],
+    ['euler-evk', [passing('governance.no-deprecated-governor'), passing('governance.router')], true],
+    ['euler-securitize', [passing('governance.no-deprecated-governor')], true],
+    ['euler-securitize', [], false],
+    ['euler-earn', [], false],
+    ['euler-earn', [{ ...passing('governance.timelock'), outcome: 'not_applicable' }], true],
+    ['a-policy-lite-does-not-know', [passing('governance.no-deprecated-governor'), passing('governance.router')], false],
+  ])('requires the %s governance rules to be present: %#', (policyId, governance, expected) => {
+    const context = withContext({ policyId, findings: [failing('hooks.zero-or-trusted'), ...governance] })
+    expect(isHiddenForNonGovernanceCause(paused, assessmentEntry(context))).toBe(expected)
+  })
+
+  it('only applies to a hidden verdict', () => {
+    expect(isHiddenForNonGovernanceCause({ ...paused, status: 'warning' }, assessmentEntry(EUSDC_42_RAW_ASSESSMENT))).toBe(false)
+  })
+})
+
+describe('paused verdict', () => {
+  const hidden = (decidedBy: string) => ({ status: 'hidden', decidedBy })
+  const exitsOff = assessmentEntry(EUSDC_95_RAW_ASSESSMENT).assessment
+  const loadedUnder = (decidedBy: string) => getVaultVerdictKey(hidden(decidedBy))
+
+  it.each(['config-suspended', 'config-failed', 'config-revoked'])('needs on-chain or assessment pause evidence for %s', (decidedBy) => {
+    expect(isPausedVerdict(hidden(decidedBy), { family: 'evk', onchainPaused: true })).toBe(true)
+    expect(isPausedVerdict(hidden(decidedBy), { family: 'evk', assessment: exitsOff, assessmentVerdictKey: loadedUnder(decidedBy) })).toBe(true)
+    expect(isPausedVerdict(hidden(decidedBy), { family: 'evk', assessment: exitsOff, assessmentVerdictKey: loadedUnder('config-revoked-earlier') })).toBe(false)
+    expect(isPausedVerdict(hidden(decidedBy), { family: 'evk' })).toBe(false)
+  })
+
+  it('does not take an untrusted hook target or an unrelated failure as a pause', () => {
+    const otherFailure = assessmentEntry(IDLE_CREDIT_VAULT_RAW_ASSESSMENT).assessment
+    expect(isPausedVerdict(hidden('config-failed'), { family: 'evk', assessment: otherFailure, assessmentVerdictKey: loadedUnder('config-failed') })).toBe(false)
+  })
+
+  it('lets the loaded vault decide over an assessment that may be older', () => {
+    expect(isPausedVerdict(hidden('config-failed'), { family: 'evk', onchainPaused: false, assessment: exitsOff })).toBe(false)
+  })
+
+  it('never calls an Earn vault paused', () => {
+    expect(isPausedVerdict(hidden('config-suspended'), { family: 'earn', onchainPaused: true, assessment: exitsOff })).toBe(false)
+  })
+
+  it.each(['consistency-suspended', 'not-explorable'])('keeps %s flagged', (decidedBy) => {
+    expect(isPausedVerdict(hidden(decidedBy), { family: 'evk', onchainPaused: true })).toBe(false)
   })
 })

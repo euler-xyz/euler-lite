@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildBadDebtCache,
   formatBadDebtHint,
-  formatBadDebtOverviewValue,
+  formatBadDebtOverview,
   parseBadDebtResponse,
   type V3VaultBadDebtRow,
 } from '~/utils/vault-bad-debt'
@@ -38,32 +38,44 @@ describe('vault bad debt helpers', () => {
     expect(parseBadDebtResponse({ data: [row()] })).toHaveLength(1)
   })
 
-  it('formats overview values with total-borrow context when available', () => {
+  it('states bad debt as a labelled share of supply, with the share of borrows on the side', () => {
     const entry = buildBadDebtCache([row({ badDebtUsd: 125 })]).values().next().value!
 
-    expect(formatBadDebtOverviewValue(entry, 500)).toBe('$125 (25%)')
-    expect(formatBadDebtOverviewValue(entry, undefined)).toBe('$125')
-    expect(formatBadDebtHint(entry, 500)).toContain('25% of total borrows')
+    expect(formatBadDebtOverview(entry, { supplyUsd: 1000, borrowsUsd: 500 })).toEqual({ value: '$125 (12.5% of supply)', borrowShare: '25% of borrows' })
+    expect(formatBadDebtHint(entry, { supplyUsd: 1000, borrowsUsd: 500 })).toContain('12.5% of supply - 25% of borrows')
+  })
+
+  it('reads eUSDC-42 as 83.2% of supply and 99.99% of borrows', () => {
+    const entry = buildBadDebtCache([row({ badDebtUsd: 17_556 })]).values().next().value!
+
+    expect(formatBadDebtOverview(entry, { supplyUsd: 21_100, borrowsUsd: 17_558 })).toEqual({ value: '$17.56K (83.2% of supply)', borrowShare: '99.99% of borrows' })
+  })
+
+  it.each([undefined, 0])('prints the amount alone when supply is %s', (supplyUsd) => {
+    const entry = buildBadDebtCache([row({ badDebtUsd: 125 })]).values().next().value!
+
+    expect(formatBadDebtOverview(entry, { supplyUsd, borrowsUsd: undefined })).toEqual({ value: '$125', borrowShare: undefined })
+    expect(formatBadDebtHint(entry, { supplyUsd, borrowsUsd: undefined })).not.toMatch(/%/)
   })
 
   it('reports bad debt in positions with unpriced collateral without attributing its cause', () => {
     const entry = buildBadDebtCache([row({ unpricedBadDebtUsd: 40, unpricedCollateralCount: 3 })]).values().next().value!
 
     expect(entry.pricing).toEqual({ status: 'reported', unpricedUsd: 40, unpricedCollateralCount: 3 })
-    expect(formatBadDebtHint(entry, 500)).toContain('$40 bad debt in positions with unpriced collateral (3 unpriced collateral positions valued at $0)')
+    expect(formatBadDebtHint(entry, { supplyUsd: 1000, borrowsUsd: 500 })).toContain('$40 bad debt in positions with unpriced collateral (3 unpriced collateral positions valued at $0)')
   })
 
   it('names one collateral position in the singular', () => {
     const entry = buildBadDebtCache([row({ unpricedBadDebtUsd: 40, unpricedCollateralCount: 1 })]).values().next().value!
 
-    expect(formatBadDebtHint(entry, 500)).toContain('$40 bad debt in positions with unpriced collateral (1 unpriced collateral position valued at $0)')
+    expect(formatBadDebtHint(entry, { supplyUsd: 1000, borrowsUsd: 500 })).toContain('$40 bad debt in positions with unpriced collateral (1 unpriced collateral position valued at $0)')
   })
 
   it('treats a reported zero as fully priced', () => {
     const entry = buildBadDebtCache([row({ unpricedBadDebtUsd: 0, unpricedCollateralCount: 0 })]).values().next().value!
 
     expect(entry.pricing).toEqual({ status: 'reported', unpricedUsd: 0, unpricedCollateralCount: 0 })
-    expect(formatBadDebtHint(entry, 500)).toContain('all collateral priced')
+    expect(formatBadDebtHint(entry, { supplyUsd: 1000, borrowsUsd: 500 })).toContain('all collateral priced')
   })
 
   it('says unpriced collateral was not reported when the fields are missing or null', () => {
@@ -74,8 +86,8 @@ describe('vault bad debt helpers', () => {
     expect(missingBoth.pricing).toEqual({ status: 'not-reported' })
     expect(missingCount.pricing).toEqual({ status: 'not-reported' })
     expect(nullBoth.pricing).toEqual({ status: 'not-reported' })
-    expect(formatBadDebtHint(missingBoth, 500)).toContain('no data on unpriced collateral')
-    expect(formatBadDebtHint(missingBoth, 500)).not.toContain('all collateral priced')
+    expect(formatBadDebtHint(missingBoth, { supplyUsd: 1000, borrowsUsd: 500 })).toContain('no data on unpriced collateral')
+    expect(formatBadDebtHint(missingBoth, { supplyUsd: 1000, borrowsUsd: 500 })).not.toContain('all collateral priced')
   })
 
   it('marks inconsistent price coverage as invalid without dropping the bad debt', () => {
@@ -93,7 +105,7 @@ describe('vault bad debt helpers', () => {
       const entry = buildBadDebtCache([input]).values().next().value!
       expect(entry.badDebtUsd).toBe(150)
       expect(entry.pricing).toEqual({ status: 'invalid' })
-      expect(formatBadDebtHint(entry, 500)).toContain('unpriced collateral data is invalid')
+      expect(formatBadDebtHint(entry, { supplyUsd: 1000, borrowsUsd: 500 })).toContain('unpriced collateral data is invalid')
     }
   })
 

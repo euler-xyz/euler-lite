@@ -66,9 +66,9 @@ const market = {
 
 const render = (selectedNodeAddress: string | null) => {
   vi.stubGlobal('useVaults', () => ({
-    isVaultGovernorVerified: () => true,
-    isSecuritizeGovernorVerified: () => true,
-    isEarnVaultOwnerVerified: () => true,
+    isVaultGovernorIdentified: () => true,
+    isSecuritizeGovernorIdentified: () => true,
+    isEarnVaultOwnerIdentified: () => true,
   }))
   vi.stubGlobal('useEulerLabels', () => ({
     isReady: ref(true),

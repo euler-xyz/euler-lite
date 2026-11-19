@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import type { EVault, SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
-import { isCyclicalNoteVault, isVaultBorrowable } from '~/utils/vault/classification'
+import { isBorrowPairPaused, isCyclicalNoteVault, isVaultBorrowable, isVaultBorrowPaused } from '~/utils/vault/classification'
+import { NO_OPERATIONS_HOOKED, makeEbold1, makeEsbold1, makeEusdc42 } from '~/tests/fixtures/liquity-hub'
 
 const makeBorrowableInput = (
   isBorrowable: boolean,
@@ -77,5 +78,37 @@ describe('isCyclicalNoteVault', () => {
 
     expect(isCyclicalNoteVault(missingType)).toBe(false)
     expect(isCyclicalNoteVault(stringType)).toBe(false)
+  })
+})
+
+describe('a paused vault (K3 Liquity Hub)', () => {
+  const live = { hookedOperations: NO_OPERATIONS_HOOKED }
+
+  it('is not borrowable while borrow is hooked with a zero target', () => {
+    expect(isVaultBorrowPaused(makeEusdc42())).toBe(true)
+    expect(isVaultBorrowPaused(makeEusdc42(live))).toBe(false)
+  })
+
+  it('treats only the borrow hook, or the status check, as blocking a new borrow', () => {
+    expect(isVaultBorrowPaused(makeEusdc42({ hookedOperations: { ...NO_OPERATIONS_HOOKED, borrow: true } }))).toBe(true)
+    expect(isVaultBorrowPaused(makeEusdc42({ hookedOperations: { ...NO_OPERATIONS_HOOKED, vaultStatusCheck: true } }))).toBe(true)
+    expect(isVaultBorrowPaused(makeEusdc42({ hookedOperations: { ...NO_OPERATIONS_HOOKED, deposit: true } }))).toBe(false)
+    expect(isVaultBorrowPaused(makeEusdc42({
+      hookedOperations: { ...NO_OPERATIONS_HOOKED, borrow: true },
+      hookTarget: '0x00000000000000000000000000000000000000aa',
+    }))).toBe(false)
+  })
+
+  it('keeps its borrow side, so outstanding debt and exposure stay visible', () => {
+    expect(isVaultBorrowable(makeEusdc42())).toBe(true)
+  })
+
+  it('pauses a pair when the liability cannot lend or the collateral cannot take a deposit', () => {
+    expect(isBorrowPairPaused(makeEbold1(), makeEsbold1())).toBe(true)
+    expect(isBorrowPairPaused(makeEbold1(live), makeEsbold1())).toBe(true)
+    expect(isBorrowPairPaused(makeEbold1(), makeEsbold1(live))).toBe(true)
+    expect(isBorrowPairPaused(makeEbold1(live), makeEsbold1(live))).toBe(false)
+    expect(isBorrowPairPaused(makeEbold1(live), { type: 'SecuritizeCollateral' })).toBe(false)
+    expect(isBorrowPairPaused(makeEbold1(live), makeEsbold1({ hookedOperations: { ...NO_OPERATIONS_HOOKED, skim: true } }))).toBe(true)
   })
 })

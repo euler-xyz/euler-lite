@@ -13,9 +13,11 @@ import { VaultApyModal, UiModalPreviewTrigger } from '#components'
 import {
   getCollateralExposureGroups,
   getCollateralExposurePairs,
+  sumOpenInterestUsd,
 } from '~/utils/vault/collateral-exposure'
 import {
   combineVaultExposureDisplays,
+  getHeldSupplyShare,
   resolveVaultExposureDisplay,
   type ExposureValueState,
   type VaultExposureDisplay,
@@ -34,6 +36,7 @@ const {
   isLoaded: isOpenInterestLoaded,
   isOpenInterestEnabled,
 } = useCollateralOpenInterest()
+const { getVaultBadDebt, isBadDebtEnabled, isBadDebtLoading, loadBadDebtForChain } = useVaultBadDebt()
 const entities = useEulerEntitiesOfEarnVault(vault)
 const isOwnerVerified = computed(() => isEarnVaultOwnerVerified(vault))
 const entityName = computed(() => {
@@ -108,6 +111,10 @@ const strategyExposureDisplays = computed<VaultExposureDisplay[]>(() =>
       totalSupplyState: allocation.valueState,
       utilization: strategyVault.utilization,
       acceptedCollateralCount: strategyVault.collaterals.length,
+      badDebtUsd: getVaultBadDebt(strategyVault.address)?.badDebtUsd,
+      badDebtLoading: isBadDebtLoading.value,
+      openInterestTotalUsd: sumOpenInterestUsd(getOpenInterestForVault(strategyVault.address)),
+      vaultShare: getHeldSupplyShare(strategy.allocatedAssets, strategyVault.totalAssets),
     })]
   }),
 )
@@ -116,8 +123,9 @@ const exposureValueState = computed(() => exposureDisplay.value.valueState)
 const exposureDisplayItems = computed(() => exposureDisplay.value.items)
 
 watchEffect(() => {
-  if (!vault.strategies.length || !isOpenInterestEnabled.value) return
-  void loadOpenInterest()
+  if (!vault.strategies.length) return
+  if (isOpenInterestEnabled.value) void loadOpenInterest()
+  if (isBadDebtEnabled.value) void loadBadDebtForChain()
 })
 
 watchEffect(async () => {

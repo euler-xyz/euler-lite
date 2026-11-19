@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { isEVault, type EVault, type SecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
+import { isEVault } from '@eulerxyz/euler-v2-sdk'
 import {
   type MatrixViewId,
   type AttributeMatrixData,
@@ -16,7 +16,7 @@ import type { VaultBadDebtCacheEntry } from '~/utils/vault-bad-debt'
 import { getEntitiesByVault } from '~/utils/eulerLabelsUtils'
 import { getEulerLabelEntityLogo } from '~/entities/euler/labels'
 import { VaultHooksInfoModal } from '#components'
-import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
+import { getCollateralExposureGroups, getCollateralExposurePairs, sumOpenInterestUsd, type CollateralVaultResolver } from '~/utils/vault/collateral-exposure'
 import { resolveVaultExposureDisplay, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
 
 const props = defineProps<{
@@ -25,16 +25,17 @@ const props = defineProps<{
   usdCache: Map<string, VaultUsdCacheEntry>
   apyCache: Map<string, VaultApyCacheEntry>
   badDebtCache: Map<string, VaultBadDebtCacheEntry>
+  isBadDebtLoading: boolean
   showBadDebtColumn: boolean
   selectedHeader: { address: string, axis: 'row' | 'column' } | null
+  resolveVault: CollateralVaultResolver
 }>()
 
 defineEmits<{
   selectHeader: [address: string, axis: 'row' | 'column']
 }>()
 
-const { isVaultGovernorVerified } = useVaults()
-const { get: registryGet } = useVaultRegistry()
+const { isVaultGovernorIdentified } = useVaults()
 const {
   load: loadOpenInterest,
   getOpenInterestForVault,
@@ -103,16 +104,17 @@ const exposureByVault = computed(() => {
       openInterestLoaded: isOpenInterestLoaded.value,
       hasOpenInterestError: hasOpenInterestError.value,
       getCollateralGroups: () => getCollateralExposureGroups(
-        getCollateralExposurePairs(
-          columnVault,
-          addr => registryGet(addr)?.vault as EVault | SecuritizeCollateralVault | undefined,
-        ),
+        getCollateralExposurePairs(columnVault, props.resolveVault),
         getOpenInterestForVault(column.address),
       ),
       totalExposureUsd,
       totalSupplyState,
       utilization: columnVault.utilization,
       acceptedCollateralCount: columnVault.collaterals.length,
+      badDebtUsd: props.badDebtCache.get(column.address)?.badDebtUsd,
+      badDebtLoading: props.isBadDebtLoading,
+      openInterestTotalUsd: sumOpenInterestUsd(getOpenInterestForVault(column.address)),
+      vaultShare: 1,
     }))
   }
   return result
@@ -268,12 +270,9 @@ const cellDataValue = (cell: AttributeCell, vault: AttributeMatrixColumn): strin
                 </div>
               </template>
 
-              <!-- governor: same precedence as VaultOverviewBlockGeneral —
-                   unverified governor wins ("Unknown"), then entities, else
-                   "—". Escrow vaults pass `isVaultGovernorVerified` and have
-                   no labeled entities, so they fall through to "—". -->
+              <!-- Escrow vaults count as identified and have no labeled entities, so they read "—". -->
               <template v-else-if="col.cells[vaultIdx].kind === 'governor'">
-                <template v-if="isVaultType(vault.vault) && !isVaultGovernorVerified(vault.vault)">
+                <template v-if="isVaultType(vault.vault) && !isVaultGovernorIdentified(vault.vault)">
                   <VaultTypeChip
                     :vault="vault.vault"
                     type="unknown"

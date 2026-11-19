@@ -63,9 +63,9 @@ const makeVault = (overrides: Partial<EVault> & { verified?: boolean } = {}): EV
 
 const setupVaultsMock = () => {
   ;(globalThis as unknown as { useVaults: unknown }).useVaults = () => ({
-    isEarnVaultOwnerVerified: (vault: { address: string }) =>
+    isEarnVaultOwnerIdentified: (vault: { address: string }) =>
       state.verifiedEarnVaults.has(vault.address.toLowerCase()),
-    isVaultGovernorVerified: (vault: { address: string, eulerRouterGovernor?: string | null }) => {
+    isVaultGovernorIdentified: (vault: { address: string, eulerRouterGovernor?: string | null }) => {
       const address = vault.address.toLowerCase()
       const requiredRouterGovernor = state.requiredRouterGovernors.get(address)
       return state.verifiedVaults.has(address)
@@ -195,9 +195,9 @@ describe('useVaultTypeBadges', () => {
     state.registryVaults.set(portfolioVault.address.toLowerCase(), registryVault)
     state.requiredRouterGovernors.set(portfolioVault.address.toLowerCase(), routerGovernor.toLowerCase())
 
-    const { isVerified, summaryBadges, verificationVault } = useVaultTypeBadges(shallowRef(portfolioVault))
+    const { isGovernanceIdentified, summaryBadges, verificationVault } = useVaultTypeBadges(shallowRef(portfolioVault))
 
-    expect(isVerified.value).toBe(true)
+    expect(isGovernanceIdentified.value).toBe(true)
     expect(summaryBadges.value).toEqual([])
     expect(verificationVault.value).not.toBe(portfolioVault)
     expect(verificationVault.value).toHaveProperty('eulerRouterGovernor', routerGovernor)
@@ -219,9 +219,9 @@ describe('useVaultTypeBadges', () => {
       '0x5000000000000000000000000000000000000005',
     )
 
-    const { isVerified, summaryBadges, verificationVault } = useVaultTypeBadges(shallowRef(portfolioVault))
+    const { isGovernanceIdentified, summaryBadges, verificationVault } = useVaultTypeBadges(shallowRef(portfolioVault))
 
-    expect(isVerified.value).toBe(false)
+    expect(isGovernanceIdentified.value).toBe(false)
     expect(summaryBadges.value).toEqual(['unknown'])
     expect(verificationVault.value).toBe(portfolioVault)
   })
@@ -232,10 +232,10 @@ describe('useVaultTypeBadges', () => {
       governorAdmin: zeroAddress,
     })
 
-    const { badges, governanceType, hasSummaryBadges, isVerified, summaryBadges } = useVaultTypeBadges(shallowRef(vault))
+    const { badges, governanceType, hasSummaryBadges, isGovernanceIdentified, summaryBadges } = useVaultTypeBadges(shallowRef(vault))
 
     expect(governanceType.value).toBe('ungoverned')
-    expect(isVerified.value).toBe(false)
+    expect(isGovernanceIdentified.value).toBe(false)
     expect(badges.value).toEqual(['ungoverned'])
     expect(summaryBadges.value).toEqual([])
     expect(hasSummaryBadges.value).toBe(false)
