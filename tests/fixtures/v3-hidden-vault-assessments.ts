@@ -270,15 +270,106 @@ export const EUSDC_42_DEPRECATED_GOVERNOR_RAW_ASSESSMENT = {
   },
 }
 
+// Raw `/v3/earn/vaults/1/<vault>/assessment` bodies and their `/visibility` verdicts as Euler V3 served them on
+// 2026-11-20, cut to the governance findings and the findings that did not pass. Both vaults are unclaimed.
+export const EARN_STRATEGY_FAILED = getAddress('0x9B5aac9c6C70d5a583f44DDd13DF25AcC431fca4')
+export const EARN_TIMELOCK_FAILED = getAddress('0x1B4715a2Ef8fecA45ACC2D19F780a33F34F498a0')
+
+const strategyNotVerified = (strategy: string, required: boolean, summary: string) => ({
+  key: `strategy.${strategy}.recognized`,
+  cause: { code: 'dependency-not-verified', remedy: 'wait-for-the-dependency-verdict', subject: strategy, summary },
+  outcome: 'fail',
+  expected: 'pass',
+  required,
+  description: 'The strategy holds a passing Layer 1 verdict; observed.link.phase says whether it gates',
+})
+
+export const EARN_STRATEGY_FAILED_VERDICT = {
+  status: 'hidden',
+  decidedBy: 'config-failed',
+  reason: 'Strategy 0x3b028b…f228 does not hold a passing Euler verdict, on its own rules or a collateral\'s.',
+  explorableLend: false,
+  explorableBorrow: false,
+}
+
+export const EARN_STRATEGY_FAILED_RAW_ASSESSMENT = {
+  chainId: 1,
+  vaultAddress: '0x9B5aac9c6C70d5a583f44DDd13DF25AcC431fca4',
+  configStatus: 'unverified',
+  configReason: EARN_STRATEGY_FAILED_VERDICT.reason,
+  checksStatus: 'warning',
+  consistencyStatus: 'not_applicable',
+  consistencyReason: null,
+  configLastCheckedAt: '2026-11-20T05:24:24.839Z',
+  nextCheckAt: '2026-11-21T05:24:24.839Z',
+  createdAt: '2026-11-03T22:05:14.014Z',
+  configContext: {
+    policyId: 'euler-earn',
+    outcome: 'fail',
+    findings: [
+      {
+        key: 'governance.timelock',
+        outcome: 'pass',
+        expected: { minSeconds: '86400' },
+        observed: '86400',
+        required: true,
+        description: 'The vault timelock is at least one day, giving depositors an exit window',
+        cause: null,
+      },
+      strategyNotVerified('0x01864ae3c7d5f507cc4c24ca67b4cabbdda37ecd', false, 'Strategy 0x01864a…7ecd does not hold a passing Euler verdict, on its own rules or a collateral\'s. The vault caps it at zero, so this only warns.'),
+      strategyNotVerified('0x3b028b4b6c567ef5f8ca1144da4fbaa0d973f228', true, EARN_STRATEGY_FAILED_VERDICT.reason),
+    ],
+  },
+  consistencyContext: null,
+}
+
+export const EARN_TIMELOCK_FAILED_VERDICT = {
+  status: 'hidden',
+  decidedBy: 'config-failed',
+  reason: 'The vault timelock is 0 seconds, under the one day depositors need to exit ahead of a change.',
+  explorableLend: false,
+  explorableBorrow: false,
+}
+
+export const EARN_TIMELOCK_FAILED_RAW_ASSESSMENT = {
+  chainId: 1,
+  vaultAddress: '0x1B4715a2Ef8fecA45ACC2D19F780a33F34F498a0',
+  configStatus: 'unverified',
+  configReason: EARN_TIMELOCK_FAILED_VERDICT.reason,
+  checksStatus: null,
+  consistencyStatus: 'not_applicable',
+  consistencyReason: null,
+  configLastCheckedAt: '2026-11-20T00:14:54.900Z',
+  nextCheckAt: '2026-11-21T00:14:54.900Z',
+  createdAt: '2026-11-03T22:50:57.719Z',
+  configContext: {
+    policyId: 'euler-earn',
+    outcome: 'fail',
+    findings: [
+      {
+        key: 'governance.timelock',
+        cause: { code: 'timelock-too-short', remedy: 'change-the-vault-parameter', subject: '0', summary: EARN_TIMELOCK_FAILED_VERDICT.reason },
+        outcome: 'fail',
+        expected: { minSeconds: '86400' },
+        observed: '0',
+        required: true,
+        description: 'The vault timelock is at least one day, giving depositors an exit window',
+      },
+    ],
+  },
+  consistencyContext: null,
+}
+
 type RawAssessment = typeof EUSDC_42_RAW_ASSESSMENT | typeof IDLE_CREDIT_VAULT_RAW_ASSESSMENT | typeof EUSDC_95_RAW_ASSESSMENT
+  | typeof EARN_STRATEGY_FAILED_RAW_ASSESSMENT | typeof EARN_TIMELOCK_FAILED_RAW_ASSESSMENT
 
 /** Stamped with the verdict it was loaded under: eUSDC-42's paused verdict unless another is given. */
 export const assessmentEntry = (
   raw: RawAssessment,
-  overrides: { consistencyStatus?: string | null, verdict?: VaultVerdictLike } = {},
+  overrides: { consistencyStatus?: string | null, verdict?: VaultVerdictLike, family?: 'evk' | 'earn' } = {},
 ) => ({
   status: 'available' as const,
-  assessment: parseVaultAssessment(raw, raw.chainId, getAddress(raw.vaultAddress), 'evk'),
+  assessment: parseVaultAssessment(raw, raw.chainId, getAddress(raw.vaultAddress), overrides.family ?? 'evk'),
   consistencyStatus: 'consistencyStatus' in overrides ? overrides.consistencyStatus : raw.consistencyStatus,
   verdictKey: getVaultVerdictKey(overrides.verdict ?? liquityHubHiddenVerdict('config-suspended')),
 })
@@ -288,10 +379,12 @@ export const makeIdleCreditVault = (): EVault => ({
   chainId: 1,
   address: IDLE_CREDIT_VAULT,
   asset: { address: getAddress('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'), symbol: 'USDC', decimals: 6, name: 'USD Coin' },
+  shares: { address: IDLE_CREDIT_VAULT, symbol: 'eUSDC-21', decimals: 6, name: 'EVK Vault eUSDC-21' },
   collaterals: [],
   totalAssets: 0n,
   totalBorrowed: 0n,
   isBorrowable: false,
+  caps: { supplyCap: 0n, borrowCap: 0n, supplyCapUtilization: 0, borrowCapUtilization: 0 },
   governorAdmin: IDLE_GOVERNOR,
   oracle: { oracle: zeroAddress, name: 'EulerRouter' },
   eulerRouterGovernor: IDLE_GOVERNOR,
