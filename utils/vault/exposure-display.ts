@@ -62,6 +62,12 @@ const getUncoveredShareOfDebt = ({ badDebtUsd, openInterestTotalUsd, liveDebtUsd
   return Math.min(1, badDebt / vaultDebt)
 }
 
+export const getUncoveredBadDebtUsd = ({ badDebtUsd, openInterestTotalUsd, liveDebtUsd }: {
+  badDebtUsd: number | undefined
+  openInterestTotalUsd: number | undefined
+  liveDebtUsd?: number
+}): number => getUncoveredShareOfDebt({ badDebtUsd, openInterestTotalUsd, liveDebtUsd }) > 0 ? badDebtUsd ?? 0 : 0
+
 /** The fraction of a vault's supply that a holding of `heldAssets` is, e.g. an Earn allocation. */
 export const getHeldSupplyShare = (heldAssets: bigint, totalAssets: bigint): number =>
   totalAssets > 0n && heldAssets > 0n ? Math.min(1, Number(heldAssets) / Number(totalAssets)) : 0

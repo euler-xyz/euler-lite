@@ -4,10 +4,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { VaultAssessment, VaultAssessmentFinding } from '@eulerxyz/euler-v2-sdk'
 import VaultAssessmentChecksModal from '~/components/entities/vault/overview/VaultAssessmentChecksModal.vue'
 import VaultAssessmentCheckRow from '~/components/entities/vault/overview/VaultAssessmentCheckRow.vue'
+import type { VaultUncoveredBorrows } from '~/composables/useVaultCheckWeights'
 
 const STRATEGY = '0x6fe7fa90756434645f0b0428fdff78e99dda0fbc'
 const PRIME = '0x797dd80692c3b2dadabce8e30c07fde5307d48a9'
 const SHARES: Record<string, number> = { [STRATEGY]: 0.06, [PRIME]: 0.94 }
+const BOLD_VAULT = '0xc1c51c5c9efaf0c485aa1097ae9690b5e102975a'
+const SBOLD_VAULT = '0xec91b109817b20d4ebd364a181666327194763f0'
+const COVERED: Record<string, number> = { [BOLD_VAULT]: 1.29, [SBOLD_VAULT]: 1.8771012270825452e-14 }
 
 const finding = (key: string, overrides: Partial<VaultAssessmentFinding> = {}): VaultAssessmentFinding => ({
   key,
@@ -34,15 +38,19 @@ const assessment = (findings: VaultAssessmentFinding[]): VaultAssessment => ({
   assessed: true,
 } as VaultAssessment)
 
-const render = (findings: VaultAssessmentFinding[]) => {
+type RenderOptions = { family?: 'evk' | 'earn', uncovered?: VaultUncoveredBorrows | null }
+
+const render = (findings: VaultAssessmentFinding[], { family = 'earn', uncovered = null }: RenderOptions = {}) => {
   const ensureResolved = vi.fn()
   vi.stubGlobal('useVaultReferences', () => ({ ensureResolved }))
   const weighAll = vi.fn((subjects: { address: string }[]) => subjects.map(({ address }) => {
     const share = SHARES[address.toLowerCase()]
-    return share === undefined ? null : { value: share, label: `Holds ${share * 100}% of deposits` }
+    if (share !== undefined) return { value: share, label: `Holds ${share * 100}% of deposits` }
+    const covered = COVERED[address.toLowerCase()]
+    return covered === undefined ? null : { value: covered, label: `Covers $${covered} of borrows` }
   }))
-  vi.stubGlobal('useVaultCheckWeights', () => ({ weighAll }))
-  const app = createSSRApp({ render: () => h(VaultAssessmentChecksModal, { assessment: assessment(findings) }) })
+  vi.stubGlobal('useVaultCheckWeights', () => ({ weighAll, getUncoveredBorrows: () => uncovered }))
+  const app = createSSRApp({ render: () => h(VaultAssessmentChecksModal, { assessment: { ...assessment(findings), family } }) })
   app.component('BaseModalWrapper', defineComponent({ setup: (_props, { slots }) => () => h('div', slots.default?.()) }))
   app.component('VaultAssessmentCheckRow', VaultAssessmentCheckRow)
   app.component('SvgIcon', { render: () => h('span') })
@@ -156,5 +164,47 @@ describe('vault checks pop-up', () => {
   it('says once, in the group title, that an Earn vault\'s collateral is its strategies\'', async () => {
     const html = await render([finding(`collateral.${PRIME}.visible`)]).html
     expect(html).toContain('Collateral in strategies')
+  })
+})
+
+describe('collateral rows and uncovered borrows', () => {
+  const failing = (address: string) => finding(`collateral.${address}.visible`, {
+    outcome: 'fail',
+    cause: { code: 'dependency-not-verified', subject: address, summary: `Collateral ${address} is not verified.`, remedy: null },
+  })
+  const findings = [failing(SBOLD_VAULT), failing(BOLD_VAULT)]
+  const rowOrder = (html: string) => [...html.matchAll(/data-id="vault-check-row" data-key="collateral\.([^"]+)"/g)].map(match => match[1])
+  const eusdc42Uncovered = { usd: 17_556.296, unpricedUsd: 3.6546, scope: '' }
+
+  it('ranks collateral by the borrows it covers when the vault has no bad debt', async () => {
+    const html = await render(findings, { family: 'evk' }).html
+    expect(rowOrder(html)).toEqual([BOLD_VAULT, SBOLD_VAULT])
+    expect(html).not.toContain('data-id="vault-check-uncovered"')
+  })
+
+  it('keeps the checks order and states the uncovered borrows when the vault has bad debt', async () => {
+    const html = await render(findings, { family: 'evk', uncovered: eusdc42Uncovered }).html
+    expect(rowOrder(html)).toEqual([SBOLD_VAULT, BOLD_VAULT])
+    const group = html.slice(html.indexOf('data-group="collateral"'))
+    expect(group).toContain('data-id="vault-check-uncovered"')
+    expect(group).toContain('Uncovered: $17.56K of borrows are not covered by any collateral&#39;s current value; $3.65 of it against collateral without a usable price')
+  })
+
+  it('still ranks strategies by their share of deposits when the vault has bad debt', async () => {
+    const strategyFindings = [finding(`strategy.${STRATEGY}.visible`), finding(`strategy.${PRIME}.visible`)]
+    const html = await render(strategyFindings, { uncovered: { usd: 80, unpricedUsd: 0, scope: ' in this vault\'s strategies' } }).html
+    const order = [...html.matchAll(/data-id="vault-check-row" data-key="strategy\.([^"]+)"/g)].map(match => match[1])
+    expect(order).toEqual([PRIME, STRATEGY])
+  })
+
+  it('says there are no detailed findings even when the vault has bad debt', async () => {
+    const html = await render([], { family: 'evk', uncovered: eusdc42Uncovered }).html
+    expect(html).toContain('No detailed findings are available yet.')
+  })
+
+  it('states an Earn vault\'s uncovered borrows in its strategies under the collateral group', async () => {
+    const html = await render([finding(`collateral.${PRIME}.visible`)], { uncovered: { usd: 80, unpricedUsd: 0, scope: ' in this vault\'s strategies' } }).html
+    expect(html).toContain('Collateral in strategies')
+    expect(html).toContain('Uncovered: $80 of borrows in this vault&#39;s strategies are not covered by any collateral&#39;s current value')
   })
 })

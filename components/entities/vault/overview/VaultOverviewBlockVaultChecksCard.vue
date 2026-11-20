@@ -13,6 +13,7 @@ import { shortenAddress } from '~/utils/string-utils'
 import { VaultAssessmentChecksModal } from '#components'
 import { useOracleAdapterAnchors } from '~/composables/useOracleAdapterAnchors'
 import { getChainPolicyGeneration } from '~/composables/useChainConfig'
+import { formatUncoveredBorrows } from '~/composables/useVaultCheckWeights'
 
 const props = defineProps<{
   address: string
@@ -55,7 +56,11 @@ const copyAddress = (address: string) => {
 }
 const { ensureResolved, oracleLinkFor } = useVaultReferences()
 watch(lines, ensureResolved, { immediate: true })
-const { weightOf } = useVaultCheckWeights(() => props.address)
+const { weightOf, getUncoveredBorrows } = useVaultCheckWeights(() => props.address)
+const uncoveredLine = computed(() => {
+  const uncovered = getUncoveredBorrows()
+  return uncovered ? formatUncoveredBorrows(uncovered) : null
+})
 const lineViews = computed(() => lines.value.map(line => ({
   ...line,
   oracleLink: oracleLinkFor(line, props.address, !!line.anchor && hasAnchor(line.anchor)),
@@ -189,6 +194,13 @@ watch(
         </span>
       </li>
     </ul>
+    <p
+      v-if="uncoveredLine"
+      class="text-warning-500"
+      data-id="vault-check-uncovered"
+    >
+      {{ uncoveredLine }}
+    </p>
     <div
       v-if="upcoming.length"
       class="flex flex-col gap-8"
