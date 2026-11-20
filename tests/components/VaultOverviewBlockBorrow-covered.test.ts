@@ -90,9 +90,8 @@ describe('collateral exposure of the vault overview', () => {
   })
 })
 
-describe('collateral exposure of a vault with no live collateral', () => {
-  const renderWithoutCollateral = () => {
-    const vault = { ...makeEusdc42(), collaterals: [] } as unknown as EVault
+describe('collateral exposure of a vault with no listed collateral pair', () => {
+  const renderBlock = (vault: EVault) => {
     const app = createSSRApp({ render: () => h(VaultOverviewBlockBorrow, { vault }) })
     app.config.warnHandler = () => undefined
     app.component('VaultOverviewAccordionSection', defineComponent({
@@ -101,10 +100,24 @@ describe('collateral exposure of a vault with no live collateral', () => {
     }))
     return renderToString(app)
   }
+  const withCollaterals = (collaterals: unknown[]) => ({ ...makeEusdc42(), collaterals }) as unknown as EVault
+  const eusdc42Uncovered = { usd: 17_556.296, unpricedUsd: 17_556.296, scope: '' }
 
-  it('still states the uncovered borrows, with no collateral list', async () => {
-    uncovered = { usd: 17_556.296, unpricedUsd: 17_556.296, scope: '' }
-    const html = await renderWithoutCollateral()
+  it('says collateral details are unavailable when configured collateral is not resolved, and keeps the uncovered line', async () => {
+    uncovered = eusdc42Uncovered
+    useVaultRegistry().clear()
+    const html = await renderBlock(makeEusdc42())
+    expect(html).toContain('data-id="collateral-exposure-uncovered"')
+    expect(html).toContain('Collateral details are not available right now.')
+    expect(html).not.toContain('No collateral is currently accepted')
+  })
+
+  it.each([
+    ['no collateral configured', []],
+    ['only collateral with zero borrow and liquidation LTV', [{ ...makeEusdc42().collaterals[0], borrowLTV: 0, liquidationLTV: 0, currentLiquidationLTV: 0 }]],
+  ])('says no collateral is accepted when there is %s, and keeps the uncovered line', async (_label, collaterals) => {
+    uncovered = eusdc42Uncovered
+    const html = await renderBlock(withCollaterals(collaterals))
     expect(html).toContain('data-section="Collateral exposure"')
     expect(html).toContain('data-id="collateral-exposure-uncovered"')
     expect(html).toContain('No collateral is currently accepted for this vault&#39;s borrows.')
@@ -112,6 +125,6 @@ describe('collateral exposure of a vault with no live collateral', () => {
   })
 
   it('stays hidden with neither collateral nor uncovered borrows', async () => {
-    expect(await renderWithoutCollateral()).not.toContain('data-section')
+    expect(await renderBlock(withCollaterals([]))).not.toContain('data-section')
   })
 })

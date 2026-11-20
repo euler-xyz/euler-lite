@@ -67,6 +67,8 @@ const collateralGroups = computed(() =>
   getCollateralExposureGroups(allCollateralPairs.value, uncoveredLine.value ? {} : openInterestUsdByCollateral.value),
 )
 const totalOpenInterestUsd = computed(() => sumOpenInterestUsd(openInterestUsdByCollateral.value))
+// Unresolved collateral drops out of the pairs, so only the configured LTVs can say that none is accepted.
+const acceptsCollateral = computed(() => vault.collaterals.some(ltv => ltv.borrowLTV > 0 || ltv.currentLiquidationLTV > 0))
 const collateralPairs = computed(() => collateralGroups.value.flatMap(group => group.items))
 const getPairOpenInterestUsd = (pair: { collateral: EVault | SecuritizeCollateralVault }) => {
   const entry = Object.entries(openInterestUsdByCollateral.value)
@@ -110,6 +112,12 @@ watchEffect(() => {
       >
         Deposits in this vault can be borrowed.
         {{ sectionDescription }}
+      </p>
+      <p
+        v-else-if="acceptsCollateral"
+        class="text-content-secondary"
+      >
+        Collateral details are not available right now.
       </p>
       <p
         v-else
