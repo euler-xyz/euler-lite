@@ -128,15 +128,30 @@ export const EUSDC_42_RAW_ASSESSMENT = {
           remedy: 'wait-for-the-dependency-verdict',
         },
       },
+      // As served on 2026-11-20, with the failing adapter's own findings under `observed`.
       {
         key: 'oracle.adapters-checks',
         outcome: 'fail',
         required: false,
         description: 'The oracle routes include adapters whose own checks are failing',
+        expected: 'every route adapter with passing checks',
+        observed: {
+          adapters: 6,
+          failing: [{
+            address: '0x94a31084a0e8dbed217ee8763a20ab03e18b38f5',
+            checksStatus: 'negative',
+            findings: [
+              { key: 'quote-liveness', severity: 'high', description: 'Quote reverted with PriceOracle_InvalidAnswer, which is not a market closure.' },
+              { key: 'feed-recognized', severity: 'medium', description: 'The connected price feed is not recognized.' },
+              { key: 'push-staleness-upper-bound', severity: 'medium', description: 'Adapter\'s maximum staleness (115792089237316195423570985008687907853269984665640564039457584007913129639935 s) must not exceed 604800 s.' },
+              { key: 'session-tolerance', severity: 'high', description: 'The quote reverted with PriceOracle_InvalidAnswer, which is not a trading-session pause; its quote reverts are no longer excused.' },
+            ],
+          }],
+        },
         cause: {
           code: 'route-adapter-checks-failing',
           subject: '0x94a31084a0e8dbed217ee8763a20ab03e18b38f5',
-          summary: 'An adapter on the oracle routes (0x94a310…38f5) has failing checks: quote reverted with PriceOracle_InvalidAnswer, which is not a market closure, the connected price feed is not recognized, adapter...',
+          summary: 'An adapter on the oracle routes (0x94a310…38f5) has failing checks: quote reverted with PriceOracle_InvalidAnswer, which is not a market closure, the connected price feed is not recognized, adapter\'s maximum staleness (115792089237316195423570985008687907853269984665640564039457584007913129639935 s) must not exceed 604800 s and 1 more.',
           remedy: 'review-the-oracle-adapter',
         },
       },

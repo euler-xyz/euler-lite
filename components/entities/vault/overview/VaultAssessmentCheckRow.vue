@@ -13,6 +13,8 @@ const details = computed(() => props.row.subject
   : props.row.checks.filter(check => check.parts.length))
 const listsChecks = computed(() => !!props.row.subject && props.row.checks.length > 1)
 const namesCheck = (parts: unknown[]) => listsChecks.value && (details.value.length > 1 || !parts.length)
+const adapters = computed(() => props.row.checks.flatMap(check => check.adapters ?? []))
+const SEVERITY_LABELS: Record<string, string> = { high: 'High severity', medium: 'Medium severity', low: 'Low severity' }
 </script>
 
 <template>
@@ -116,6 +118,39 @@ const namesCheck = (parts: unknown[]) => listsChecks.value && (details.value.len
           data-id="vault-check-tag"
         >{{ check.tag }}</span>
       </p>
+      <div
+        v-for="adapter in adapters"
+        :key="adapter.address"
+        class="mt-2 flex flex-col gap-4"
+        data-id="vault-check-adapter"
+      >
+        <p class="text-p3 text-content-primary break-words">
+          <VaultReference
+            class="text-accent-600"
+            :address="adapter.address"
+          />
+        </p>
+        <ul class="flex flex-col gap-2 text-p3 text-content-secondary">
+          <li
+            v-for="finding in adapter.findings"
+            :key="finding.key"
+            class="break-words"
+            data-id="vault-check-adapter-finding"
+            :data-severity="finding.severity"
+          >
+            {{ finding.text }}<span
+              v-if="finding.severity"
+              class="ml-4 text-p4 text-content-tertiary"
+            >{{ SEVERITY_LABELS[finding.severity] ?? finding.severity }}</span>
+          </li>
+        </ul>
+        <NuxtLink
+          v-if="adapter.oracleLink"
+          :to="adapter.oracleLink"
+          class="self-start text-p4 text-accent-600 underline decoration-dotted hover:text-accent-500"
+          data-id="vault-check-oracle-link"
+        >View oracle</NuxtLink>
+      </div>
     </div>
   </div>
 </template>

@@ -3,6 +3,7 @@ import type { VaultAssessment, VaultAssessmentFinding } from '@eulerxyz/euler-v2
 import {
   VAULT_CHECKS_DISCLAIMER,
   VAULT_CHECK_LISTING_IMPACT_LABELS,
+  getAdapterCheckFailures,
   getVaultAssessmentCheckDetails,
   getVaultCheckCopyableParts,
   getVaultCheckFindingTone,
@@ -10,8 +11,11 @@ import {
   getVaultCheckMessage,
   getVaultCheckTitle,
   groupVaultCheckFindings,
+  oracleAdapterAnchor,
 } from '~/utils/vault-assessment/presentation'
-import { groupVaultCheckRows, type VaultCheckRowView, type VaultCheckView } from '~/utils/vault-assessment/check-rows'
+import { groupVaultCheckRows, type VaultCheckAdapterView, type VaultCheckRowView, type VaultCheckView } from '~/utils/vault-assessment/check-rows'
+import { formatUnboundedStaleness } from '~/entities/oracle'
+import { useOracleAdapterAnchors } from '~/composables/useOracleAdapterAnchors'
 import { getVaultCheckSubject, vaultCheckSubjectKey, type VaultCheckSubject } from '~/utils/vault-assessment/subjects'
 import { getRelativeTimeBetweenDates } from '~/utils/time-utils'
 import { formatUncoveredBorrows } from '~/composables/useVaultCheckWeights'
@@ -52,15 +56,32 @@ const statusFor = (finding: VaultAssessmentFinding): string => {
   if (finding.outcome === 'unknown') return 'not checked yet'
   return finding.outcome === 'pass' ? 'passed' : 'not applicable'
 }
-const toCheckView = (finding: VaultAssessmentFinding): VaultCheckView => ({
-  key: finding.key,
-  title: getVaultCheckTitle(finding.key),
-  status: statusFor(finding),
-  tone: getVaultCheckFindingTone(finding),
-  icon: iconFor(finding),
-  parts: messagePartsFor(finding),
-  tag: tagFor(finding),
-})
+const { ensureResolved, oracleLinkFor } = useVaultReferences()
+const { hasAnchor } = useOracleAdapterAnchors()
+// The finding's summary abbreviates its adapters' findings; the cards' "+K more" relies on this list being complete.
+const adaptersFor = (finding: VaultAssessmentFinding): VaultCheckAdapterView[] => finding.outcome !== 'fail'
+  ? []
+  : getAdapterCheckFailures(finding).map((failure) => {
+      const anchor = oracleAdapterAnchor(failure.address)
+      return {
+        address: failure.address,
+        oracleLink: oracleLinkFor({ anchor, adapter: failure.address }, props.assessment.vaultAddress, hasAnchor(anchor)),
+        findings: failure.findings.map(check => ({ key: check.key, text: formatUnboundedStaleness(check.description), severity: check.severity ?? null })),
+      }
+    })
+const toCheckView = (finding: VaultAssessmentFinding): VaultCheckView => {
+  const adapters = adaptersFor(finding)
+  return {
+    key: finding.key,
+    title: getVaultCheckTitle(finding.key),
+    status: statusFor(finding),
+    tone: getVaultCheckFindingTone(finding),
+    icon: iconFor(finding),
+    parts: adapters.length ? [] : messagePartsFor(finding),
+    tag: tagFor(finding),
+    ...(adapters.length ? { adapters } : {}),
+  }
+}
 
 const shownGroups = computed(() => groupVaultCheckFindings(details.value.findings))
 const checkViews = computed(() => new Map(shownGroups.value.flatMap(group => group.findings.map(finding => [finding, toCheckView(finding)] as const))))
@@ -97,7 +118,6 @@ const groups = computed(() => {
   }))
 })
 
-const { ensureResolved } = useVaultReferences()
 watch(checkViews, (views) => {
   ensureResolved([...views.values()].map(check => ({ key: check.key, parts: check.parts })))
 }, { immediate: true })
