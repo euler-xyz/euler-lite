@@ -365,10 +365,16 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   watch([fromVault, slippage], () => {
     clearSimulationError()
     invalidatePreparedSwap()
-    if (fromAmount.value) {
+    // Invalidate the quote and its prepared card before the debounced refresh.
+    // reset() also prevents responses from the previous request being selected.
+    resetQuoteState()
+    if (isSameAsset.value) {
+      toAmount.value = fromAmount.value
+    }
+    else if (fromAmount.value) {
       requestQuote()
     }
-  })
+  }, { flush: 'sync' })
 
   watch(country, () => {
     clearSimulationError()
@@ -537,6 +543,7 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   const submit = async () => {
     if (isOperationBlocked.value) return
     if (isPreparing.value || isGeoBlocked.value) return
+    if (isSubmitDisabled.value) return
     if (isSubmitting.value || !fromVault.value) return
     const sameAsset = isSameAsset.value
     const selectedQuoteSnapshot = sameAsset ? undefined : selectedQuote.value ?? undefined
