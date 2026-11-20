@@ -79,7 +79,11 @@ const render = (vault: EVault) => {
     props: { entities: { type: Array as PropType<Array<{ name: string }>>, required: true } },
     setup: props => () => h('span', { 'data-test-curator': props.entities.map(entity => entity.name).join(',') }),
   }))
-  for (const name of ['VaultDeprecationBanner', 'LiquidationCoverageNotice', 'VaultPublicNotice', 'SafeAccountBadge', 'UiIcon', 'VaultExposureSummary', 'NuxtLink']) {
+  app.component('SafeAccountBadge', defineComponent({
+    props: { address: String },
+    setup: props => () => h('span', { 'data-test-safe': props.address }),
+  }))
+  for (const name of ['VaultDeprecationBanner', 'LiquidationCoverageNotice', 'VaultPublicNotice', 'UiIcon', 'VaultExposureSummary', 'NuxtLink']) {
     app.component(name, { render: () => h('span') })
   }
   return renderToString(app)
@@ -159,5 +163,15 @@ describe('curator and vault type of a hidden vault', () => {
 
     expect(curatorCell(html)).toContain('Flagged')
     expect(curatorCell(html)).not.toContain('data-test-curator')
+  })
+})
+
+describe('Safe badge beside the curator', () => {
+  it('names the curator without the Safe badge, which belongs to the Addresses rows', async () => {
+    setEusdc42Labels('config-suspended')
+    const html = await render(makeEusdc42())
+
+    expect(curatorCell(html)).toContain('data-test-curator="K3 Capital"')
+    expect(html).not.toContain('data-test-safe')
   })
 })

@@ -13,7 +13,6 @@ import type { VaultTypeBadge } from '~/composables/useVaultTypeBadges'
 import { AccessControlBadge, CyclicalNoteBadge, GovernanceLimitedBadge, KeyringBadge } from '#components'
 import { getCollateralExposureGroups, getCollateralExposurePairs, sumOpenInterestUsd } from '~/utils/vault/collateral-exposure'
 import { resolveVaultExposureDisplay, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
-import { getAssessmentSafeEvidence } from '~/utils/vault-assessment/evidence'
 import { FLAGGED_VAULT_LABEL } from '~/utils/vault-assessment/flagged'
 
 const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
@@ -49,10 +48,8 @@ const description = computed(() => {
 })
 
 const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernanceIdentified.value)
-const { assessment, fallbackReady } = useVaultAssessmentEvidence(() => vault.address, 'evk')
-const governorSafeEvidence = computed(() => assessment.value || fallbackReady.value
-  ? getAssessmentSafeEvidence(assessment.value, vault.governorAdmin)
-  : null)
+// The assessment decides whether a hidden vault's curator can be named.
+useVaultAssessmentEvidence(() => vault.address, 'evk')
 
 const borrowAvailability = computed(() => formatVaultBorrowAvailability(vault))
 const hasBorrowSideExposure = computed(() => isVaultBorrowable(vault))
@@ -231,10 +228,6 @@ watchEffect(() => {
             <CuratorEntityLink
               :entities="[entity]"
               avatar-class="!w-28 !h-28"
-            />
-            <SafeAccountBadge
-              :address="vault.governorAdmin"
-              :evidence="governorSafeEvidence"
             />
           </div>
         </div>
