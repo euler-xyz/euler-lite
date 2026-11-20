@@ -90,7 +90,7 @@ const deprecatedGovernorIdle = () => labelsFor(
 const listedEusdc42 = () => labelsFor({ [EUSDC_42.toLowerCase()]: visibleVerdict }, {}, [EUSDC_42])
 
 const asSecuritize = (vault: EVault, governor: string) =>
-  ({ ...vault, type: 'SecuritizeCollateralVault', governor }) as unknown as SecuritizeCollateralVault
+  ({ ...vault, type: 'SecuritizeCollateral', governor }) as unknown as SecuritizeCollateralVault
 
 const makeEarn = (address: string) => ({
   type: 'EulerEarn',
