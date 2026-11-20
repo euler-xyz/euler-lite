@@ -17,6 +17,7 @@ export interface VaultCheckRow {
 export interface VaultCheckAdapterView {
   address: string
   oracleLink?: RouteLocationRaw
+  oracleHref?: string
   findings: Array<{ key: string, text: string, severity: string | null }>
 }
 

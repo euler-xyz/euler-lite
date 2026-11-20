@@ -43,6 +43,10 @@ type RenderOptions = { family?: 'evk' | 'earn', uncovered?: VaultUncoveredBorrow
 const render = (findings: VaultAssessmentFinding[], { family = 'earn', uncovered = null }: RenderOptions = {}) => {
   const ensureResolved = vi.fn()
   vi.stubGlobal('useVaultReferences', () => ({ ensureResolved }))
+  vi.stubGlobal('useRouter', () => ({
+    resolve: (to: { path?: string, hash?: string }) => ({ href: `${to.path ?? ''}${to.hash ?? ''}`, hash: to.hash ?? '' }),
+    push: vi.fn(),
+  }))
   const weighAll = vi.fn((subjects: { address: string }[]) => subjects.map(({ address }) => {
     const share = SHARES[address.toLowerCase()]
     if (share !== undefined) return { value: share, label: `Holds ${share * 100}% of deposits` }

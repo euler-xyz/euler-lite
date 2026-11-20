@@ -63,6 +63,10 @@ const render = (component: Component, props: Record<string, unknown>) => {
 
 beforeEach(() => {
   opened.assessment = undefined
+  vi.stubGlobal('useRouter', () => ({
+    resolve: (to: { path?: string, hash?: string }) => ({ href: `${to.path ?? ''}${to.hash ?? ''}`, hash: to.hash ?? '' }),
+    push: vi.fn(),
+  }))
   vi.stubGlobal('useVaultReferences', references)
   vi.stubGlobal('useVaultCheckWeights', () => ({ weighAll: (subjects: unknown[]) => subjects.map(() => null), getUncoveredBorrows: () => null }))
   vi.stubGlobal('useEulerLabels', () => ({
@@ -107,6 +111,6 @@ describe('"+K more · see checks" opens a view that shows everything the card le
     expect([...adapters.matchAll(/data-id="vault-check-adapter-finding"/g)]).toHaveLength(4)
     expect([...adapters.matchAll(/data-severity="high"/g)]).toHaveLength(2)
     expect(view).not.toContain('and 1 more.')
-    expect(adapters).toContain('data-test-link')
+    expect(adapters).toContain('data-id="vault-check-oracle-link"')
   })
 })

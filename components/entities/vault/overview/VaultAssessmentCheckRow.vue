@@ -1,7 +1,10 @@
 <script setup lang="ts">
+import type { RouteLocationRaw } from 'vue-router'
 import type { VaultCheckRowView } from '~/utils/vault-assessment/check-rows'
 
 const props = defineProps<{ row: VaultCheckRowView }>()
+const emit = defineEmits<{ navigate: [to: RouteLocationRaw] }>()
+const followOracleLink = (to: RouteLocationRaw) => emit('navigate', to)
 
 const TONE_BACKGROUND = { pass: 'bg-success-500', warning: 'bg-warning-500', error: 'bg-error-500', muted: 'bg-content-muted' } as const
 const TONE_TEXT = { pass: 'text-success-500', warning: 'text-warning-500', error: 'text-error-500', muted: 'text-content-muted' } as const
@@ -144,12 +147,13 @@ const SEVERITY_LABELS: Record<string, string> = { high: 'High severity', medium:
             >{{ SEVERITY_LABELS[finding.severity] ?? finding.severity }}</span>
           </li>
         </ul>
-        <NuxtLink
-          v-if="adapter.oracleLink"
-          :to="adapter.oracleLink"
+        <a
+          v-if="adapter.oracleLink && adapter.oracleHref"
+          :href="adapter.oracleHref"
           class="self-start text-p4 text-accent-600 underline decoration-dotted hover:text-accent-500"
           data-id="vault-check-oracle-link"
-        >View oracle</NuxtLink>
+          @click.prevent="followOracleLink(adapter.oracleLink)"
+        >View oracle</a>
       </div>
     </div>
   </div>

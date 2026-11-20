@@ -16,17 +16,30 @@ import {
 import { groupVaultCheckRows, type VaultCheckAdapterView, type VaultCheckRowView, type VaultCheckView } from '~/utils/vault-assessment/check-rows'
 import { formatUnboundedStaleness } from '~/entities/oracle'
 import { useOracleAdapterAnchors } from '~/composables/useOracleAdapterAnchors'
+import { useModal } from '~/components/ui/composables/useModal'
+import type { RouteLocationRaw } from 'vue-router'
 import { getVaultCheckSubject, vaultCheckSubjectKey, type VaultCheckSubject } from '~/utils/vault-assessment/subjects'
 import { getRelativeTimeBetweenDates } from '~/utils/time-utils'
 import { formatUncoveredBorrows } from '~/composables/useVaultCheckWeights'
 
-defineEmits(['close'])
+const emit = defineEmits(['close'])
 
 const props = withDefaults(defineProps<{
   assessment: VaultAssessment
   inline?: boolean
   close?: boolean
-}>(), { inline: false, close: true })
+  modalId?: number
+}>(), { inline: false, close: true, modalId: undefined })
+
+const router = useRouter()
+const modal = useModal()
+const followOracleLink = async (to: RouteLocationRaw) => {
+  if (props.modalId === undefined) emit('close')
+  else await modal.closeBeforeNavigation(props.modalId)
+  await router.push(to)
+  const { hash } = router.resolve(to)
+  if (hash) document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView({ block: 'start' })
+}
 
 const details = computed(() => getVaultAssessmentCheckDetails(props.assessment))
 const checkedAgo = computed(() => {
@@ -63,9 +76,11 @@ const adaptersFor = (finding: VaultAssessmentFinding): VaultCheckAdapterView[] =
   ? []
   : getAdapterCheckFailures(finding).map((failure) => {
       const anchor = oracleAdapterAnchor(failure.address)
+      const oracleLink = oracleLinkFor({ anchor, adapter: failure.address }, props.assessment.vaultAddress, hasAnchor(anchor))
       return {
         address: failure.address,
-        oracleLink: oracleLinkFor({ anchor, adapter: failure.address }, props.assessment.vaultAddress, hasAnchor(anchor)),
+        oracleLink,
+        oracleHref: oracleLink ? router.resolve(oracleLink).href : undefined,
         findings: failure.findings.map(check => ({ key: check.key, text: formatUnboundedStaleness(check.description), severity: check.severity ?? null })),
       }
     })
@@ -129,7 +144,7 @@ watch(checkViews, (views) => {
     :inline="inline"
     :close="close"
     :compact="inline && !close"
-    @close="$emit('close')"
+    @close="emit('close')"
   >
     <div class="flex flex-col gap-10">
       <p
@@ -171,6 +186,7 @@ watch(checkViews, (views) => {
           v-for="row in group.rows"
           :key="row.key"
           :row="row"
+          @navigate="followOracleLink"
         />
       </section>
     </div>
