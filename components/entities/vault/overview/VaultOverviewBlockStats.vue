@@ -84,10 +84,14 @@ watchEffect(() => {
   if (isBorrowable.value && isBadDebtEnabled.value) void loadBadDebtForChain()
 })
 
-const badDebtDisplay = computed((): { value: string, borrowShare?: string } | null => {
+const badDebtDisplay = computed((): { value: string, hint?: string } | null => {
   if (!isBorrowable.value || !isBadDebtEnabled.value) return null
   const badDebt = getVaultBadDebt(vault.address)
-  if (badDebt) return formatBadDebtOverview(badDebt, { supplyUsd: totalSupplyUsd.value, borrowsUsd: totalBorrowedUsd.value })
+  if (badDebt) {
+    const { value, borrowShare } = formatBadDebtOverview(badDebt, { supplyUsd: totalSupplyUsd.value, borrowsUsd: totalBorrowedUsd.value })
+    const hint = ['Debt that no collateral currently covers. Suppliers bear it if it is socialised.', borrowShare && `Bad debt is ${borrowShare}.`]
+    return { value, hint: hint.filter(Boolean).join(' ') }
+  }
   if (isBadDebtLoading.value) return { value: '...' }
   return isBadDebtLoaded.value ? { value: '$0' } : null
 })
@@ -117,15 +121,24 @@ const badDebtDisplay = computed((): { value: string, borrowShare?: string } | nu
       :value="badDebtDisplay.value"
       orientation="horizontal"
     >
-      <span class="flex items-center gap-4">
-        {{ badDebtDisplay.value }}
-        <UiHoverPreviewTooltip
-          v-if="badDebtDisplay.borrowShare"
-          title="Pending bad debt"
-          :text="`Bad debt is ${badDebtDisplay.borrowShare}.`"
-          placement="top-end"
-        />
-      </span>
+      <template #label>
+        <span class="flex items-center gap-4">
+          Pending bad debt
+          <UiHoverPreviewTooltip
+            v-if="badDebtDisplay.hint"
+            title="Pending bad debt"
+            :text="badDebtDisplay.hint"
+            aria-label="About pending bad debt"
+            placement="top-start"
+          >
+            <SvgIcon
+              class="!w-20 !h-20 text-content-muted hover:text-content-secondary cursor-pointer"
+              name="info-circle"
+            />
+          </UiHoverPreviewTooltip>
+        </span>
+      </template>
+      {{ badDebtDisplay.value }}
     </VaultOverviewLabelValue>
     <VaultOverviewLabelValue
       v-if="isBorrowable"
