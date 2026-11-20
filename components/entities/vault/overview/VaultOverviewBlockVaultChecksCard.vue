@@ -24,10 +24,7 @@ const props = defineProps<{
 const { chainId } = useEulerAddresses()
 const nowMs = useActivityNowMs()
 const { vaultAssessments, loadVaultAssessment, getVaultAssessmentEntry, oracleAdapters, loadOracleAdapters } = useEulerLabels()
-const adapterLabel = (address: string) => {
-  const meta = oracleAdapters[address.toLowerCase()]
-  return meta?.label || meta?.name || undefined
-}
+const { ensureResolved, oracleLinkFor, adapterLabel } = useVaultReferences()
 const family = computed(() => props.family ?? 'evk')
 const entry = computed(() => {
   void vaultAssessments.value
@@ -54,7 +51,6 @@ const { isCopied, copyToClipboard } = useClipboardCopy()
 const copyAddress = (address: string) => {
   copyToClipboard(address).catch(() => {})
 }
-const { ensureResolved, oracleLinkFor } = useVaultReferences()
 watch(lines, ensureResolved, { immediate: true })
 const { weightOf, getUncoveredBorrows } = useVaultCheckWeights(() => props.address)
 const uncoveredLine = computed(() => {

@@ -20,10 +20,7 @@ const props = withDefaults(defineProps<{
 }>(), { showSymbol: false })
 
 const { isReady, source, vaultAssessments, getVaultAssessmentEntry, isVaultAssessmentAvailableForChain, oracleAdapters, loadOracleAdapters } = useEulerLabels()
-const adapterLabel = (address: string) => {
-  const meta = oracleAdapters[address.toLowerCase()]
-  return meta?.label || meta?.name || undefined
-}
+const { ensureResolved, adapterLabel } = useVaultReferences()
 const adapterAddresses = computed(() => {
   void vaultAssessments.value
   return props.vaults.flatMap((vault) => {
@@ -75,7 +72,6 @@ const rows = computed((): WarningRow[] => {
     return [...(restated ? [] : cause), ...shown, ...more]
   })
 })
-const { ensureResolved } = useVaultReferences()
 watch(rows, list => ensureResolved(list.filter(row => !row.more).map(row => ({ key: row.checkKey, parts: row.parts }))), { immediate: true })
 </script>
 
