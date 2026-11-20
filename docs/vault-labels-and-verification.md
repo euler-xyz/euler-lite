@@ -156,7 +156,9 @@ The overview **Vault checks** accordion is hosted-V3 only (`source === 'v3'` and
 
 > Vault checks test this vault's configuration against fixed rules. They are not a risk rating or a recommendation by Euler.
 
-Lend and Earn overviews render one card for the page vault. A borrow pair renders the liability vault and the EVK collateral; a Securitize collateral wrapper is omitted so only the borrow vault is checked. Each card shows a Status line (`getVaultChecksStatusLine`) and a Checks cell (`getVaultChecksCell`) that opens the findings pop-up.
+Lend and Earn overviews render one card for the page vault. A borrow pair renders the liability vault and the EVK collateral; a Securitize collateral wrapper is omitted so only the borrow vault is checked (`VaultOverviewPair` drops the wrapper; listing chips pass `family: null`). Each card shows a Status line (`getVaultChecksStatusLine`) and a Checks cell (`getVaultChecksCell`) that opens the findings pop-up.
+
+Explore warning copy is a separate load. `useDiscoveryVaultWarningDetails` maps Earn → family `'earn'` and both EVK and Securitize collateral vaults → `'evk'`. V3 assesses Securitize vaults on the EVK route; there is no `'securitize'` family. Cards, graphs, and accordions call `loadWarningDetails` so a wrapper that is omitted from the pair Vault-checks accordion still gets its warning reasons on Explore. Do not copy the overview `family: null` omission into that loader, or Securitize warning details never fetch.
 
 The pop-up (`VaultAssessmentChecksModal` + `groupVaultCheckRows`) is one row per subject vault, not one row per rule:
 
