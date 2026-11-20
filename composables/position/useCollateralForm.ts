@@ -133,7 +133,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const { primeSlotHintsFor, buildStateOverrideOptions } = useStateOverrideOptions()
   const buildCollateralStateOverrideOptions = () =>
     buildStateOverrideOptions({ noBalanceOverride: options.mode === 'supply' })
-  const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
+  const { address, isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { account: planAccount } = usePlanAccount()
   const { finalizeExecutionUi } = useTxFinalization()
   const positionIndex = usePositionIndex()
@@ -151,7 +151,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const { runSimulation, runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
   const { isReady: isVaultsReady } = useVaults()
   const { getOrFetch } = useVaultRegistry()
-  const { isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
+  const { chainId, isReady: isEulerAddressesReady, loadEulerConfig } = useEulerAddresses()
   const { getCollateralApySnapshot } = usePositionCollateralApy()
 
   // --- Shared reactive state ---
@@ -626,7 +626,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   const requestSwapQuote = useDebounceFn(async () => {
     swapQuoteError.value = null
 
-    if (!options.needsSwap.value || !amount.value || !asset.value) {
+    if (!options.needsSwap.value || !amount.value || !asset.value || !position.value?.subAccount) {
       resetSwapQuoteState()
       return
     }
@@ -658,7 +658,7 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
       return
     }
 
-    await requestSwapQuotes(params)
+    await requestSwapQuotes({ ...params, chainId: chainId.value!, origin: (address.value || userAddr) as Address })
   }, 500)
 
   const openSwapTokenSelector = (currentAddress?: string, onSelect?: (a: VaultAsset, meta?: SwapTokenSelectMeta) => void) => {
@@ -1145,6 +1145,14 @@ export const useCollateralForm = (options: UseCollateralFormOptions) => {
   })
 
   // --- Common watchers ---
+  watch([effectiveAddress, address, isSpyMode, chainId, () => position.value?.subAccount], () => {
+    clearSimulationError()
+    resetSwapQuoteState()
+    plan.value = null
+    preparedPlan.value = null
+    if (options.needsSwap.value && amount.value) requestSwapQuote()
+  }, { flush: 'sync' })
+
   watch(isPositionsLoaded, (val) => {
     if (val) load()
   }, { immediate: true })
