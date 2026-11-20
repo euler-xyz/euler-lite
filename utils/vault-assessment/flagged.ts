@@ -32,8 +32,18 @@ const withReason = (lead: string, reason?: string | null): string => {
   return `${lead}: ${text}${/[.!?]$/.test(text) ? '' : '.'}`
 }
 
+const FLAGGED_VAULT_LINE_LEAD = 'Euler\'s checks flagged this vault'
+
 export const getFlaggedVaultLine = (reason?: string | null): string =>
-  withReason('Euler\'s checks flagged this vault', reason)
+  withReason(FLAGGED_VAULT_LINE_LEAD, reason)
+
+const normalizeReasonText = (text: string): string =>
+  text.trim().replace(new RegExp(`^${FLAGGED_VAULT_LINE_LEAD}:\\s*`), '').replace(/[.!?]+$/, '').trim()
+
+export const isRestatedByCheckLine = (cause: string, lineTexts: readonly string[]): boolean => {
+  const reason = normalizeReasonText(cause)
+  return !!reason && lineTexts.some(text => normalizeReasonText(text) === reason)
+}
 
 export const getFlaggedTransactionLine = (reason?: string | null): string =>
   withReason('This transaction uses a flagged vault', reason)

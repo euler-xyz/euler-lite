@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
 import { getVaultCheckWarningLines, getWarningAdapterFailures, type VaultCheckLine } from '~/utils/vault-assessment/presentation'
+import { isRestatedByCheckLine } from '~/utils/vault-assessment/flagged'
 
 export type VaultAssessmentWarningTarget = {
   address: string
@@ -60,7 +61,8 @@ const rows = computed((): WarningRow[] => {
     if (entry.status !== 'available' || !entry.assessment?.assessed) return cause
     const checks = getVaultCheckWarningLines(entry.assessment, { adapterLabel })
       .map((line): WarningRow => ({ key: `${vault.address}:${line.key}`, checkKey: line.key, symbol, text: line.text, parts: line.parts, tone: vault.unverified ? tone : line.outcome === 'unknown' ? 'muted' : tone }))
-    return [...cause, ...checks]
+    const restated = !!vault.cause && isRestatedByCheckLine(vault.cause, checks.map(check => check.text))
+    return [...(restated ? [] : cause), ...checks]
   })
 })
 const { ensureResolved } = useVaultReferences()
