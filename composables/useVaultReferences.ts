@@ -9,6 +9,8 @@ import {
 import type { RouteLocationRaw } from 'vue-router'
 import { getProductByVault } from '~/utils/eulerLabelsUtils'
 import { shortenAddress } from '~/utils/string-utils'
+import { getSpecialAddressLabel } from '~/utils/special-addresses'
+import { formatOracleAdapterLabel } from '~/entities/oracle'
 import { formatVaultReferenceName, getOraclePairCollateral, getVaultCheckSubject } from '~/utils/vault-assessment/subjects'
 import { oracleAdapterAnchor, type VaultCheckLine } from '~/utils/vault-assessment/presentation'
 
@@ -31,8 +33,22 @@ const recentlyFailed = (key: string) => {
 export const useVaultReferences = () => {
   const route = useRoute()
   const { chainId } = useEulerAddresses()
-  const { get, getOrFetch, getVaultCategory, registryVersion } = useVaultRegistry()
+  const { get, getAll, getOrFetch, getVaultCategory, registryVersion } = useVaultRegistry()
   const { oracleAdapters, loadOracleAdapters } = useEulerLabels()
+  const { getTokenByAddress } = useTokenList()
+
+  const registrySymbols = computed(() => {
+    void registryVersion.value
+    const symbols = new Map<string, string>()
+    for (const { vault } of getAll()) {
+      if (vault.asset?.address && vault.asset.symbol) symbols.set(vault.asset.address.toLowerCase(), vault.asset.symbol)
+    }
+    return symbols
+  })
+  const symbolOf = (address: string): string | undefined =>
+    getSpecialAddressLabel(address) ?? getTokenByAddress(address)?.symbol ?? registrySymbols.value.get(address.toLowerCase())
+  const adapterLabel = (address: string): string | undefined =>
+    formatOracleAdapterLabel(oracleAdapters[address.toLowerCase()], symbolOf)
 
   const networkQuery = () => route.query.network ? { network: route.query.network } : {}
 
@@ -56,9 +72,8 @@ export const useVaultReferences = () => {
       const path = isEulerEarn(vault) ? `/earn/${vault.address}` : `/lend/${vault.address}`
       return { kind: 'vault', label, to: { path, query: networkQuery() } }
     }
-    const adapter = oracleAdapters[address.toLowerCase()]
-    const adapterLabel = adapter?.label || adapter?.name
-    if (adapterLabel) return { kind: 'adapter', label: adapterLabel }
+    const label = adapterLabel(address)
+    if (label) return { kind: 'adapter', label }
     return { kind: 'address', label: fallback ?? shortenAddress(address) }
   }
 
@@ -130,5 +145,5 @@ export const useVaultReferences = () => {
     return line.adapter ? oraclePairLink(vaultAddress, line.adapter) : undefined
   }
 
-  return { describe, ensureVaults, ensureResolved, oracleLinkFor }
+  return { describe, adapterLabel, ensureVaults, ensureResolved, oracleLinkFor }
 }

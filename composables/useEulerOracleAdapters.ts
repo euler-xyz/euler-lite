@@ -8,6 +8,7 @@ import { getChainPolicyGeneration, subscribeToChainPolicyChanges } from '~/compo
 import {
   type OracleAdapterCheckOutcome,
   type OracleAdapterMeta,
+  formatUnboundedStaleness,
   normalizeOracleAdapterCheckSeverity,
 } from '~/entities/oracle'
 
@@ -76,7 +77,7 @@ const toOracleAdapterMeta = (assessment: OracleAdapterAssessment): OracleAdapter
   // time (see formatOracleCheckTitle).
   checks: assessment.findings.map(finding => ({
     id: finding.key,
-    message: finding.description,
+    message: formatUnboundedStaleness(finding.description),
     outcome: finding.outcome as OracleAdapterCheckOutcome,
     severity: normalizeOracleAdapterCheckSeverity(finding.severity),
     expected: finding.expected,

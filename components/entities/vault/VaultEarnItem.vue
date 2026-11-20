@@ -10,6 +10,7 @@ import { logWarn } from '~/utils/errorHandling'
 import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { VaultApyModal, UiModalPreviewTrigger } from '#components'
+import { useHiddenVaultEvidence } from '~/composables/useHiddenVaultEvidence'
 import {
   getCollateralExposureGroups,
   getCollateralExposurePairs,
@@ -27,7 +28,7 @@ const { isConnected } = useWagmi()
 const { vault } = defineProps<{ vault: EulerEarn }>()
 const product = useEulerProductOfVault(vault.address)
 const { enableEntityBranding } = useDeployConfig()
-const { isEarnVaultOwnerVerified } = useVaults()
+const { isEarnVaultOwnerVerified, isEarnVaultOwnerIdentified } = useVaults()
 const { get: registryGet, isVerifiedVault } = useVaultRegistry()
 const {
   load: loadOpenInterest,
@@ -39,12 +40,15 @@ const {
 const { getVaultBadDebt, isBadDebtEnabled, isBadDebtLoading, loadBadDebtForChain } = useVaultBadDebt()
 const entities = useEulerEntitiesOfEarnVault(vault)
 const isOwnerVerified = computed(() => isEarnVaultOwnerVerified(vault))
+const isOwnerIdentified = computed(() => isEarnVaultOwnerIdentified(vault))
+useHiddenVaultEvidence(() => [{ chainId: vault.chainId, address: vault.address, family: 'earn' }])
 const entityName = computed(() => {
-  if (!isOwnerVerified.value || entities.length === 0) return ''
+  if (!isOwnerIdentified.value || entities.length === 0) return ''
   if (entities.length === 1) return entities[0].name
   if (entities.length === 2) return `${entities[0].name} & ${entities[1].name}`
   return `${entities[0].name} & others`
 })
+const isCuratorUnknown = computed(() => !isOwnerIdentified.value || (!isOwnerVerified.value && !entityName.value))
 const { getBalance, isLoading: isBalancesLoading } = useWallets()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -330,7 +334,7 @@ const supplyApyModalData = computed(() => ({
       >
         <div class="text-content-tertiary text-p3 mb-4">Curator</div>
         <div
-          v-if="!isOwnerVerified"
+          v-if="isCuratorUnknown"
           class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
         >
           <SvgIcon
@@ -343,7 +347,7 @@ const supplyApyModalData = computed(() => ({
           v-else-if="entityName"
           class="flex items-center gap-6"
         >
-          <VaultEntityDisclosureTooltip :entities="entities">
+          <VaultEntityDisclosureTooltip :entities="isOwnerVerified ? entities : []">
             <CuratorEntityLink
               :entities="entities"
               :label="entityName"
@@ -443,7 +447,7 @@ const supplyApyModalData = computed(() => ({
         </div>
         <div class="flex gap-8 justify-end items-center text-right flex-1">
           <div
-            v-if="!isOwnerVerified"
+            v-if="isCuratorUnknown"
             class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
           >
             <SvgIcon

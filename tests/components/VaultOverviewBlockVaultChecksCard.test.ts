@@ -32,7 +32,7 @@ const assessment = {
   consistencyContext: null,
 }
 
-const render = async () => {
+const render = async (uncovered: { usd: number, unpricedUsd: number, scope: string } | null = null) => {
   vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1) }))
   vi.stubGlobal('useActivityNowMs', () => ref(Date.now()))
   vi.stubGlobal('useEulerLabels', () => ({
@@ -47,7 +47,7 @@ const render = async () => {
     ensureResolved: () => {},
     oracleLinkFor: () => ({ path: `/borrow/0x01/${VAULT}`, hash: `#oracle-adapter-${ADAPTER}` }),
   }))
-  vi.stubGlobal('useVaultCheckWeights', () => ({ weightOf: () => null }))
+  vi.stubGlobal('useVaultCheckWeights', () => ({ weightOf: () => null, getUncoveredBorrows: () => uncovered }))
   const { default: Card } = await import('~/components/entities/vault/overview/VaultOverviewBlockVaultChecksCard.vue')
   const app = createSSRApp({ render: () => h(Card, { address: VAULT }) })
   app.component('SvgIcon', { render: () => h('span') })
@@ -70,5 +70,17 @@ describe('vault checks card', () => {
     expect(line.slice(sentenceEnd, link)).toContain('</span>')
     expect(html).toMatch(/data-id="vault-check-oracle-link"[^>]*>View oracle</)
     expect(html).not.toContain('Show in Oracles')
+  })
+})
+
+describe('uncovered borrows on the vault checks card', () => {
+  it('states the borrows no collateral covers next to the checks', async () => {
+    const html = await render({ usd: 17_556.296, unpricedUsd: 3.6546, scope: '' })
+    expect(html).toContain('data-id="vault-check-uncovered"')
+    expect(html).toContain('Uncovered: $17.56K of borrows are not covered by any collateral&#39;s current value; $3.65 of it against collateral without a usable price')
+  })
+
+  it('says nothing without bad debt above the floor', async () => {
+    expect(await render()).not.toContain('data-id="vault-check-uncovered"')
   })
 })

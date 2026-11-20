@@ -9,6 +9,7 @@ import { formatNumber, formatCompactUsdValue } from '~/utils/string-utils'
 import { VaultApyModal, UiModalPreviewTrigger } from '#components'
 import BaseLoadableContent from '~/components/base/BaseLoadableContent.vue'
 import { zeroAddress } from 'viem'
+import { useHiddenVaultEvidence } from '~/composables/useHiddenVaultEvidence'
 
 const { isConnected } = useWagmi()
 const { vault } = defineProps<{ vault: SecuritizeCollateralVault }>()
@@ -16,21 +17,24 @@ const { vault } = defineProps<{ vault: SecuritizeCollateralVault }>()
 const vaultAddress = computed(() => vault.address)
 const product = useEulerProductOfVault(vaultAddress)
 const { enableEntityBranding } = useDeployConfig()
-const { isSecuritizeGovernorVerified } = useVaults()
+const { isSecuritizeGovernorVerified, isSecuritizeGovernorIdentified } = useVaults()
 const { isVerifiedVault } = useVaultRegistry()
 // Entity lookup accepts the shared vault shape; Securitize verification uses its governor field.
 const entities = useEulerEntitiesOfVault(vault as unknown as EVault)
 
 const isUnverified = computed(() => !isVerifiedVault(vault.address))
 const isGovernorVerified = computed(() => isSecuritizeGovernorVerified(vault))
+const isGovernorIdentified = computed(() => isSecuritizeGovernorIdentified(vault))
+useHiddenVaultEvidence(() => [{ chainId: vault.chainId, address: vault.address, family: 'evk' }])
 const isUngoverned = computed(() => vault.governor?.toLowerCase() === zeroAddress)
 const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
 const entityName = computed(() => {
-  if (!isGovernorVerified.value || entities.length === 0) return ''
+  if (!isGovernorIdentified.value || entities.length === 0) return ''
   if (entities.length === 1) return entities[0].name
   if (entities.length === 2) return `${entities[0].name} & ${entities[1].name}`
   return `${entities[0].name} & others`
 })
+const isCuratorUnknown = computed(() => !isGovernorIdentified.value || (!isGovernorVerified.value && !entityName.value))
 const displayName = computed(() => product.name || vault.shares.name)
 const isGeoBlocked = computed(() => isVaultBlockedByCountry(vault.address))
 
@@ -198,7 +202,7 @@ watchEffect(async () => {
           Ungoverned
         </div>
         <div
-          v-else-if="!isGovernorVerified"
+          v-else-if="isCuratorUnknown"
           class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
         >
           <SvgIcon
@@ -212,7 +216,7 @@ watchEffect(async () => {
           class="flex items-center gap-6"
           :class="{ 'opacity-20': isGovernanceLimited }"
         >
-          <VaultEntityDisclosureTooltip :entities="entities">
+          <VaultEntityDisclosureTooltip :entities="isGovernorVerified ? entities : []">
             <CuratorEntityLink
               :entities="entities"
               :label="entityName"
@@ -279,7 +283,7 @@ watchEffect(async () => {
             Ungoverned
           </div>
           <div
-            v-else-if="!isGovernorVerified"
+            v-else-if="isCuratorUnknown"
             class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
           >
             <SvgIcon
