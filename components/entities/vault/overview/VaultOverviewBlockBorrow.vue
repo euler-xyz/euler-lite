@@ -97,16 +97,25 @@ watchEffect(() => {
 
 <template>
   <VaultOverviewAccordionSection
-    v-if="collateralGroups.length"
+    v-if="collateralGroups.length || uncoveredLine"
     :title="sectionTitle"
     icon="section-collateral-exposure"
     :default-open="defaultOpen"
     content-class="flex flex-col gap-24"
   >
     <div>
-      <p class="text-content-secondary">
+      <p
+        v-if="collateralGroups.length"
+        class="text-content-secondary"
+      >
         Deposits in this vault can be borrowed.
         {{ sectionDescription }}
+      </p>
+      <p
+        v-else
+        class="text-content-secondary"
+      >
+        No collateral is currently accepted for this vault's borrows.
       </p>
       <p
         v-if="uncoveredLine"
@@ -117,7 +126,10 @@ watchEffect(() => {
       </p>
     </div>
 
-    <div class="flex flex-col gap-12">
+    <div
+      v-if="collateralPairs.length"
+      class="flex flex-col gap-12"
+    >
       <div
         v-for="pair in collateralPairs"
         :key="pair.collateral.address"

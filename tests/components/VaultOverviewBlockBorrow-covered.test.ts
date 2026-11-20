@@ -89,3 +89,29 @@ describe('collateral exposure of the vault overview', () => {
     expect(collateralOrder(html).slice(0, 2)).toEqual([EBOLD_1, ESBOLD_1])
   })
 })
+
+describe('collateral exposure of a vault with no live collateral', () => {
+  const renderWithoutCollateral = () => {
+    const vault = { ...makeEusdc42(), collaterals: [] } as unknown as EVault
+    const app = createSSRApp({ render: () => h(VaultOverviewBlockBorrow, { vault }) })
+    app.config.warnHandler = () => undefined
+    app.component('VaultOverviewAccordionSection', defineComponent({
+      props: { title: String },
+      setup: (props, { slots }) => () => h('section', { 'data-section': props.title }, slots.default?.()),
+    }))
+    return renderToString(app)
+  }
+
+  it('still states the uncovered borrows, with no collateral list', async () => {
+    uncovered = { usd: 17_556.296, unpricedUsd: 17_556.296, scope: '' }
+    const html = await renderWithoutCollateral()
+    expect(html).toContain('data-section="Collateral exposure"')
+    expect(html).toContain('data-id="collateral-exposure-uncovered"')
+    expect(html).toContain('No collateral is currently accepted for this vault&#39;s borrows.')
+    expect(html).not.toContain('Review the borrows each collateral covers')
+  })
+
+  it('stays hidden with neither collateral nor uncovered borrows', async () => {
+    expect(await renderWithoutCollateral()).not.toContain('data-section')
+  })
+})
