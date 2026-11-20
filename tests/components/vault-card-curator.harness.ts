@@ -95,8 +95,11 @@ export const renderCard = (component: Component, props: Record<string, unknown>)
     props: { entities: { type: Array, required: true } },
     setup: (props, { slots }) => () => h('span', { 'data-test-disclosure': props.entities.length }, slots.default?.()),
   }))
+  for (const name of ['KeyringBadge', 'GovernanceLimitedBadge', 'CyclicalNoteBadge']) {
+    app.component(name, { render: () => h('span', { 'data-test-property': name }) })
+  }
   for (const name of [
-    'AssetAvatar', 'VaultDisplayName', 'RecentlyAddedBadge', 'KeyringBadge', 'GovernanceLimitedBadge', 'CyclicalNoteBadge',
+    'AssetAvatar', 'VaultDisplayName', 'RecentlyAddedBadge',
     'RestrictedBadge', 'VaultDeprecatedBadge', 'LiquidationCoverageBadge', 'VaultAssessmentWarning', 'VaultAssessmentWarningLines',
     'VaultAssessmentChecksField', 'VaultPoints', 'VaultWarningIcon', 'VaultExposureDisplay', 'VaultExposureSummary',
     'VaultNoUsdPriceHint', 'UiRadialProgress', 'SvgIcon', 'CorrelatedPairBadge',

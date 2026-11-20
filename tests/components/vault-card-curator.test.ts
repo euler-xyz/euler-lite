@@ -181,6 +181,30 @@ const EARN_CARD = {
 
 beforeEach(() => stubCardGlobals())
 
+describe('curator-declared property badges on cards', () => {
+  const tagged = (labels: CardLabels) => ({
+    ...labels,
+    products: Object.fromEntries(Object.entries(labels.products ?? {}).map(([key, product]) =>
+      [key, { ...(product as object), tags: ['keyring', 'governance limited', 'cyclical note'] }])),
+  })
+
+  it('names the identified curator of a hidden vault without its property badges or dimming', async () => {
+    setCardLabels(tagged(pausedEusdc42()))
+    const html = await renderCard(VaultItem, { vault: makeEusdc42() })
+    expect(curatorStates(html)).toEqual([K3, K3])
+    expect(html).not.toContain('data-test-property')
+    expect(html).not.toContain('opacity-20')
+  })
+
+  it('keeps the property badges of a verified vault', async () => {
+    setCardLabels(tagged(listedEusdc42()))
+    const html = await renderCard(VaultItem, { vault: makeEusdc42() })
+    expect(html).toContain('data-test-property="KeyringBadge"')
+    expect(html).toContain('data-test-property="GovernanceLimitedBadge"')
+    expect(html).toContain('data-test-property="CyclicalNoteBadge"')
+  })
+})
+
 describe('curator cell of a borrow pair with one listed side', () => {
   const listedCollateralPausedBorrow = (entry?: { status: string }) => labelsFor(
     { [EBOLD_1.toLowerCase()]: visibleVerdict, [EUSDC_42.toLowerCase()]: liquityHubHiddenVerdict() },
