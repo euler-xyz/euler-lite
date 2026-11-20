@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import type { VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
-import { getVaultCheckWarningLines, getWarningAdapterFailures, type VaultCheckLine } from '~/utils/vault-assessment/presentation'
+import type { VaultAssessmentFamily, VaultAssessment } from '@eulerxyz/euler-v2-sdk'
+import { getVaultCheckWarningLines, getWarningAdapterFailures, orderVaultCheckLinesForSummary, type VaultCheckLine } from '~/utils/vault-assessment/presentation'
+import { UiModalPreviewTrigger, VaultAssessmentChecksModal } from '#components'
 import { isRestatedByCheckLine } from '~/utils/vault-assessment/flagged'
 
 export type VaultAssessmentWarningTarget = {
@@ -47,7 +48,10 @@ type WarningRow = {
   text: string
   parts: VaultCheckLine['parts']
   tone: 'error' | 'warning' | 'muted'
+  more?: { count: number, assessment: VaultAssessment }
 }
+
+const SUMMARY_LINES = 3
 
 const rows = computed((): WarningRow[] => {
   void vaultAssessments.value
@@ -59,14 +63,20 @@ const rows = computed((): WarningRow[] => {
     const cause: WarningRow[] = vault.unverified && vault.cause ? [{ key: `${vault.address}:cause`, checkKey: '', symbol, text: vault.cause, tone, parts: undefined }] : []
     const entry = getVaultAssessmentEntry(vault.chainId, vault.address, vault.family ?? 'evk')
     if (entry.status !== 'available' || !entry.assessment?.assessed) return cause
-    const checks = getVaultCheckWarningLines(entry.assessment, { adapterLabel })
+    const checks = orderVaultCheckLinesForSummary(getVaultCheckWarningLines(entry.assessment, { adapterLabel }))
       .map((line): WarningRow => ({ key: `${vault.address}:${line.key}`, checkKey: line.key, symbol, text: line.text, parts: line.parts, tone: vault.unverified ? tone : line.outcome === 'unknown' ? 'muted' : tone }))
-    const restated = !!vault.cause && isRestatedByCheckLine(vault.cause, checks.map(check => check.text))
-    return [...(restated ? [] : cause), ...checks]
+    const shownBesideCause = checks.slice(0, SUMMARY_LINES - cause.length)
+    const restated = !!vault.cause && isRestatedByCheckLine(vault.cause, shownBesideCause.map(check => check.text))
+    const shown = restated ? checks.slice(0, SUMMARY_LINES) : shownBesideCause
+    const hidden = checks.length - shown.length
+    const more: WarningRow[] = hidden > 0
+      ? [{ key: `${vault.address}:more`, checkKey: '', symbol, text: `+${hidden} more · see checks`, parts: undefined, tone: 'muted', more: { count: hidden, assessment: entry.assessment } }]
+      : []
+    return [...(restated ? [] : cause), ...shown, ...more]
   })
 })
 const { ensureResolved } = useVaultReferences()
-watch(rows, list => ensureResolved(list.map(row => ({ key: row.checkKey, parts: row.parts }))), { immediate: true })
+watch(rows, list => ensureResolved(list.filter(row => !row.more).map(row => ({ key: row.checkKey, parts: row.parts }))), { immediate: true })
 </script>
 
 <template>
@@ -75,37 +85,58 @@ watch(rows, list => ensureResolved(list.map(row => ({ key: row.checkKey, parts: 
     class="flex flex-col gap-6 border-t border-line-subtle px-16 py-10 text-p3"
     data-id="vault-assessment-warning-lines"
   >
-    <div
+    <template
       v-for="row in rows"
       :key="row.key"
-      class="flex items-start gap-8"
-      :class="row.tone === 'error' ? 'text-error-500' : row.tone === 'warning' ? 'text-warning-500' : 'text-content-tertiary'"
-      :data-tone="row.tone"
     >
-      <SvgIcon
-        v-if="row.tone !== 'muted'"
-        name="warning"
-        class="mt-1 !w-16 !h-16 shrink-0"
-      />
-      <span class="min-w-0 break-words text-content-secondary">
-        <span
-          v-if="row.symbol"
-          class="text-content-primary"
-        >{{ row.symbol }} · </span><template v-if="row.parts">
-          <template
-            v-for="(part, index) in row.parts"
-            :key="index"
-          >
-            <VaultReference
-              v-if="part.address"
-              :address="part.address"
-              :fallback="part.text"
-              :linkable="false"
-            />
-            <template v-else>{{ part.text }}</template>
-          </template>
-        </template><template v-else>{{ row.text }}</template>
-      </span>
-    </div>
+      <div
+        v-if="row.more"
+        class="flex items-start gap-8 pl-24 text-content-tertiary"
+        :data-tone="row.tone"
+        data-id="vault-assessment-warning-more"
+      >
+        <UiModalPreviewTrigger
+          :component="VaultAssessmentChecksModal"
+          :modal-data="{ props: { assessment: row.more.assessment } }"
+          :aria-label="row.symbol ? `${row.symbol} · ${row.text}` : row.text"
+          placement="top-start"
+          popover-width="wide"
+          class="cursor-pointer underline decoration-dotted hover:text-content-secondary"
+        >
+          <span v-if="row.symbol">{{ row.symbol }} · </span>{{ row.text }}
+        </UiModalPreviewTrigger>
+      </div>
+      <div
+        v-else
+        class="flex items-start gap-8"
+        :class="row.tone === 'error' ? 'text-error-500' : row.tone === 'warning' ? 'text-warning-500' : 'text-content-tertiary'"
+        :data-tone="row.tone"
+      >
+        <SvgIcon
+          v-if="row.tone !== 'muted'"
+          name="warning"
+          class="mt-1 !w-16 !h-16 shrink-0"
+        />
+        <span class="min-w-0 break-words text-content-secondary">
+          <span
+            v-if="row.symbol"
+            class="text-content-primary"
+          >{{ row.symbol }} · </span><template v-if="row.parts">
+            <template
+              v-for="(part, index) in row.parts"
+              :key="index"
+            >
+              <VaultReference
+                v-if="part.address"
+                :address="part.address"
+                :fallback="part.text"
+                :linkable="false"
+              />
+              <template v-else>{{ part.text }}</template>
+            </template>
+          </template><template v-else>{{ row.text }}</template>
+        </span>
+      </div>
+    </template>
   </div>
 </template>

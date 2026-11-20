@@ -68,6 +68,8 @@ export const isConfigHiddenVerdict = (verdict: VaultVerdictLike | undefined): ve
   verdict?.status === 'hidden' && CONFIG_HIDING_REASONS.has(verdict.decidedBy ?? '')
 const PAUSE_CAUSE_CODES: ReadonlySet<string> = new Set(['exit-operations-disabled', 'vault-paused'])
 
+export const isPauseCauseCode = (code: string | null | undefined): boolean => PAUSE_CAUSE_CODES.has(code ?? '')
+
 export interface VaultPauseEvidence {
   family: 'evk' | 'earn' | null
   /** Undefined when the vault's hooks are not loaded; the assessment then stands in for them. */

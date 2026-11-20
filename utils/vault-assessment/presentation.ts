@@ -3,7 +3,7 @@ import { getAddress, isAddress } from 'viem'
 import type { VaultWarning } from '~/composables/useVaultWarnings'
 import { formatExactAmount, shortenAddress } from '~/utils/string-utils'
 import { collectObservedAddresses, getVaultCheckSubject, type VaultCheckSubject } from './subjects'
-import { FLAGGED_VAULT_TITLE, getFlaggedVaultLine, type VaultVerdictLike } from './flagged'
+import { FLAGGED_VAULT_TITLE, getFlaggedVaultLine, isPauseCauseCode, type VaultVerdictLike } from './flagged'
 
 export type VaultCheckListingImpact = 'affects-listing' | 'does-not-affect-listing'
 
@@ -17,6 +17,7 @@ export interface VaultCheckLine {
   adapter?: string
   subject?: VaultCheckSubject
   listingImpact?: VaultCheckListingImpact
+  pauses?: boolean
 }
 
 export const ORACLE_ADAPTERS_CHECKS_KEY = 'oracle.adapters-checks'
@@ -264,10 +265,20 @@ export const getVaultCheckWarningLines = (assessment: VaultAssessment, options?:
       ...(parts ? { parts } : {}),
       ...(subject ? { subject } : {}),
       ...listingImpactOf(finding),
+      ...(finding.outcome === 'fail' && isPauseCauseCode(finding.cause?.code) ? { pauses: true } : {}),
     })
   }
   return [...lines.values()]
 }
+
+const summaryTier = (line: VaultCheckLine): number => {
+  if (line.pauses) return 0
+  if (line.listingImpact !== 'affects-listing') return 3
+  return line.outcome === 'fail' ? 1 : 2
+}
+
+export const orderVaultCheckLinesForSummary = <T extends VaultCheckLine>(lines: readonly T[]): T[] =>
+  [...lines].sort((a, b) => summaryTier(a) - summaryTier(b))
 
 export const getVaultCheckFindingRank = (finding: VaultAssessmentFinding): number => finding.outcome === 'fail'
   ? finding.exempted || isMutedAdapterFinding(finding) ? 2 : 0
