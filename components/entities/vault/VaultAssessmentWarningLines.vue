@@ -3,6 +3,7 @@ import type { VaultAssessmentFamily, VaultAssessment } from '@eulerxyz/euler-v2-
 import { getVaultCheckWarningLines, getWarningAdapterFailures, orderVaultCheckLinesForSummary, type VaultCheckLine } from '~/utils/vault-assessment/presentation'
 import { UiModalPreviewTrigger, VaultAssessmentChecksModal } from '#components'
 import { isRestatedByCheckLine } from '~/utils/vault-assessment/flagged'
+import { formatUnboundedStaleness } from '~/entities/oracle'
 
 export type VaultAssessmentWarningTarget = {
   address: string
@@ -57,13 +58,14 @@ const rows = computed((): WarningRow[] => {
     if (!isVaultAssessmentAvailableForChain(vault.chainId)) return []
     const symbol = props.showSymbol ? vault.symbol : undefined
     const tone = vault.unverified ? 'error' : 'warning'
-    const cause: WarningRow[] = vault.unverified && vault.cause ? [{ key: `${vault.address}:cause`, checkKey: '', symbol, text: vault.cause, tone, parts: undefined }] : []
+    const causeText = vault.cause ? formatUnboundedStaleness(vault.cause) : ''
+    const cause: WarningRow[] = vault.unverified && causeText ? [{ key: `${vault.address}:cause`, checkKey: '', symbol, text: causeText, tone, parts: undefined }] : []
     const entry = getVaultAssessmentEntry(vault.chainId, vault.address, vault.family ?? 'evk')
     if (entry.status !== 'available' || !entry.assessment?.assessed) return cause
     const checks = orderVaultCheckLinesForSummary(getVaultCheckWarningLines(entry.assessment, { adapterLabel }))
       .map((line): WarningRow => ({ key: `${vault.address}:${line.key}`, checkKey: line.key, symbol, text: line.text, parts: line.parts, tone: vault.unverified ? tone : line.outcome === 'unknown' ? 'muted' : tone }))
     const shownBesideCause = checks.slice(0, SUMMARY_LINES - cause.length)
-    const restated = !!vault.cause && isRestatedByCheckLine(vault.cause, shownBesideCause.map(check => check.text))
+    const restated = !!causeText && isRestatedByCheckLine(causeText, shownBesideCause.map(check => check.text))
     const shown = restated ? checks.slice(0, SUMMARY_LINES) : shownBesideCause
     const hidden = checks.length - shown.length
     const more: WarningRow[] = hidden > 0

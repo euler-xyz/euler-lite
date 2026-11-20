@@ -121,3 +121,24 @@ describe('summary of the failing checks under a card', () => {
     expect(rows[3]).toMatch(/^\+\d+ more · see checks$/)
   })
 })
+
+describe('cause line that quotes an unbounded staleness', () => {
+  const MAX_UINT = '115792089237316195423570985008687907853269984665640564039457584007913129639935'
+  const stalenessReason = `Adapter's maximum staleness (${MAX_UINT} s) must not exceed 604800 s.`
+  const stalenessEntry = syntheticEntry([finding('oracle.liability-quote', {
+    required: true,
+    cause: { code: 'staleness', subject: null, summary: stalenessReason, remedy: null },
+  })])
+
+  it('drops a cause that repeats the staleness check once both read unbounded', async () => {
+    const rows = rowTexts(await render(stalenessEntry, { unverified: true, cause: getFlaggedVaultLine(stalenessReason) }))
+    expect(rows).toEqual(['Adapter\'s maximum staleness (unbounded) must not exceed 604800 s.'])
+  })
+
+  it('keeps a distinct cause and reads its staleness as unbounded', async () => {
+    const cause = getFlaggedVaultLine(`The router quotes through an adapter whose maximum staleness (${MAX_UINT} s) has no bound.`)
+    const rows = rowTexts(await render(stalenessEntry, { unverified: true, cause }))
+    expect(rows[0]).toBe('Euler\'s checks flagged this vault: The router quotes through an adapter whose maximum staleness (unbounded) has no bound.')
+    expect(rows).toHaveLength(2)
+  })
+})
