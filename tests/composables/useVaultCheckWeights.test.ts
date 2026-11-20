@@ -189,7 +189,7 @@ describe('uncovered borrows', () => {
   })
 
   it.each([['no open interest row', undefined], ['a zero row', { [COLLATERAL]: 0 }]])(
-    'states the uncovered borrows when no collateral covers any debt: %s',
+    'states V3\'s bad debt when no collateral covers any debt, a missing row counting as nothing covered: %s',
     (_label, split) => {
       if (split) openInterest[EVK] = split
       else Reflect.deleteProperty(openInterest, EVK)
