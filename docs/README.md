@@ -26,14 +26,16 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Technology decisions
 - Shareable Explore / Lend / Borrow / Earn query parameters and curator aliases
 - Explore listing: `groupHasExplorableMarket` then `isExploreListedMarket` (Lend/Borrow-table pair, fully deprecated exception)
+- Explore graph lines: one grey, thicker two-way pairs, dashes when neither side has borrow LTV, green only for the selected vault
 - JSON-RPC proxy allowlist (`eth_createAccessList` for simulation), batch/timeout limits, and wagmi public-RPC fallback
+- API guards classify encoded `/api` via decoded `event.path`; provider proxies still inspect the raw URL
 
 ### 🚀 [Development Guide](./development-guide.md)
 
 - Development workflow
 - Shared `readAppEnvConfig` / `readChainEnvConfig` builders (do not re-parse env in the Nitro plugins)
 - Shareable listing-filter URLs (`?curator=` plus legacy `riskManager` / Earn `allocator`)
-- JSON-RPC proxy, curator profile/network endpoints, `/healthz` liveness, and Advanced-mode localStorage pitfalls
+- JSON-RPC proxy, curator profile/network endpoints, `/healthz` liveness, Advanced-mode localStorage, and stylesheet/`entryImportMap` cache pitfalls
 
 ### ⛓️ [Adding a Chain](./adding-a-chain.md)
 
@@ -80,6 +82,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - `cyclical note` is the UI gate for the cyclical IRM overview (on-chain IRM type alone is not enough)
 - Curator profile pages (`/curators/{entityId}`): V3 profile + network index, chain-label fallback retry, completeness only on successful V3
 - Lend/Borrow/Explore share `utils/vault/borrow-table.ts`; Unknown collateral stays on the graph, not in the Borrow table
+- Explore graph edges follow Toolbox line rules (grey idle, thicker two-way, dash without borrow LTV, green only on the selected vault)
 - Shared Oracles-block / Explore-matrix adapter display is covered in [Oracle Adapter Display](./oracle-adapter-display.md)
 
 ### 🧿 [Oracle Adapter Display](./oracle-adapter-display.md)
@@ -100,6 +103,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Add-time `captureSwapReview` keeps Swap row amounts when the live quote resets; batch close discards cached preparation so reopen reprepares
 - Spy-mode review uses `prepareReadOnly` and a synthetic approval-only wallet binding; confirm stays disabled
 - Wallet screening is connect-time only; reviewed execution does not re-screen or consult VPN evidence
+- An accepted exit-only verdict is enforced at execution without a second screening request; see [Geo-Blocking](./geo-blocking.md#exit-only-addresses)
 - `transferMin` `verify.vault` is a transfer recipient, not an Euler vault to snapshot
 - Brevis/Incentra `rewardClaimId` includes `epoch` so same-campaign epochs do not collide
 - Collateral withdraw is gated on borrow LTV (1% buffer) plus vault cash; Max stays hidden until that limit is defined
@@ -153,6 +157,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - V3 proxy allowlist, rate limits, failure backoff, and troubleshooting
 - V3-conditional warm-cache cadence (1-min vaults timer with V3, 5-min without)
 - First per-chain warms wait for the EulerChains manifest read (10 s cap) so `deprecated` status is applied
+- Sensitive `no-store` and API middleware classify encoded paths via `getRouterPathname`; nested provider prefixes 404 before credentials
 - Curator profile and network-index caches (5 min, entity-id keyed, static short-circuit)
 - Liquidation-bot `/vault-filter` modes (`None` / `Blacklist` / `Whitelist`) and borrow-side-only UI
 - Server provider overrides: Sonic Multicall byte cap vs SDK `fetchVaults` chunking
