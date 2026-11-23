@@ -125,7 +125,7 @@ it.each(['card', 'warning', 'evidence'])('reloads mounted vault %s assessments w
   }))
   vi.stubGlobal('useActivityNowMs', () => ref(Date.now()))
   vi.stubGlobal('useVaultReferences', () => ({ ensureResolved: vi.fn(), oracleLinkFor: vi.fn() }))
-  vi.stubGlobal('useVaultCheckWeights', () => ({ weightOf: () => null }))
+  vi.stubGlobal('useVaultCheckWeights', () => ({ weightOf: () => null, getUncoveredBorrows: () => null }))
   if (surface === 'card') mount(VaultOverviewBlockVaultChecksCard, { address: BASE })
   else if (surface === 'warning') mount(VaultAssessmentWarning, { address: BASE, family: 'evk' })
   else mount(defineComponent({ setup: () => {

@@ -12,7 +12,10 @@ export type VaultTypeBadge = VaultGovernanceBadge | 'securitize' | 'private' | '
 export type VaultTypeSummaryBadge = Extract<VaultTypeBadge, 'cyclicalNote' | 'private' | 'accessControl' | 'unknown'>
 
 export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
-  const { isVaultGovernorIdentified, isSecuritizeGovernorIdentified, isEarnVaultOwnerIdentified } = useVaults()
+  const {
+    isVaultGovernorIdentified, isSecuritizeGovernorIdentified, isEarnVaultOwnerIdentified,
+    isVaultGovernorVerified, isSecuritizeGovernorVerified, isEarnVaultOwnerVerified,
+  } = useVaults()
   const { getVault, getVaultCategory } = useVaultRegistry()
 
   const addressRef = computed(() => vault.value.address)
@@ -56,6 +59,13 @@ export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
     return isVaultGovernorIdentified(verificationVault.value as EVault)
   })
 
+  // Curator-declared properties are shown only on verified vaults; an identified hidden vault keeps its name and type.
+  const isGovernanceVerified = computed(() => {
+    if (isEarn.value) return isEarnVaultOwnerVerified(vault.value as EulerEarn)
+    if (isSecuritize.value) return isSecuritizeGovernorVerified(vault.value as SecuritizeCollateralVault)
+    return isVaultGovernorVerified(verificationVault.value as EVault)
+  })
+
   const governanceType = computed<VaultGovernanceBadge>(() => {
     if (isEarn.value) {
       return entities.value.length ? 'managed' : 'unknown'
@@ -71,7 +81,7 @@ export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
   })
 
   const isGovernanceLimited = computed(() =>
-    isVaultGovernanceLimited(addressRef.value) && isGovernanceIdentified.value,
+    isVaultGovernanceLimited(addressRef.value) && isGovernanceVerified.value,
   )
 
   const isCyclicalNote = computed(() => {
@@ -88,10 +98,10 @@ export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
     const result: VaultTypeBadge[] = [governanceType.value]
 
     if (isGovernanceIdentified.value && isSecuritize.value) result.push('securitize')
-    if (isGovernanceIdentified.value && isVaultKeyring(vault.value.address)) result.push('private')
-    if (isGovernanceIdentified.value && isVaultAccessControlled(vault.value.address)) result.push('accessControl')
+    if (isGovernanceVerified.value && isVaultKeyring(vault.value.address)) result.push('private')
+    if (isGovernanceVerified.value && isVaultAccessControlled(vault.value.address)) result.push('accessControl')
     if (isGovernanceLimited.value) result.push('governanceLimited')
-    if (isGovernanceIdentified.value && isCyclicalNote.value) result.push('cyclicalNote')
+    if (isGovernanceVerified.value && isCyclicalNote.value) result.push('cyclicalNote')
 
     return result
   })
@@ -117,6 +127,7 @@ export const useVaultTypeBadges = (vault: Ref<VaultTypeBadgeVault>) => {
     governanceType,
     hasSummaryBadges,
     isGovernanceIdentified,
+    isGovernanceVerified,
     summaryBadges,
     summaryGovernanceType,
     verificationVault,

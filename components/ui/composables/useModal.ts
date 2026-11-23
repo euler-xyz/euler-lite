@@ -104,10 +104,28 @@ export const useModal = () => {
     bus.emit('close')
   }
 
+  /** Closing a modal steps history back; navigating before that settles would be undone by it. */
+  const closeBeforeNavigation = (id: number) => new Promise<void>((resolve) => {
+    if (window.history.state?.modalId !== id) {
+      close(id)
+      resolve()
+      return
+    }
+    const settle = () => {
+      window.removeEventListener('popstate', settle)
+      clearTimeout(timeout)
+      resolve()
+    }
+    const timeout = setTimeout(settle, 500)
+    window.addEventListener('popstate', settle)
+    close(id)
+  })
+
   return {
     list,
     open,
     close,
+    closeBeforeNavigation,
     hasModal,
   }
 }

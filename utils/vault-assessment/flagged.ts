@@ -32,8 +32,18 @@ const withReason = (lead: string, reason?: string | null): string => {
   return `${lead}: ${text}${/[.!?]$/.test(text) ? '' : '.'}`
 }
 
+const FLAGGED_VAULT_LINE_LEAD = 'Euler\'s checks flagged this vault'
+
 export const getFlaggedVaultLine = (reason?: string | null): string =>
-  withReason('Euler\'s checks flagged this vault', reason)
+  withReason(FLAGGED_VAULT_LINE_LEAD, reason)
+
+const normalizeReasonText = (text: string): string =>
+  text.trim().replace(new RegExp(`^${FLAGGED_VAULT_LINE_LEAD}:\\s*`), '').replace(/[.!?]+$/, '').trim()
+
+export const isRestatedByCheckLine = (cause: string, lineTexts: readonly string[]): boolean => {
+  const reason = normalizeReasonText(cause)
+  return !!reason && lineTexts.some(text => normalizeReasonText(text) === reason)
+}
 
 export const getFlaggedTransactionLine = (reason?: string | null): string =>
   withReason('This transaction uses a flagged vault', reason)
@@ -52,7 +62,13 @@ export const getFlaggedVerdict = (
 }
 
 const CONFIG_HIDING_REASONS: ReadonlySet<string> = new Set(['config-suspended', 'config-failed', 'config-revoked'])
+
+/** Only a configuration verdict can be shown, by the assessment, to be unrelated to governance. */
+export const isConfigHiddenVerdict = (verdict: VaultVerdictLike | undefined): verdict is VaultVerdictLike =>
+  verdict?.status === 'hidden' && CONFIG_HIDING_REASONS.has(verdict.decidedBy ?? '')
 const PAUSE_CAUSE_CODES: ReadonlySet<string> = new Set(['exit-operations-disabled', 'vault-paused'])
+
+export const isPauseCauseCode = (code: string | null | undefined): boolean => PAUSE_CAUSE_CODES.has(code ?? '')
 
 export interface VaultPauseEvidence {
   family: 'evk' | 'earn' | null
@@ -73,7 +89,7 @@ const isPauseFinding = (finding: VaultAssessmentFinding): boolean => {
 
 /** Any configuration verdict can come from a pause, and none proves one, so the pause itself must be seen. */
 export const isPausedVerdict = (verdict: VaultVerdictLike | undefined, evidence: VaultPauseEvidence): boolean => {
-  if (verdict?.status !== 'hidden' || !CONFIG_HIDING_REASONS.has(verdict.decidedBy ?? '')) return false
+  if (!isConfigHiddenVerdict(verdict)) return false
   if (evidence.family === 'earn') return false
   if (evidence.onchainPaused !== undefined) return evidence.onchainPaused
   if (evidence.assessmentVerdictKey !== getVaultVerdictKey(verdict)) return false
@@ -114,7 +130,7 @@ export const isHiddenForNonGovernanceCause = (
   verdict: VaultVerdictLike | undefined,
   evidence: VaultGovernanceEvidence | undefined,
 ): boolean => {
-  if (verdict?.status !== 'hidden' || !CONFIG_HIDING_REASONS.has(verdict.decidedBy ?? '')) return false
+  if (!isConfigHiddenVerdict(verdict)) return false
   if (evidence?.verdictKey !== getVaultVerdictKey(verdict)) return false
   const configContext = evidence.status === 'available' ? evidence.assessment?.configContext : null
   if (!configContext || !CLEAR_CONSISTENCY_STATUSES.has(evidence?.consistencyStatus ?? '')) return false

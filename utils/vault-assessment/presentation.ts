@@ -3,7 +3,8 @@ import { getAddress, isAddress } from 'viem'
 import type { VaultWarning } from '~/composables/useVaultWarnings'
 import { formatExactAmount, shortenAddress } from '~/utils/string-utils'
 import { collectObservedAddresses, getVaultCheckSubject, type VaultCheckSubject } from './subjects'
-import { FLAGGED_VAULT_TITLE, getFlaggedVaultLine, type VaultVerdictLike } from './flagged'
+import { FLAGGED_VAULT_TITLE, getFlaggedVaultLine, isPauseCauseCode, type VaultVerdictLike } from './flagged'
+import { formatUnboundedStaleness } from '~/entities/oracle'
 
 export type VaultCheckListingImpact = 'affects-listing' | 'does-not-affect-listing'
 
@@ -17,6 +18,7 @@ export interface VaultCheckLine {
   adapter?: string
   subject?: VaultCheckSubject
   listingImpact?: VaultCheckListingImpact
+  pauses?: boolean
 }
 
 export const ORACLE_ADAPTERS_CHECKS_KEY = 'oracle.adapters-checks'
@@ -170,9 +172,11 @@ const listingImpactOf = (finding: VaultAssessmentFinding): { listingImpact?: Vau
 }
 
 /** The rule description documents the rule for API readers, so it stands in only for an open check that has no cause. */
-export const getVaultCheckMessage = (finding: VaultAssessmentFinding): string | null =>
-  finding.cause?.summary
-  || ((finding.outcome === 'fail' || finding.outcome === 'unknown') && finding.description ? finding.description : null)
+export const getVaultCheckMessage = (finding: VaultAssessmentFinding): string | null => {
+  const message = finding.cause?.summary
+    || ((finding.outcome === 'fail' || finding.outcome === 'unknown') && finding.description ? finding.description : null)
+  return message ? formatUnboundedStaleness(message) : null
+}
 
 const TITLE_WORDS: Record<string, string> = { apy: 'APY', ltv: 'LTV', evc: 'EVC', evault: 'EVault', irm: 'IRM', id: 'ID' }
 
@@ -232,7 +236,7 @@ export const groupVaultCheckFindings = (findings: readonly VaultAssessmentFindin
 const adapterFailureLines = (finding: VaultAssessmentFinding, options?: VaultCheckLineOptions): VaultCheckLine[] =>
   getWarningAdapterFailures(finding).map((failure) => {
     const label = options?.adapterLabel?.(failure.address) ?? shortenAddress(failure.address)
-    const checks = failure.findings.map(check => check.description.replace(/\.$/, '')).join(' · ')
+    const checks = failure.findings.map(check => formatUnboundedStaleness(check.description).replace(/\.$/, '')).join(' · ')
     return {
       key: `${finding.key}:${failure.address.toLowerCase()}`,
       text: `${label} · ${checks}`,
@@ -254,7 +258,7 @@ export const getVaultCheckWarningLines = (assessment: VaultAssessment, options?:
     }
     const key = finding.key
     if (lines.has(key) && !(lines.get(key)?.outcome === 'unknown' && finding.outcome === 'fail')) continue
-    const text = finding.outcome === 'unknown' ? finding.cause?.summary || 'Being re-checked' : finding.cause?.summary || finding.description
+    const text = formatUnboundedStaleness(finding.outcome === 'unknown' ? finding.cause?.summary || 'Being re-checked' : finding.cause?.summary || finding.description)
     const parts = getVaultCheckCopyableParts(text, finding)
     const subject = getVaultCheckSubject(finding.key)
     lines.set(key, {
@@ -264,10 +268,20 @@ export const getVaultCheckWarningLines = (assessment: VaultAssessment, options?:
       ...(parts ? { parts } : {}),
       ...(subject ? { subject } : {}),
       ...listingImpactOf(finding),
+      ...(finding.outcome === 'fail' && isPauseCauseCode(finding.cause?.code) ? { pauses: true } : {}),
     })
   }
   return [...lines.values()]
 }
+
+const summaryTier = (line: VaultCheckLine): number => {
+  if (line.pauses) return 0
+  if (line.listingImpact !== 'affects-listing') return 3
+  return line.outcome === 'fail' ? 1 : 2
+}
+
+export const orderVaultCheckLinesForSummary = <T extends VaultCheckLine>(lines: readonly T[]): T[] =>
+  [...lines].sort((a, b) => summaryTier(a) - summaryTier(b))
 
 export const getVaultCheckFindingRank = (finding: VaultAssessmentFinding): number => finding.outcome === 'fail'
   ? finding.exempted || isMutedAdapterFinding(finding) ? 2 : 0

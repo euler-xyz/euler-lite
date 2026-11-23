@@ -15,13 +15,14 @@ import { getCollateralExposureGroups, getCollateralExposurePairs, sumOpenInteres
 import { resolveVaultExposureDisplay, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
 import { getCriticalAssessmentWarning, getUnknownVaultCause } from '~/utils/vault-assessment/presentation'
 import { zeroAddress } from 'viem'
+import { useHiddenVaultEvidence } from '~/composables/useHiddenVaultEvidence'
 
 const { isConnected } = useWagmi()
 const { vault, type = 'lend', assessmentUi = 'badge' } = defineProps<{ vault: EVault, type?: 'lend' | 'borrow', assessmentUi?: 'badge' | 'field' | 'none' }>()
 const vaultAddress = computed(() => vault.address)
 const product = useEulerProductOfVault(vaultAddress)
 const { enableEntityBranding } = useDeployConfig()
-const { isVaultGovernorVerified } = useVaults()
+const { isVaultGovernorVerified, isVaultGovernorIdentified } = useVaults()
 const entities = useEulerEntitiesOfVault(vault)
 const { getVaultCategory, isVerifiedVault, get: registryGet } = useVaultRegistry()
 const {
@@ -34,14 +35,17 @@ const {
 const { getVaultBadDebt, isBadDebtEnabled, isBadDebtLoading, loadBadDebtForChain } = useVaultBadDebt()
 const isUnverified = computed(() => !isVerifiedVault(vault.address))
 const isGovernorVerified = computed(() => isVaultGovernorVerified(vault))
+const isGovernorIdentified = computed(() => isVaultGovernorIdentified(vault))
+useHiddenVaultEvidence(() => [{ chainId: vault.chainId, address: vault.address, family: 'evk' }])
 const isUngoverned = computed(() => vault.governorAdmin?.toLowerCase() === zeroAddress)
 const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
 const entityName = computed(() => {
-  if (!isGovernorVerified.value || entities.length === 0) return ''
+  if (!isGovernorIdentified.value || entities.length === 0) return ''
   if (entities.length === 1) return entities[0].name
   if (entities.length === 2) return `${entities[0].name} & ${entities[1].name}`
   return `${entities[0].name} & others`
 })
+const isCuratorUnknown = computed(() => !isGovernorIdentified.value || (!isGovernorVerified.value && !entityName.value))
 const isEscrow = computed(() => getVaultCategory(vault.address) === 'escrow')
 const isBorrowable = computed(() => isVaultBorrowable(vault))
 const displayName = computed(() => {
@@ -304,7 +308,7 @@ watchEffect(async () => {
           Ungoverned
         </div>
         <div
-          v-else-if="!isGovernorVerified"
+          v-else-if="isCuratorUnknown"
           class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
         >
           <SvgIcon
@@ -318,7 +322,7 @@ watchEffect(async () => {
           class="flex items-center gap-6"
           :class="{ 'opacity-20': isGovernanceLimited }"
         >
-          <VaultEntityDisclosureTooltip :entities="entities">
+          <VaultEntityDisclosureTooltip :entities="isGovernorVerified ? entities : []">
             <CuratorEntityLink
               :entities="entities"
               :label="entityName"
@@ -465,7 +469,7 @@ watchEffect(async () => {
             Ungoverned
           </div>
           <div
-            v-else-if="!isGovernorVerified"
+            v-else-if="isCuratorUnknown"
             class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
           >
             <SvgIcon

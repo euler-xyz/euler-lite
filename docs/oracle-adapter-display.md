@@ -63,6 +63,8 @@ For recognized assessments, label and health applicability use `assessmentApplie
 
 Pair matching controls label and health applicability independently of adapter identity recognition. A recognized adapter retains its curated name and provider even when the assessed pair explicitly mismatches the route.
 
+Vault-check lines and references outside the Oracles section (the lines under list cards, the overview Vault checks card and the checks pop-up) name an adapter by the pair it prices: "PT-sBOLD-1765325646 → BOLD price feed · Unknown AggregatorV3 Feed" (`formatOracleAdapterLabel`, used by `useVaultReferences.adapterLabel` and `describe`). Base and quote come from the assessment's `config`, kept only when each is an address; symbols resolve from the reserved unit-of-account addresses (USD, ETH, BTC), the token list, then the assets of vaults in the registry, so no request is added. Without both symbols the label is V3's `label`, then the adapter class, as before. An adapter finding that prints a maximum staleness over a hundred years, such as max uint, reads "(unbounded)" in place of the 78 digits, and its observed value reads "unbounded" (`formatUnboundedStaleness`); V3's other wording is unchanged.
+
 ## Identity — never trust `name()`
 
 `resolveOracleAdapterIdentity` in `entities/oracle.ts`:
