@@ -111,6 +111,7 @@ function buildRecorderArgs({ group, groupDir, fixturePath, scenariosPath, anvilR
   }
   for (const key of [
     'headless',
+    'assert-csp',
     'keep-open',
     'skip-v3-preflight',
     'v3-preflight',
