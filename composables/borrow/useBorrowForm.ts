@@ -1334,7 +1334,16 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     queueAsyncEstimates()
   })
 
-  watch([effectiveAddress, address, isSpyMode, chainId, pendingSubAccount], () => {
+  watch([effectiveAddress, address, isSpyMode, chainId, pendingSubAccount], (
+    [owner, wallet, spy, chain, subAccount],
+    [previousOwner, previousWallet, previousSpy, previousChain, previousSubAccount],
+  ) => {
+    // The first quote request resolves this account's sub-account itself.
+    // That is not a context change: restarting here would cancel the request
+    // that caused it. The page clears the sub-account on owner or chain change.
+    const contextChanged = owner !== previousOwner || wallet !== previousWallet
+      || spy !== previousSpy || chain !== previousChain
+    if (!contextChanged && !previousSubAccount && subAccount) return
     clearBorrowSimulationError()
     resetBorrowSwapQuoteState()
     plan.value = null

@@ -345,7 +345,14 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     clearSimulationError()
     invalidatePreparedSwap()
     resetQuoteState()
-    if (fromAmount.value) requestQuote()
+    // A same-asset transfer has no quote to refetch, so nothing else would
+    // restore the amount that the reset just cleared.
+    if (isSameAsset.value) {
+      toAmount.value = fromAmount.value
+    }
+    else if (fromAmount.value) {
+      requestQuote()
+    }
   }, { flush: 'sync' })
 
   watch(toVault, () => {

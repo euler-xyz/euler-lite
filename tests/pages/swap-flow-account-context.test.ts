@@ -177,7 +177,7 @@ describe('swap flow account context', () => {
     vi.unstubAllGlobals()
   })
 
-  const openFlow = async (flow: Flow): Promise<FlowState> => {
+  const openFlow = async (flow: Flow, borrowPendingSubAccount?: Ref<string | null>): Promise<FlowState> => {
     let state!: FlowState
     let setInput!: () => void
     const app = createSSRApp({})
@@ -256,7 +256,7 @@ describe('swap flow account context', () => {
         }
         if (flow === 'borrow') {
           const form = useBorrowForm({
-            ...common, savingPositions: computed(() => []), balance: ref(10n ** 25n), pendingSubAccount: computed(subAccount),
+            ...common, savingPositions: computed(() => []), balance: ref(10n ** 25n), pendingSubAccount: borrowPendingSubAccount ?? computed(subAccount),
             collateralSupplyApy: computed(() => 0), borrowApy: computed(() => 0), collateralSupplyRewardApy: computed(() => 0),
             borrowRewardApy: computed(() => 0), collateralSupplyApyWithRewards: computed(() => 0),
             isSecuritizeCollateral: computed(() => false), isBorrowRestricted: computed(() => false), collateralAddress: vault.address, borrowAddress: debtVault.address,
@@ -395,6 +395,50 @@ describe('swap flow account context', () => {
       expect(getSwapQuotes).toHaveBeenCalledTimes(requests)
       expectOwner(flow, state.quote.value, B)
     })
+  })
+
+  it.each(['wallet switch', 'Spy Mode exit'] as const)('lend swap keeps the same-asset transfer amount on %s', async (change) => {
+    if (change === 'wallet switch') isSpyMode.value = false
+    const sameAssetVault = makeVault('0x5000000000000000000000000000000000000000', WETH)
+    vi.stubGlobal('useVaults', () => ({ isReady: ref(true), isMarketDataResolved: ref(true), getVault: async (a: string) => a === vault.address ? vault : sameAssetVault }))
+    vi.stubGlobal('useRoute', () => ({ params: { vault: vault.address, subAccount: '1' }, query: { to: sameAssetVault.address } }))
+    const app = createSSRApp({})
+    app.provide(ssrContextKey, {})
+    const component = SwapPage as unknown as { setup: (props: object, context: object) => {
+      fromAmount: Ref<string>
+      toAmount: Ref<string>
+      isSameAsset: Ref<boolean>
+      onFromInput: () => void
+    } }
+    const page = scope.run(() => app.runWithContext(() => component.setup({}, { expose: vi.fn() })))!
+    await vi.advanceTimersByTimeAsync(0)
+    page.fromAmount.value = '1'
+    page.onFromInput()
+    expect(page.isSameAsset.value).toBe(true)
+    expect(page.toAmount.value).toBe('1')
+    if (change === 'wallet switch') address.value = A
+    else isSpyMode.value = false
+    expect(page.toAmount.value).toBe('1')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(page.toAmount.value).toBe('1')
+    expect(getSwapQuotes).not.toHaveBeenCalled()
+  })
+
+  it('borrow keeps the quote request that resolves its own subaccount', async () => {
+    isSpyMode.value = false
+    // The page starts with no subaccount; the first quote request resolves it.
+    const pendingSubAccount = ref<string | null>(null)
+    resolveSubAccount.mockImplementation(async () => {
+      await Promise.resolve()
+      pendingSubAccount.value = subAccount()
+      return subAccount()
+    })
+    const state = await openFlow('borrow', pendingSubAccount)
+    expect(getSwapQuotes).toHaveBeenCalledTimes(1)
+    expectOwner('borrow', state.quote.value, B)
+    // The page clears the subaccount on owner or chain change.
+    pendingSubAccount.value = null
+    expect(state.quote.value).toBeNull()
   })
 
   it.each(['account', 'chain'] as const)('keeps the borrow page subaccount cache bound to the current %s', async (change) => {
