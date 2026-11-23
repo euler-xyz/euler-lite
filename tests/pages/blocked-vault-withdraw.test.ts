@@ -145,7 +145,7 @@ describe('withdraw forms on a blocked vault', () => {
       getEscrowVault: vi.fn(),
       isMarketDataResolved: ref(true),
     }))
-    vi.stubGlobal('useEffectiveAddress', () => ({ isConnected: ref(true), isSpyMode: ref(false), effectiveAddress: ref(USER) }))
+    vi.stubGlobal('useEffectiveAddress', () => ({ address: ref(USER), isConnected: ref(true), isSpyMode: ref(false), effectiveAddress: ref(USER) }))
     vi.stubGlobal('useTransactionPlanSimulation', () => ({
       runPreparedSimulation: async () => true,
       runSimulation: async () => true,

@@ -3,6 +3,7 @@ import type { VaultAssessment, VaultAssessmentFinding } from '@eulerxyz/euler-v2
 import {
   VAULT_CHECKS_DISCLAIMER,
   VAULT_CHECK_LISTING_IMPACT_LABELS,
+  getAdapterCheckFailures,
   getVaultAssessmentCheckDetails,
   getVaultCheckCopyableParts,
   getVaultCheckFindingTone,
@@ -10,18 +11,35 @@ import {
   getVaultCheckMessage,
   getVaultCheckTitle,
   groupVaultCheckFindings,
+  oracleAdapterAnchor,
 } from '~/utils/vault-assessment/presentation'
-import { groupVaultCheckRows, type VaultCheckRowView, type VaultCheckView } from '~/utils/vault-assessment/check-rows'
+import { groupVaultCheckRows, type VaultCheckAdapterView, type VaultCheckRowView, type VaultCheckView } from '~/utils/vault-assessment/check-rows'
+import { formatUnboundedStaleness } from '~/entities/oracle'
+import { useOracleAdapterAnchors } from '~/composables/useOracleAdapterAnchors'
+import { useModal } from '~/components/ui/composables/useModal'
+import type { RouteLocationRaw } from 'vue-router'
 import { getVaultCheckSubject, vaultCheckSubjectKey, type VaultCheckSubject } from '~/utils/vault-assessment/subjects'
 import { getRelativeTimeBetweenDates } from '~/utils/time-utils'
+import { formatUncoveredBorrows } from '~/composables/useVaultCheckWeights'
 
-defineEmits(['close'])
+const emit = defineEmits(['close'])
 
 const props = withDefaults(defineProps<{
   assessment: VaultAssessment
   inline?: boolean
   close?: boolean
-}>(), { inline: false, close: true })
+  modalId?: number
+}>(), { inline: false, close: true, modalId: undefined })
+
+const router = useRouter()
+const modal = useModal()
+const followOracleLink = async (to: RouteLocationRaw) => {
+  if (props.modalId === undefined) emit('close')
+  else await modal.closeBeforeNavigation(props.modalId)
+  await router.push(to)
+  const { hash } = router.resolve(to)
+  if (hash) document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView({ block: 'start' })
+}
 
 const details = computed(() => getVaultAssessmentCheckDetails(props.assessment))
 const checkedAgo = computed(() => {
@@ -51,20 +69,43 @@ const statusFor = (finding: VaultAssessmentFinding): string => {
   if (finding.outcome === 'unknown') return 'not checked yet'
   return finding.outcome === 'pass' ? 'passed' : 'not applicable'
 }
-const toCheckView = (finding: VaultAssessmentFinding): VaultCheckView => ({
-  key: finding.key,
-  title: getVaultCheckTitle(finding.key),
-  status: statusFor(finding),
-  tone: getVaultCheckFindingTone(finding),
-  icon: iconFor(finding),
-  parts: messagePartsFor(finding),
-  tag: tagFor(finding),
-})
+const { ensureResolved, oracleLinkFor } = useVaultReferences()
+const { hasAnchor } = useOracleAdapterAnchors()
+// The finding's summary abbreviates its adapters' findings; the cards' "+K more" relies on this list being complete.
+const adaptersFor = (finding: VaultAssessmentFinding): VaultCheckAdapterView[] => finding.outcome !== 'fail'
+  ? []
+  : getAdapterCheckFailures(finding).map((failure) => {
+      const anchor = oracleAdapterAnchor(failure.address)
+      const oracleLink = oracleLinkFor({ anchor, adapter: failure.address }, props.assessment.vaultAddress, hasAnchor(anchor))
+      return {
+        address: failure.address,
+        oracleLink,
+        oracleHref: oracleLink ? router.resolve(oracleLink).href : undefined,
+        findings: failure.findings.map(check => ({ key: check.key, text: formatUnboundedStaleness(check.description), severity: check.severity ?? null })),
+      }
+    })
+const toCheckView = (finding: VaultAssessmentFinding): VaultCheckView => {
+  const adapters = adaptersFor(finding)
+  return {
+    key: finding.key,
+    title: getVaultCheckTitle(finding.key),
+    status: statusFor(finding),
+    tone: getVaultCheckFindingTone(finding),
+    icon: iconFor(finding),
+    parts: adapters.length ? [] : messagePartsFor(finding),
+    tag: tagFor(finding),
+    ...(adapters.length ? { adapters } : {}),
+  }
+}
 
 const shownGroups = computed(() => groupVaultCheckFindings(details.value.findings))
 const checkViews = computed(() => new Map(shownGroups.value.flatMap(group => group.findings.map(finding => [finding, toCheckView(finding)] as const))))
 
-const { weighAll } = useVaultCheckWeights(() => props.assessment.vaultAddress)
+const { weighAll, getUncoveredBorrows } = useVaultCheckWeights(() => props.assessment.vaultAddress)
+const uncoveredLine = computed(() => {
+  const uncovered = getUncoveredBorrows()
+  return uncovered ? formatUncoveredBorrows(uncovered) : null
+})
 const groups = computed(() => {
   const subjects = [...new Map(shownGroups.value
     .flatMap(group => group.findings.map(finding => getVaultCheckSubject(finding.key)))
@@ -73,10 +114,17 @@ const groups = computed(() => {
   const measured = weighAll(subjects)
   const weights = new Map(subjects.map((subject, index) => [vaultCheckSubjectKey(subject), measured[index]]))
   const weightOf = (subject: VaultCheckSubject) => weights.get(vaultCheckSubjectKey(subject)) ?? null
-  return shownGroups.value.map(group => ({
+  // Covered value cannot say which collateral carries bad debt, so it only ranks rows while there is none.
+  const rankValueOf = (subject: VaultCheckSubject) => subject.namespace === 'collateral' && uncoveredLine.value ? null : weightOf(subject)?.value ?? null
+  const collateralTitle = props.assessment.family === 'earn' ? 'Collateral in strategies' : 'Collateral'
+  const groupsWithCollateral = uncoveredLine.value && !shownGroups.value.some(group => group.key === 'collateral')
+    ? [...shownGroups.value, { key: 'collateral', title: collateralTitle, findings: [] }]
+    : shownGroups.value
+  return groupsWithCollateral.map(group => ({
     key: group.key,
-    title: group.key === 'collateral' && props.assessment.family === 'earn' ? 'Collateral in strategies' : group.title,
-    rows: groupVaultCheckRows(group.findings, subject => weightOf(subject)?.value ?? null).map((row): VaultCheckRowView => ({
+    title: group.key === 'collateral' ? collateralTitle : group.title,
+    note: group.key === 'collateral' ? uncoveredLine.value : null,
+    rows: groupVaultCheckRows(group.findings, rankValueOf).map((row): VaultCheckRowView => ({
       key: row.key,
       subject: row.subject,
       weight: row.subject ? weightOf(row.subject)?.label ?? null : null,
@@ -85,7 +133,6 @@ const groups = computed(() => {
   }))
 })
 
-const { ensureResolved } = useVaultReferences()
 watch(checkViews, (views) => {
   ensureResolved([...views.values()].map(check => ({ key: check.key, parts: check.parts })))
 }, { immediate: true })
@@ -97,7 +144,7 @@ watch(checkViews, (views) => {
     :inline="inline"
     :close="close"
     :compact="inline && !close"
-    @close="$emit('close')"
+    @close="emit('close')"
   >
     <div class="flex flex-col gap-10">
       <p
@@ -113,7 +160,7 @@ watch(checkViews, (views) => {
         {{ VAULT_CHECKS_DISCLAIMER }}
       </p>
       <p
-        v-if="!groups.length"
+        v-if="!shownGroups.length"
         class="text-p3 text-content-secondary"
       >
         No detailed findings are available yet.
@@ -128,10 +175,18 @@ watch(checkViews, (views) => {
         <h3 class="text-p3 font-semibold text-content-primary">
           {{ group.title }}
         </h3>
+        <p
+          v-if="group.note"
+          class="text-p3 text-warning-500"
+          data-id="vault-check-uncovered"
+        >
+          {{ group.note }}
+        </p>
         <VaultAssessmentCheckRow
           v-for="row in group.rows"
           :key="row.key"
           :row="row"
+          @navigate="followOracleLink"
         />
       </section>
     </div>

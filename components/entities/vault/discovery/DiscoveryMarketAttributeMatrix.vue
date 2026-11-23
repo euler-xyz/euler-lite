@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { isEVault } from '@eulerxyz/euler-v2-sdk'
+import { isEVault, isSecuritizeCollateralVault } from '@eulerxyz/euler-v2-sdk'
 import {
   type MatrixViewId,
   type AttributeMatrixData,
@@ -35,7 +35,7 @@ defineEmits<{
   selectHeader: [address: string, axis: 'row' | 'column']
 }>()
 
-const { isVaultGovernorIdentified } = useVaults()
+const { isVaultGovernorIdentified, isSecuritizeGovernorIdentified } = useVaults()
 const {
   load: loadOpenInterest,
   getOpenInterestForVault,
@@ -68,6 +68,11 @@ const canShowHooksModal = (vault: AttributeMatrixColumn, cell: AttributeCell) =>
   cell.hookable && isVaultType(vault.vault)
 
 const entitiesFor = (vault: AttributeMatrixColumn) => getEntitiesByVault(vault.vault)
+const isGovernorUnidentified = (vault: AttributeMatrixColumn) => {
+  if (isEVault(vault.vault)) return !isVaultGovernorIdentified(vault.vault)
+  if (isSecuritizeCollateralVault(vault.vault)) return !isSecuritizeGovernorIdentified(vault.vault)
+  return false
+}
 const hasLiveExposureData = computed(() =>
   isOpenInterestEnabled.value && isOpenInterestLoaded.value && !hasOpenInterestError.value,
 )
@@ -272,7 +277,7 @@ const cellDataValue = (cell: AttributeCell, vault: AttributeMatrixColumn): strin
 
               <!-- Escrow vaults count as identified and have no labeled entities, so they read "—". -->
               <template v-else-if="col.cells[vaultIdx].kind === 'governor'">
-                <template v-if="isVaultType(vault.vault) && !isVaultGovernorIdentified(vault.vault)">
+                <template v-if="isGovernorUnidentified(vault)">
                   <VaultTypeChip
                     :vault="vault.vault"
                     type="unknown"

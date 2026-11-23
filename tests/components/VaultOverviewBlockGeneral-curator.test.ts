@@ -41,12 +41,14 @@ const idle = { name: 'Idle DAO', addresses: { [IDLE_GOVERNOR]: 'Idle DAO Limited
 const setLabels = (
   verdicts: Record<string, unknown>,
   entries: Record<string, ReturnType<typeof assessmentEntry>> = {},
+  { tags = [], verified = [] }: { tags?: string[], verified?: string[] } = {},
 ) => {
   __setEulerLabelsDataForTest({
     source: 'v3',
     entities: { [LIQUITY_HUB_ENTITY]: k3, [IDLE_ENTITY]: idle },
+    verifiedVaultAddresses: verified,
     products: {
-      [LIQUITY_HUB_PRODUCT]: { name: 'Liquity Hub', entity: LIQUITY_HUB_ENTITY, vaults: [EUSDC_42] },
+      [LIQUITY_HUB_PRODUCT]: { name: 'Liquity Hub', entity: LIQUITY_HUB_ENTITY, vaults: [EUSDC_42], tags },
       [IDLE_PRODUCT]: { name: 'Idle Credit Vaults', entity: IDLE_ENTITY, vaults: [IDLE_CREDIT_VAULT] },
     },
     managingEntityByVault: { [EUSDC_42.toLowerCase()]: LIQUITY_HUB_ENTITY, [IDLE_CREDIT_VAULT.toLowerCase()]: IDLE_ENTITY },
@@ -79,7 +81,11 @@ const render = (vault: EVault) => {
     props: { entities: { type: Array as PropType<Array<{ name: string }>>, required: true } },
     setup: props => () => h('span', { 'data-test-curator': props.entities.map(entity => entity.name).join(',') }),
   }))
-  for (const name of ['VaultDeprecationBanner', 'LiquidationCoverageNotice', 'VaultPublicNotice', 'SafeAccountBadge', 'UiIcon', 'VaultExposureSummary', 'NuxtLink']) {
+  app.component('SafeAccountBadge', defineComponent({
+    props: { address: String },
+    setup: props => () => h('span', { 'data-test-safe': props.address }),
+  }))
+  for (const name of ['VaultDeprecationBanner', 'LiquidationCoverageNotice', 'VaultPublicNotice', 'UiIcon', 'VaultExposureSummary', 'NuxtLink']) {
     app.component(name, { render: () => h('span') })
   }
   return renderToString(app)
@@ -159,5 +165,47 @@ describe('curator and vault type of a hidden vault', () => {
 
     expect(curatorCell(html)).toContain('Flagged')
     expect(curatorCell(html)).not.toContain('data-test-curator')
+  })
+})
+
+describe('Safe badge beside the curator', () => {
+  it('names the curator without the Safe badge, which belongs to the Addresses rows', async () => {
+    setEusdc42Labels('config-suspended')
+    const html = await render(makeEusdc42())
+
+    expect(curatorCell(html)).toContain('data-test-curator="K3 Capital"')
+    expect(html).not.toContain('data-test-safe')
+  })
+})
+
+describe('curator-declared property badges', () => {
+  const PROPERTY_TAGS = ['keyring', 'governance limited', 'cyclical note']
+
+  it('names the identified curator of a hidden vault without its property badges or dimming', async () => {
+    setLabels(
+      { [EUSDC_42.toLowerCase()]: liquityHubHiddenVerdict('config-suspended') },
+      { [EUSDC_42.toLowerCase()]: assessmentEntry(EUSDC_42_RAW_ASSESSMENT) },
+      { tags: PROPERTY_TAGS },
+    )
+    const html = await render(makeEusdc42())
+
+    expect(curatorCell(html)).toContain('data-test-curator="K3 Capital"')
+    expect(vaultTypeCell(html)).toContain('data-test-chip="governed"')
+    expect(html).not.toContain('Types &amp; properties')
+    expect(html).not.toContain('opacity-20')
+  })
+
+  it('keeps the property badges and dimming of a verified vault', async () => {
+    setLabels(
+      { [EUSDC_42.toLowerCase()]: { status: 'visible', decidedBy: 'verified', reason: null, explorableLend: true, explorableBorrow: true } },
+      {},
+      { tags: PROPERTY_TAGS, verified: [EUSDC_42] },
+    )
+    const html = await render(makeEusdc42())
+
+    expect(curatorCell(html)).toContain('data-test-curator="K3 Capital"')
+    expect(html).toContain('Types &amp; properties')
+    expect(html).toContain('Vault operations require identity verification before interacting.')
+    expect(html).toContain('opacity-20')
   })
 })
