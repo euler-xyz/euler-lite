@@ -134,6 +134,8 @@ describe('useSwapPageLogic', () => {
 
     vi.stubGlobal('useRouter', () => ({ replace: vi.fn() }))
     vi.stubGlobal('useRoute', () => ({ query: {} }))
+    vi.stubGlobal('useEffectiveAddress', () => ({ address: ref(undefined), effectiveAddress: ref(undefined), isConnected: ref(true), isSpyMode: ref(false) }))
+    vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1) }))
     vi.stubGlobal('useWagmi', () => ({
       isConnected: ref(true),
     }))

@@ -23,6 +23,7 @@ import { formatUnits, getAddress, type Address } from 'viem'
 import { areRoeCollateralVaultsCorrelatedWithBorrow, mergeRoeCollateralVaults } from '~/utils/position-roe'
 import { getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 import { COWSWAP_BATCH_UNSUPPORTED_REASON, isCowProviderOrQuote } from '~/entities/cowswap'
+import { createRaceGuard } from '~/utils/race-guard'
 
 const router = useRouter()
 const route = useRoute()
@@ -69,6 +70,7 @@ const formTab = ref<'borrow' | 'multiply'>(formTabFromQuery(route.query.tab) ?? 
 const pendingSubAccount = ref<string | null>(null)
 const isPendingSubAccountLoading = ref(false)
 let pendingSubAccountPromise: Promise<string> | null = null
+const pendingSubAccountGuard = createRaceGuard()
 
 // Load vault pair (non-blocking to avoid Suspense + pageTransition crash on direct navigation)
 const pair: Ref<AnyBorrowVaultPair | undefined> = ref()
@@ -98,13 +100,16 @@ const resolvePendingSubAccount = async (): Promise<string> => {
   const owner = effectiveOwner.value
   if (!owner) throw new Error('Wallet not connected')
   if (!pendingSubAccountPromise) {
+    const generation = pendingSubAccountGuard.next()
     isPendingSubAccountLoading.value = true
     pendingSubAccountPromise = getNewSubAccount(owner)
       .then((subAccount) => {
+        if (pendingSubAccountGuard.isStale(generation)) throw new Error('Account changed while resolving position')
         pendingSubAccount.value = subAccount
         return subAccount
       })
       .finally(() => {
+        if (pendingSubAccountGuard.isStale(generation)) return
         isPendingSubAccountLoading.value = false
         pendingSubAccountPromise = null
       })
@@ -516,11 +521,13 @@ watch(pair, async (val) => {
   await updateBalance()
 }, { immediate: true })
 
-watch(effectiveOwner, () => {
+watch([effectiveOwner, chainId], () => {
+  pendingSubAccountGuard.next()
   pendingSubAccount.value = null
   pendingSubAccountPromise = null
+  isPendingSubAccountLoading.value = false
   updateBalance()
-})
+}, { flush: 'sync' })
 
 watch(formTab, () => {
   borrow.resetOnTabSwitch()

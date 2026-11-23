@@ -1,5 +1,5 @@
 import type { SecuritizeCollateralVault, EVault, TransactionPlan, TransactionPlanPrepared, SwapQuote, SwapperMode } from '@eulerxyz/euler-v2-sdk'
-import { getAddress, formatUnits, type Address } from 'viem'
+import { getAddress, formatUnits, zeroAddress, type Address } from 'viem'
 import { logWarn } from '~/utils/errorHandling'
 import { SlippageSettingsModal } from '#components'
 import { usePriceImpactGate } from '~/composables/usePriceImpactGate'
@@ -100,8 +100,8 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
 
   const router = useRouter()
   const route = useRoute()
-  const { isConnected } = useWagmi()
-  const { isSpyMode } = useSpyMode()
+  const { address, effectiveAddress, isConnected, isSpyMode } = useEffectiveAddress()
+  const { chainId } = useEulerAddresses()
   const { prepareTransactionPlan, prefetchPluginData } = useEulerTx()
   const { capture: captureReviewState } = useExecutionReview()
   const modal = useModal()
@@ -303,7 +303,11 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
     }
 
     toAmount.value = ''
-    await requestQuotes(request.params)
+    await requestQuotes({
+      ...request.params,
+      chainId: chainId.value!,
+      origin: (address.value || effectiveAddress.value || zeroAddress) as Address,
+    })
   }, 500)
 
   // ── Input handlers ─────────────────────────────────────────────────────
@@ -337,6 +341,20 @@ export const useSwapPageLogic = (options: UseSwapPageLogicOptions) => {
   }
 
   // ── Watchers ───────────────────────────────────────────────────────────
+  watch([effectiveAddress, address, isSpyMode, chainId], () => {
+    clearSimulationError()
+    invalidatePreparedSwap()
+    resetQuoteState()
+    // A same-asset transfer has no quote to refetch, so nothing else would
+    // restore the amount that the reset just cleared.
+    if (isSameAsset.value) {
+      toAmount.value = fromAmount.value
+    }
+    else if (fromAmount.value) {
+      requestQuote()
+    }
+  }, { flush: 'sync' })
+
   watch(toVault, () => {
     clearSimulationError()
     invalidatePreparedSwap()

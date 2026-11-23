@@ -103,7 +103,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   const { capture: captureReviewState } = useExecutionReview()
   const { capture: captureIntentFactory, create: createIntent } = useOperationIntentFactory()
   const { account: planAccount } = usePlanAccount()
-  const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
+  const { address, isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
   const { chainId } = useEulerAddresses()
   const { getBalance } = useWallets()
   const {
@@ -158,7 +158,7 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     quoteError: borrowSwapQuoteError,
     statusLabel: borrowSwapQuotesStatusLabel,
     getQuoteDiffPct: getBorrowSwapQuoteDiffPct,
-    reset: resetBorrowSwapQuoteState,
+    reset: resetBorrowSwapQuoteStateInternal,
     requestQuotes: requestBorrowSwapQuotes,
     selectProvider: selectBorrowSwapQuote,
   } = useSwapQuotesParallel({
@@ -520,7 +520,14 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   })
 
   // --- Swap quote ---
+  // Also guard the sub-account lookups before the parallel quote loader starts.
+  const borrowQuoteGuard = createRaceGuard()
+  const resetBorrowSwapQuoteState = () => {
+    borrowQuoteGuard.next()
+    resetBorrowSwapQuoteStateInternal()
+  }
   const requestBorrowSwapQuote = useDebounceFn(async () => {
+    const generation = borrowQuoteGuard.next()
     borrowSwapQuoteError.value = null
 
     if (!borrowSelectedAsset.value || !collateralVault.value || !borrowNeedsSwap.value || !collateralAmount.value) {
@@ -535,14 +542,25 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
     }
 
     const userAddr = (effectiveAddress.value || zeroAddress) as Address
-    const subAccountAddr = effectiveAddress.value
-      ? (await resolvePendingSubAccount()) as Address
-      : userAddr
+    let subAccountAddr: Address
+    try {
+      subAccountAddr = effectiveAddress.value ? (await resolvePendingSubAccount()) as Address : userAddr
+    }
+    catch {
+      if (borrowQuoteGuard.isStale(generation)) return
+      resetBorrowSwapQuoteState()
+      borrowSwapQuoteError.value = 'Unable to resolve position'
+      return
+    }
+    if (borrowQuoteGuard.isStale(generation)) return
     await ensureBorrowSubAccountSnapshot(planAccount.value, subAccountAddr)
+    if (borrowQuoteGuard.isStale(generation)) return
     const swapTokenIn = isNativeCurrencyAddress(borrowSelectedAsset.value.address)
       ? resolveWrappedNativeAddress(chainId.value!) || borrowSelectedAsset.value.address
       : borrowSelectedAsset.value.address
     await requestBorrowSwapQuotes({
+      chainId: chainId.value!,
+      origin: (address.value || userAddr) as Address,
       tokenIn: swapTokenIn as Address,
       tokenOut: collateralVault.value.asset.address as Address,
       accountIn: zeroAddress as Address,
@@ -1315,6 +1333,22 @@ export const useBorrowForm = (options: UseBorrowFormOptions) => {
   watch([rewardsVersion, enableIntrinsicApy], () => {
     queueAsyncEstimates()
   })
+
+  watch([effectiveAddress, address, isSpyMode, chainId, pendingSubAccount], (
+    [owner, wallet, spy, chain, subAccount],
+    [previousOwner, previousWallet, previousSpy, previousChain, previousSubAccount],
+  ) => {
+    // The first quote request resolves this account's sub-account itself.
+    // That is not a context change: restarting here would cancel the request
+    // that caused it. The page clears the sub-account on owner or chain change.
+    const contextChanged = owner !== previousOwner || wallet !== previousWallet
+      || spy !== previousSpy || chain !== previousChain
+    if (!contextChanged && !previousSubAccount && subAccount) return
+    clearBorrowSimulationError()
+    resetBorrowSwapQuoteState()
+    plan.value = null
+    if (borrowNeedsSwap.value && collateralAmount.value) requestBorrowSwapQuote()
+  }, { flush: 'sync' })
 
   watch(borrowSelectedAsset, async () => {
     if (borrowNeedsSwap.value && collateralAmount.value) {
