@@ -88,7 +88,8 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     // else: leave terminal status visible until user dismisses the modal.
   })
 
-  const submitCowSwapMultiply = async () => {
+  const submitCowSwapMultiply = async (isCurrent: () => boolean = () => true) => {
+    if (!isCurrent()) return
     cowSwapExecution.reset()
     const supplyVault = options.multiplySupplyVault.value
     const longVault = options.multiplyLongVault.value
@@ -128,6 +129,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
     let subAccount: string
     try {
       subAccount = await getNewSubAccount(address.value, shortVault.address)
+      if (!isCurrent()) return
       if (
         quote.accountIn.toLowerCase() !== subAccount.toLowerCase()
         || quote.accountOut.toLowerCase() !== subAccount.toLowerCase()
@@ -144,6 +146,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
       }
     }
     catch (e) {
+      if (!isCurrent()) return
       logWarn('multiply/cowswap/resolveSubaccount', e)
       error('Unable to resolve position')
       return
@@ -195,6 +198,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
           authorizationList: undefined,
           args: [address.value as Address, supplyVault.address as Address],
         }) as bigint
+        if (!isCurrent()) return
 
         if (chainConfig) {
           sellTokenAllowance = await client.readContract({
@@ -204,12 +208,14 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
             authorizationList: undefined,
             args: [address.value as Address, chainConfig.vaultRelayer],
           }) as bigint
+          if (!isCurrent()) return
         }
       }
     }
     catch {
       // Fall through — show approval steps by default.
     }
+    if (!isCurrent()) return
 
     const collateralAsset = supplyVault.asset
     const borrowAsset = shortVault.asset
@@ -265,6 +271,7 @@ export const useMultiplyCowSwap = (options: UseMultiplyCowSwapOptions) => {
         + 'The CoW order receiver is your sub-account, not your main wallet — your wallet may flag this as a mismatch. '
         + 'You can verify the first 19 bytes (38 hex chars after "0x") of the receiver match your wallet address.'
 
+    if (!isCurrent()) return
     prepareMooolerSound()
     openCowSwapReviewModal(modal, {
       signSteps,

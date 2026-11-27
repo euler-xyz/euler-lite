@@ -27,7 +27,16 @@ const makeVault = (address: Address, asset: typeof USDC) => ({
 }) as unknown as EVault
 const vault = makeVault('0x3000000000000000000000000000000000000000', WETH)
 const debtVault = makeVault('0x4000000000000000000000000000000000000000', USDC)
-const mocks = vi.hoisted(() => ({ getNewSubAccount: vi.fn() }))
+const mocks = vi.hoisted(() => ({
+  getNewSubAccount: vi.fn(),
+  planMultiply: vi.fn(async () => []),
+  prepareTransactionPlan: vi.fn(async () => ({ plan: [] })),
+  prefetchPluginData: vi.fn(async () => undefined),
+  runPreparedSimulation: vi.fn(async () => true),
+  prepareReview: vi.fn(async () => undefined),
+  openReview: vi.fn(async (..._args: unknown[]) => undefined),
+  createIntent: vi.fn((..._args: unknown[]) => ({})),
+}))
 
 vi.mock('#components', () => ({ SwapTokenSelector: {}, SlippageSettingsModal: {} }))
 vi.mock('~/components/ui/composables/useModal', () => ({ useModal: () => ({ open: vi.fn() }) }))
@@ -70,6 +79,8 @@ interface FlowState {
   quote: Ref<SwapQuote | null>
   select: (provider: string) => void
   request: () => unknown
+  submitDisabled?: Ref<boolean>
+  submit?: () => Promise<void>
 }
 const quoteFor = (request: SwapQuoteInput): SwapQuote => ({
   ...makeSwapQuote(), amountIn: request.amount.toString(), amountInMax: request.amount.toString(),
@@ -85,6 +96,7 @@ describe('swap flow account context', () => {
   let isSpyMode: Ref<boolean>
   let spyAddress: Ref<Address>
   let chainId: Ref<number>
+  let slippage: Ref<number>
   let positionAvailable: Ref<boolean>
   let getSwapQuotes: ReturnType<typeof vi.fn>
   let resolveSubAccount: ReturnType<typeof vi.fn<() => Promise<Address>>>
@@ -99,11 +111,19 @@ describe('swap flow account context', () => {
     isSpyMode = ref(true)
     spyAddress = ref(A)
     chainId = ref(1)
+    slippage = ref(0.5)
     positionAvailable = ref(true)
     getSwapQuotes = vi.fn(async (request: SwapQuoteInput) => [quoteFor(request)])
     resolveSubAccount = vi.fn(async () => subAccount())
     preloadSubAccount = vi.fn(async () => undefined)
     mocks.getNewSubAccount.mockReset().mockImplementation(async (owner: Address) => getSubAccountAddress(owner, 1))
+    mocks.planMultiply.mockReset().mockResolvedValue([])
+    mocks.prepareTransactionPlan.mockReset().mockResolvedValue({ plan: [] })
+    mocks.prefetchPluginData.mockReset().mockResolvedValue(undefined)
+    mocks.runPreparedSimulation.mockReset().mockResolvedValue(true)
+    mocks.prepareReview.mockReset().mockResolvedValue(undefined)
+    mocks.openReview.mockReset().mockResolvedValue(undefined)
+    mocks.createIntent.mockReset().mockReturnValue({})
     const account = computed(() => ({
       owner: owner(), chainId: chainId.value,
       getSubAccount: () => ({ enabledCollaterals: [], positions: [{ vaultAddress: vault.address, assets: 10n ** 25n, shares: 10n ** 25n }] }),
@@ -140,22 +160,41 @@ describe('swap flow account context', () => {
     vi.stubGlobal('onUnmounted', vi.fn())
     vi.stubGlobal('useVaults', () => ({ isReady: ref(true), isMarketDataResolved: ref(true), getVault: async (a: string) => a === vault.address ? vault : debtVault }))
     vi.stubGlobal('useWallets', () => ({ getBalance: () => 10n ** 25n, fetchSingleBalance: async () => 10n ** 25n }))
-    vi.stubGlobal('useEulerTx', () => ({ preloadSubAccountSnapshot: preloadSubAccount }))
-    vi.stubGlobal('useOperationIntentFactory', () => ({ create: vi.fn(), capture: () => vi.fn() }))
-    vi.stubGlobal('useExecutionReview', () => ({ capture: vi.fn() }))
+    vi.stubGlobal('useEulerTx', () => ({
+      planMultiply: mocks.planMultiply,
+      prepareTransactionPlan: mocks.prepareTransactionPlan,
+      prefetchPluginData: mocks.prefetchPluginData,
+      preloadSubAccountSnapshot: preloadSubAccount,
+    }))
+    vi.stubGlobal('useOperationIntentFactory', () => ({ create: mocks.createIntent, capture: () => mocks.createIntent }))
+    vi.stubGlobal('useExecutionReview', () => ({
+      capture: (currentIntents: readonly unknown[], options: unknown, preparedIntents?: readonly unknown[]) => ({
+        intents: preparedIntents ?? currentIntents,
+        usesPreparedIntents: preparedIntents !== undefined,
+        open: async (isCurrent?: () => boolean) => {
+          await mocks.prepareReview()
+          if (isCurrent?.() === false) return
+          return mocks.openReview(preparedIntents ?? currentIntents, options)
+        },
+      }),
+    }))
     vi.stubGlobal('useTxBatch', () => ({ entryCount: ref(0), addEntry: vi.fn() }))
     vi.stubGlobal('useBatchRedirect', () => ({ redirectAfterAdd: vi.fn() }))
     vi.stubGlobal('useTxFinalization', () => ({ finalizeExecutionUi: vi.fn() }))
     vi.stubGlobal('useCowSwapEligibility', () => ({ cowSwapForcedOff: ref(true) }))
     vi.stubGlobal('usePositionCollateralApy', () => ({ getCollateralApySnapshot: async () => ({ supplyUsd: 0, weightedSupplyApy: 0 }) }))
-    vi.stubGlobal('useTransactionPlanSimulation', () => ({ simulationError: ref(null), clearSimulationError: vi.fn() }))
+    vi.stubGlobal('useTransactionPlanSimulation', () => ({
+      runPreparedSimulation: mocks.runPreparedSimulation,
+      simulationError: ref(null),
+      clearSimulationError: vi.fn(),
+    }))
     vi.stubGlobal('useUserSettings', () => ({ settings: ref({ enableIntrinsicApy: false }) }))
     vi.stubGlobal('useRewardsApy', () => ({
       version: ref(0), getSupplyRewardApy: () => 0, getSupplyRewardCampaigns: () => [],
       getBorrowRewardApyForCollaterals: () => 0, getBorrowRewardCampaignsForCollaterals: () => [],
       getEligibleLoopingRewardApyForCollaterals: () => 0, getEligibleLoopingRewardCampaignsForCollaterals: () => [],
     }))
-    vi.stubGlobal('useSlippage', () => ({ slippage: ref(0.5) }))
+    vi.stubGlobal('useSlippage', () => ({ slippage }))
     vi.stubGlobal('usePriceInvert', () => ({ invertValue: (v: unknown) => v, autoInvert: vi.fn() }))
     vi.stubGlobal('useDebounceFn', useDebounceFn)
     vi.stubGlobal('getCurrentScope', getCurrentScope)
@@ -165,6 +204,8 @@ describe('swap flow account context', () => {
     vi.stubGlobal('getVaultSupplyApy', () => 0)
     vi.stubGlobal('getVaultTotalSupplyApy', () => 0)
     vi.stubGlobal('getVaultBorrowApy', () => 0)
+    vi.stubGlobal('getIsSupplyCapReached', () => false)
+    vi.stubGlobal('getIsBorrowCapReached', () => false)
     vi.stubGlobal('ltvToPercent', () => 80)
     vi.stubGlobal('logWarn', vi.fn())
     vi.stubGlobal('showError', vi.fn())
@@ -216,14 +257,22 @@ describe('swap flow account context', () => {
         const component = MultiplyPage as unknown as { setup: (props: object, context: object) => {
           multiplier: Ref<number>
           multiplyEffectiveQuote: Ref<SwapQuote | null>
+          isMultiplySubmitDisabled: Ref<boolean>
           selectMultiplyQuote: FlowState['select']
           onMultiplierInput: FlowState['request']
+          submitMultiply: () => Promise<void>
         } }
         const page = component.setup({}, { expose: vi.fn() })
         setInput = () => {
           page.multiplier.value = 3
         }
-        state = { quote: page.multiplyEffectiveQuote, select: page.selectMultiplyQuote, request: page.onMultiplierInput }
+        state = {
+          quote: page.multiplyEffectiveQuote,
+          select: page.selectMultiplyQuote,
+          request: page.onMultiplierInput,
+          submitDisabled: page.isMultiplySubmitDisabled,
+          submit: page.submitMultiply,
+        }
       }
       else if (flow === 'position supply' || flow === 'position withdraw') {
         const supply = flow === 'position supply'
@@ -274,7 +323,13 @@ describe('swap flow account context', () => {
             form.multiplyInputAmount.value = '1'
             form.multiplier.value = 2
           }
-          state = { quote: form.multiplyEffectiveQuote, select: form.selectMultiplyQuote, request: form.onMultiplyInput }
+          state = {
+            quote: form.multiplyEffectiveQuote,
+            select: form.selectMultiplyQuote,
+            request: form.onMultiplyInput,
+            submitDisabled: form.isMultiplySubmitDisabled,
+            submit: form.submitMultiply,
+          }
         }
       }
     }))
@@ -347,6 +402,66 @@ describe('swap flow account context', () => {
       if (change === 'same-address spy exit') isSpyMode.value = false
       expect(state.quote.value).toBeNull()
     })
+  })
+
+  it.each(['multiply', 'position multiply'] as const)('%s clears the selected quote before a slippage refetch', async (flow) => {
+    const state = await openFlow(flow)
+    expect(state.quote.value).not.toBeNull()
+    expect(state.submitDisabled?.value).toBe(false)
+    const requests = getSwapQuotes.mock.calls.length
+
+    slippage.value = 0.1
+
+    expect(state.quote.value).toBeNull()
+    expect(state.submitDisabled?.value).toBe(true)
+    expect(getSwapQuotes).toHaveBeenCalledTimes(requests)
+
+    await vi.advanceTimersByTimeAsync(500)
+    expect(getSwapQuotes).toHaveBeenCalledTimes(requests + 1)
+    expect(getSwapQuotes).toHaveBeenLastCalledWith(expect.objectContaining({ slippage: 0.1 }), expect.anything())
+  })
+
+  it.each(['multiply', 'position multiply'] as const)('%s does not open Review after slippage changes during preparation', async (flow) => {
+    const state = await openFlow(flow)
+    expect(state.quote.value).not.toBeNull()
+
+    let release!: () => void
+    if (flow === 'multiply') {
+      resolveSubAccount.mockImplementationOnce(() => new Promise<Address>((resolve) => {
+        release = () => resolve(subAccount())
+      }))
+    }
+    else {
+      mocks.planMultiply.mockImplementationOnce(() => new Promise((resolve) => {
+        release = () => resolve([])
+      }))
+    }
+
+    const submitting = state.submit!()
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+
+    slippage.value = 0.1
+    release()
+    await submitting
+
+    expect(mocks.openReview).not.toHaveBeenCalled()
+  })
+
+  it.each(['multiply', 'position multiply'] as const)('%s keeps the slippage guard active during review launch', async (flow) => {
+    const state = await openFlow(flow)
+    let release!: () => void
+    mocks.prepareReview.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      release = resolve
+    }))
+
+    const submitting = state.submit!()
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+
+    slippage.value = 0.1
+    release()
+    await submitting
+
+    expect(mocks.openReview).not.toHaveBeenCalled()
   })
 
   it.each(['position supply', 'position withdraw'] as const)('%s waits for the new account position before fetching', async (flow) => {

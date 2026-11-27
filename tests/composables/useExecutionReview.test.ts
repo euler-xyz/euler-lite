@@ -127,6 +127,36 @@ describe('useExecutionReview', () => {
     })
   })
 
+  it('does not open Review when the launch becomes stale during preparation', async () => {
+    let resolvePrepare!: (value: {
+      execution: { reviewId: Hash, reviewDigest: Hash }
+      prepared: TransactionPlanPrepared
+    }) => void
+    const executablePrepared = { chainId: 1, plan: [{ type: 'executable' }] } as unknown as TransactionPlanPrepared
+    const prepare = vi.fn(() => new Promise<{
+      execution: { reviewId: Hash, reviewDigest: Hash }
+      prepared: TransactionPlanPrepared
+    }>((resolve) => {
+      resolvePrepare = resolve
+    }))
+    vi.stubGlobal('useReviewedExecution', () => ({ prepare }))
+    let isCurrent = true
+
+    const opening = useExecutionReview().capture([], {
+      presentationKind: 'borrow',
+      review: {
+        asset: { address: '0x2000000000000000000000000000000000000000', symbol: 'USDC', decimals: 6 },
+        amount: '1',
+      },
+    }).open(() => isCurrent)
+    isCurrent = false
+    resolvePrepare({ execution: { reviewId, reviewDigest }, prepared: executablePrepared })
+    await opening
+
+    expect(prepare).toHaveBeenCalledOnce()
+    expect(modalOpen).not.toHaveBeenCalled()
+  })
+
   it('uses warmed intent DTOs only when their transaction semantics match the click', () => {
     vi.stubGlobal('useReviewedExecution', () => ({ prepare: vi.fn() }))
     const review = {

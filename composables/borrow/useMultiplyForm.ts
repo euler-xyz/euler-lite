@@ -1045,6 +1045,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   // --- Swap quote ---
   // Account changes must cancel prerequisite lookups as well as quote responses.
   const multiplyQuoteGuard = createRaceGuard()
+  const multiplyReviewGuard = createRaceGuard()
   const requestMultiplyQuote = useDebounceFn(async () => {
     const generation = multiplyQuoteGuard.next()
     profMark('multiplyForm', 'requestMultiplyQuote.fire')
@@ -1262,9 +1263,11 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     // CowSwap branch: skip plan building and simulation, go straight to the
     // CoW review modal which signs the EVC permit + order off-chain.
     if (isCowProviderOrQuote(multiplySelectedProvider.value, multiplyEffectiveQuote.value)) {
+      const reviewGeneration = multiplyReviewGuard.current()
+      const isReviewCurrent = () => !multiplyReviewGuard.isStale(reviewGeneration)
       isMultiplyPreparing.value = true
       try {
-        await submitCowSwapMultiply()
+        await submitCowSwapMultiply(isReviewCurrent)
       }
       finally {
         isMultiplyPreparing.value = false
@@ -1316,6 +1319,8 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       const isSameAsset = normalizeAddress(longVaultSnapshot.asset.address) === normalizeAddress(shortVaultSnapshot.asset.address)
       const quote = isSameAsset ? null : multiplySelectedQuote.value
       if (!isSameAsset && !quote) return
+      const reviewGeneration = multiplyReviewGuard.current()
+      const isReviewStale = () => !isSameAsset && multiplyReviewGuard.isStale(reviewGeneration)
 
       profMark('review', 'submitMultiply.start')
       let subAccount: string
@@ -1327,6 +1332,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         error('Unable to resolve position')
         return
       }
+      if (isReviewStale()) return
 
       const collateralShareSource = isSavingCollateralSnapshot
         && supplySharesAmount
@@ -1378,6 +1384,8 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         },
       }, matchingCard?.intents)
 
+      let nextMultiplyPlan: TransactionPlan | null = null
+      let nextPreparedMultiplyPlan: TransactionPlanPrepared | null = null
       try {
         // Best case: the selected quote was lazily prepared in the background
         // when the user picked it, so we already have an envelope on the card.
@@ -1390,16 +1398,17 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
             logWarn('multiply/review/preloadSubAccountSnapshot', e)
           }
         }
+        if (isReviewStale()) return
         if (matchingCard?.preparedPlan && reviewLaunch.usesPreparedIntents) {
           // Lazy-prepared envelope is available — short-circuit prepare entirely.
-          multiplyPlan.value = matchingCard.plan ?? null
-          preparedMultiplyPlan.value = matchingCard.preparedPlan as TransactionPlanPrepared
+          nextMultiplyPlan = matchingCard.plan ?? null
+          nextPreparedMultiplyPlan = matchingCard.preparedPlan as TransactionPlanPrepared
         }
         else {
           // Reuse the raw plan from the selected quote card when possible.
           const cachedPlan = reviewLaunch.usesPreparedIntents ? matchingCard?.plan : undefined
           const account = planAccountSnapshot
-          multiplyPlan.value = cachedPlan ?? await profAsync('review', 'planMultiply', () => planMultiply({
+          const builtPlan = cachedPlan ?? await profAsync('review', 'planMultiply', () => planMultiply({
             collateralVault: supplyVaultSnapshot.address as Address,
             collateralAmount,
             collateralAsset: supplyVaultSnapshot.asset.address as Address,
@@ -1413,23 +1422,34 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
             account,
             subAccountSnapshotApplied: Boolean(account),
           }))
-          preparedMultiplyPlan.value = await profAsync('review', 'prepareTransactionPlan', () => prepareTransactionPlan(multiplyPlan.value!, { account, intents: reviewLaunch.intents }))
+          if (isReviewStale()) return
+          const builtPreparedPlan = await profAsync('review', 'prepareTransactionPlan', () => prepareTransactionPlan(builtPlan, { account, intents: reviewLaunch.intents }))
+          if (isReviewStale()) return
+          nextMultiplyPlan = builtPlan
+          nextPreparedMultiplyPlan = builtPreparedPlan
         }
+        if (isReviewStale()) return
+        multiplyPlan.value = nextMultiplyPlan
+        preparedMultiplyPlan.value = nextPreparedMultiplyPlan
       }
       catch (e) {
+        if (isReviewStale()) return
         logWarn('multiply/buildPlan', e)
         multiplyPlan.value = null
         preparedMultiplyPlan.value = null
       }
 
-      if (preparedMultiplyPlan.value) {
-        const ok = await profAsync('review', 'runPreparedSimulation', () => runMultiplySimulation(preparedMultiplyPlan.value!, buildMultiplyStateOverrideOptions(), undefined, reviewLaunch.intents))
+      const preparedPlanSnapshot = preparedMultiplyPlan.value
+      if (preparedPlanSnapshot) {
+        const ok = await profAsync('review', 'runPreparedSimulation', () => runMultiplySimulation(preparedPlanSnapshot, buildMultiplyStateOverrideOptions(), undefined, reviewLaunch.intents))
+        if (isReviewStale()) return
         if (!ok) return
       }
 
       profMark('review', 'submitMultiply.modalOpen')
+      if (isReviewStale()) return
       if (!multiplyPlan.value) return
-      await reviewLaunch.open()
+      await reviewLaunch.open(() => !isReviewStale())
     }
     finally {
       isMultiplyPreparing.value = false
@@ -1472,12 +1492,14 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
   watch(multiplySlippage, () => {
     clearMultiplySimulationError()
-    if (!multiplyInputAmount.value) {
-      resetMultiplyQuoteState()
-      return
-    }
+    if (multiplyIsSameAsset.value) return
+    multiplyReviewGuard.next()
+    resetMultiplyQuoteState()
+    multiplyPlan.value = null
+    preparedMultiplyPlan.value = null
+    if (!multiplyInputAmount.value) return
     requestMultiplyQuote()
-  })
+  }, { flush: 'sync' })
 
   watch(
     [multiplySupplyVault, multiplyLongVault, multiplyShortVault, isMultiplySavingCollateral, multiplySelectedSavingSubAccount],
