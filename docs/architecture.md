@@ -356,6 +356,8 @@ The `useSlippage` composable (`composables/useSlippage.ts`) manages swap slippag
 
 The composable accepts optional `fromSymbol`/`toSymbol` getters to detect stablecoin pairs reactively. Slippage state is persisted to `localStorage` with a timestamp for expiry tracking.
 
+Lend Swap (`useSwapPageLogic`) clears the selected quote and plans held by the form synchronously on account-context or slippage changes, then refetches after the 500 ms debounce. The Lend, new-position Borrow, position supply/withdraw, and Multiply forms listed in [Transaction Building → Account-context invalidation](./transaction-building.md#account-context-invalidation) also reset synchronously on owner, wallet, Spy Mode, or chain changes. Repay flows have separate context keys and watcher timing. New-position and existing-position Multiply only queue a debounced refetch on slippage changes.
+
 ## 🔒 Security Architecture
 
 ### Security Measures

@@ -30,6 +30,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Explore pair-matrix paused cells: `-` with tooltip title `Pair paused` and the liability/collateral pause reason
 - JSON-RPC proxy allowlist (`eth_createAccessList` for simulation), batch/timeout limits, and wagmi public-RPC fallback
 - API guards classify encoded `/api` via decoded `event.path`; provider proxies still inspect the raw URL
+- Account-context quote invalidation for Lend, new-position Borrow, position supply/withdraw, and Multiply, with separate watcher behavior for repay; Lend Swap also resets on slippage
 
 ### 🚀 [Development Guide](./development-guide.md)
 
@@ -37,7 +38,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Shared `readAppEnvConfig` / `readChainEnvConfig` builders (do not re-parse env in the Nitro plugins)
 - Shareable listing-filter URLs (`?curator=` plus legacy `riskManager` / Earn `allocator`)
 - JSON-RPC proxy, curator profile/network endpoints, `/healthz` liveness, and Advanced-mode localStorage pitfalls
-- `@wagmi/connectors` override alignment and stylesheet/`entryImportMap` cache pitfalls
+- `@wagmi/connectors` override alignment, stylesheet/`entryImportMap` caching, and stale swap-quote troubleshooting
 
 ### ⛓️ [Adding a Chain](./adding-a-chain.md)
 
@@ -105,6 +106,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Raw plugin-plan snapshot before in-place approval resolution; cart `expectedIntentPlans` reject preview drift; typed prepare errors stay verbatim in the modal
 - [User-facing review compatibility](./transaction-building.md#user-facing-review-compatibility): exhaustive internal reviewed executions remain separate from the unchanged handcrafted review
 - Add-time `captureSwapReview` keeps Swap row amounts when the live quote resets; batch close discards cached preparation so reopen reprepares
+- Lend, new-position Borrow, position supply/withdraw, and Multiply quotes reset synchronously on account / Spy Mode / chain change; repay uses separate context keys and watcher timing
 - Lend deposit-with-swap drops selected quotes synchronously when spy/wallet/chain context changes; CoW collateral-swap review captures quote identity and closes stale Confirm
 - Spy-mode review uses `prepareReadOnly` and a synthetic approval-only wallet binding; confirm stays disabled
 - Wallet screening is connect-time only; reviewed execution does not re-screen or consult VPN evidence
