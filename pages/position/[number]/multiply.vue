@@ -1117,12 +1117,13 @@ watch(multiplySelectedQuote, () => {
 })
 watch(multiplySlippage, () => {
   clearMultiplySimulationError()
-  if (multiplyDebtAmountNano.value <= 0n) {
-    resetMultiplyQuoteState()
-    return
-  }
+  if (multiplyIsSameAsset.value) return
+  resetMultiplyQuoteState()
+  plan.value = null
+  preparedPlan.value = null
+  if (multiplyDebtAmountNano.value <= 0n) return
   requestMultiplyQuote()
-})
+}, { flush: 'sync' })
 watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
   let next = multiplier.value
   if (!max || max < min) {

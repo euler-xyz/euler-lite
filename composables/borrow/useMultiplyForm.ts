@@ -1472,12 +1472,13 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
   watch(multiplySlippage, () => {
     clearMultiplySimulationError()
-    if (!multiplyInputAmount.value) {
-      resetMultiplyQuoteState()
-      return
-    }
+    if (multiplyIsSameAsset.value) return
+    resetMultiplyQuoteState()
+    multiplyPlan.value = null
+    preparedMultiplyPlan.value = null
+    if (!multiplyInputAmount.value) return
     requestMultiplyQuote()
-  })
+  }, { flush: 'sync' })
 
   watch(
     [multiplySupplyVault, multiplyLongVault, multiplyShortVault, isMultiplySavingCollateral, multiplySelectedSavingSubAccount],

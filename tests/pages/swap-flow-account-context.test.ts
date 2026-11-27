@@ -70,6 +70,7 @@ interface FlowState {
   quote: Ref<SwapQuote | null>
   select: (provider: string) => void
   request: () => unknown
+  submitDisabled?: Ref<boolean>
 }
 const quoteFor = (request: SwapQuoteInput): SwapQuote => ({
   ...makeSwapQuote(), amountIn: request.amount.toString(), amountInMax: request.amount.toString(),
@@ -85,6 +86,7 @@ describe('swap flow account context', () => {
   let isSpyMode: Ref<boolean>
   let spyAddress: Ref<Address>
   let chainId: Ref<number>
+  let slippage: Ref<number>
   let positionAvailable: Ref<boolean>
   let getSwapQuotes: ReturnType<typeof vi.fn>
   let resolveSubAccount: ReturnType<typeof vi.fn<() => Promise<Address>>>
@@ -99,6 +101,7 @@ describe('swap flow account context', () => {
     isSpyMode = ref(true)
     spyAddress = ref(A)
     chainId = ref(1)
+    slippage = ref(0.5)
     positionAvailable = ref(true)
     getSwapQuotes = vi.fn(async (request: SwapQuoteInput) => [quoteFor(request)])
     resolveSubAccount = vi.fn(async () => subAccount())
@@ -155,7 +158,7 @@ describe('swap flow account context', () => {
       getBorrowRewardApyForCollaterals: () => 0, getBorrowRewardCampaignsForCollaterals: () => [],
       getEligibleLoopingRewardApyForCollaterals: () => 0, getEligibleLoopingRewardCampaignsForCollaterals: () => [],
     }))
-    vi.stubGlobal('useSlippage', () => ({ slippage: ref(0.5) }))
+    vi.stubGlobal('useSlippage', () => ({ slippage }))
     vi.stubGlobal('usePriceInvert', () => ({ invertValue: (v: unknown) => v, autoInvert: vi.fn() }))
     vi.stubGlobal('useDebounceFn', useDebounceFn)
     vi.stubGlobal('getCurrentScope', getCurrentScope)
@@ -165,6 +168,8 @@ describe('swap flow account context', () => {
     vi.stubGlobal('getVaultSupplyApy', () => 0)
     vi.stubGlobal('getVaultTotalSupplyApy', () => 0)
     vi.stubGlobal('getVaultBorrowApy', () => 0)
+    vi.stubGlobal('getIsSupplyCapReached', () => false)
+    vi.stubGlobal('getIsBorrowCapReached', () => false)
     vi.stubGlobal('ltvToPercent', () => 80)
     vi.stubGlobal('logWarn', vi.fn())
     vi.stubGlobal('showError', vi.fn())
@@ -216,6 +221,7 @@ describe('swap flow account context', () => {
         const component = MultiplyPage as unknown as { setup: (props: object, context: object) => {
           multiplier: Ref<number>
           multiplyEffectiveQuote: Ref<SwapQuote | null>
+          isMultiplySubmitDisabled: Ref<boolean>
           selectMultiplyQuote: FlowState['select']
           onMultiplierInput: FlowState['request']
         } }
@@ -223,7 +229,12 @@ describe('swap flow account context', () => {
         setInput = () => {
           page.multiplier.value = 3
         }
-        state = { quote: page.multiplyEffectiveQuote, select: page.selectMultiplyQuote, request: page.onMultiplierInput }
+        state = {
+          quote: page.multiplyEffectiveQuote,
+          select: page.selectMultiplyQuote,
+          request: page.onMultiplierInput,
+          submitDisabled: page.isMultiplySubmitDisabled,
+        }
       }
       else if (flow === 'position supply' || flow === 'position withdraw') {
         const supply = flow === 'position supply'
@@ -274,7 +285,12 @@ describe('swap flow account context', () => {
             form.multiplyInputAmount.value = '1'
             form.multiplier.value = 2
           }
-          state = { quote: form.multiplyEffectiveQuote, select: form.selectMultiplyQuote, request: form.onMultiplyInput }
+          state = {
+            quote: form.multiplyEffectiveQuote,
+            select: form.selectMultiplyQuote,
+            request: form.onMultiplyInput,
+            submitDisabled: form.isMultiplySubmitDisabled,
+          }
         }
       }
     }))
@@ -347,6 +363,23 @@ describe('swap flow account context', () => {
       if (change === 'same-address spy exit') isSpyMode.value = false
       expect(state.quote.value).toBeNull()
     })
+  })
+
+  it.each(['multiply', 'position multiply'] as const)('%s clears the selected quote before a slippage refetch', async (flow) => {
+    const state = await openFlow(flow)
+    expect(state.quote.value).not.toBeNull()
+    expect(state.submitDisabled?.value).toBe(false)
+    const requests = getSwapQuotes.mock.calls.length
+
+    slippage.value = 0.1
+
+    expect(state.quote.value).toBeNull()
+    expect(state.submitDisabled?.value).toBe(true)
+    expect(getSwapQuotes).toHaveBeenCalledTimes(requests)
+
+    await vi.advanceTimersByTimeAsync(500)
+    expect(getSwapQuotes).toHaveBeenCalledTimes(requests + 1)
+    expect(getSwapQuotes).toHaveBeenLastCalledWith(expect.objectContaining({ slippage: 0.1 }), expect.anything())
   })
 
   it.each(['position supply', 'position withdraw'] as const)('%s waits for the new account position before fetching', async (flow) => {
