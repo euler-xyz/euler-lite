@@ -25,7 +25,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Data flow patterns
 - Technology decisions
 - Shareable Explore / Lend / Borrow / Earn query parameters and curator aliases
-- Explore listing: `groupHasExplorableMarket` then `isExploreListedMarket` (Lend/Borrow-table pair, fully deprecated exception)
+- Explore listing: `buildProductGroups` (`groupHasExplorableMarket` or listed Borrow collateral) then `isExploreListedMarket`; graph Deprecated vs Vault checks badges
 - Explore graph lines: one grey, thicker two-way pairs, dashes when neither side has borrow LTV, green only for the selected vault
 - Explore pair-matrix paused cells: `-` with tooltip title `Pair paused` and the liability/collateral pause reason
 - JSON-RPC proxy allowlist (`eth_createAccessList` for simulation), batch/timeout limits, and wagmi public-RPC fallback
@@ -36,7 +36,8 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Development workflow
 - Shared `readAppEnvConfig` / `readChainEnvConfig` builders (do not re-parse env in the Nitro plugins)
 - Shareable listing-filter URLs (`?curator=` plus legacy `riskManager` / Earn `allocator`)
-- JSON-RPC proxy, curator profile/network endpoints, `/healthz` liveness, Advanced-mode localStorage, and stylesheet/`entryImportMap` cache pitfalls
+- JSON-RPC proxy, curator profile/network endpoints, `/healthz` liveness, and Advanced-mode localStorage pitfalls
+- `@wagmi/connectors` override alignment and stylesheet/`entryImportMap` cache pitfalls
 
 ### ⛓️ [Adding a Chain](./adding-a-chain.md)
 
@@ -84,6 +85,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - `cyclical note` is the UI gate for the cyclical IRM overview (on-chain IRM type alone is not enough)
 - Curator profile pages (`/curators/{entityId}`): V3 profile + network index, chain-label fallback retry, completeness only on successful V3
 - Lend/Borrow/Explore share `utils/vault/borrow-table.ts`; Unknown collateral stays on the graph, not in the Borrow table
+- Explore grouping also keeps collateral-only products that back a listed Borrow pair; graph Deprecated vs Vault checks vs Unlisted badges are exclusive
 - Explore graph edges follow Toolbox line rules (grey idle, thicker two-way, dash without borrow LTV, green only on the selected vault)
 - Shared Oracles-block / Explore-matrix adapter display is covered in [Oracle Adapter Display](./oracle-adapter-display.md)
 
