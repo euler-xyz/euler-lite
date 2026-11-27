@@ -164,7 +164,7 @@ Plan transformation runs as SDK `EulerPlugin`s registered in `composables/useEul
 - Terms-of-use signing — `createLiteTosPlugin()` (`utils/sdk-tos.ts`) prepends a signed terms-of-use `EVCBatchItem` to every `evcBatch` item. Injection only happens when `useTosGuard` has published a signed message for the owner and the chain's deployment has a `termsOfUseSigner` address.
 - Keyring credential injection for private vaults — the SDK's [`createKeyringPlugin`](https://github.com/euler-xyz/euler-sdks/blob/main/packages/euler-v2-sdk/src/plugins/keyring/keyringPlugin.ts), configured with hook targets and a credential store from `utils/sdk-keyring.ts`. `composables/useOperationGuard.ts` publishes verified credentials into that store; the plugin prepends a Keyring `createCredential` `EVCBatchItem` when a plan touches a keyring hook target, the sender has no valid on-chain credential, and the store returns a current credential.
 
-Submit blockers remain the operation-eligibility gate. Wallet screening happens at connect time only — see [Address Screening](./address-screening.md). Reviewed execution does not call `screenAddress` or `detectVpn`; `SUBJECT_CONCERNS.account` is empty. It requires the TOS, Keyring, labels, chain-scoped vault metadata, canonical governor/owner verification, and authority bindings needed by the exact reviewed calls. Each intent retains the route operation that captured unverified-vault consent. Final policy groups retained intents by that operation and requires an acknowledgement for the exact unverified-vault set in each group, bound to the reviewed account and chain. Derived EVC accounts are bound into the reviewed request but are not screened as separate wallets. Country and labels versions are part of the accepted policy identity, and acquisition/swap intent sets re-evaluate vault and asset restrictions from their exact planner requirements before handoff. Plugin-prefetch reuse is context-bound and does not weaken those checks.
+Submit blockers remain the operation-eligibility gate. Wallet screening happens at connect time only — see [Address Screening](./address-screening.md). Reviewed execution does not call `screenAddress` or `detectVpn`; `SUBJECT_CONCERNS.account` is empty. An accepted **exit-only** verdict is still enforced here (`resolveAppPolicy`, collateral-debt RPC reads, CoW handoff) without a second screening request; see [Exit-only addresses](./geo-blocking.md#exit-only-addresses). Policy still requires the TOS, Keyring, labels, chain-scoped vault metadata, canonical governor/owner verification, and authority bindings needed by the exact reviewed calls. Each intent retains the route operation that captured unverified-vault consent. Final policy groups retained intents by that operation and requires an acknowledgement for the exact unverified-vault set in each group, bound to the reviewed account and chain. Derived EVC accounts are bound into the reviewed request but are not screened as separate wallets. Country and labels versions are part of the accepted policy identity, and acquisition/swap intent sets re-evaluate vault and asset restrictions from their exact planner requirements before handoff. Plugin-prefetch reuse is context-bound and does not weaken those checks.
 
 See the SDK side: [plugins.md](https://github.com/euler-xyz/euler-sdks/blob/main/packages/euler-v2-sdk/docs/plugins.md).
 
@@ -312,11 +312,71 @@ Quote orchestration and UI selection remain in Lite:
 - Repay, borrow, collateral, multiply, supply, and withdraw composables provide workflow-specific request parameters and review text.
 - `useSwapPriceImpact({ quote, fromVault?, toVault? })` watches the **live** selected quote. It converts in/out to USD via `getTokenUsdValue` and sets `priceImpact` to `(outUsd / inUsd - 1) * 100`. Missing quote, zero amounts, or missing USD values yield `null`. The watcher is race-guarded: a stale USD lookup cannot restore an old impact after the quote is replaced or cleared. Pass the selected-quote ref, not a copied amount — multiply must refresh when the same input produces a better/worse `amountOut`.
 
+### Account-context invalidation
+
+The Lend, new-position Borrow, position supply/withdraw, and Multiply forms in the table below invalidate selected quotes, pending provider responses, and plans held by those forms synchronously (`flush: 'sync'`) when their account context changes. The replacement quote request is debounced 500 ms, so the preceding quote is unavailable for a new Review during that window. Repay flows use their own context keys and watcher timing.
+
+`useSwapQuotesParallel().reset()` (or the form wrapper that calls it) aborts the in-flight `AbortController`, bumps the race guard, and clears cards, the selected provider, and `lastQuoteRequest`. A response that arrives after abort cannot be selected. Each replacement request then binds `chainId` and `origin` (`address` if connected, otherwise `effectiveAddress` / the zero address) while the flow keeps its own `accountIn` / `accountOut` / `receiver` / `unusedInputReceiver` semantics.
+
+Watched keys on the swap-capable forms in the table (except wallet-swap repay): `effectiveAddress`, `address`, `isSpyMode`, `chainId`. Position-scoped flows also watch the Euler sub-account (`position.subAccount` on supply/withdraw, `subAccount` on Lend withdraw, `multiplySubAccount` on existing-position Multiply). The first borrow quote that *resolves* `pendingSubAccount` is not a context change — restarting there would cancel the request that caused it. The borrow page still clears that cache when the owner or chain changes.
+
+| Flow | Where | Extra rules |
+| --- | --- | --- |
+| Lend Swap | `useSwapPageLogic` | Also clears `plan` / `preparedPlan`. Same-asset transfers have no quote: restore `toAmount` from `fromAmount` and skip refetch. |
+| Lend withdraw | `pages/lend/[vault]/[subAccount]/withdraw.vue` | Replacement quote uses the new owner as `receiver`. |
+| Lend deposit-with-swap | `pages/lend/[vault]/index.vue` | Same sync reset; deposit recipient rules stay on that page's intent validator. |
+| Position supply / withdraw | `useCollateralForm` | Wait until the new account's position exists before requesting. |
+| New-position Borrow | `useBorrowForm` | `borrowQuoteGuard` also cancels sub-account resolve and snapshot preload. The page's `pendingSubAccount` promise is owner- and chain-scoped; a completion for the previous account is rejected (`Account changed while resolving position`). |
+| New-position Multiply | `useMultiplyForm` | `multiplyQuoteGuard` same as borrow for resolve/preload. |
+| Existing-position Multiply | `pages/position/[number]/multiply.vue` | Clears `plan` / `preparedPlan` with the quote. |
+| Wallet-swap repay | `useWalletSwapRepay` | Sync reset is keyed by `quoteContextKey` (sub-account, debt, borrow vault/asset), not by wallet/Spy/chain. |
+
+For the non-repay rows, invalidate on the watched keys before the debounced replacement request and keep the selected quote empty while that replacement is queued. Coverage: `tests/pages/swap-flow-account-context.test.ts`.
+
+Wallet-swap repay's synchronous key tracks sub-account, debt, and borrow vault/asset identity. Collateral/savings swap repayment uses `useRepaySwapCore`, with Vue's default watcher timing for source/account/slippage changes.
+
+### Slippage invalidation
+
+`useSwapPageLogic` watches `[fromVault, slippage]` with `{ flush: 'sync' }`: `resetQuoteState()` plus `invalidatePreparedSwap()` clear the selected quote and plans held by the form before `requestQuote()` schedules the 500 ms refetch. Same-asset transfers keep the copied amount and do not refetch. `submit()` re-checks `isSubmitDisabled` (no selected quote, or `isQuoteLoading`) so a direct call cannot capture Review from a disabled form. Coverage: `tests/composables/useSwapPageLogic.slippage.test.ts`.
+
+Other flows reset then request on slippage, but not always with `flush: 'sync'`:
+
+- Lend deposit-with-swap includes `swapSlippage` in its sync account-context watcher.
+- Lend withdraw, `useCollateralForm`, `useBorrowForm`, and wallet-swap repay call `reset()` inside the slippage watcher, then the debounced request.
+- New-position and existing-position Multiply currently only queue `requestMultiplyQuote()`; the selected quote stays on screen until that debounce fires.
+
+Do not treat a live `selectedQuote` as matching the form's current slippage until the card was fetched after the last reset.
+
+### Lend deposit-with-swap quote context
+
+Lend `/lend/[vault]` swap-and-supply quotes are bound to the current supplying account. The request sets `accountOut` and `unusedInputReceiver` to `effectiveAddress` (spy address while spy mode is on, otherwise the connected wallet). `accountIn` and `vaultIn` stay the wallet-side zero-address sentinels.
+
+A 500 ms debounce starts the next request. That is not enough to drop a selected quote: a spy-exit with wallet B already connected would otherwise keep A's `accountOut` until the B response lands. The page therefore watches `effectiveAddress`, `address`, `isSpyMode`, `chainId`, vault/pay-with asset, amount, and slippage with `{ flush: 'sync' }`, calls `resetSwapQuoteState()` immediately, and only then schedules the debounced refetch. A late A response that arrives after the reset is discarded. Review and Add to batch stay disabled until a matching quote is selected again.
+
+Defense in depth: `validateIntentSet` rejects a Lend-source `deposit-with-swap` when `quote.accountOut` or `quote.verify.account` is not the intent account (`Lend swap quote recipient does not match the supplying account. Refresh the quote.`). Position supplies can target a selected sub-account, so this check is Lend-source only. Wallet-swap repay resets synchronously for sub-account/debt/vault changes via `quoteContextKey` in `useWalletSwapRepay`.
+
 ### CoW multiply review
 
 `useMultiplyCowSwap.submitCowSwapMultiply` is outside reviewed execution. Capture deposit, quote `amountOut`, and derived review amounts **before** the sub-account and allowance awaits. Edits during those lookups must not change Supply / Swap / approval rows.
 
 Before preparing a CoW order (which skips transaction simulation), the composable checks the long vault supply cap as `totalAssets + deposit + quote.amountOut`. Unlimited caps (`0n` or `maxUint256`) skip the check. Amounts use the collateral asset's decimals via `valueToNano`.
+
+### CoW collateral-swap review
+
+`useCowSwapCollateralSwapReview` is the same excluded CoW boundary. It opens from `/position/[number]/borrow/swap` when `getInput()` returns a form snapshot: CoW eligibility, selected CoW provider, source/target EVK vaults, and a quote. Whether the quote is CoW is the page's call (`canRequestCollateralCowSwap` plus `isCowProviderOrQuote` on the selected provider). The review must not re-test `isCowQuote`.
+
+`isCowQuote` / `isCowProvider` compare against the provider key `cow`. The swap API's route `providerName` is `CoW Protocol`, so a real CoW quote fails `isCowQuote`. The SDK planner checks the quote again before it builds the order.
+
+Capture one copy of the input **before** the allowance read: `structuredClone` of the quote, a new `Account(...)`, and shallow vault/asset copies. Review rows and `executeParams` come from that copy. Order amounts come from `getCowSwapQuoteOrderAmounts(quote, { slippage, slippageTarget: 'buyAmount' })` (`providerData.sellAmount + feeAmount` / `buyAmount`). Do not convert shares at the cached vault rate to decide whether the quote is valid; `sellAmount` must equal the captured `collateralShares`.
+
+Quotes are replaced, never edited in place, so the same quote object means the same quote. Everything else is compared by value (`selectionKey`: chain, owner, sub-account, account owner/chain, vault addresses, shares, assets, slippage, `quoteFetchedAt`). A metadata refetch that swaps in an equal vault or account object must not cancel the review.
+
+The live form is read twice after capture: once after the allowance RPC, and again in `beforeConfirm` on Confirm. If the quote object or selection values changed, or the page unmounted:
+
+- During preparation: throw `Collateral swap changed. Review the updated quote and try again.` and do not open the modal. Leaving the page is silent (no toast on the next route).
+- On Confirm: close that modal, toast the same message, and return `false` so Confirm is not left enabled against a dead review.
+
+A missing `account` is `Account not ready` and never opens the modal. Allowance RPC failures only affect the approval step list; they do not skip the current-selection check.
 
 ## Pyth Prices
 
@@ -341,7 +401,14 @@ Lite still uses `utils/pyth.ts` for read-path lens simulations and visible vault
 | `composables/batchPrefetchState.ts` | Form → batch handoff for pre-overlay accounts and chain-scoped slot hints |
 | `composables/useTxBatch.ts` | Intent draft cart, non-authoritative merged preview, resimulation, plugin-layer map, slot-hint reuse, and `discardBatchExecutionReview` |
 | `composables/useSwapPriceImpact.ts` | USD price-impact from the live selected quote; race-guarded |
+| `composables/useSwapQuotesParallel.ts` | Provider fan-out; `reset()` invalidates pending responses and drops the selected card |
+| `composables/useSwapPageLogic.ts` | Lend Swap coordinator; sync reset on account, slippage, and source vault |
+| `pages/lend/[vault]/index.vue` | Deposit-with-swap: sync quote reset on account/spy/chain/form change |
+| `features/reviewed-execution/domain/validators.ts` | Lend-source swap quote `accountOut` / `verify.account` must match the intent |
 | `composables/borrow/useMultiplyCowSwap.ts` | CoW multiply submit: captured review amounts and combined supply-cap check |
+| `composables/cowswap/useCowSwapCollateralSwapReview.ts` | CoW collateral-swap review: captured quote identity + value selection; `beforeConfirm` closes stale reviews |
+| `entities/cowswap/quote-utils.ts` | `getCowSwapQuoteOrderAmounts` from `providerData`; do not use cached vault rates |
+| `entities/cowswap/constants.ts` | `isCowProvider` is the `cow` key; `isCowQuote` is route name `cow`, not `CoW Protocol` |
 | `composables/useSafeWallet.ts` | Reactive Safe detection (`isSafeWallet` / `isSafeWalletResolved`) |
 | `composables/useSafeExecutionDetachment.ts` | Close-review-while-cosigning; toasts until confirm or 5-min poll timeout |
 | `components/entities/operation/OperationReviewModal.vue` | Presentation-only prepared-plan review, calldata copy, and Tenderly simulation |
@@ -352,3 +419,5 @@ Lite still uses `utils/pyth.ts` for read-path lens simulations and visible vault
 | `utils/sdk-keyring.ts` | Credential store and hook-target config for the SDK keyring plugin |
 | `utils/sdk-tos.ts` | Terms-of-use SDK plugin (batch-item injection) |
 | `composables/useSwapApi.ts` | Swap API request building and quote normalization |
+| `tests/pages/swap-flow-account-context.test.ts` | Account / Spy / chain quote invalidation across swap flows |
+| `tests/composables/useSwapPageLogic.slippage.test.ts` | Lend Swap sync slippage reset and disabled submit |

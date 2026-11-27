@@ -28,7 +28,7 @@ describe('CoW execution for an exit-only address', () => {
     const form = read('composables/borrow/useMultiplyForm.ts')
     const guard = form.indexOf('isMultiplyPreparing.value || isGeoBlocked.value')
     expect(guard).toBeGreaterThan(-1)
-    expect(form.indexOf('await submitCowSwapMultiply()')).toBeGreaterThan(guard)
+    expect(form.indexOf('await submitCowSwapMultiply(isReviewCurrent)')).toBeGreaterThan(guard)
     expect(read('pages/borrow/[collateral]/[borrow]/index.vue'))
       .toContain('const isGeoBlocked = computed(() => isAnyVaultBlockedByCountry(collateralAddress, borrowAddress))')
   })

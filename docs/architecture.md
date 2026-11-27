@@ -138,7 +138,7 @@ The application follows Vue 3's Composition API pattern, organizing code into lo
 - **SSR Disabled**: Client-side only SPA, SSR is not needed
 - **Auto-imports**: Reduces boilerplate and improves developer experience
 - **File-based Routing**: Simple and intuitive routing system
-- **Built-in Optimizations**: Automatic code splitting and optimization
+- **Built-in Optimizations**: Automatic code splitting and optimization. Hashed `/_nuxt/**` assets are cached as `immutable` for a year; `experimental.entryImportMap` is `false` so a stylesheet change still changes JavaScript chunk hashes and invalidates those URLs. `emitRouteChunkError: 'automatic-immediate'` reloads the app if a stale preload 404s after a deploy. See [Development Guide](./development-guide.md#troubleshooting).
 
 ### 2. Composition API Pattern
 
@@ -257,7 +257,7 @@ The `useMarketGroups` composable (`composables/useMarketGroups.ts`) implements a
 3. **Orphan clustering** — Vaults not assigned to any product are clustered using a BFS connected-component algorithm over their collateral relationships. This produces "Ungrouped" markets.
 4. **Async TVL resolution** — Group metrics (TVL, available liquidity, borrowed) are resolved asynchronously using USD pricing.
 
-A grouped product is not automatically listed. `groupHasExplorableMarket` drops collateral-only products (no lend-open member and no borrowable, borrow-open member). Explore then applies `isExploreListedMarket` once market data resolves: the card stays only while a member is a Lend-table vault or in a Borrow-table pair, except a fully deprecated market which stays listed last. `?showAll` keeps every grouped market and sets `showsAllMembers` so graphs keep hidden loan relationships. Listing predicates, Unknown-collateral exclusion, and the graph drop exception are in [Vault Labels → Discovery Page Filtering](./vault-labels-and-verification.md#discovery-page-filtering). Curator names on cards link to `/curators/{entityId}` when a single managing entity resolves; see [Curator profile pages](./vault-labels-and-verification.md#curator-profile-pages).
+A grouped product is not automatically listed. `buildProductGroups` keeps a product while `groupHasExplorableMarket` is true (a member is open on the lend side, or borrowable — including residual debt — and open on the borrow side) **or** a member is collateral in a listed Borrow-table pair. `groupHasExplorableMarket` itself still drops collateral-only products; the Borrow-pair keep is a separate check in `buildProductGroups`. Explore then applies `isExploreListedMarket` once market data resolves: the card stays only while a member is a Lend-table vault or in a Borrow-table pair, except a fully deprecated market which stays listed last. `?showAll` keeps every grouped market and sets `showsAllMembers` so graphs keep hidden loan relationships. Listing predicates, Unknown-collateral exclusion, graph node badges, and ring clustering are in [Vault Labels → Discovery Page Filtering](./vault-labels-and-verification.md#discovery-page-filtering). Graph line colour, thickness, and dashes follow the Toolbox rules in [Explore graph edges](./vault-labels-and-verification.md#explore-graph-edges). Curator names on cards link to `/curators/{entityId}` when a single managing entity resolves; see [Curator profile pages](./vault-labels-and-verification.md#curator-profile-pages).
 
 ### Correlated Pairs, Max ROE, and Max Multiplier
 
@@ -274,7 +274,7 @@ The correlation decision is shared across discovery, borrow, and portfolio surfa
 | Surface | Correlated assets | Uncorrelated assets |
 |---|---|---|
 | Explore market card (`useBestMaxROE`) | Best Max ROE across eligible LTV pairs, skipping pairs whose liability has borrow disabled or whose collateral has deposit or skim disabled by a zero-target hook (`isBorrowPairPaused`) | Best visible Net APY fallback, with the same pairs skipped |
-| Explore matrix (`DiscoveryMarketMatrix.vue`) | Numeric cells in `roe` and `multiplier` views; a paused pair (`isMarketPairPaused`) shows `-` with a paused tooltip | `-` cell with unavailable-metric tooltip and accordion notice |
+| Explore matrix (`DiscoveryMarketMatrix.vue`) | Numeric cells in `roe` and `multiplier` views; a paused pair (`isMarketPairPaused`) shows `-` with tooltip title `Pair paused` and text `This pair is paused: the liability does not lend or the collateral does not take deposits.` | `-` cell with unavailable-metric tooltip and accordion notice |
 | Borrow pair card (`VaultBorrowItem.vue`) | Max ROE headline, correlated-category badge, Max multiplier column, Multiply tab link | Net APY headline; multiplier column and Multiply tab shortcut are hidden |
 | Portfolio borrow card (`PortfolioBorrowItem.vue`) | Position ROE when all collateral vaults resolve and share the category | Net APY path |
 
@@ -356,6 +356,8 @@ The `useSlippage` composable (`composables/useSlippage.ts`) manages swap slippag
 
 The composable accepts optional `fromSymbol`/`toSymbol` getters to detect stablecoin pairs reactively. Slippage state is persisted to `localStorage` with a timestamp for expiry tracking.
 
+Lend Swap (`useSwapPageLogic`) clears the selected quote and plans held by the form synchronously on account-context or slippage changes, then refetches after the 500 ms debounce. The Lend, new-position Borrow, position supply/withdraw, and Multiply forms listed in [Transaction Building → Account-context invalidation](./transaction-building.md#account-context-invalidation) also reset synchronously on owner, wallet, Spy Mode, or chain changes. Repay flows have separate context keys and watcher timing. New-position and existing-position Multiply only queue a debounced refetch on slippage changes.
+
 ## 🔒 Security Architecture
 
 ### Security Measures
@@ -381,8 +383,15 @@ The Nuxt server layer (`server/api/`) proxies requests to external services (RPC
 
 API guards and sensitive-cache checks classify requests with `getRouterPathname(event)`
 (`server/utils/router-path.ts`), using h3's decoded `event.path` without the query string.
-This keeps encoded API prefixes under the same checks as canonical routes. Proxy forwarding
-validation still inspects the raw URL, including V3's rejection of encoded path bytes.
+This keeps encoded API prefixes (`/%61pi/...`) under the same CORS, geo-gate, body-limit, and
+`no-store` checks as canonical routes. Do not decode a second time: `/%2561pi` is a 404.
+Sensitive `no-store` (`server/plugins/sensitive-route-cache.ts`) matches path-segment prefixes
+(`pathname === prefix || pathname.startsWith(prefix + '/')`) after stripping a trailing slash, so
+`/api/internal/rpc/1` is covered and `/api/internal/rpcextra` is not. Provider proxies still slice
+the remainder from the **raw** URL pathname; a nested extra prefix such as
+`/api/internal/proxy/merkl/api/internal/proxy/merkl/opportunities` fails the allowlist with 404
+before credentials are attached. V3 forwarding still inspects the raw URL and rejects encoded
+path bytes.
 
 #### JSON-RPC proxy
 

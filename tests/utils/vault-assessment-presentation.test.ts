@@ -88,7 +88,7 @@ describe('vault checks presentation', () => {
   it.each([
     'hooks.zero-or-trusted', 'irm.max-apy', 'liquidation.max-discount',
     'governance.timelock', 'strategy.0x01.recognized', 'strategy.0x01.visible',
-    'collateral.0x01.visible', 'governance.owner-registered', 'governance.curator-registered',
+    'collateral.0x01.visible', 'collateral.0x01.listed', 'asset.listed', 'governance.owner-registered', 'governance.curator-registered',
   ])('shows selected rule %s', (key) => {
     const overrides = key === 'hooks.zero-or-trusted'
       ? { cause: { code: 'exit-operations-disabled', subject: 'vault', summary: 'Exits disabled', remedy: null } }
@@ -177,6 +177,26 @@ describe('vault checks presentation', () => {
       ['evidence.safe-threshold', 'fail', 'V3 says evidence.safe-threshold'],
       ['oracle.liability-quote', 'unknown', 'Euler has not finished checking 4 adapters on the oracle routes.'],
     ])
+  })
+
+  it('shows the vault\'s own asset missing from the token lists next to a collateral that is', () => {
+    const lines = getVaultCheckWarningLines(assessment([
+      finding('asset.listed', { cause: { code: 'token-not-listed', subject: '0x09', summary: 'Its asset is on no token list', remedy: null } }),
+      finding('collateral.0x01.listed'),
+    ]))
+    expect(lines.map(line => line.key)).toEqual(['asset.listed', 'collateral.0x01.listed'])
+    expect(getVaultCheckFindings(assessment([finding('asset.listed', { exempted: true })])).lines).toEqual([])
+  })
+
+  it('shows a collateral token missing from the token lists, and nothing once Euler waives it', () => {
+    const open = assessment([finding('collateral.0x01.listed', { cause: { code: 'token-not-listed', subject: '0x01', summary: 'Its token is on no token list', remedy: null } })])
+    expect(getVaultCheckFindings(open).lines.map(line => line.text)).toEqual(['Its token is on no token list'])
+    expect(getVaultCheckWarningLines(open).map(line => line.key)).toEqual(['collateral.0x01.listed'])
+
+    const waived = assessment([finding('collateral.0x01.listed', { exempted: true })])
+    expect(getVaultCheckFindings(waived)).toEqual({ lines: [], moreCount: 0, reviewCount: 0 })
+    expect(getVaultCheckWarningLines(waived)).toEqual([])
+    expect(hasOnlyAcceptedVaultCheckFindings(waived)).toBe(true)
   })
 
   it('keeps one line per deprecated collateral and strategy instead of folding them into one rule', () => {

@@ -773,6 +773,7 @@ watch(
 )
 
 const multiplyQuoteGuard = createRaceGuard()
+const multiplyReviewGuard = createRaceGuard()
 const resetMultiplyQuoteState = () => {
   multiplyQuoteGuard.next()
   resetMultiplyQuoteStateInternal()
@@ -941,6 +942,8 @@ const submitMultiply = async () => {
   const isSameAsset = normalizeAddress(longVaultSnapshot.asset.address) === normalizeAddress(shortVaultSnapshot.asset.address)
   const quote = isSameAsset ? undefined : multiplySelectedQuote.value ?? undefined
   if (!isSameAsset && !quote) return
+  const reviewGeneration = multiplyReviewGuard.current()
+  const isReviewStale = () => !isSameAsset && multiplyReviewGuard.isStale(reviewGeneration)
   const quoteIntents = quote && multiplySelectedQuoteCard.value?.quote === quote
     ? multiplySelectedQuoteCard.value.intents
     : undefined
@@ -988,9 +991,11 @@ const submitMultiply = async () => {
   isPreparing.value = true
   try {
     await guardWithPriceImpact(async () => {
+      if (isReviewStale()) return
       try {
         const subAccountSnapshotApplied = await ensureMultiplySubAccountSnapshot(subAccount as Address, planAccountSnapshot)
-        plan.value = await planMultiply({
+        if (isReviewStale()) return
+        const builtPlan = await planMultiply({
           collateralVault: supplyVaultSnapshot.address as Address,
           collateralAmount: 0n,
           collateralAsset: supplyVaultSnapshot.asset.address as Address,
@@ -1003,9 +1008,14 @@ const submitMultiply = async () => {
           account: planAccountSnapshot,
           subAccountSnapshotApplied,
         })
-        preparedPlan.value = await prepareTransactionPlan(plan.value, { account: planAccountSnapshot, intents: reviewLaunch.intents })
+        if (isReviewStale()) return
+        const builtPreparedPlan = await prepareTransactionPlan(builtPlan, { account: planAccountSnapshot, intents: reviewLaunch.intents })
+        if (isReviewStale()) return
+        plan.value = builtPlan
+        preparedPlan.value = builtPreparedPlan
       }
       catch (e) {
+        if (isReviewStale()) return
         console.warn('[Multiply] failed to build plan', e)
         void reportClientEvent({
           event: 'tx_plan_build_failed',
@@ -1021,15 +1031,18 @@ const submitMultiply = async () => {
         preparedPlan.value = null
       }
 
-      if (preparedPlan.value) {
-        const ok = await runMultiplySimulation(preparedPlan.value, undefined, undefined, reviewLaunch.intents)
+      const preparedPlanSnapshot = preparedPlan.value
+      if (preparedPlanSnapshot) {
+        const ok = await runMultiplySimulation(preparedPlanSnapshot, undefined, undefined, reviewLaunch.intents)
+        if (isReviewStale()) return
         if (!ok) {
           return
         }
       }
 
+      if (isReviewStale()) return
       if (!plan.value) return
-      await reviewLaunch.open()
+      await reviewLaunch.open(() => !isReviewStale())
     })
   }
   finally {
@@ -1117,12 +1130,14 @@ watch(multiplySelectedQuote, () => {
 })
 watch(multiplySlippage, () => {
   clearMultiplySimulationError()
-  if (multiplyDebtAmountNano.value <= 0n) {
-    resetMultiplyQuoteState()
-    return
-  }
+  if (multiplyIsSameAsset.value) return
+  multiplyReviewGuard.next()
+  resetMultiplyQuoteState()
+  plan.value = null
+  preparedPlan.value = null
+  if (multiplyDebtAmountNano.value <= 0n) return
   requestMultiplyQuote()
-})
+}, { flush: 'sync' })
 watch([multiplyMinMultiplier, multiplyMaxMultiplier], ([min, max]) => {
   let next = multiplier.value
   if (!max || max < min) {
