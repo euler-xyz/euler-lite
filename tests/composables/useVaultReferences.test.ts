@@ -9,6 +9,11 @@ const ESCROW = '0x00000000000000000000000000000000000000e5'
 const SECURITIZE = '0x00000000000000000000000000000000000000d5'
 const ADAPTER = '0x00000000000000000000000000000000000000a1'
 const HOOK = '0x00000000000000000000000000000000000000b1'
+const PT_ADAPTER = '0x94a31084a0e8dbed217ee8763a20ab03e18b38f5'
+const EPT_SBOLD = '0x5bca378719ad01bb8e490d09e2326edfee66b954'
+const EBOLD = '0xc1c51c5c9efaf0c485aa1097ae9690b5e102975a'
+const PT_SBOLD = '0x1ff893c9071d04f8a965a90fcb0de22406a3eeaa'
+const BOLD = '0x6440f144b7e50d6a8439336510312d2f54beb01d'
 
 const mocks = vi.hoisted(() => ({
   vaults: {} as Record<string, unknown>,
@@ -36,7 +41,7 @@ const evault = (address: string, symbol: string, extra: Record<string, unknown> 
   ...extra,
 })
 
-let oracleAdapters: Record<string, { label?: string, name?: string }>
+let oracleAdapters: Record<string, { label?: string, name?: string, base?: string, quote?: string }>
 
 const load = async () => {
   vi.resetModules()
@@ -54,13 +59,20 @@ beforeEach(() => {
   mocks.getOrFetch.mockReset().mockResolvedValue(undefined)
   mocks.loadOracleAdapters.mockReset().mockResolvedValue(undefined)
   mocks.route = { path: '/lend/0x0', query: { network: '1' } }
-  oracleAdapters = reactive({ [ADAPTER]: { label: 'Chainlink USDC/USD' } })
+  mocks.vaults[EPT_SBOLD] = evault(EPT_SBOLD, 'PT-sBOLD-1765325646', { asset: { address: PT_SBOLD, symbol: 'PT-sBOLD-1765325646' } })
+  mocks.vaults[EBOLD] = evault(EBOLD, 'BOLD', { asset: { address: BOLD, symbol: 'BOLD' } })
+  oracleAdapters = reactive({
+    [ADAPTER]: { label: 'Chainlink USDC/USD' },
+    [PT_ADAPTER]: { label: 'Unknown AggregatorV3 Feed', name: 'ChainlinkInfrequentOracle', base: PT_SBOLD, quote: BOLD },
+  })
+  vi.stubGlobal('useTokenList', () => ({ getTokenByAddress: () => undefined }))
   vi.stubGlobal('useRoute', () => mocks.route)
   vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1) }))
   vi.stubGlobal('useVaultRegistry', () => ({
     get: (address: string) => mocks.vaults[address.toLowerCase()] ? { vault: mocks.vaults[address.toLowerCase()] } : undefined,
     getOrFetch: mocks.getOrFetch,
     getVaultCategory: (address: string) => address.toLowerCase() === ESCROW ? 'escrow' : 'standard',
+    getAll: () => Object.values(mocks.vaults).map(vault => ({ vault })),
     registryVersion: ref(0),
   }))
   vi.stubGlobal('useEulerLabels', () => ({ oracleAdapters, loadOracleAdapters: mocks.loadOracleAdapters }))
@@ -80,6 +92,18 @@ describe('useVaultReferences.describe', () => {
     expect(describeAddress(ESCROW).label).toBe('Escrowed wstETH')
     expect(describeAddress(SECURITIZE)).toEqual({ kind: 'vault', label: 'ACRED' })
     expect(describeAddress(ADAPTER)).toEqual({ kind: 'adapter', label: 'Chainlink USDC/USD' })
+  })
+
+  it('names an adapter by the pair it prices, from the assets the app knows, keeping V3\'s label after it', async () => {
+    const references = await load()
+    const label = 'PT-sBOLD-1765325646 → BOLD price feed · Unknown AggregatorV3 Feed'
+    expect(references.describe(PT_ADAPTER)).toEqual({ kind: 'adapter', label })
+    expect(references.adapterLabel(PT_ADAPTER)).toBe(label)
+  })
+
+  it('names the quote by its unit of account when it is a reserved address', async () => {
+    oracleAdapters[PT_ADAPTER] = { ...oracleAdapters[PT_ADAPTER], quote: '0x0000000000000000000000000000000000000348' }
+    expect((await load()).adapterLabel(PT_ADAPTER)).toBe('PT-sBOLD-1765325646 → USD price feed · Unknown AggregatorV3 Feed')
   })
 
   it('keeps the sentence\'s own spelling for an address it cannot name', async () => {

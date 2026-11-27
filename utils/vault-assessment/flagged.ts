@@ -1,3 +1,5 @@
+import type { VaultAssessment, VaultAssessmentContext, VaultAssessmentFinding } from '@eulerxyz/euler-v2-sdk'
+
 export interface VaultVerdictLike {
   status: string
   reason?: string | null
@@ -6,15 +8,22 @@ export interface VaultVerdictLike {
 
 export type VaultVisibilityMap = Readonly<Record<string, VaultVerdictLike>> | undefined
 
+/** The labels verdict an assessment was loaded under; evidence read under another verdict is stale. */
+export const getVaultVerdictKey = (verdict: VaultVerdictLike | undefined): string =>
+  JSON.stringify([verdict?.status ?? null, verdict?.decidedBy ?? null, verdict?.reason ?? null])
+
 export const FLAGGED_VAULT_LABEL = 'Flagged'
 export const FLAGGED_VAULT_TITLE = 'Vault flagged'
 export const FLAGGED_VAULT_ACTION = 'Review flagged vault'
+export const PAUSED_VAULT_LABEL = 'Paused'
+export const PAUSED_VAULT_TITLE = 'Vault paused'
+export const PAUSED_VAULT_FALLBACK_REASON = 'This vault is paused.'
 
 export type VaultPairSide = 'collateral' | 'borrow'
 
-export const PAIR_SIDE_BADGE_LABELS: Readonly<Record<VaultPairSide, { warning: string, flagged: string }>> = {
-  collateral: { warning: 'Collateral warning', flagged: 'Collateral flagged' },
-  borrow: { warning: 'Borrow warning', flagged: 'Borrow flagged' },
+export const PAIR_SIDE_BADGE_LABELS: Readonly<Record<VaultPairSide, { warning: string, flagged: string, paused: string }>> = {
+  collateral: { warning: 'Collateral warning', flagged: 'Collateral flagged', paused: 'Collateral paused' },
+  borrow: { warning: 'Borrow warning', flagged: 'Borrow flagged', paused: 'Borrow paused' },
 }
 
 const withReason = (lead: string, reason?: string | null): string => {
@@ -23,8 +32,18 @@ const withReason = (lead: string, reason?: string | null): string => {
   return `${lead}: ${text}${/[.!?]$/.test(text) ? '' : '.'}`
 }
 
+const FLAGGED_VAULT_LINE_LEAD = 'Euler\'s checks flagged this vault'
+
 export const getFlaggedVaultLine = (reason?: string | null): string =>
-  withReason('Euler\'s checks flagged this vault', reason)
+  withReason(FLAGGED_VAULT_LINE_LEAD, reason)
+
+const normalizeReasonText = (text: string): string =>
+  text.trim().replace(new RegExp(`^${FLAGGED_VAULT_LINE_LEAD}:\\s*`), '').replace(/[.!?]+$/, '').trim()
+
+export const isRestatedByCheckLine = (cause: string, lineTexts: readonly string[]): boolean => {
+  const reason = normalizeReasonText(cause)
+  return !!reason && lineTexts.some(text => normalizeReasonText(text) === reason)
+}
 
 export const getFlaggedTransactionLine = (reason?: string | null): string =>
   withReason('This transaction uses a flagged vault', reason)
@@ -40,6 +59,86 @@ export const getFlaggedVerdict = (
   if (source !== 'v3') return undefined
   const verdict = visibility?.[address.toLowerCase()]
   return verdict?.status === 'hidden' ? verdict : undefined
+}
+
+const CONFIG_HIDING_REASONS: ReadonlySet<string> = new Set(['config-suspended', 'config-failed', 'config-revoked'])
+
+/** Only a configuration verdict can be shown, by the assessment, to be unrelated to governance. */
+export const isConfigHiddenVerdict = (verdict: VaultVerdictLike | undefined): verdict is VaultVerdictLike =>
+  verdict?.status === 'hidden' && CONFIG_HIDING_REASONS.has(verdict.decidedBy ?? '')
+const PAUSE_CAUSE_CODES: ReadonlySet<string> = new Set(['exit-operations-disabled', 'vault-paused'])
+
+export const isPauseCauseCode = (code: string | null | undefined): boolean => PAUSE_CAUSE_CODES.has(code ?? '')
+
+export interface VaultPauseEvidence {
+  family: 'evk' | 'earn' | null
+  /** Undefined when the vault's hooks are not loaded; the assessment then stands in for them. */
+  onchainPaused?: boolean
+  assessment?: Pick<VaultAssessment, 'configContext'>
+  assessmentVerdictKey?: string
+}
+
+const ZERO_ADDRESS_PATTERN = /^0x0{40}$/i
+
+const isPauseFinding = (finding: VaultAssessmentFinding): boolean => {
+  if (finding.outcome !== 'fail' || !PAUSE_CAUSE_CODES.has(finding.cause?.code ?? '')) return false
+  if (finding.cause?.code !== 'exit-operations-disabled') return true
+  const governor = (finding.observed as { governorAdmin?: unknown } | undefined)?.governorAdmin
+  return typeof governor === 'string' && /^0x[0-9a-f]{40}$/i.test(governor) && !ZERO_ADDRESS_PATTERN.test(governor)
+}
+
+/** Any configuration verdict can come from a pause, and none proves one, so the pause itself must be seen. */
+export const isPausedVerdict = (verdict: VaultVerdictLike | undefined, evidence: VaultPauseEvidence): boolean => {
+  if (!isConfigHiddenVerdict(verdict)) return false
+  if (evidence.family === 'earn') return false
+  if (evidence.onchainPaused !== undefined) return evidence.onchainPaused
+  if (evidence.assessmentVerdictKey !== getVaultVerdictKey(verdict)) return false
+  return evidence.assessment?.configContext?.findings.some(isPauseFinding) ?? false
+}
+const CLEAR_CONSISTENCY_STATUSES: ReadonlySet<string> = new Set(['verified', 'not_applicable'])
+const REQUIRED_GOVERNANCE_RULES: Readonly<Record<string, readonly string[]>> = {
+  'euler-evk': ['governance.no-deprecated-governor', 'governance.router'],
+  'euler-securitize': ['governance.no-deprecated-governor'],
+  'euler-earn': ['governance.timelock'],
+}
+const GOVERNANCE_FINDING_KEY = /^(scheduled\.)?governance\./
+
+export interface VaultGovernanceEvidence {
+  status: string
+  assessment?: Pick<VaultAssessment, 'configContext' | 'consistencyContext'>
+  consistencyStatus?: string | null
+  verdictKey?: string
+}
+
+const isUnresolvedFinding = (finding: VaultAssessmentFinding): boolean =>
+  !finding.exempted && (finding.outcome === 'fail' || finding.outcome === 'unknown')
+
+const isGovernanceFinding = (finding: VaultAssessmentFinding): boolean =>
+  GOVERNANCE_FINDING_KEY.test(finding.key)
+
+const hasPolicyGovernanceRules = (configContext: VaultAssessmentContext): boolean => {
+  const rules = REQUIRED_GOVERNANCE_RULES[typeof configContext.policyId === 'string' ? configContext.policyId : '']
+  return !!rules && rules.every(key => configContext.findings.some(finding => finding.key === key
+    && (finding.outcome === 'pass' || finding.outcome === 'not_applicable' || !!finding.exempted)))
+}
+
+/**
+ * A configuration verdict can mask a consistency failure and Layer 1 holds governance rules, so the
+ * reason alone never proves the hiding is unrelated to governance: the assessment has to show it.
+ */
+export const isHiddenForNonGovernanceCause = (
+  verdict: VaultVerdictLike | undefined,
+  evidence: VaultGovernanceEvidence | undefined,
+): boolean => {
+  if (!isConfigHiddenVerdict(verdict)) return false
+  if (evidence?.verdictKey !== getVaultVerdictKey(verdict)) return false
+  const configContext = evidence.status === 'available' ? evidence.assessment?.configContext : null
+  if (!configContext || !CLEAR_CONSISTENCY_STATUSES.has(evidence?.consistencyStatus ?? '')) return false
+  if (!hasPolicyGovernanceRules(configContext)) return false
+  const findings = [...configContext.findings, ...(evidence?.assessment?.consistencyContext?.findings ?? [])]
+  if (findings.some(finding => isGovernanceFinding(finding) && isUnresolvedFinding(finding))) return false
+  return configContext.findings.some(finding => finding.required && finding.outcome === 'fail' && !finding.exempted
+    && !isGovernanceFinding(finding) && !finding.key.startsWith('scheduled.'))
 }
 
 /** Without the label deprecation there is no Deprecated badge, so the verdict stays the only signal. */

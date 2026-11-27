@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ loadEulerChains: vi.fn(), error: vi.fn() }))
-vi.mock('~/server/api/internal/euler-chains.get', () => ({ loadEulerChains: mocks.loadEulerChains }))
+const mocks = vi.hoisted(() => ({ error: vi.fn() }))
 vi.mock('~/server/utils/logger', () => ({ logger: { error: mocks.error } }))
 
 beforeEach(() => {
@@ -13,7 +12,6 @@ beforeEach(() => {
   vi.stubEnv('ONCHAIN_SDK_CHAINS', '')
   vi.stubEnv('RPC_URL_146', 'https://rpc.example')
   mocks.error.mockReset()
-  mocks.loadEulerChains.mockReset().mockResolvedValue([{ chainId: 146, status: 'deprecated' }])
 })
 afterEach(() => vi.unstubAllEnvs())
 
@@ -23,32 +21,18 @@ it('reports missing static configuration at boot without preventing the server f
   const { default: plugin } = await import('~/server/plugins/labels-config')
   expect(() => plugin({} as never)).not.toThrow()
   expect(mocks.error).toHaveBeenCalledWith(expect.objectContaining({ message: 'STATIC_LABELS_BASE_URL is required for static labels' }), expect.any(String))
-  expect(mocks.loadEulerChains).not.toHaveBeenCalled()
 })
 
-it('checks registry-derived deprecation when the manifest arrives', async () => {
+it('accepts hosted deprecation without a duplicated SDK override', async () => {
+  vi.stubEnv('DEPRECATED_CHAINS', '146')
   const { default: plugin } = await import('~/server/plugins/labels-config')
   plugin({} as never)
-  await vi.waitFor(() => expect(mocks.error).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('ONCHAIN_SDK_CHAINS: 146') }), expect.any(String)))
+  expect(mocks.error).not.toHaveBeenCalled()
 })
 
 it('accepts the hosted setup with the on-chain chain entry', async () => {
   vi.stubEnv('ONCHAIN_SDK_CHAINS', '146')
   const { default: plugin } = await import('~/server/plugins/labels-config')
   plugin({} as never)
-  await mocks.loadEulerChains.mock.results[0]!.value
-  expect(mocks.error).not.toHaveBeenCalled()
-})
-
-it.each(['missing', 'unlisted', 'staging'])('does not diagnose a %s chain excluded from this deployment', async (status) => {
-  vi.stubEnv('DEPRECATED_CHAINS', '146')
-  vi.stubEnv('DOPPLER_ENVIRONMENT', 'prd')
-  mocks.loadEulerChains.mockResolvedValue(status === 'missing'
-    ? [{ chainId: 1, status: 'production' }]
-    : [{ chainId: 146, status }])
-  const { default: plugin } = await import('~/server/plugins/labels-config')
-  plugin({} as never)
-  expect(mocks.loadEulerChains).toHaveBeenCalledOnce()
-  await mocks.loadEulerChains.mock.results[0]!.value
   expect(mocks.error).not.toHaveBeenCalled()
 })

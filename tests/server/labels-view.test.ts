@@ -11,6 +11,10 @@ import { getInternalFetchHeaders } from '~/server/utils/internal-headers'
 import { getPublicEulerLabelsData } from '~/server/utils/public-labels-source'
 
 vi.mock('~/server/utils/sdk-server', () => ({ getServerSdk: vi.fn() }))
+vi.mock('~/server/utils/chain-policy', () => ({
+  loadServerChainReadPolicy: async () => ({ deprecated: false, onchain: false, metadataOnly: false }),
+  loadServerChainPolicyKey: async (chainId: number) => `${chainId}:active`,
+}))
 vi.mock('~/server/utils/public-labels-source', () => ({ getPublicEulerLabelsData: vi.fn() }))
 
 afterEach(() => {

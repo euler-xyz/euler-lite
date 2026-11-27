@@ -2,6 +2,7 @@ import type { MarketGroup } from '~/entities/lend-discovery'
 import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
 import { type BestMaxRoeResult, getBorrowableVaults, getVaultAddress, getVaultAssetAddress, getVaultAssetSymbol } from '~/utils/discoveryCalculations'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
+import { isBorrowPairPaused } from '~/utils/vault/classification'
 import {
   computeSupplyApy,
   computeBorrowApy,
@@ -25,7 +26,7 @@ const getLendRewardCampaigns = (vault: unknown, viewer: string | undefined): Len
  * Computes the headline metric for each market group by iterating actual
  * collateral/liability pairs with LTV relationships. Correlated pairs use
  * leveraged return (max ROE); groups without a correlated pair fall back to
- * the best visible net APY.
+ * the best visible net APY. Pairs a new position cannot open are skipped.
  *
  * Returns a reactive map of marketGroupId -> BestMaxRoeResult.
  */
@@ -79,6 +80,7 @@ export const useBestMaxROE = (marketGroups: Ref<MarketGroup[]>) => {
 
         const collateral = vaultsByAddress.get(colAddr)
         if (!collateral) continue
+        if (isBorrowPairPaused(liability, collateral)) continue
         const collateralAddress = getVaultAddress(collateral)
 
         const supplyFinal = computeSupplyApy(collateral, viewer.value, visibilitySettings)

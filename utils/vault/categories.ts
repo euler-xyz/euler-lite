@@ -85,14 +85,16 @@ const fetchEscrowAddressSet = async (chainId: number): Promise<Set<string>> => {
     .then(sdk => sdk.eVaultService.fetchVerifiedVaultAddresses(chainId, [StandardEVaultPerspectives.ESCROW]))
     .then(addresses => new Set(uniqueAddresses(addresses).map(address => address.toLowerCase())))
     .then((set) => {
-      escrowAddressCache.set(chainId, set)
+      if (escrowAddressInFlight.get(chainId) === promise) escrowAddressCache.set(chainId, set)
       return set
     })
     .catch((err) => {
       logger.warn({ ctx: 'fetchEscrowAddressSet', chainId, err }, 'failed to fetch escrow vault addresses')
       return new Set<string>()
     })
-    .finally(() => { escrowAddressInFlight.delete(chainId) })
+    .finally(() => {
+      if (escrowAddressInFlight.get(chainId) === promise) escrowAddressInFlight.delete(chainId)
+    })
 
   escrowAddressInFlight.set(chainId, promise)
   return promise
@@ -180,15 +182,19 @@ export const fetchChainVaultCategories = async (): Promise<VaultCategories> => {
       }
     }
 
-    chainCategoriesCache.set(chainId, categories)
-    populatePerAddressFromCategories(chainId, categories)
+    if (chainCategoriesInFlight.get(chainId) === promise) {
+      chainCategoriesCache.set(chainId, categories)
+      populatePerAddressFromCategories(chainId, categories)
+    }
     return categories
   })()
     .catch((err) => {
       logger.warn({ ctx: 'fetchChainVaultCategories', chainId, err }, 'failed to fetch chain vault categories')
       return null
     })
-    .finally(() => { chainCategoriesInFlight.delete(chainId) })
+    .finally(() => {
+      if (chainCategoriesInFlight.get(chainId) === promise) chainCategoriesInFlight.delete(chainId)
+    })
 
   chainCategoriesInFlight.set(chainId, promise)
   return (await promise) ?? emptyCategories()
@@ -216,13 +222,13 @@ export const fetchVaultCategory = async (
   const promise = (async () => {
     const escrowAddresses = await fetchEscrowAddressSet(chainId)
     if (escrowAddresses.has(normalized.toLowerCase())) {
-      perAddressCache.set(key, 'escrow')
+      if (perAddressInFlight.get(key) === promise) perAddressCache.set(key, 'escrow')
       return 'escrow' satisfies VaultCategory
     }
 
     const type = await (await getSdk(chainId)).vaultMetaService.fetchVaultType(chainId, normalized)
     const category = mapVaultType(type)
-    if (category) {
+    if (category && perAddressInFlight.get(key) === promise) {
       perAddressCache.set(key, category)
     }
     return category
@@ -231,7 +237,9 @@ export const fetchVaultCategory = async (
       logger.warn({ ctx: 'fetchVaultCategory', chainId, address: normalized, err }, 'failed to fetch vault category')
       return null
     })
-    .finally(() => { perAddressInFlight.delete(key) })
+    .finally(() => {
+      if (perAddressInFlight.get(key) === promise) perAddressInFlight.delete(key)
+    })
 
   perAddressInFlight.set(key, promise)
   return promise

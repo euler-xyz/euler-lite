@@ -92,3 +92,20 @@ export const evcGetAccountOwnerAbi = [
     stateMutability: 'view',
   },
 ] as const
+
+export const evcAccountExposureAbi = [
+  {
+    type: 'function',
+    name: 'getCollaterals',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'address[]' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'getControllers',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'address[]' }],
+    stateMutability: 'view',
+  },
+] as const

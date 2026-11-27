@@ -20,6 +20,7 @@ vi.mock('~/server/utils/logger', () => ({
 }))
 
 type TestEvent = {
+  path: string
   url: string
   cookies: Record<string, string>
   headers: Record<string, string>
@@ -41,6 +42,7 @@ const makeEvent = (
   cookies: Record<string, string> = {},
   remoteAddress?: string,
 ): TestEvent => ({
+  path,
   url: `https://app.example${path}`,
   cookies: { ...cookies },
   headers: {},

@@ -90,7 +90,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   const { planMultiply, prepareTransactionPlan, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
   const { capture: captureReviewState } = useExecutionReview()
   const { capture: captureIntentFactory, create: createIntent } = useOperationIntentFactory()
-  const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
+  const { address, isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
   // State-override knobs: pass the current wallet snapshot and pre-prime slot
   // hints when the relevant assets resolve. Skip balance probing at Review
   // (form validates "Not enough balance"); quote estimates turn balance
@@ -1043,7 +1043,10 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   })
 
   // --- Swap quote ---
+  // Account changes must cancel prerequisite lookups as well as quote responses.
+  const multiplyQuoteGuard = createRaceGuard()
   const requestMultiplyQuote = useDebounceFn(async () => {
+    const generation = multiplyQuoteGuard.next()
     profMark('multiplyForm', 'requestMultiplyQuote.fire')
     multiplyQuoteError.value = null
 
@@ -1069,10 +1072,13 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       account = (await profAsync('multiplyForm', 'requestQuote.resolvePendingSubAccount', () => resolvePendingSubAccount())) as Address
     }
     catch {
+      if (multiplyQuoteGuard.isStale(generation)) return
       resetMultiplyQuoteState()
       multiplyQuoteError.value = 'Unable to resolve position'
       return
     }
+
+    if (multiplyQuoteGuard.isStale(generation)) return
 
     if (planAccount.value) {
       try {
@@ -1082,6 +1088,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         logWarn('multiply/preloadSubAccountSnapshot', e)
       }
     }
+    if (multiplyQuoteGuard.isStale(generation)) return
 
     // CoW open position uses a compatible empty sub-account because the
     // wrapper enables the borrow vault controller itself. Resolve it here so
@@ -1101,6 +1108,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
         logWarn('multiply/cowswap/resolveQuoteSubaccount', e)
       }
     }
+    if (multiplyQuoteGuard.isStale(generation)) return
     if (shouldRequestCowSwap && chainConfig && cowAccount && cowOwner) {
       cowProviderExtraData.appData = buildOpenPositionQuoteAppData(
         {
@@ -1119,6 +1127,8 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
 
     setMultiplyAmounts(null, null)
     const requestParams = {
+      chainId: chainId.value!,
+      origin: (address.value || effectiveAddress.value || zeroAddress) as Address,
       tokenIn: multiplyShortVault.value.asset.address as Address,
       tokenOut: multiplyLongVault.value.asset.address as Address,
       accountIn: account,
@@ -1171,6 +1181,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   }
 
   const resetMultiplyQuoteState = () => {
+    multiplyQuoteGuard.next()
     resetMultiplyQuoteStateInternal()
     setMultiplyAmounts(null, null)
   }
@@ -1437,6 +1448,14 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
   }
 
   // --- Watchers ---
+  watch([effectiveAddress, address, isSpyMode, chainId], () => {
+    clearMultiplySimulationError()
+    resetMultiplyQuoteState()
+    multiplyPlan.value = null
+    preparedMultiplyPlan.value = null
+    if (multiplyInputAmount.value) requestMultiplyQuote()
+  }, { flush: 'sync' })
+
   watch([multiplyEffectiveQuote, multiplyIsSameAsset, multiplyDebtAmountNano], () => {
     if (multiplyIsSameAsset.value && multiplyDebtAmountNano.value > 0n) {
       setMultiplyAmounts(multiplyDebtAmountNano.value, multiplyDebtAmountNano.value)

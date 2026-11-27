@@ -5,6 +5,7 @@ import { detectVpn, resetVpnCache } from '~/services/vpn'
 import { resetCountryCache } from '~/services/country'
 import { screenAddress } from '~/services/screening'
 import { getDefaultPageRoute } from '~/entities/menu'
+import { isAddressExitOnly, setAddressExitOnly } from '~/composables/addressExitOnlyState'
 
 // Module-scoped so every useAddressScreen() consumer sees the same screening
 // verdict — otherwise each composable instance would carry its own pending
@@ -45,21 +46,24 @@ export const useAddressScreen = () => {
 
     const gen = ++screeningGeneration
     screenedAddress.value = null
+    setAddressExitOnly(false)
     isScreening.value = true
     try {
       const vpnIsUsed = await detectVpn()
       if (gen !== screeningGeneration) return false
 
       // VPN usage is audit metadata; only the address-screening verdict gates access.
-      const isRestricted = await screenAddress(address, vpnIsUsed)
+      const verdict = await screenAddress(address, vpnIsUsed)
       if (gen !== screeningGeneration) return false
 
-      if (isRestricted) {
+      if (verdict === 'blocked') {
         await disconnect()
         if (gen !== screeningGeneration) return false
         showBlockedModal(address)
         return true
       }
+      // Flag first: the address must never become visible without its exit-only gate.
+      setAddressExitOnly(verdict === 'exit-only')
       screenedAddress.value = address
       return false
     }
@@ -76,6 +80,7 @@ export const useAddressScreen = () => {
   const resetScreeningCache = () => {
     screeningGeneration++
     screenedAddress.value = null
+    setAddressExitOnly(false)
     isScreening.value = false
     resetVpnCache()
     resetCountryCache()
@@ -85,6 +90,7 @@ export const useAddressScreen = () => {
     isScreening,
     blockedAddress,
     screenedAddress,
+    isExitOnly: isAddressExitOnly,
     isAddressScreened,
     screenConnectedAddress,
     resetScreeningCache,

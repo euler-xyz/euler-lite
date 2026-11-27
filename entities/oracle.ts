@@ -1,4 +1,4 @@
-import { decodeAbiParameters, type Address, type Hex, isHex, toHex, zeroAddress } from 'viem'
+import { decodeAbiParameters, type Address, type Hex, isAddress, isHex, toHex, zeroAddress } from 'viem'
 import {
   CROSS_ADAPTER_COMPONENTS,
   EULER_ROUTER_COMPONENTS,
@@ -169,9 +169,35 @@ export function getOracleCheckEvidenceLines(
   const lines: OracleCheckEvidenceLine[] = []
   const expected = formatOracleCheckDetail(check.expected)
   if (expected !== undefined) lines.push({ key: 'expected', text: `Expected: ${expected}` })
-  const observed = formatOracleCheckDetail(check.observed)
+  const observed = check.id.includes('staleness') && isUnboundedSeconds(check.observed)
+    ? 'unbounded'
+    : formatOracleCheckDetail(check.observed)
   if (observed !== undefined) lines.push({ key: 'observed', text: `Observed: ${observed}` })
   return lines
+}
+
+const UNBOUNDED_STALENESS_SECONDS = 100n * 365n * 24n * 60n * 60n
+
+const isUnboundedSeconds = (value: unknown): boolean => {
+  const digits = typeof value === 'number' && Number.isInteger(value) ? String(value) : value
+  return typeof digits === 'string' && /^\d+$/.test(digits) && BigInt(digits) >= UNBOUNDED_STALENESS_SECONDS
+}
+
+/** V3 prints a max-uint staleness as its 78 digits; over a hundred years it has no bound worth reading. */
+export const formatUnboundedStaleness = (text: string): string =>
+  text.replace(/\((\d+) s\)/g, (match, seconds: string) => isUnboundedSeconds(seconds) ? '(unbounded)' : match)
+
+export const formatOracleAdapterLabel = (
+  meta: { base?: string, quote?: string, label?: string, name?: string } | undefined,
+  symbolOf: (address: string) => string | undefined,
+): string | undefined => {
+  if (!meta) return undefined
+  const kind = meta.label || meta.name || undefined
+  const base = meta.base && isAddress(meta.base, { strict: false }) ? symbolOf(meta.base) : undefined
+  const quote = meta.quote && isAddress(meta.quote, { strict: false }) ? symbolOf(meta.quote) : undefined
+  if (!base || !quote) return kind
+  const pair = `${base} → ${quote} price feed`
+  return kind ? `${pair} · ${kind}` : pair
 }
 
 export type OracleAdapterMeta = {

@@ -14,6 +14,7 @@ import { buildOracleAdapterViews, collectOracleRouteSteps, type OracleAdapterVie
 import { OracleAdapterChecksModal } from '#components'
 import { oracleAdapterAnchor } from '~/utils/vault-assessment/presentation'
 import { registerOracleAdapterAnchors } from '~/composables/useOracleAdapterAnchors'
+import { getChainPolicyGeneration } from '~/composables/useChainConfig'
 
 const props = defineProps<{
   vault?: EVault
@@ -73,7 +74,7 @@ const trustedRouteSteps = computed(() => oracleAssessmentsAvailable.value ? rout
 const adapterViews = computed(() => buildOracleAdapterViews(trustedRouteSteps.value, oracleAdapters, v3ImagesUrl))
 
 watch(
-  [routeSteps, chainId],
+  [routeSteps, chainId, () => getChainPolicyGeneration(chainId.value)],
   async ([stepList, currentChainId]) => {
     if (!currentChainId) return
 
@@ -88,8 +89,8 @@ watch(
 )
 
 watch(
-  chainId,
-  (id) => {
+  [chainId, () => getChainPolicyGeneration(chainId.value)],
+  ([id]) => {
     if (id) loadRecognizedRouters(id)
   },
   { immediate: true },

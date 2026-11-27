@@ -57,6 +57,7 @@ export const makeReviewedExecution = (
   additional: {
     before?: readonly AdditionalMaterializedCall[]
     after?: readonly AdditionalMaterializedCall[]
+    intent?: OperationIntent
     constraints?: OperationIntent['constraints']
     signatureValidUntil?: number
   } = {},
@@ -72,7 +73,7 @@ export const makeReviewedExecution = (
     classificationVersion: 'classification-1',
     approvalMode: 'approve',
   }
-  const reviewedIntent: OperationIntent = additional.constraints ? { ...intent, constraints: additional.constraints } : intent
+  const reviewedIntent: OperationIntent = additional.intent ?? (additional.constraints ? { ...intent, constraints: additional.constraints } : intent)
   const migrationSignatureSlots = additional.signatureValidUntil === undefined
     ? []
     : [prepareMigrationSignatureEvidence({

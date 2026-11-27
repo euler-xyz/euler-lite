@@ -33,7 +33,9 @@ beforeEach(() => {
   __setEulerLabelsDataForTest()
   geo.useGeoBlock().country.value = 'NL'
   fetchLabels.mockReset().mockResolvedValue(staticGeoBundle())
-  vi.stubGlobal('$fetch', fetchLabels)
+  vi.stubGlobal('$fetch', (url: string, options: { query: { chainId: number } }) => url === '/api/internal/chain-policy'
+    ? Promise.resolve({ chainId: options.query.chainId, policy: { deprecated: false, onchain: false, metadataOnly: false } })
+    : fetchLabels(url, options))
   vi.stubGlobal('useEulerAddresses', () => ({
     chainId, getCurrentChainConfig: computed(() => ({ chainId: chainId.value, addresses: { coreAddrs: { evc: cozy.address } } })),
   }))

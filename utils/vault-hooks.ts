@@ -195,6 +195,34 @@ export const isVaultEffectivelyPaused = (vault: EVault): boolean => {
   return areAllUserOpsHooked(getVaultHookedOperations(vault))
 }
 
+const EXIT_OPERATIONS: readonly VaultOperation[] = [
+  OP_WITHDRAW,
+  OP_REDEEM,
+  OP_TRANSFER,
+  OP_LIQUIDATE,
+  OP_REPAY,
+  OP_REPAY_WITH_SHARES,
+  OP_VAULT_STATUS_CHECK,
+]
+
+/** The operations Euler V3's `exit-operations-disabled` cause watches, hooked with no target to allow them. */
+export const isVaultExitPaused = (vault: EVault): boolean =>
+  isHookDisabling(vault) && EXIT_OPERATIONS.some(op => isOpHooked(vault, op))
+
+const isGovernorSet = (governor: string | undefined): boolean => {
+  if (!governor) return false
+  try {
+    return getAddress(governor) !== zeroAddress
+  }
+  catch {
+    return false
+  }
+}
+
+/** Without a governor nobody can turn the exits back on, so V3 calls it permanently disabled, not paused. */
+export const isVaultPausedByGovernor = (vault: EVault): boolean =>
+  isVaultExitPaused(vault) && isGovernorSet(vault.governorAdmin)
+
 export const isOpDisabled = (vault: EVault, op: VaultOperation): boolean => {
   if (!isHookDisabling(vault)) return false
   return isOpHooked(vault, op) || isOpHooked(vault, OP_VAULT_STATUS_CHECK)

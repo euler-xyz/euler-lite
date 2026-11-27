@@ -2,6 +2,9 @@ import { computed, ref, shallowRef, watch, watchEffect } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Account, EVault, IHasVaultAddress } from '@eulerxyz/euler-v2-sdk'
 import { useMultiplyForm } from '~/composables/borrow/useMultiplyForm'
+import { isCowProviderOrQuote } from '~/entities/cowswap'
+import { isAnyVaultBlockedByCountry } from '~/composables/useGeoBlock'
+import { setAddressExitOnly } from '~/composables/addressExitOnlyState'
 import type { RewardCampaign } from '~/entities/reward-campaign'
 
 const { USER, makeVault, planAccount, mocks } = vi.hoisted(() => {
@@ -45,6 +48,7 @@ const { USER, makeVault, planAccount, mocks } = vi.hoisted(() => {
     makeVault,
     planAccount: { chainId: 1 } as Account<IHasVaultAddress>,
     mocks: {
+      submitCowSwapMultiply: vi.fn(),
       planMultiply: vi.fn(),
       prepareTransactionPlan: vi.fn(),
       executePlan: vi.fn(),
@@ -132,7 +136,7 @@ vi.mock('~/composables/borrow/useMultiplyCowSwap', () => ({
     cowSwapExecution: ref(null),
     cowSwapOrderStatus: ref(null),
     cowSwapStatusLabel: computed(() => ''),
-    submitCowSwapMultiply: vi.fn(),
+    submitCowSwapMultiply: mocks.submitCowSwapMultiply,
   }),
 }))
 
@@ -203,7 +207,7 @@ vi.mock('~/entities/cowswap', () => ({
   isCowProviderOrQuote: vi.fn(() => false),
 }))
 
-const makeForm = (vault: EVault) => useMultiplyForm({
+const makeForm = (vault: EVault, isGeoBlocked = computed(() => false)) => useMultiplyForm({
   pair: ref({
     collateral: vault,
     borrow: vault,
@@ -217,7 +221,7 @@ const makeForm = (vault: EVault) => useMultiplyForm({
   formTab: ref('multiply'),
   resolvePendingSubAccount: vi.fn(async () => USER),
   isPendingSubAccountLoading: ref(false),
-  isGeoBlocked: computed(() => false),
+  isGeoBlocked,
   isMultiplyRestricted: computed(() => false),
 })
 
@@ -350,6 +354,25 @@ describe('useMultiplyForm', () => {
     // shortfall first: 0.13 USDC cannot cover a 1,000 USDC deposit.
     expect(form.multiplyErrorText.value).toBe('Not enough balance')
     expect(form.isMultiplySubmitDisabled.value).toBe(true)
+  })
+
+  it('sends a CoW quote to the CoW executor only while the pair is not geo-blocked', async () => {
+    vi.mocked(isCowProviderOrQuote).mockReturnValue(true)
+    const vault = makeVault()
+
+    await makeForm(vault).submitMultiply()
+    expect(mocks.submitCowSwapMultiply).toHaveBeenCalledTimes(1)
+
+    mocks.submitCowSwapMultiply.mockClear()
+    setAddressExitOnly(true)
+    try {
+      await makeForm(vault, computed(() => isAnyVaultBlockedByCountry(vault.address))).submitMultiply()
+      expect(mocks.submitCowSwapMultiply).not.toHaveBeenCalled()
+    }
+    finally {
+      setAddressExitOnly(false)
+      vi.mocked(isCowProviderOrQuote).mockReturnValue(false)
+    }
   })
 
   it('surfaces a reached supply cap as the multiply disabled reason and form warning', () => {

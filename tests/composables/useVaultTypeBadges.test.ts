@@ -16,6 +16,7 @@ const state = vi.hoisted(() => ({
   requiredRouterGovernors: new Map<string, string>(),
   verifiedEarnVaults: new Set<string>(),
   verifiedVaults: new Set<string>(),
+  identifiedVaults: new Set<string>(),
 }))
 
 vi.mock('~/utils/eulerLabelsUtils', () => ({
@@ -61,16 +62,21 @@ const makeVault = (overrides: Partial<EVault> & { verified?: boolean } = {}): EV
   ...overrides,
 } as unknown as EVault)
 
+const isGovernorVerified = (vault: { address: string, eulerRouterGovernor?: string | null }) => {
+  const address = vault.address.toLowerCase()
+  const requiredRouterGovernor = state.requiredRouterGovernors.get(address)
+  return state.verifiedVaults.has(address)
+    && (!requiredRouterGovernor || vault.eulerRouterGovernor?.toLowerCase() === requiredRouterGovernor)
+}
+
 const setupVaultsMock = () => {
   ;(globalThis as unknown as { useVaults: unknown }).useVaults = () => ({
-    isEarnVaultOwnerVerified: (vault: { address: string }) =>
+    isEarnVaultOwnerIdentified: (vault: { address: string }) =>
       state.verifiedEarnVaults.has(vault.address.toLowerCase()),
-    isVaultGovernorVerified: (vault: { address: string, eulerRouterGovernor?: string | null }) => {
-      const address = vault.address.toLowerCase()
-      const requiredRouterGovernor = state.requiredRouterGovernors.get(address)
-      return state.verifiedVaults.has(address)
-        && (!requiredRouterGovernor || vault.eulerRouterGovernor?.toLowerCase() === requiredRouterGovernor)
-    },
+    isVaultGovernorIdentified: (vault: { address: string, eulerRouterGovernor?: string | null }) =>
+      isGovernorVerified(vault) || state.identifiedVaults.has(vault.address.toLowerCase()),
+    isVaultGovernorVerified: isGovernorVerified,
+    isEarnVaultOwnerVerified: (vault: { address: string }) => state.verifiedEarnVaults.has(vault.address.toLowerCase()),
   })
 }
 
@@ -91,6 +97,7 @@ describe('useVaultTypeBadges', () => {
     state.requiredRouterGovernors.clear()
     state.verifiedEarnVaults.clear()
     state.verifiedVaults.clear()
+    state.identifiedVaults.clear()
     setupVaultsMock()
   })
 
@@ -195,9 +202,9 @@ describe('useVaultTypeBadges', () => {
     state.registryVaults.set(portfolioVault.address.toLowerCase(), registryVault)
     state.requiredRouterGovernors.set(portfolioVault.address.toLowerCase(), routerGovernor.toLowerCase())
 
-    const { isVerified, summaryBadges, verificationVault } = useVaultTypeBadges(shallowRef(portfolioVault))
+    const { isGovernanceIdentified, summaryBadges, verificationVault } = useVaultTypeBadges(shallowRef(portfolioVault))
 
-    expect(isVerified.value).toBe(true)
+    expect(isGovernanceIdentified.value).toBe(true)
     expect(summaryBadges.value).toEqual([])
     expect(verificationVault.value).not.toBe(portfolioVault)
     expect(verificationVault.value).toHaveProperty('eulerRouterGovernor', routerGovernor)
@@ -219,9 +226,9 @@ describe('useVaultTypeBadges', () => {
       '0x5000000000000000000000000000000000000005',
     )
 
-    const { isVerified, summaryBadges, verificationVault } = useVaultTypeBadges(shallowRef(portfolioVault))
+    const { isGovernanceIdentified, summaryBadges, verificationVault } = useVaultTypeBadges(shallowRef(portfolioVault))
 
-    expect(isVerified.value).toBe(false)
+    expect(isGovernanceIdentified.value).toBe(false)
     expect(summaryBadges.value).toEqual(['unknown'])
     expect(verificationVault.value).toBe(portfolioVault)
   })
@@ -232,10 +239,10 @@ describe('useVaultTypeBadges', () => {
       governorAdmin: zeroAddress,
     })
 
-    const { badges, governanceType, hasSummaryBadges, isVerified, summaryBadges } = useVaultTypeBadges(shallowRef(vault))
+    const { badges, governanceType, hasSummaryBadges, isGovernanceIdentified, summaryBadges } = useVaultTypeBadges(shallowRef(vault))
 
     expect(governanceType.value).toBe('ungoverned')
-    expect(isVerified.value).toBe(false)
+    expect(isGovernanceIdentified.value).toBe(false)
     expect(badges.value).toEqual(['ungoverned'])
     expect(summaryBadges.value).toEqual([])
     expect(hasSummaryBadges.value).toBe(false)
@@ -255,5 +262,41 @@ describe('useVaultTypeBadges', () => {
     expect(badges.value).toEqual(['governed', 'governanceLimited'])
     expect(summaryBadges.value).toEqual([])
     expect(hasSummaryBadges.value).toBe(false)
+  })
+})
+
+describe('curator-declared property badges on a hidden vault whose curator is identified', () => {
+  beforeEach(() => {
+    state.verifiedVaults.clear()
+    state.identifiedVaults.clear()
+    state.entityGovernors.clear()
+    for (const set of [state.keyringVaults, state.accessControlVaults, state.governanceLimitedVaults, state.cyclicalNoteVaults]) set.clear()
+    setupVaultsMock()
+  })
+
+  const tagAll = (address: string) => {
+    for (const set of [state.keyringVaults, state.accessControlVaults, state.governanceLimitedVaults, state.cyclicalNoteVaults]) set.add(address)
+  }
+
+  it('keeps the governed type but shows no property badge', () => {
+    const vault = makeVault({ verified: false })
+    state.identifiedVaults.add(vault.address.toLowerCase())
+    if (vault.governorAdmin) state.entityGovernors.add(vault.governorAdmin.toLowerCase())
+    tagAll(vault.address.toLowerCase())
+
+    const { badges, governanceType, isGovernanceIdentified, summaryBadges } = useVaultTypeBadges(shallowRef(vault))
+
+    expect(isGovernanceIdentified.value).toBe(true)
+    expect(governanceType.value).toBe('governed')
+    expect(badges.value).toEqual(['governed'])
+    expect(summaryBadges.value).toEqual([])
+  })
+
+  it('shows every property badge on a verified vault', () => {
+    const vault = makeVault()
+    verify(vault)
+    tagAll(vault.address.toLowerCase())
+
+    expect(useVaultTypeBadges(shallowRef(vault)).badges.value).toEqual(['governed', 'private', 'accessControl', 'governanceLimited', 'cyclicalNote'])
   })
 })

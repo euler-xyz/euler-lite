@@ -7,13 +7,12 @@ import { formatAssetValue } from '~/utils/sdk-prices'
 import { useEulerEntitiesOfVault, useEulerProductOfVault } from '~/composables/useEulerLabels'
 import { getProductByVault, getProductKeyByVault, isVaultGovernanceLimited } from '~/utils/eulerLabelsUtils'
 import { autoLink } from '~/utils/autoLink'
-import { formatMarketAvailability } from '~/utils/vault-display'
+import { formatVaultBorrowAvailability } from '~/utils/vault-display'
 import { isVaultBorrowable } from '~/utils/vault/classification'
 import type { VaultTypeBadge } from '~/composables/useVaultTypeBadges'
 import { AccessControlBadge, CyclicalNoteBadge, GovernanceLimitedBadge, KeyringBadge } from '#components'
-import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
+import { getCollateralExposureGroups, getCollateralExposurePairs, sumOpenInterestUsd } from '~/utils/vault/collateral-exposure'
 import { resolveVaultExposureDisplay, type ExposureValueState, type VaultExposureDisplay } from '~/utils/vault/exposure-display'
-import { getAssessmentSafeEvidence } from '~/utils/vault-assessment/evidence'
 import { FLAGGED_VAULT_LABEL } from '~/utils/vault-assessment/flagged'
 
 const { vault, defaultOpen = true } = defineProps<{ vault: EVault, defaultOpen?: boolean }>()
@@ -31,6 +30,7 @@ const {
   isLoaded: isOpenInterestLoaded,
   isOpenInterestEnabled,
 } = useCollateralOpenInterest()
+const { getVaultBadDebt, isBadDebtEnabled, isBadDebtLoading, loadBadDebtForChain } = useVaultBadDebt()
 
 type VaultPropertyBadge = Extract<VaultTypeBadge, 'private' | 'accessControl' | 'governanceLimited' | 'cyclicalNote'>
 
@@ -39,7 +39,7 @@ const vaultRef = computed(() => vault)
 const product = useEulerProductOfVault(vaultAddress)
 const entities = useEulerEntitiesOfVault(vault)
 const isFlagged = useFlaggedVault(() => vault.address)
-const { badges, governanceType, isVerified: isGovernorVerified, verificationVault } = useVaultTypeBadges(vaultRef)
+const { badges, governanceType, isGovernanceIdentified, isGovernanceVerified, verificationVault } = useVaultTypeBadges(vaultRef)
 const governanceVault = computed(() => verificationVault.value as EVault)
 const marketProductKey = computed(() => getProductKeyByVault(vault.address))
 const marketProductName = computed(() => getProductByVault(vault.address).name)
@@ -47,16 +47,11 @@ const description = computed(() => {
   return product.vaultOverrides?.[vaultAddress.value]?.description ?? product.description
 })
 
-const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernorVerified.value)
-const { assessment, fallbackReady } = useVaultAssessmentEvidence(() => vault.address, 'evk')
-const governorSafeEvidence = computed(() => assessment.value || fallbackReady.value
-  ? getAssessmentSafeEvidence(assessment.value, vault.governorAdmin)
-  : null)
+const isGovernanceLimited = computed(() => isVaultGovernanceLimited(vault.address) && isGovernanceVerified.value)
+// The assessment decides whether a hidden vault's curator can be named.
+useVaultAssessmentEvidence(() => vault.address, 'evk')
 
-// Count how many borrow pairs have this vault as the liability (borrow) side
-const borrowCount = computed(() => {
-  return vault.collaterals.filter(ltv => ltv.borrowLTV > 0).length
-})
+const borrowAvailability = computed(() => formatVaultBorrowAvailability(vault))
 const hasBorrowSideExposure = computed(() => isVaultBorrowable(vault))
 // Only show "Current exposure" when something is currently borrowed against
 // collateral — idle supply is not exposure, so a vault with nothing utilized
@@ -86,6 +81,10 @@ const exposureDisplay = computed<VaultExposureDisplay>(() =>
     totalSupplyState: totalSupplyState.value,
     utilization: vault.utilization,
     acceptedCollateralCount: vault.collaterals.length,
+    badDebtUsd: getVaultBadDebt(vault.address)?.badDebtUsd,
+    badDebtLoading: isBadDebtLoading.value,
+    openInterestTotalUsd: sumOpenInterestUsd(getOpenInterestForVault(vault.address)),
+    vaultShare: 1,
   }),
 )
 const exposureValueState = computed(() => exposureDisplay.value.valueState)
@@ -139,8 +138,9 @@ watchEffect(async () => {
 })
 
 watchEffect(() => {
-  if (!hasBorrowSideExposure.value || !isOpenInterestEnabled.value) return
-  void loadOpenInterest()
+  if (!hasBorrowSideExposure.value) return
+  if (isOpenInterestEnabled.value) void loadOpenInterest()
+  if (isBadDebtEnabled.value) void loadBadDebtForChain()
 })
 </script>
 
@@ -171,7 +171,7 @@ watchEffect(() => {
         label="Vault type"
       >
         <span
-          v-if="isFlagged && governanceType !== 'ungoverned' && governanceType !== 'escrow'"
+          v-if="isFlagged && !isGovernanceIdentified && governanceType !== 'ungoverned' && governanceType !== 'escrow'"
           class="text-p2 text-content-tertiary"
         >-</span>
         <VaultTypeChip
@@ -209,14 +209,14 @@ watchEffect(() => {
           class="w-fit"
         />
         <VaultTypeChip
-          v-else-if="!isGovernorVerified && !isFlagged"
+          v-else-if="!isGovernanceIdentified && !isFlagged"
           :vault="governanceVault"
           type="unknown"
           nudge
           class="w-fit"
         />
         <div
-          v-else-if="isGovernorVerified && entities.length"
+          v-else-if="isGovernanceIdentified && entities.length"
           class="flex flex-col gap-8"
         >
           <div
@@ -228,10 +228,6 @@ watchEffect(() => {
             <CuratorEntityLink
               :entities="[entity]"
               avatar-class="!w-28 !h-28"
-            />
-            <SafeAccountBadge
-              :address="vault.governorAdmin"
-              :evidence="governorSafeEvidence"
             />
           </div>
         </div>
@@ -246,10 +242,10 @@ watchEffect(() => {
         <div class="flex min-w-0 items-center gap-8">
           <UiIcon
             class="shrink-0"
-            :name="borrowCount ? 'green-tick' : 'red-cross'"
+            :name="borrowAvailability.canBorrow ? 'green-tick' : 'red-cross'"
           />
           <span class="text-p2 text-content-primary">
-            {{ formatMarketAvailability(borrowCount) }}
+            {{ borrowAvailability.label }}
           </span>
         </div>
       </VaultOverviewLabelValue>

@@ -13,7 +13,7 @@
  *
  * Pipeline order, and the status each step answers with:
  *   1. method not in `methods`            → 405
- *   2. path does not contain `prefix`     → 404
+ *   2. path does not start with `prefix`  → 404
  *   3. `allow()` rejects path/query       → 404 (before any upstream contact)
  *   4. rate limit                          → 429 / 403 (see `rate-limit.ts`)
  *   5. `headers()` returns `undefined`    → 503 (required credential missing)
@@ -146,12 +146,11 @@ export function createProviderProxy(config: ProviderProxyConfig): ProviderProxyH
     }
 
     const requestUrl = getRequestURL(event)
-    const idx = requestUrl.pathname.indexOf(prefix)
-    if (idx < 0) {
+    if (!requestUrl.pathname.startsWith(prefix)) {
       logger.warn({ ctx, method, reason: 'invalid-path' }, 'request rejected')
       throw createError({ statusCode: 404, statusMessage: `Not a ${slug} proxy path` })
     }
-    const rest = stripLeadingSlash(requestUrl.pathname.slice(idx + prefix.length))
+    const rest = stripLeadingSlash(requestUrl.pathname.slice(prefix.length))
     if (!config.allow(method, rest, requestUrl.searchParams)) {
       logger.warn(
         {

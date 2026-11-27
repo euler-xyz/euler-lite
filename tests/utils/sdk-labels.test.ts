@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildEulerSDK, type BuildQueryFn } from '@eulerxyz/euler-v2-sdk'
 import files from '~/tests/fixtures/static-labels.json'
 import { KPK_VAULT, publicLabelsFixture } from '~/tests/fixtures/public-labels-v20260804151305236'
-import { LiteEulerLabelsService } from '~/utils/sdk-labels'
+import { LiteEulerLabelsService, loadBrowserLabelsBundle } from '~/utils/sdk-labels'
 
 const fetchMock = vi.fn()
 
@@ -34,6 +34,24 @@ describe('SDK labels source in Lite', () => {
     expect(vault.eulerLabel?.products[0]?.id).toBe('kpk-securitize')
     expect(vault.populated.labels).toBe(true)
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps SDK population on metadata-only labels when HTTP caches still contain assessments', async () => {
+    const policy = { deprecated: true, onchain: true, metadataOnly: true }
+    const bundle = { labelSet: 'public', version: 'published', publicLabels: publicLabelsFixture, sourceFetchedAt: Date.now() }
+    fetchMock.mockResolvedValueOnce({ ...bundle, source: 'v3', chainPolicy: { deprecated: false, onchain: false, metadataOnly: false } })
+      .mockResolvedValueOnce({ ...bundle, source: 'v3-metadata', chainPolicy: policy })
+    const service = new LiteEulerLabelsService(chainId => loadBrowserLabelsBundle(chainId, policy))
+    const labels = await service.fetchEulerLabelsData(1)
+    expect(labels.verifiedVaultAddresses).toEqual([])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/internal/public-labels', expect.objectContaining({ cache: 'no-store' }))
+  })
+
+  it('rejects consistently mismatched SDK labels instead of populating stale assessments', async () => {
+    fetchMock.mockResolvedValue({ chainPolicy: { deprecated: false, onchain: false, metadataOnly: false } })
+    const service = new LiteEulerLabelsService(chainId => loadBrowserLabelsBundle(chainId, { deprecated: true, onchain: true, metadataOnly: true }))
+    await expect(service.fetchEulerLabelsData(1)).rejects.toThrow('do not match')
   })
 
   it('uses a fork snapshot selected by the same server endpoint', async () => {

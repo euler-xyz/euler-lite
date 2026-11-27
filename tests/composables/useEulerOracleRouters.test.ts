@@ -113,6 +113,34 @@ describe('useEulerOracleRouters', () => {
     expect(routers.recognizedRouters.value.has('0xbbb0000000000000000000000000000000000002')).toBe(false)
   })
 
+  it('does not reuse or publish a router request from before a policy transition', async () => {
+    const previous = deferred<Array<{ chainId: number, router: string }>>()
+    const current = deferred<Array<{ chainId: number, router: string }>>()
+    const fetchOracleRouters = vi.fn().mockReturnValueOnce(previous.promise).mockReturnValueOnce(current.promise)
+    vi.doMock('~/composables/useEulerSdk', () => ({
+      getEulerSdkForChain: async () => ({ oracleAdapterService: { fetchOracleRouters } }),
+    }))
+    vi.doMock('~/composables/useV3ChainGate', () => ({ useV3ChainGate: () => ({ isV3EnabledForChain: () => true }) }))
+    const { useChainConfig, applyChainReadPolicy } = await import('~/composables/useChainConfig')
+    useChainConfig().enabledChainIds.push(1)
+    const { useEulerOracleRouters } = await import('~/composables/useEulerOracleRouters')
+    const routers = useEulerOracleRouters()
+    const oldLoad = routers.loadRecognizedRouters(1)
+    await vi.waitFor(() => expect(fetchOracleRouters).toHaveBeenCalledOnce())
+    applyChainReadPolicy(1, { deprecated: true, onchain: true, metadataOnly: true })
+    applyChainReadPolicy(1, { deprecated: true, onchain: false, metadataOnly: false })
+    const newLoad = routers.loadRecognizedRouters(1)
+    await vi.waitFor(() => expect(fetchOracleRouters).toHaveBeenCalledTimes(2))
+    previous.resolve([{ chainId: 1, router: '0xOld' }])
+    await oldLoad
+    expect(routers.recognizedRouters.value.size).toBe(0)
+    const joined = routers.loadRecognizedRouters(1)
+    current.resolve([{ chainId: 1, router: '0xNew' }])
+    await Promise.all([newLoad, joined])
+    expect(fetchOracleRouters).toHaveBeenCalledTimes(2)
+    expect(routers.recognizedRouters.value).toEqual(new Set(['0xnew']))
+  })
+
   it('resolves concurrent loads to an empty set when the SDK request fails', async () => {
     const request = deferred<Array<{ chainId: number, router: string }>>()
     const fetchOracleRouters = vi.fn().mockReturnValue(request.promise)

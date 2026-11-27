@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { computed, ref, shallowRef } from 'vue'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { computed, ref, shallowRef, watchEffect } from 'vue'
 
 describe('useVaultBadDebt', () => {
   beforeEach(() => {
@@ -58,5 +58,78 @@ describe('useVaultBadDebt', () => {
     expect(fetchMock).not.toHaveBeenCalled()
     expect(badDebt.isBadDebtEnabled.value).toBe(true)
     expect(badDebt.badDebtByChain.value.has(onchainChainId)).toBe(false)
+  })
+})
+
+describe('useVaultBadDebt after a failed load', () => {
+  const setup = async (fetchMock: ReturnType<typeof vi.fn>) => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+    vi.stubGlobal('computed', computed)
+    vi.stubGlobal('shallowRef', shallowRef)
+    vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1) }))
+    vi.stubGlobal('useEnvConfig', () => ({ enableV3Backend: true, v3ApiUrl: '/api/internal/v3' }))
+    vi.stubGlobal('useV3ChainGate', () => ({ isV3EnabledForChain: () => true }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { useVaultBadDebt } = await import('~/composables/useVaultBadDebt')
+    return useVaultBadDebt()
+  }
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('does not loop on a persistent error while watchers re-run on its state', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn(async () => new Response('unavailable', { status: 503 }))
+    const badDebt = await setup(fetchMock)
+    const stop = watchEffect(() => {
+      void badDebt.loadBadDebtForChain()
+    })
+    await vi.advanceTimersByTimeAsync(300)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(badDebt.isBadDebtLoading.value).toBe(false)
+    expect(badDebt.badDebtError.value).toBeInstanceOf(Error)
+
+    await badDebt.loadBadDebtForChain()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await badDebt.loadBadDebtForChain(1, { force: true })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    await badDebt.loadBadDebtForChain()
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    stop()
+  })
+
+  it('gives up on a response whose body stalls', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => ({
+      ok: true,
+      status: 200,
+      json: () => new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+      }),
+    }))
+    const badDebt = await setup(fetchMock)
+    const pending = badDebt.loadBadDebtForChain()
+    await vi.advanceTimersByTimeAsync(15_000)
+    await pending
+    expect(badDebt.isBadDebtLoading.value).toBe(false)
+    expect(badDebt.badDebtError.value).toBeInstanceOf(Error)
+  })
+
+  it('gives up on a request that does not answer and stops reporting loading', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+    }))
+    const badDebt = await setup(fetchMock)
+    const pending = badDebt.loadBadDebtForChain()
+    expect(badDebt.isBadDebtLoading.value).toBe(true)
+    await vi.advanceTimersByTimeAsync(15_000)
+    await pending
+    expect(badDebt.isBadDebtLoading.value).toBe(false)
+    expect(badDebt.badDebtError.value).toBeInstanceOf(Error)
   })
 })

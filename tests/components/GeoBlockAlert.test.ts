@@ -1,18 +1,19 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createSSRApp, defineComponent, h, ref } from 'vue'
 import { renderToString } from '@vue/server-renderer'
 import GeoBlockAlert from '~/components/entities/vault/GeoBlockAlert.vue'
 import FormAlertStack from '~/components/entities/vault/form/FormAlertStack.vue'
 import { __setEulerLabelsDataForTest } from '~/composables/useEulerLabels'
 import { isVaultBlockedByCountry, isVaultRestrictedByCountry, useGeoBlock } from '~/composables/useGeoBlock'
+import { ADDRESS_EXIT_ONLY_MESSAGE, ADDRESS_EXIT_ONLY_TITLE, setAddressExitOnly } from '~/composables/addressExitOnlyState'
 import { cozy, staticGeoLabels } from '~/tests/fixtures/static-geo-labels'
 
 const registry = vi.hoisted(() => ({ getVault: vi.fn() }))
 vi.mock('~/composables/useVaultRegistry', () => ({ useVaultRegistry: () => registry }))
 const chainId = ref(1)
-const render = async () => {
+const render = async (vaultAddresses: (string | undefined)[] = [cozy.address]) => {
   const app = createSSRApp({ render: () => h(FormAlertStack, {
-    vaultAddresses: [cozy.address],
+    vaultAddresses,
     isGeoBlocked: isVaultBlockedByCountry(cozy.address),
     swapRestricted: isVaultRestrictedByCountry(cozy.address),
     swapRestrictedDescription: 'Swapping into this vault is not available in your region.',
@@ -86,4 +87,41 @@ it('keeps cold policy acquisition guarded, explains availability and preserves t
   const html = await render()
   expect(html).toContain('Compliance data unavailable')
   expect(html).not.toContain('your region')
+})
+
+describe.each(['v3', 'static'] as const)('%s exit-only address', (source) => {
+  beforeEach(() => {
+    __setEulerLabelsDataForTest(source === 'static'
+      ? staticGeoLabels()
+      : { source, sourceFetchedAt: Date.now(), geoFetchedAt: Date.now(), geoContext: { chainId: 1, policies: [], productByVault: {} } })
+    setAddressExitOnly(true)
+  })
+  afterEach(() => setAddressExitOnly(false))
+
+  it.each([
+    ['a vault', [cozy.address]],
+    ['an empty vault list', []],
+    ['undefined vaults', [undefined]],
+  ] as const)('uses its own title and wording for %s', async (_case, vaults) => {
+    const html = await render([...vaults])
+    expect(html).toContain(ADDRESS_EXIT_ONLY_TITLE)
+    expect(html).toContain(ADDRESS_EXIT_ONLY_MESSAGE)
+    expect(html).not.toContain('Availability not confirmed')
+    expect(html).not.toMatch(/region|flag|screen/i)
+  })
+
+  it.each([null, undefined, 'IR'])('keeps the wording with country %s', async (country) => {
+    useGeoBlock().country.value = country
+    const html = await render()
+    expect(html).toContain(ADDRESS_EXIT_ONLY_MESSAGE)
+    expect(html).not.toMatch(/region|your country/i)
+  })
+
+  it('returns to the regional wording once the flag is down', async () => {
+    setAddressExitOnly(false)
+    useGeoBlock().country.value = 'IR'
+    const html = await render()
+    expect(html).toContain('Region restricted')
+    expect(html).not.toContain(ADDRESS_EXIT_ONLY_TITLE)
+  })
 })

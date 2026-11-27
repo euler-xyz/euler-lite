@@ -1,6 +1,7 @@
-import { createError, getRequestURL } from 'h3'
+import { createError } from 'h3'
 import { logger } from '~/server/utils/logger'
 import { safePathTemplate } from '~/server/utils/observability'
+import { getRouterPathname } from '~/server/utils/router-path'
 
 // 1 MB for RPC, 2 MB for Tenderly
 const RPC_LIMIT = 1 * 1024 * 1024
@@ -19,27 +20,27 @@ export default defineEventHandler((event) => {
     return
   }
 
-  const url = getRequestURL(event)
-  if (!url.pathname.startsWith('/api/')) {
+  const pathname = getRouterPathname(event)
+  if (!pathname.startsWith('/api/')) {
     return
   }
 
   const contentLength = event.node.req.headers['content-length']
   if (!contentLength) {
-    logger.warn({ ctx: 'body-limit', method, pathTemplate: safePathTemplate(url.pathname), reason: 'missing-content-length' }, 'request rejected')
+    logger.warn({ ctx: 'body-limit', method, pathTemplate: safePathTemplate(pathname), reason: 'missing-content-length' }, 'request rejected')
     throw createError({ statusCode: 411, statusMessage: 'Length Required' })
   }
 
   const length = parseInt(contentLength, 10)
   if (!Number.isInteger(length) || length < 0) {
-    logger.warn({ ctx: 'body-limit', method, pathTemplate: safePathTemplate(url.pathname), reason: 'invalid-content-length' }, 'request rejected')
+    logger.warn({ ctx: 'body-limit', method, pathTemplate: safePathTemplate(pathname), reason: 'invalid-content-length' }, 'request rejected')
     throw createError({ statusCode: 400, statusMessage: 'Invalid Content-Length' })
   }
 
-  const limit = getLimit(url.pathname)
+  const limit = getLimit(pathname)
   if (length > limit) {
     logger.warn(
-      { ctx: 'body-limit', method, pathTemplate: safePathTemplate(url.pathname), contentLength: length, limit, reason: 'payload-too-large' },
+      { ctx: 'body-limit', method, pathTemplate: safePathTemplate(pathname), contentLength: length, limit, reason: 'payload-too-large' },
       'request rejected',
     )
     throw createError({

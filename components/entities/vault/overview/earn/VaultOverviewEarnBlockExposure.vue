@@ -13,9 +13,11 @@ import { getAssetUsdValue } from '~/utils/sdk-prices'
 import {
   getCollateralExposureGroups,
   getCollateralExposurePairs,
+  sumOpenInterestUsd,
   type CollateralExposureGroup,
 } from '~/utils/vault/collateral-exposure'
 import {
+  getHeldSupplyShare,
   getVaultHeaderAssets,
   resolveVaultExposureDisplay,
   type ExposureValueState,
@@ -39,6 +41,7 @@ const {
   isLoaded: isOpenInterestLoaded,
   isOpenInterestEnabled,
 } = useCollateralOpenInterest()
+const { getVaultBadDebt, isBadDebtEnabled, isBadDebtLoading, loadBadDebtForChain } = useVaultBadDebt()
 const { isEscrowLoadedOnce, isMarketDataResolved } = useVaults()
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -49,6 +52,7 @@ const isLoading = ref(false)
 const exposureUsdPrices = ref<Map<string, number>>(new Map())
 const unavailableExposureUsdPrices = ref<Set<string>>(new Set())
 const exposureCapUsdPrices = ref<Map<string, number>>(new Map())
+const strategyBorrowsUsd = ref<Map<string, number>>(new Map())
 let priceLoadId = 0
 
 const UINT136_MAX = 2n ** 136n - 1n
@@ -96,28 +100,30 @@ const load = async () => {
 
 const loadExposureUsdPrices = async () => {
   const loadId = ++priceLoadId
-  const results = await Promise.all(exposureList.value.map(async (exposure) => {
-    const exposureVault = getExposureVaultByAddress(exposure.address)
+  const results = await Promise.all(exposureRows.value.map(async ({ exposure, vault: exposureVault }) => {
     if (!exposureVault) return null
 
-    const [allocationUsd, capUsd] = await Promise.all([
+    const [allocationUsd, capUsd, borrowsUsd] = await Promise.all([
       getAssetUsdValue(exposure.allocatedAssets, exposureVault, 'off-chain'),
       isUnlimitedCap(exposure)
         ? Promise.resolve(undefined)
         : getAssetUsdValue(exposure.allocationCap.current, exposureVault, 'off-chain'),
+      getAssetUsdValue(exposureVault.totalBorrowed, exposureVault, 'off-chain'),
     ])
 
-    return { exposure, allocationUsd, capUsd }
+    return { exposure, allocationUsd, capUsd, borrowsUsd }
   }))
   if (loadId !== priceLoadId) return
 
   const newPrices = new Map<string, number>()
   const newUnavailablePrices = new Set<string>()
   const newCapPrices = new Map<string, number>()
+  const newBorrowsUsd = new Map<string, number>()
   results.forEach((result) => {
     if (!result) return
 
-    const { exposure, allocationUsd, capUsd } = result
+    const { exposure, allocationUsd, capUsd, borrowsUsd } = result
+    if (borrowsUsd !== undefined) newBorrowsUsd.set(exposure.address.toLowerCase(), borrowsUsd)
     if (allocationUsd !== undefined) {
       newPrices.set(exposure.address.toLowerCase(), allocationUsd)
     }
@@ -131,6 +137,7 @@ const loadExposureUsdPrices = async () => {
   exposureUsdPrices.value = newPrices
   unavailableExposureUsdPrices.value = newUnavailablePrices
   exposureCapUsdPrices.value = newCapPrices
+  strategyBorrowsUsd.value = newBorrowsUsd
 }
 
 const getExposureVaultByAddress = (address: string) => {
@@ -198,6 +205,10 @@ const strategyExposureDisplayByAddress = computed(() => {
       totalSupplyState,
       utilization: strategyVault.utilization,
       acceptedCollateralCount: strategyVault.collaterals.length,
+      badDebtUsd: getVaultBadDebt(strategyVault.address)?.badDebtUsd,
+      badDebtLoading: isBadDebtLoading.value,
+      openInterestTotalUsd: sumOpenInterestUsd(getOpenInterestForVault(strategyVault.address)),
+      vaultShare: getHeldSupplyShare(row.exposure.allocatedAssets, strategyVault.totalAssets),
     }))
   }
   return result
@@ -207,14 +218,21 @@ const getStrategyExposureDisplay = (strategyVault: EVault | undefined): VaultExp
   (strategyVault && strategyExposureDisplayByAddress.value.get(strategyVault.address.toLowerCase()))
   || { valueState: 'unavailable', items: [] }
 
-watch(isMarketDataResolved, () => {
-  if (!exposureVaults.value.length) return
-  void loadExposureUsdPrices()
-})
+const repriceExposures = () => {
+  if (!exposureRows.value.some(row => row.vault)) return
+  loadExposureUsdPrices().catch(e => logWarn('VaultOverviewEarnBlockExposure/loadExposureUsdPrices', e))
+}
+
+watch(isMarketDataResolved, repriceExposures)
+watch(
+  () => exposureRows.value.map(row => [row.vault, row.vault?.totalBorrowed, row.vault?.totalAssets, row.exposure.allocatedAssets, row.exposure.allocationCap.current]),
+  repriceExposures,
+)
 
 watchEffect(() => {
-  if (!exposureRows.value.length || !isOpenInterestEnabled.value) return
-  void loadOpenInterest()
+  if (!exposureRows.value.length) return
+  if (isOpenInterestEnabled.value) void loadOpenInterest()
+  if (isBadDebtEnabled.value) void loadBadDebtForChain()
 })
 
 const getAllocationPercentage = (exposure: EulerEarnStrategyInfo) => {
@@ -243,6 +261,11 @@ const strategyHeaderAssets = (strategyVault: EVault) => getVaultHeaderAssets(
   strategyVault,
   { enabled: isOpenInterestEnabled.value, loaded: isOpenInterestLoaded.value, hasError: hasOpenInterestError.value },
   () => collateralExposureGroupsByStrategy.value.get(getAddress(strategyVault.address)) ?? [],
+  {
+    badDebtUsd: getVaultBadDebt(strategyVault.address)?.badDebtUsd,
+    openInterestTotalUsd: sumOpenInterestUsd(getOpenInterestForVault(strategyVault.address)),
+    liveDebtUsd: strategyBorrowsUsd.value.get(strategyVault.address.toLowerCase()),
+  },
 )
 
 const headerAssetsByStrategy = computed(() => new Map(exposureRows.value

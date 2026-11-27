@@ -10,6 +10,7 @@ vi.mock('~/server/utils/labels-view', async original => ({
   buildLabelsView: mocks.view,
 }))
 vi.mock('~/server/utils/verified-vaults', () => ({ refreshVerifiedAddressSet: mocks.verified }))
+vi.mock('~/server/utils/chain-policy', () => ({ loadServerChainPolicyKey: async (chainId: number) => `${chainId}:active` }))
 
 const address = getAddress(KPK_VAULT)
 

@@ -2,8 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   enabledChainIds: [1, 137, 146, 8453],
+  catalog: { indexedChainIds: [1, 137, 146, 8453] } as { indexedChainIds: number[] } | undefined,
+  requiresCatalog: true,
   loadEulerChains: vi.fn((): Promise<unknown[]> => Promise.resolve([])),
   peekEulerChains: vi.fn((): unknown[] | undefined => undefined),
+}))
+
+vi.mock('~/server/utils/v3-chain-catalog', () => ({
+  loadV3ChainCatalog: async () => mocks.catalog,
+  peekV3ChainCatalog: () => mocks.catalog,
+  requiresV3ChainCatalog: () => mocks.requiresCatalog,
 }))
 
 vi.mock('~/server/api/internal/euler-chains.get', () => ({
@@ -28,6 +36,8 @@ interface InjectedChainConfig {
   enabledChainIds: number[]
   deprecatedChainIds: number[]
   onchainSdkChainIds: number[]
+  metadataOnlyChainIds: number[]
+  unresolvedChainIds: number[]
   explorerUrls: Record<string, string>
 }
 
@@ -53,6 +63,12 @@ describe('chain-config plugin registry status', () => {
     for (const key of Object.keys(process.env).filter(key => /^RPC_URL_\d+$/.test(key))) vi.stubEnv(key, undefined)
     for (const chainId of mocks.enabledChainIds) vi.stubEnv(`RPC_URL_${chainId}`, `https://rpc.example/${chainId}`)
     mocks.peekEulerChains.mockReturnValue(REGISTRY)
+    mocks.catalog = { indexedChainIds: [1, 137, 146, 8453] }
+    mocks.requiresCatalog = true
+    vi.stubEnv('DEPRECATED_CHAINS', '')
+    vi.stubEnv('ONCHAIN_SDK_CHAINS', '')
+    vi.stubEnv('LABELS_SOURCE', 'v3')
+    vi.stubEnv('STATIC_LABELS_BASE_URL', 'https://labels.example.test')
   })
 
   afterEach(() => {
@@ -95,6 +111,60 @@ describe('chain-config plugin registry status', () => {
     const config = await render()
     expect(config.deprecatedChainIds).toEqual([1, 146])
     expect(config.onchainSdkChainIds).toEqual([146])
+    expect(config.metadataOnlyChainIds).toEqual([])
+  })
+
+  it('injects deprecation independently of V3 routing', async () => {
+    const { render } = await bootPlugin()
+    for (const status of ['production', 'deprecated', 'production']) {
+      mocks.peekEulerChains.mockReturnValue([{ chainId: 146, status }])
+      const config = await render()
+      const expected = status === 'deprecated' ? [146] : []
+      expect(config.deprecatedChainIds).toEqual(expected)
+      expect(config.onchainSdkChainIds).toEqual([])
+      expect(config.metadataOnlyChainIds).toEqual([])
+    }
+  })
+
+  it('marks cold catalog policy unresolved without inferring retirement and resolves it on a later render', async () => {
+    mocks.catalog = undefined
+    const { render } = await bootPlugin()
+    const config = await render()
+    expect(config.unresolvedChainIds).toEqual(config.enabledChainIds)
+    expect(config.onchainSdkChainIds).toEqual([])
+    expect(config.metadataOnlyChainIds).toEqual([])
+    mocks.catalog = { indexedChainIds: [1, 137, 146, 8453] }
+    expect((await render()).unresolvedChainIds).toEqual([])
+  })
+
+  it('does not hold static deployments without V3 for an unnecessary catalog', async () => {
+    mocks.catalog = undefined
+    mocks.requiresCatalog = false
+    vi.stubEnv('LABELS_SOURCE', 'static')
+    const { render } = await bootPlugin()
+    expect((await render()).unresolvedChainIds).toEqual([])
+  })
+
+  it('injects catalog retirement and reactivation while lifecycle stays deprecated', async () => {
+    mocks.peekEulerChains.mockReturnValue([{ chainId: 146, status: 'deprecated' }])
+    const { render } = await bootPlugin()
+    for (const indexed of [true, false, true]) {
+      mocks.catalog = { indexedChainIds: indexed ? [146] : [] }
+      const config = await render()
+      expect(config.deprecatedChainIds).toEqual([146])
+      expect(config.onchainSdkChainIds).toEqual(indexed ? [] : [146])
+      expect(config.metadataOnlyChainIds).toEqual(indexed ? [] : [146])
+    }
+  })
+
+  it('preserves explicit static-label routing on deprecated chains', async () => {
+    vi.stubEnv('LABELS_SOURCE', 'static')
+    vi.stubEnv('ONCHAIN_SDK_CHAINS', '1')
+    const { render } = await bootPlugin()
+    const config = await render()
+    expect(config.deprecatedChainIds).toEqual([146])
+    expect(config.onchainSdkChainIds).toEqual([1])
+    expect(config.metadataOnlyChainIds).toEqual([])
   })
 
   it('falls back to the env-derived config when no manifest is cached', async () => {
@@ -106,6 +176,7 @@ describe('chain-config plugin registry status', () => {
     const config = await render()
     expect(config.enabledChainIds).toEqual([1, 137, 146, 8453])
     expect(config.deprecatedChainIds).toEqual([146])
+    expect(config.unresolvedChainIds).toEqual(config.enabledChainIds)
     expect(config.explorerUrls).toEqual({})
   })
 

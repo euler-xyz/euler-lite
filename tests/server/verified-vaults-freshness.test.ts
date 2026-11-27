@@ -3,6 +3,7 @@ import { getAddress } from 'viem'
 import { buildLabelsView } from '~/server/utils/labels-view'
 
 vi.mock('~/server/utils/labels-view', () => ({ buildLabelsView: vi.fn() }))
+vi.mock('~/server/utils/chain-policy', () => ({ loadServerChainPolicyKey: async (chainId: number) => `${chainId}:active` }))
 
 const VAULT = getAddress('0x00000000000000000000000000000000000000a1')
 const DAY_MS = 24 * 60 * 60_000

@@ -14,9 +14,10 @@ import { INTEREST_RATE_MODEL_TYPE } from '~/entities/constants'
 import { getVaultBorrowApy, getVaultSupplyApy } from '~/utils/vault-display'
 import { computeSupplyApy, computeBorrowApy, type ApyVisibilitySettings } from '~/utils/collateralOptions'
 import { getMaxLiquidationDiscountDisplayPercent } from '~/utils/vault/liquidation'
-import { isVaultBorrowable } from '~/utils/vault/classification'
+import { isBorrowPairPaused, isVaultBorrowable } from '~/utils/vault/classification'
 import { formatBadDebtHint, formatBadDebtUsd, type VaultBadDebtCacheEntry } from '~/utils/vault-bad-debt'
 import { getRingBlocks, getRingSlots, type RingLink, type RingSlots } from '~/utils/discovery-graph-layout'
+import type { CollateralVaultResolver } from '~/utils/vault/collateral-exposure'
 
 // ============================================================
 // Types & Constants
@@ -267,6 +268,18 @@ export const findVault = (market: MarketGroup, address: string): EVault | Securi
   return null
 }
 
+export const isMarketPairPaused = (market: MarketGroup, collateralAddr: string, liabilityAddr: string): boolean => {
+  const liability = findVault(market, liabilityAddr)
+  return !!liability && isEVault(liability) && isBorrowPairPaused(liability, findVault(market, collateralAddr))
+}
+
+/** Members of an on-demand market are never written to the vault registry, so the market answers first. */
+export const getMarketVaultResolver = (
+  market: MarketGroup,
+  fallback: CollateralVaultResolver,
+): CollateralVaultResolver =>
+  address => findVault(market, address) ?? fallback(address)
+
 // ============================================================
 // Mini Relationship Graph
 // ============================================================
@@ -286,6 +299,7 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
 
   const directedEdges = new Set<string>()
   const displayEdges = new Set<string>()
+  const borrowableEdges = new Set<string>()
   const connectedAddresses = new Set<string>()
   const connectedUnknownAddresses = new Set<string>()
 
@@ -307,6 +321,7 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
       }
       if (isLiveCollateralEdge(ltv)) {
         displayEdges.add(`${colAddr}:${liabAddr}`)
+        if (ltv.borrowLTV > 0) borrowableEdges.add(`${colAddr}:${liabAddr}`)
         connectedAddresses.add(liabAddr)
         if (isKnown) connectedAddresses.add(colAddr)
         else connectedUnknownAddresses.add(colAddr)
@@ -392,8 +407,13 @@ export const getMiniDiagram = (market: MarketGroup): MiniDiagramData => {
     const toNode = nodeMap.get(toAddr)
     if (!fromNode || !toNode) continue
 
-    const reverseExists = displayEdges.has(`${toAddr}:${fromAddr}`)
-    edges.push({ from: fromNode, to: toNode, mutual: reverseExists })
+    const reverseKey = `${toAddr}:${fromAddr}`
+    edges.push({
+      from: fromNode,
+      to: toNode,
+      mutual: displayEdges.has(reverseKey),
+      borrowable: borrowableEdges.has(key) || borrowableEdges.has(reverseKey),
+    })
   }
 
   const viewWidth = (cx + rx + 8)
@@ -1041,7 +1061,10 @@ export const STATS_ROWS: AttributeRow[] = [
       return {
         display: formatBadDebtUsd(badDebt),
         numeric: badDebt.badDebtUsd,
-        hint: formatBadDebtHint(badDebt, usd?.borrowUsd),
+        hint: formatBadDebtHint(badDebt, {
+          supplyUsd: usd?.supplyHasPrice ? usd.supplyUsd : undefined,
+          borrowsUsd: usd?.supplyHasPrice ? usd.borrowUsd : undefined,
+        }),
         kind: 'text',
       }
     },

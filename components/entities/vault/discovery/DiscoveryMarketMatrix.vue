@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { isEVault } from '@eulerxyz/euler-v2-sdk'
 import { getMaxMultiplier, getMaxRoe } from '~/utils/leverage'
-import { findVault, formatMetricValue, getCellBgColor, isMatrixCompatibleVault, type CollateralMatrixData, type MatrixCell, type DotMetric, type EnhancedCellApys } from '~/utils/discoveryCalculations'
+import { findVault, formatMetricValue, getCellBgColor, isMarketPairPaused, isMatrixCompatibleVault, type CollateralMatrixData, type MatrixCell, type DotMetric, type EnhancedCellApys } from '~/utils/discoveryCalculations'
 import { buildOracleAdapterViews, collectOracleRouteSteps, type OracleAdapterView } from '~/utils/oracle-adapter-views'
 import type { MarketGroup } from '~/entities/lend-discovery'
 import { withVaultIntrinsicApy } from '~/utils/vault-intrinsic-apy'
 import { areTokenAddressesCorrelatedByTags } from '~/utils/token-categories'
+import { getChainPolicyGeneration } from '~/composables/useChainConfig'
 
 const props = defineProps<{
   market: MarketGroup
@@ -46,6 +47,7 @@ const hoveredCell = ref<{
 
 const unavailableRoeCellLabel = 'Max ROE is unavailable for uncorrelated pairs. Compare Net APY instead.'
 const unavailableMultiplierCellLabel = 'Max multiplier is unavailable for uncorrelated pairs.'
+const pausedPairCellLabel = 'This pair is paused: the liability does not lend or the collateral does not take deposits.'
 
 // Row/column highlighting helpers — make it easy to scan a cell back to its
 // row label and column header. A row is "highlighted" when it owns either
@@ -126,12 +128,14 @@ const getCellMetricValue = (
     case 'lltv':
       return Number(ltvToPercent(cell.ltv.currentLiquidationLTV))
     case 'multiplier':
-      return isCorrelatedCell(collateralAddr, liabilityAddr) ? getMaxMultiplier(cell.ltv.borrowLTV) : Number.NaN
+      return isCorrelatedCell(collateralAddr, liabilityAddr) && !isMarketPairPaused(props.market, collateralAddr, liabilityAddr)
+        ? getMaxMultiplier(cell.ltv.borrowLTV)
+        : Number.NaN
     case 'net-apy':
       return computeEnhancedApys(cell, collateralAddr, liabilityAddr).netApy
     case 'roe': {
-      const apys = computeEnhancedApys(cell, collateralAddr, liabilityAddr)
-      return isCorrelatedCell(collateralAddr, liabilityAddr) ? apys.roe : Number.NaN
+      if (!isCorrelatedCell(collateralAddr, liabilityAddr) || isMarketPairPaused(props.market, collateralAddr, liabilityAddr)) return Number.NaN
+      return computeEnhancedApys(cell, collateralAddr, liabilityAddr).roe
     }
     default:
       return 0
@@ -154,10 +158,16 @@ const isUnavailableMultiplierCell = (
   && !!props.matrix.cells.get(collateralAddr)?.get(liabilityAddr)
   && !isCorrelatedCell(collateralAddr, liabilityAddr)
 
+const isPausedMetricCell = (collateralAddr: string, liabilityAddr: string): boolean =>
+  (props.dotMetric === 'roe' || props.dotMetric === 'multiplier')
+  && !!props.matrix.cells.get(collateralAddr)?.get(liabilityAddr)
+  && isMarketPairPaused(props.market, collateralAddr, liabilityAddr)
+
 const getUnavailableMetricLabel = (
   collateralAddr: string,
   liabilityAddr: string,
 ): string | undefined => {
+  if (isPausedMetricCell(collateralAddr, liabilityAddr)) return pausedPairCellLabel
   if (isUnavailableRoeCell(collateralAddr, liabilityAddr)) return unavailableRoeCellLabel
   if (isUnavailableMultiplierCell(collateralAddr, liabilityAddr)) return unavailableMultiplierCellLabel
   return undefined
@@ -261,7 +271,7 @@ const onCellClick = (collateralAddr: string, liabilityAddr: string) => {
 // bounded caching, so returning to this view reuses fresh data within its TTL
 // and revalidates after expiry.
 watch(
-  [() => props.dotMetric, chainId],
+  [() => props.dotMetric, chainId, () => getChainPolicyGeneration(chainId.value)],
   ([metric, currentChainId]) => {
     if (metric !== 'oracle' || !currentChainId) return
     void loadAllOracleAdapters(currentChainId)
@@ -504,8 +514,16 @@ watch(
                     name="sparks"
                     class="!w-10 !h-10 text-accent-500 shrink-0"
                   />
+                  <UiHoverPreviewTooltip
+                    v-if="isPausedMetricCell(row.address, col.address)"
+                    title="Pair paused"
+                    :text="pausedPairCellLabel"
+                    placement="top-start"
+                  >
+                    <span class="text-p5 whitespace-nowrap text-content-muted">-</span>
+                  </UiHoverPreviewTooltip>
                   <span
-                    v-if="isUnavailableMetricCell(row.address, col.address)"
+                    v-else-if="isUnavailableMetricCell(row.address, col.address)"
                     class="text-p5 whitespace-nowrap text-content-muted"
                   >
                     -

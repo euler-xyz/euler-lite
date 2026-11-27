@@ -1,4 +1,5 @@
 import type { VaultAssessmentFinding } from '@eulerxyz/euler-v2-sdk'
+import type { RouteLocationRaw } from 'vue-router'
 import {
   getVaultCheckFindingRank,
   getVaultCheckTitle,
@@ -13,6 +14,13 @@ export interface VaultCheckRow {
   findings: VaultAssessmentFinding[]
 }
 
+export interface VaultCheckAdapterView {
+  address: string
+  oracleLink?: RouteLocationRaw
+  oracleHref?: string
+  findings: Array<{ key: string, text: string, severity: string | null }>
+}
+
 export interface VaultCheckView {
   key: string
   title: string
@@ -21,6 +29,7 @@ export interface VaultCheckView {
   icon: string
   parts: NonNullable<VaultCheckLine['parts']>
   tag: string | null
+  adapters?: VaultCheckAdapterView[]
 }
 
 export interface VaultCheckRowView {

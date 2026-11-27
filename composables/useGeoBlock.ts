@@ -15,6 +15,7 @@ import { matchesHostedGeo } from '~/utils/geo-policies'
 import { getEulerGeoContext, getEulerLabelsVersion } from '~/composables/useEulerLabels'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { SANCTIONED_COUNTRIES, COUNTRY_GROUPS } from '~/entities/constants'
+import { ADDRESS_EXIT_ONLY_MESSAGE, isAddressExitOnly } from '~/composables/addressExitOnlyState'
 
 // undefined = not yet loaded, null = loaded but country unknown, string = loaded with country
 const country = ref<string | null | undefined>(undefined)
@@ -62,7 +63,7 @@ export type AssetLike = string | { address?: string, symbol?: string, name?: str
 
 /** Resolved SDK vaults carry the chain that gives their asset metadata meaning. */
 export type VaultGeoInput = string | { address: string, chainId: number, asset?: AssetLike }
-export type VaultGeoBlockReason = 'region' | 'country-unavailable' | 'policy-unavailable' | 'asset-unavailable' | 'chain-mismatch'
+export type VaultGeoBlockReason = 'address-exit-only' | 'region' | 'country-unavailable' | 'policy-unavailable' | 'asset-unavailable' | 'chain-mismatch'
 
 export interface VaultGeoPolicyOptions {
   /** Prefer the caller's already-resolved, chain-scoped vault asset. */
@@ -245,11 +246,12 @@ const resolveVaultGeoInput = (vault: VaultGeoInput, opts?: Pick<VaultGeoPolicyOp
   return { address, asset }
 }
 
-/** Only `region` is affirmative geographic evidence; other reasons describe missing context. */
+/** Only `region` is affirmative geographic evidence; `address-exit-only` is not geographic and the rest describe missing context. */
 export const getVaultGeoBlockReason = (
   vault: VaultGeoInput,
   opts?: Pick<VaultGeoPolicyOptions, 'asset'>,
 ): VaultGeoBlockReason | undefined => {
+  if (isAddressExitOnly.value) return 'address-exit-only'
   if (country.value == null) return 'country-unavailable'
   if (isCountryInList(SANCTIONED_COUNTRIES)) return 'region'
   if (isStaleVaultGeoInput(vault)) return 'chain-mismatch'
@@ -274,6 +276,7 @@ export const getVaultGeoBlockReason = (
 
 /** Explain unavailable evidence without asserting that a geographic rule matched. */
 export const getVaultGeoUnavailableReason = (...vaults: (VaultGeoInput | undefined)[]): string | undefined => {
+  if (isAddressExitOnly.value) return ADDRESS_EXIT_ONLY_MESSAGE
   const reasons = vaults.filter(vault => vault !== undefined).map(vault => getVaultGeoBlockReason(vault))
   if (reasons.includes('region')) return undefined
   if (reasons.includes('country-unavailable')) return 'Your country could not be determined. Please retry.'
@@ -343,7 +346,9 @@ export const getVaultTags = (
   const tags: string[] = []
   const reason = getVaultGeoBlockReason(vaultAddress)
   const policyResolved = reason === undefined
-  const blocked = reason !== undefined && reason !== 'policy-unavailable'
+  // Repaying from collateral or a deposit is an exit, so an exit-only address must be able to pick its source.
+  const isExitSource = reason === 'address-exit-only' && context === 'supply-source'
+  const blocked = reason !== undefined && reason !== 'policy-unavailable' && !isExitSource
   const address = typeof vaultAddress === 'string' ? vaultAddress : vaultAddress.address
   const restricted = !blocked && isVaultRestrictedByCountry(vaultAddress)
 

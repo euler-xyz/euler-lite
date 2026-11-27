@@ -15,16 +15,21 @@
  * The country ref and current SDK labels snapshot are shared across imports —
  * each test resets them explicitly in beforeEach.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { EulerLabelAssetPatternRule } from '@eulerxyz/euler-v2-sdk'
 import {
   useGeoBlock,
   clearAssetGeoCache,
+  getVaultGeoBlockReason,
+  getVaultGeoUnavailableReason,
+  getVaultTags,
+  isAnyVaultBlockedByCountry,
   isAssetBlockedByCountry,
   isAssetRestrictedByCountry,
   isVaultBlockedByCountry,
   isVaultRestrictedByCountry,
 } from '~/composables/useGeoBlock'
+import { setAddressExitOnly } from '~/composables/addressExitOnlyState'
 import { __setEulerLabelsDataForTest, getCurrentEulerLabelsData } from '~/composables/useEulerLabels'
 
 // Mock the vault registry before the module under test imports it.
@@ -393,5 +398,82 @@ describe('isVaultRestrictedByCountry — asset-level OR', () => {
       asset: { address: '0xdeadbeef', symbol: 'OMPL', name: 'Ampleforth' },
     })
     expect(isVaultRestrictedByCountry(vault)).toBe(true)
+  })
+})
+
+describe('exit-only address', () => {
+  const VAULT = '0x7777777777777777777777777777777777777777'
+  const OTHER_VAULT = '0x8888888888888888888888888888888888888888'
+  const resolvedVault = { address: VAULT, chainId: 1, asset: { address: USDC, symbol: 'USDC', name: 'USD Coin' } }
+
+  beforeEach(() => {
+    resetState()
+    setCountry('DE')
+    getVaultMock.mockReturnValue({ asset: { address: USDC, symbol: 'USDC', name: 'USD Coin' } })
+    setAddressExitOnly(true)
+  })
+
+  afterEach(() => {
+    setAddressExitOnly(false)
+  })
+
+  it.each([
+    ['a known country', 'DE'],
+    ['a sanctioned country', 'IR'],
+    ['a loading country', undefined],
+    ['an unknown country', null],
+  ])('reports address-exit-only first with %s', (_case, country) => {
+    setCountry(country)
+    expect(getVaultGeoBlockReason(VAULT)).toBe('address-exit-only')
+    expect(getVaultGeoBlockReason(resolvedVault)).toBe('address-exit-only')
+    expect(isVaultBlockedByCountry(VAULT)).toBe(true)
+  })
+
+  it('blocks every vault, including one with no registry entry or from another chain', () => {
+    getVaultMock.mockReturnValue(undefined)
+    expect(isVaultBlockedByCountry(VAULT)).toBe(true)
+    expect(isVaultBlockedByCountry({ ...resolvedVault, chainId: 8453 })).toBe(true)
+    expect(isAnyVaultBlockedByCountry(VAULT, OTHER_VAULT)).toBe(true)
+  })
+
+  it('is inert with the flag down', () => {
+    setAddressExitOnly(false)
+    expect(getVaultGeoBlockReason(VAULT)).toBeUndefined()
+    expect(isVaultBlockedByCountry(VAULT)).toBe(false)
+    expect(getVaultGeoUnavailableReason(VAULT)).toBeUndefined()
+    expect(getVaultTags(VAULT).disabled).toBe(false)
+  })
+
+  it('disables browse and swap-target vaults without a Restricted chip', () => {
+    expect(getVaultTags(VAULT)).toEqual({ tags: [], disabled: true })
+    expect(getVaultTags(VAULT, 'browse')).toEqual({ tags: [], disabled: true })
+    expect(getVaultTags(VAULT, 'swap-target')).toEqual({ tags: [], disabled: true })
+  })
+
+  it('keeps a repayment source selectable', () => {
+    expect(getVaultTags(VAULT, 'supply-source')).toEqual({ tags: [], disabled: false })
+  })
+
+  it('leaves soft restrictions and asset-level helpers on real geo only', () => {
+    expect(isVaultRestrictedByCountry(VAULT)).toBe(false)
+    expect(isAssetBlockedByCountry(USDC)).toBe(false)
+    expect(isAssetRestrictedByCountry(USDC)).toBe(false)
+  })
+
+  it('explains itself without regional wording, even with no vault to inspect', () => {
+    for (const reason of [getVaultGeoUnavailableReason(VAULT), getVaultGeoUnavailableReason(undefined), getVaultGeoUnavailableReason()]) {
+      expect(reason).toMatch(/can only repay and withdraw/)
+      expect(reason).not.toMatch(/region|flag|screen/i)
+    }
+  })
+
+  it('takes over a real geographic block once the flag is up, and hands it back', () => {
+    setCountry('IR')
+    expect(getVaultGeoUnavailableReason(VAULT)).toMatch(/can only repay and withdraw/)
+    expect(getVaultTags(VAULT, 'browse').tags).not.toContain('Restricted')
+
+    setAddressExitOnly(false)
+    expect(getVaultGeoBlockReason(VAULT)).toBe('region')
+    expect(getVaultTags(VAULT, 'browse').tags).toContain('Restricted')
   })
 })

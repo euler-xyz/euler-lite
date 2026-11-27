@@ -7,7 +7,10 @@ import { isAbortError } from '~/utils/errorHandling'
 
 export interface ScreeningResult {
   addressIsSuspicious: boolean
+  exitOnly: boolean
 }
+
+const failClosed: ScreeningResult = { addressIsSuspicious: true, exitOnly: false }
 
 interface ScreeningVerdictData {
   address: string
@@ -16,6 +19,8 @@ interface ScreeningVerdictData {
   resolvedChain: string
   cached: boolean
   ruleVersion: string
+  // Absent on older v3 releases; never required below.
+  exitOnly?: unknown
 }
 
 // Narrow the untrusted upstream payload to the complete documented success
@@ -82,7 +87,8 @@ function isAllowedScreeningUri(uri: string): boolean {
  * `data.addressIsSuspicious: false` **for the requested address** reports the
  * address as suspicious — missing or non-TLS configuration, upstream errors,
  * timeouts, redirects, malformed or ambiguous verdicts, and verdicts echoing
- * a different address included.
+ * a different address included. `exitOnly` is true only on a complete
+ * flagged verdict for the requested address that carries a strict `true`.
  *
  * `chain` is sent as `all` explicitly: TRM screens the address across every
  * chain it supports in one request, and the explicit value keeps that
@@ -106,10 +112,10 @@ export async function screenAddressUpstream(
   if (!screeningUri && !apiKey) {
     if (process.env.DOPPLER_ENVIRONMENT === 'prd') {
       logger.warn({ ctx: logCtx }, 'address screening not configured in production — failing closed')
-      return { addressIsSuspicious: true }
+      return failClosed
     }
     logger.info({ ctx: logCtx }, 'address screening not configured — screening disabled, address passes')
-    return { addressIsSuspicious: false }
+    return { addressIsSuspicious: false, exitOnly: false }
   }
 
   if (!screeningUri || !apiKey) {
@@ -117,7 +123,7 @@ export async function screenAddressUpstream(
       { ctx: logCtx },
       'only one of ADDRESS_SCREENING_URI / ADDRESS_SCREENING_API_KEY is set — failing closed',
     )
-    return { addressIsSuspicious: true }
+    return failClosed
   }
 
   if (!isAllowedScreeningUri(screeningUri)) {
@@ -125,7 +131,7 @@ export async function screenAddressUpstream(
       { ctx: logCtx },
       'ADDRESS_SCREENING_URI is not https (or local http) — refusing to send the API key, failing closed',
     )
-    return { addressIsSuspicious: true }
+    return failClosed
   }
 
   try {
@@ -143,23 +149,25 @@ export async function screenAddressUpstream(
     // envelope — any other 2xx is not a verdict.
     if (resp.status !== 200) {
       logger.warn({ ctx: logCtx, status: resp.status }, 'screening API non-200 response — failing closed')
-      return { addressIsSuspicious: true }
+      return failClosed
     }
 
     const body: unknown = await resp.json()
     const data = extractVerdictData(body)
     const addressMatches
       = data !== null && data.address.toLowerCase() === address.toLowerCase()
-    const isSuspicious = data === null || data.addressIsSuspicious !== false || !addressMatches
+    // A clean verdict that also claims exit-only is ambiguous: never let it read as full access.
+    const isSuspicious = data === null || data.addressIsSuspicious !== false || !addressMatches || data.exitOnly === true
+    const exitOnly = addressMatches && data.addressIsSuspicious === true && data.exitOnly === true
 
     if (isSuspicious) {
       logger.warn(
-        { ctx: logCtx, addressHash: hashIdentifier(address), addressMatches },
+        { ctx: logCtx, addressHash: hashIdentifier(address), addressMatches, exitOnly },
         'flagged, malformed, or ambiguous screening response — failing closed',
       )
     }
 
-    return { addressIsSuspicious: isSuspicious }
+    return { addressIsSuspicious: isSuspicious, exitOnly }
   }
   catch (error) {
     if (isAbortError(error)) {
@@ -168,6 +176,6 @@ export async function screenAddressUpstream(
     else {
       logger.warn({ ctx: logCtx, err: error }, 'screening API error — failing closed')
     }
-    return { addressIsSuspicious: true }
+    return failClosed
   }
 }
