@@ -312,6 +312,39 @@ Quote orchestration and UI selection remain in Lite:
 - Repay, borrow, collateral, multiply, supply, and withdraw composables provide workflow-specific request parameters and review text.
 - `useSwapPriceImpact({ quote, fromVault?, toVault? })` watches the **live** selected quote. It converts in/out to USD via `getTokenUsdValue` and sets `priceImpact` to `(outUsd / inUsd - 1) * 100`. Missing quote, zero amounts, or missing USD values yield `null`. The watcher is race-guarded: a stale USD lookup cannot restore an old impact after the quote is replaced or cleared. Pass the selected-quote ref, not a copied amount — multiply must refresh when the same input produces a better/worse `amountOut`.
 
+### Account-context invalidation
+
+A selected quote, its pending provider responses, and any prepared plan must not survive a change that would make Review execute for a different owner, wallet, Spy Mode, or chain. Quote requests are debounced 500 ms; invalidation is **synchronous** (`flush: 'sync'`), so the 500 ms window cannot leave the previous quote Review-able.
+
+`useSwapQuotesParallel().reset()` (or the form wrapper that calls it) aborts the in-flight `AbortController`, bumps the race guard, and clears cards, the selected provider, and `lastQuoteRequest`. A response that arrives after abort cannot be selected. Each replacement request then binds `chainId` and `origin` (`address` if connected, otherwise `effectiveAddress` / the zero address) while the flow keeps its own `accountIn` / `accountOut` / `receiver` / `unusedInputReceiver` semantics.
+
+Watched keys on the swap-capable forms in the table (except wallet-swap repay): `effectiveAddress`, `address`, `isSpyMode`, `chainId`. Position-scoped flows also watch the Euler sub-account (`position.subAccount` on supply/withdraw, `subAccount` on Lend withdraw, `multiplySubAccount` on existing-position Multiply). The first borrow quote that *resolves* `pendingSubAccount` is not a context change — restarting there would cancel the request that caused it. The borrow page still clears that cache when the owner or chain changes.
+
+| Flow | Where | Extra rules |
+| --- | --- | --- |
+| Lend Swap | `useSwapPageLogic` | Also clears `plan` / `preparedPlan`. Same-asset transfers have no quote: restore `toAmount` from `fromAmount` and skip refetch. |
+| Lend withdraw | `pages/lend/[vault]/[subAccount]/withdraw.vue` | Replacement quote uses the new owner as `receiver`. |
+| Lend deposit-with-swap | `pages/lend/[vault]/index.vue` | Same sync reset; deposit recipient rules stay on that page's intent validator. |
+| Position supply / withdraw | `useCollateralForm` | Wait until the new account's position exists before requesting. |
+| New-position Borrow | `useBorrowForm` | `borrowQuoteGuard` also cancels sub-account resolve and snapshot preload. The page's `pendingSubAccount` promise is owner- and chain-scoped; a completion for the previous account is rejected (`Account changed while resolving position`). |
+| New-position Multiply | `useMultiplyForm` | `multiplyQuoteGuard` same as borrow for resolve/preload. |
+| Existing-position Multiply | `pages/position/[number]/multiply.vue` | Clears `plan` / `preparedPlan` with the quote. |
+| Wallet-swap repay | `useWalletSwapRepay` | Sync reset is keyed by `quoteContextKey` (sub-account, debt, borrow vault/asset), not by wallet/Spy/chain. |
+
+Do not debounce-only on those keys, and do not keep a selected quote while a replacement is queued. Coverage: `tests/pages/swap-flow-account-context.test.ts`.
+
+### Slippage invalidation
+
+Tightening slippage (5% → 0.1%) used to leave the selected quote and its prepared card usable during the 500 ms debounce. `useSwapPageLogic` now watches `[fromVault, slippage]` with `{ flush: 'sync' }`: `resetQuoteState()` plus `invalidatePreparedSwap()` run before `requestQuote()`. Same-asset transfers keep the copied amount and do not refetch. `submit()` re-checks `isSubmitDisabled` (no selected quote, or `isQuoteLoading`) so a direct call cannot capture Review from a disabled form. Coverage: `tests/composables/useSwapPageLogic.slippage.test.ts`.
+
+Other flows reset then request on slippage, but not always with `flush: 'sync'`:
+
+- Lend deposit-with-swap includes `swapSlippage` in its sync account-context watcher.
+- Lend withdraw, `useCollateralForm`, `useBorrowForm`, and wallet-swap repay call `reset()` inside the slippage watcher, then the debounced request.
+- New-position and existing-position Multiply currently only queue `requestMultiplyQuote()`; the selected quote stays on screen until that debounce fires.
+
+Do not treat a live `selectedQuote` as matching the form's current slippage until the card was fetched after the last reset.
+
 ### CoW multiply review
 
 `useMultiplyCowSwap.submitCowSwapMultiply` is outside reviewed execution. Capture deposit, quote `amountOut`, and derived review amounts **before** the sub-account and allowance awaits. Edits during those lookups must not change Supply / Swap / approval rows.
@@ -341,6 +374,8 @@ Lite still uses `utils/pyth.ts` for read-path lens simulations and visible vault
 | `composables/batchPrefetchState.ts` | Form → batch handoff for pre-overlay accounts and chain-scoped slot hints |
 | `composables/useTxBatch.ts` | Intent draft cart, non-authoritative merged preview, resimulation, plugin-layer map, slot-hint reuse, and `discardBatchExecutionReview` |
 | `composables/useSwapPriceImpact.ts` | USD price-impact from the live selected quote; race-guarded |
+| `composables/useSwapQuotesParallel.ts` | Provider fan-out; `reset()` aborts in-flight quotes and drops the selected card |
+| `composables/useSwapPageLogic.ts` | Lend Swap coordinator; sync reset on account, slippage, and source vault |
 | `composables/borrow/useMultiplyCowSwap.ts` | CoW multiply submit: captured review amounts and combined supply-cap check |
 | `composables/useSafeWallet.ts` | Reactive Safe detection (`isSafeWallet` / `isSafeWalletResolved`) |
 | `composables/useSafeExecutionDetachment.ts` | Close-review-while-cosigning; toasts until confirm or 5-min poll timeout |
@@ -352,3 +387,5 @@ Lite still uses `utils/pyth.ts` for read-path lens simulations and visible vault
 | `utils/sdk-keyring.ts` | Credential store and hook-target config for the SDK keyring plugin |
 | `utils/sdk-tos.ts` | Terms-of-use SDK plugin (batch-item injection) |
 | `composables/useSwapApi.ts` | Swap API request building and quote normalization |
+| `tests/pages/swap-flow-account-context.test.ts` | Account / Spy / chain quote invalidation across swap flows |
+| `tests/composables/useSwapPageLogic.slippage.test.ts` | Lend Swap sync slippage reset and disabled submit |

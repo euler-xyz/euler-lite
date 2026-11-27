@@ -27,13 +27,14 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Shareable Explore / Lend / Borrow / Earn query parameters and curator aliases
 - Explore listing: `groupHasExplorableMarket` then `isExploreListedMarket` (Lend/Borrow-table pair, fully deprecated exception)
 - JSON-RPC proxy allowlist (`eth_createAccessList` for simulation), batch/timeout limits, and wagmi public-RPC fallback
+- Swap quote invalidation on account change; Lend Swap also resets on slippage before the 500 ms refetch
 
 ### 🚀 [Development Guide](./development-guide.md)
 
 - Development workflow
 - Shared `readAppEnvConfig` / `readChainEnvConfig` builders (do not re-parse env in the Nitro plugins)
 - Shareable listing-filter URLs (`?curator=` plus legacy `riskManager` / Earn `allocator`)
-- JSON-RPC proxy, curator profile/network endpoints, `/healthz` liveness, and Advanced-mode localStorage pitfalls
+- JSON-RPC proxy, curator profile/network endpoints, `/healthz` liveness, Advanced-mode localStorage, and stale swap-quote pitfalls
 
 ### ⛓️ [Adding a Chain](./adding-a-chain.md)
 
@@ -98,6 +99,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Raw plugin-plan snapshot before in-place approval resolution; cart `expectedIntentPlans` reject preview drift; typed prepare errors stay verbatim in the modal
 - [User-facing review compatibility](./transaction-building.md#user-facing-review-compatibility): exhaustive internal reviewed executions remain separate from the unchanged handcrafted review
 - Add-time `captureSwapReview` keeps Swap row amounts when the live quote resets; batch close discards cached preparation so reopen reprepares
+- Swap quotes reset synchronously on account / Spy Mode / chain change; Lend Swap also resets on slippage before the 500 ms refetch
 - Spy-mode review uses `prepareReadOnly` and a synthetic approval-only wallet binding; confirm stays disabled
 - Wallet screening is connect-time only; reviewed execution does not re-screen or consult VPN evidence
 - `transferMin` `verify.vault` is a transfer recipient, not an Euler vault to snapshot

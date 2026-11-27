@@ -356,6 +356,8 @@ The `useSlippage` composable (`composables/useSlippage.ts`) manages swap slippag
 
 The composable accepts optional `fromSymbol`/`toSymbol` getters to detect stablecoin pairs reactively. Slippage state is persisted to `localStorage` with a timestamp for expiry tracking.
 
+Changing slippage or the connected account must not leave a previous quote Review-able during the 500 ms quote debounce. Lend Swap (`useSwapPageLogic`) resets the selected quote and prepared plan synchronously, then refetches; every swap-capable flow does the same on owner, wallet, Spy Mode, or chain change. Details and the Multiply exception: [Transaction Building → Swap Quotes](./transaction-building.md#account-context-invalidation).
+
 ## 🔒 Security Architecture
 
 ### Security Measures
