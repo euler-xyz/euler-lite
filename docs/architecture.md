@@ -274,7 +274,7 @@ The correlation decision is shared across discovery, borrow, and portfolio surfa
 | Surface | Correlated assets | Uncorrelated assets |
 |---|---|---|
 | Explore market card (`useBestMaxROE`) | Best Max ROE across eligible LTV pairs, skipping pairs whose liability has borrow disabled or whose collateral has deposit or skim disabled by a zero-target hook (`isBorrowPairPaused`) | Best visible Net APY fallback, with the same pairs skipped |
-| Explore matrix (`DiscoveryMarketMatrix.vue`) | Numeric cells in `roe` and `multiplier` views; a paused pair (`isMarketPairPaused`) shows `-` with a paused tooltip | `-` cell with unavailable-metric tooltip and accordion notice |
+| Explore matrix (`DiscoveryMarketMatrix.vue`) | Numeric cells in `roe` and `multiplier` views; a paused pair (`isMarketPairPaused`) shows `-` with tooltip title `Pair paused` and text `This pair is paused: the liability does not lend or the collateral does not take deposits.` | `-` cell with unavailable-metric tooltip and accordion notice |
 | Borrow pair card (`VaultBorrowItem.vue`) | Max ROE headline, correlated-category badge, Max multiplier column, Multiply tab link | Net APY headline; multiplier column and Multiply tab shortcut are hidden |
 | Portfolio borrow card (`PortfolioBorrowItem.vue`) | Position ROE when all collateral vaults resolve and share the category | Net APY path |
 
@@ -356,7 +356,7 @@ The `useSlippage` composable (`composables/useSlippage.ts`) manages swap slippag
 
 The composable accepts optional `fromSymbol`/`toSymbol` getters to detect stablecoin pairs reactively. Slippage state is persisted to `localStorage` with a timestamp for expiry tracking.
 
-Changing slippage or the connected account must not leave a previous quote Review-able during the 500 ms quote debounce. Lend Swap (`useSwapPageLogic`) resets the selected quote and prepared plan synchronously, then refetches; every swap-capable flow does the same on owner, wallet, Spy Mode, or chain change. Details and the Multiply exception: [Transaction Building → Swap Quotes](./transaction-building.md#account-context-invalidation).
+Lend Swap (`useSwapPageLogic`) clears the selected quote and plans held by the form synchronously on account-context or slippage changes, then refetches after the 500 ms debounce. The Lend, new-position Borrow, position supply/withdraw, and Multiply forms listed in [Transaction Building → Account-context invalidation](./transaction-building.md#account-context-invalidation) also reset synchronously on owner, wallet, Spy Mode, or chain changes. Repay flows have separate context keys and watcher timing. New-position and existing-position Multiply only queue a debounced refetch on slippage changes.
 
 ## 🔒 Security Architecture
 
