@@ -35,7 +35,7 @@ const createForm = (deposit: string, output: string, cap: bigint, decimals: numb
     multiplySupplyProduct: computed(() => ({ name: 'Supply' })), multiplyShortProduct: computed(() => ({ name: 'Borrow' })),
     multiplyLongAmount: computed(() => outputAmount.value), multiplyEffectiveQuoteFetchedAt: computed(() => 123),
   } as Parameters<typeof useMultiplyCowSwap>[0]
-  return { ...useMultiplyCowSwap(options), input: options.multiplyInputAmount, output: outputAmount }
+  return { ...useMultiplyCowSwap(options), input: options.multiplyInputAmount, output: outputAmount, slippage: options.multiplySlippage }
 }
 
 beforeEach(() => {
@@ -111,4 +111,21 @@ it.each(['sub-account', 'allowance'])('keeps the captured deposit in review whil
     label: 'Approve for deposit', requiredAmount: parseUnits('60', 6),
     assetInfo: expect.objectContaining({ amount: '60' }),
   }))
+})
+
+it('does not open Review when slippage invalidates a pending allowance lookup', async () => {
+  let resolve!: () => void
+  mocks.readContract.mockImplementationOnce(() => new Promise<bigint>((done) => {
+    resolve = () => done(0n)
+  }))
+  const form = createForm('60', '20', parseUnits('1000', 6), 6)
+  let isCurrent = true
+
+  const submitted = form.submitCowSwapMultiply(() => isCurrent)
+  await vi.waitFor(() => expect(mocks.readContract).toHaveBeenCalled())
+  isCurrent = false
+  resolve()
+  await submitted
+
+  expect(mocks.showReview).not.toHaveBeenCalled()
 })

@@ -1263,9 +1263,11 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
     // CowSwap branch: skip plan building and simulation, go straight to the
     // CoW review modal which signs the EVC permit + order off-chain.
     if (isCowProviderOrQuote(multiplySelectedProvider.value, multiplyEffectiveQuote.value)) {
+      const reviewGeneration = multiplyReviewGuard.current()
+      const isReviewCurrent = () => !multiplyReviewGuard.isStale(reviewGeneration)
       isMultiplyPreparing.value = true
       try {
-        await submitCowSwapMultiply()
+        await submitCowSwapMultiply(isReviewCurrent)
       }
       finally {
         isMultiplyPreparing.value = false
@@ -1447,7 +1449,7 @@ export const useMultiplyForm = (options: UseMultiplyFormOptions) => {
       profMark('review', 'submitMultiply.modalOpen')
       if (isReviewStale()) return
       if (!multiplyPlan.value) return
-      await reviewLaunch.open()
+      await reviewLaunch.open(() => !isReviewStale())
     }
     finally {
       isMultiplyPreparing.value = false

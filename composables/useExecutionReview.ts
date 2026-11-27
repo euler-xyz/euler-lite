@@ -28,7 +28,7 @@ export interface CapturedExecutionReview {
   intents: readonly OperationIntent[]
   /** True only when the warmed intent set was semantically identical. */
   usesPreparedIntents: boolean
-  open: () => Promise<{ reviewId: Hash, reviewDigest: Hash }>
+  open: (isCurrent?: () => boolean) => Promise<{ reviewId: Hash, reviewDigest: Hash } | null>
 }
 
 const clonePresentationValue = (value: unknown): unknown => {
@@ -60,12 +60,15 @@ export const useExecutionReview = () => {
   const openCaptured = async (
     intents: readonly OperationIntent[],
     options: OpenExecutionReviewOptions,
-  ): Promise<{ reviewId: Hash, reviewDigest: Hash }> => {
+    isCurrent?: () => boolean,
+  ): Promise<{ reviewId: Hash, reviewDigest: Hash } | null> => {
+    if (isCurrent?.() === false) return null
     if (isSpyMode.value) {
       const prepared = await execution.prepareReadOnly(intents, {
         presentationKind: options.presentationKind,
         presentationInputs: options.review,
       })
+      if (isCurrent?.() === false) return null
       modal.open(OperationReviewModal, {
         props: {
           ...options.review,
@@ -90,6 +93,7 @@ export const useExecutionReview = () => {
       presentationKind: options.presentationKind,
       presentationInputs: options.review,
     })
+    if (isCurrent?.() === false) return null
     const reviewId = prepared.execution.reviewId
     const reviewDigest = prepared.execution.reviewDigest
     modal.open(ReviewedOperationModal, {
@@ -134,7 +138,7 @@ export const useExecutionReview = () => {
     return Object.freeze({
       intents,
       usesPreparedIntents: preparedIntents !== undefined && selectedIntents === preparedIntents,
-      open: () => openCaptured(intents, capturedOptions),
+      open: isCurrent => openCaptured(intents, capturedOptions, isCurrent),
     })
   }
 

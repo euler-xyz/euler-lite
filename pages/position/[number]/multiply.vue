@@ -1042,7 +1042,7 @@ const submitMultiply = async () => {
 
       if (isReviewStale()) return
       if (!plan.value) return
-      await reviewLaunch.open()
+      await reviewLaunch.open(() => !isReviewStale())
     })
   }
   finally {

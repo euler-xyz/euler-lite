@@ -361,7 +361,7 @@ describe('useMultiplyForm', () => {
     const vault = makeVault()
 
     await makeForm(vault).submitMultiply()
-    expect(mocks.submitCowSwapMultiply).toHaveBeenCalledTimes(1)
+    expect(mocks.submitCowSwapMultiply).toHaveBeenCalledWith(expect.any(Function))
 
     mocks.submitCowSwapMultiply.mockClear()
     setAddressExitOnly(true)

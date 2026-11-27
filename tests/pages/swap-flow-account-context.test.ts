@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   prepareTransactionPlan: vi.fn(async () => ({ plan: [] })),
   prefetchPluginData: vi.fn(async () => undefined),
   runPreparedSimulation: vi.fn(async () => true),
+  prepareReview: vi.fn(async () => undefined),
   openReview: vi.fn(async (..._args: unknown[]) => undefined),
   createIntent: vi.fn((..._args: unknown[]) => ({})),
 }))
@@ -120,6 +121,7 @@ describe('swap flow account context', () => {
     mocks.prepareTransactionPlan.mockReset().mockResolvedValue({ plan: [] })
     mocks.prefetchPluginData.mockReset().mockResolvedValue(undefined)
     mocks.runPreparedSimulation.mockReset().mockResolvedValue(true)
+    mocks.prepareReview.mockReset().mockResolvedValue(undefined)
     mocks.openReview.mockReset().mockResolvedValue(undefined)
     mocks.createIntent.mockReset().mockReturnValue({})
     const account = computed(() => ({
@@ -169,7 +171,11 @@ describe('swap flow account context', () => {
       capture: (currentIntents: readonly unknown[], options: unknown, preparedIntents?: readonly unknown[]) => ({
         intents: preparedIntents ?? currentIntents,
         usesPreparedIntents: preparedIntents !== undefined,
-        open: () => mocks.openReview(preparedIntents ?? currentIntents, options),
+        open: async (isCurrent?: () => boolean) => {
+          await mocks.prepareReview()
+          if (isCurrent?.() === false) return
+          return mocks.openReview(preparedIntents ?? currentIntents, options)
+        },
       }),
     }))
     vi.stubGlobal('useTxBatch', () => ({ entryCount: ref(0), addEntry: vi.fn() }))
@@ -430,6 +436,23 @@ describe('swap flow account context', () => {
         release = () => resolve([])
       }))
     }
+
+    const submitting = state.submit!()
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+
+    slippage.value = 0.1
+    release()
+    await submitting
+
+    expect(mocks.openReview).not.toHaveBeenCalled()
+  })
+
+  it.each(['multiply', 'position multiply'] as const)('%s keeps the slippage guard active during review launch', async (flow) => {
+    const state = await openFlow(flow)
+    let release!: () => void
+    mocks.prepareReview.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      release = resolve
+    }))
 
     const submitting = state.submit!()
     await vi.waitFor(() => expect(release).toBeTypeOf('function'))
