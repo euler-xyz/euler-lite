@@ -71,7 +71,7 @@ export const buildApprovalSignSteps = (params: {
 }
 
 export const openCowSwapReviewModal = <TExecuteParams>(
-  modal: { open: (component: Component, options?: ModalData) => void },
+  modal: { open: (component: Component, options?: ModalData) => number },
   options: {
     signSteps: DisplayStep[]
     wrapperSteps: DisplayStep[]
@@ -81,9 +81,12 @@ export const openCowSwapReviewModal = <TExecuteParams>(
     executeParams: TExecuteParams
     quoteFetchedAt?: number | null
     logPrefix: string
+    /** Runs on every Confirm click. Return false to skip execution; the caller then owns the feedback. */
+    beforeConfirm?: () => boolean
   },
 ) => {
-  modal.open(CowSwapReviewModal, {
+  // Returns the modal id, so a caller can close this review itself.
+  return modal.open(CowSwapReviewModal, {
     isNotClosable: true,
     closeOnBackdropWhenAllowed: true,
     props: {
@@ -99,10 +102,12 @@ export const openCowSwapReviewModal = <TExecuteParams>(
       cancellationStatus: options.execution.cancellationStatus,
       quoteFetchedAt: options.quoteFetchedAt,
       onConfirm: async () => {
+        if (options.beforeConfirm?.() === false) return
         try {
           await options.execution.executeAsync(options.executeParams)
         }
         catch (e) {
+          options.execution.error.value = e instanceof Error ? e : new Error(String(e))
           logWarn(`${options.logPrefix}/execute`, e)
         }
       },

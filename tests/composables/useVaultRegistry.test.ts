@@ -10,6 +10,7 @@ const { fetchVaultCategoryMock } = vi.hoisted(() => ({
 
 vi.mock('~/utils/vault/categories', () => ({
   fetchVaultCategory: fetchVaultCategoryMock,
+  resetVaultCategoryCache: vi.fn(),
 }))
 
 const VAULT = getAddress('0x00000000000000000000000000000000000000a1')
@@ -159,6 +160,30 @@ describe('useVaultRegistry chain-scoped identity', () => {
     })
     expect(fetchVaultCategoryMock).toHaveBeenCalledTimes(2)
   })
+
+  it('preserves refreshed entries while rejecting resolutions from an earlier policy', async () => {
+    const { applyChainReadPolicy, useChainConfig } = await import('~/composables/useChainConfig')
+    const config = useChainConfig()
+    config.enabledChainIds.splice(0, config.enabledChainIds.length, 1)
+    config.onchainSdkChainIds.splice(0)
+    config.deprecatedChainIds.splice(0)
+    config.metadataOnlyChainIds = []
+    let resolveOld!: (value: unknown) => void
+    const oldRead = new Promise((resolve) => {
+      resolveOld = resolve
+    })
+    fetchVaultCategoryMock.mockResolvedValue('evk')
+    const fetchVault = vi.fn(() => oldRead)
+    vi.stubGlobal('useEulerSdk', () => ({ getEulerSdkForChain: async () => ({ eVaultService: { fetchVault } }) }))
+    const registry = useVaultRegistry()
+    const pending = registry.getOrFetch(VAULT)
+    await vi.waitFor(() => expect(fetchVault).toHaveBeenCalledOnce())
+    applyChainReadPolicy(1, { deprecated: true, onchain: true, metadataOnly: true })
+    registry.setMany([{ address: VAULT, vault: { ...vault(ASSET_ONE), totalAssets: 20n } as never, type: 'evk' }])
+    resolveOld({ result: { ...vault(ASSET_ONE), totalAssets: 10n }, errors: [] })
+    await expect(pending).resolves.toBeUndefined()
+    expect(registry.getVault(VAULT)?.totalAssets).toBe(20n)
+  })
 })
 
 describe('metadata-only verification uses current governance and membership', () => {
@@ -230,7 +255,7 @@ describe('V3 verification expiry', () => {
     registry.set(VAULT, vault(ASSET_ONE) as never, 'evk')
     expect(registry.isVerifiedVault(VAULT)).toBe(true)
 
-    useEulerLabels().isReady.value = false
+    __setEulerLabelsDataForTest(getEulerLabelsSourceData(), false)
     expect(registry.isVerifiedVault(VAULT)).toBe(false)
     registry.setEscrowAddresses([VAULT])
     expect(registry.isVerifiedVault(VAULT)).toBe(true)

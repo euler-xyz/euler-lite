@@ -1,4 +1,5 @@
 import { createTtlCache } from './cache'
+import { loadServerChainPolicyKey } from './chain-policy'
 import { tryChecksum } from './labels-helpers'
 import { buildLabelsView, type LabelsView } from './labels-view'
 import { logger } from '~/server/utils/logger'
@@ -22,7 +23,7 @@ export interface VerifiedAddressSnapshot {
 }
 
 const cache = createTtlCache<VerifiedAddressSnapshot>({ ttlMs: CACHE_TTL_MS, maxStaleMs: LABELS_MAX_STALE_MS, maxEntries: 64 })
-const inflight = new Map<number, Promise<VerifiedAddressSnapshot>>()
+const inflight = new Map<string, Promise<VerifiedAddressSnapshot>>()
 
 const isUsable = (snapshot: VerifiedAddressSnapshot): boolean => {
   if (snapshot.source !== 'v3' && snapshot.source !== 'v3-metadata') return true
@@ -70,8 +71,8 @@ function computeVerifiedSet(view: LabelsView): Set<string> {
 
 /** Rebuild the derived set on demand, preserving the source verdict's age. */
 async function refreshVerifiedAddressSnapshot(chainId: number): Promise<VerifiedAddressSnapshot> {
-  const key = String(chainId)
-  const pending = inflight.get(chainId)
+  const key = await loadServerChainPolicyKey(chainId)
+  const pending = inflight.get(key)
   if (pending) return pending
 
   const task = (async () => {
@@ -83,22 +84,24 @@ async function refreshVerifiedAddressSnapshot(chainId: number): Promise<Verified
         sourceFetchedAt: view.sourceFetchedAt,
       }
       if (!isUsable(snapshot)) throw new VerificationUnavailableError()
+      if (key !== await loadServerChainPolicyKey(chainId)) throw new Error('Chain policy changed during verification refresh')
       cache.set(key, snapshot)
       return snapshot
     }
     catch (err) {
       logger.warn({ ctx: 'verified-vaults', chainId, err }, 'rebuild failed')
+      if (key !== await loadServerChainPolicyKey(chainId)) throw err
       const stale = cache.getStale(key)
       if (stale && isUsable(stale)) return stale
       if (stale) throw new VerificationUnavailableError()
       throw err
     }
     finally {
-      inflight.delete(chainId)
+      inflight.delete(key)
     }
   })()
 
-  inflight.set(chainId, task)
+  inflight.set(key, task)
   return task
 }
 
@@ -107,7 +110,7 @@ export async function refreshVerifiedAddressSet(chainId: number): Promise<Set<st
 }
 
 export async function getVerifiedAddressSnapshot(chainId: number): Promise<VerifiedAddressSnapshot> {
-  const fresh = cache.get(String(chainId))
+  const fresh = cache.get(await loadServerChainPolicyKey(chainId))
   if (fresh && isUsable(fresh)) return fresh
   return refreshVerifiedAddressSnapshot(chainId)
 }

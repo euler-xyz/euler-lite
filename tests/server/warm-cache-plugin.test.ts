@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   refreshEulerChains: vi.fn((): Promise<unknown[]> => Promise.resolve([])),
+  refreshV3ChainCatalog: vi.fn(() => Promise.resolve()),
   peekEulerChains: vi.fn((): unknown[] | undefined => undefined),
   refreshPublicLabelsBundle: vi.fn((_chainId: number) => Promise.resolve()),
   refreshTokenList: vi.fn((_chainId: number) => Promise.resolve([])),
@@ -10,6 +11,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('~/server/utils/public-labels-source', () => ({
   refreshPublicLabelsBundle: mocks.refreshPublicLabelsBundle,
+}))
+
+vi.mock('~/server/utils/v3-chain-catalog', () => ({
+  refreshV3ChainCatalog: mocks.refreshV3ChainCatalog,
 }))
 
 vi.mock('~/server/api/internal/euler-chains.get', () => ({
@@ -88,9 +93,24 @@ describe('warm-cache plugin deprecated chains', () => {
     Reflect.deleteProperty(globalThis, WARM_LATCH_KEY)
     mocks.peekEulerChains.mockReset().mockReturnValue(undefined)
     mocks.refreshEulerChains.mockReset().mockImplementation(() => Promise.resolve([]))
+    mocks.refreshV3ChainCatalog.mockClear()
     mocks.refreshTokenList.mockClear()
     mocks.refreshPublicLabelsBundle.mockClear()
     mocks.refreshChainVaults.mockClear()
+  })
+
+  it.each(['', '1,146,8453'])('warms the catalog at boot and every cycle with deprecated overrides=%s', async (deprecated) => {
+    vi.stubEnv('DEPRECATED_CHAINS', deprecated)
+    await bootPlugin()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(mocks.refreshV3ChainCatalog).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(REWARM_INTERVAL_MS)
+    expect(mocks.refreshV3ChainCatalog).toHaveBeenCalledTimes(2)
+    if (deprecated) {
+      expect(mocks.refreshTokenList).not.toHaveBeenCalled()
+      expect(mocks.refreshPublicLabelsBundle).not.toHaveBeenCalled()
+      expect(mocks.refreshChainVaults).not.toHaveBeenCalled()
+    }
   })
 
   it('skips chains listed in DEPRECATED_CHAINS', async () => {

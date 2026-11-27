@@ -8,6 +8,7 @@ import type {
   IEulerEarn,
   IEVault,
   ISecuritizeCollateralVault,
+  VaultAssessmentFamily,
 } from '@eulerxyz/euler-v2-sdk'
 import {
   EVault,
@@ -40,8 +41,11 @@ import {
   type SnapshotArgsByAddress,
 } from '~/utils/sdk-snapshot-populate-stubs'
 import type { SerialisedSnapshot, SerialisedVault } from '~/utils/snapshot-types'
+import { chainReadPolicyKey, getChainReadPolicy } from '~/utils/chain-policy'
+import { isChainReadPolicyReady, subscribeToChainPolicyChanges } from '~/composables/useChainConfig'
 import { resolveEulerRouterGovernors, retainEulerRouterGovernor } from '~/utils/vault/euler-router-governance'
 import { governableGovernorAbi } from '~/abis/oracle'
+import { getFlaggedVerdict, isHiddenForNonGovernanceCause } from '~/utils/vault-assessment/flagged'
 
 const isReady = ref(false)
 const isEVaultLoading = ref(false)
@@ -280,6 +284,10 @@ const resetVaultsState = (options: { preserveRegistry?: boolean } = {}) => {
   if (!options.preserveRegistry) clear()
   resetVaultCategoryCache()
 }
+
+subscribeToChainPolicyChanges((chainId) => {
+  if (useEulerAddresses().chainId.value === chainId) resetVaultsState({ preserveRegistry: true })
+})
 
 const isCurrentVaultLoad = (generation: number, targetChainId: number): boolean => {
   const { chainId } = useEulerAddresses()
@@ -599,7 +607,7 @@ const updateSecuritizeVaults = async (securitizeAddresses: string[], generation:
 /**
  * Reject snapshots older than this — indicates the warm-cache plugin
  * has been stalled across multiple cycles. Falling through to a full
- * RPC load is preferable to rendering ancient TVLs / rates.
+ * browser SDK load is preferable to rendering ancient TVLs / rates.
  */
 const MAX_HYDRATION_AGE_MS = 6 * 60_000
 
@@ -720,9 +728,10 @@ const scheduleHydratedSnapshotEnrichment = (snapshot: HydratedSnapshot, generati
  * Returns true if the registry is populated and the UI can render
  * immediately. Returns false if the snapshot is too stale, the wire
  * shape is malformed, or fetch failed — caller falls through to a
- * full RPC load.
+ * chain-aware browser SDK load.
  */
 const hydrateFromServer = async (targetChainId: number, generation: number): Promise<boolean> => {
+  if (!isChainReadPolicyReady(targetChainId)) return false
   const { setMany: registrySetMany, setEscrowAddresses } = useVaultRegistry()
   try {
     const wire = await $fetch<SerialisedSnapshot>('/api/internal/vaults', { query: { chainId: targetChainId } })
@@ -730,14 +739,16 @@ const hydrateFromServer = async (targetChainId: number, generation: number): Pro
 
     const snap = decodeBigints(wire) as SerialisedSnapshot
     if (!isSerialisedSnapshot(snap)) {
-      logWarn('useVaults/hydrateFromServer', 'server returned a malformed snapshot; falling back to RPC')
+      logWarn('useVaults/hydrateFromServer', 'server returned a malformed snapshot; falling back to browser SDK')
       return false
     }
     if (snap.chainId !== targetChainId) return false
+    // An untagged HTTP-cached response cannot prove which routing policy built it.
+    if (!snap.chainPolicy || chainReadPolicyKey(snap.chainPolicy) !== chainReadPolicyKey(getChainReadPolicy(useChainConfig(), targetChainId))) return false
     if (Date.now() - snap.fetchedAt > MAX_HYDRATION_AGE_MS) {
       logWarn(
         'useVaults/hydrateFromServer',
-        `snapshot too stale (${Math.round((Date.now() - snap.fetchedAt) / 1000)}s old); falling back to RPC`,
+        `snapshot too stale (${Math.round((Date.now() - snap.fetchedAt) / 1000)}s old); falling back to browser SDK`,
       )
       return false
     }
@@ -795,9 +806,9 @@ const loadVaults = async (options: { preserveRegistry?: boolean } = {}) => {
 
   // Phase 0: try to hydrate from the warm snapshot at /api/internal/vaults. On
   // success the registry is populated and the UI renders immediately;
-  // the subsequent RPC pipeline runs in *silent* mode so the per-category
+  // the subsequent SDK loads run in *silent* mode so the per-category
   // loading/updating flags stay false. On failure (stale, malformed, or
-  // network error) we fall through and the RPC pipeline drives the
+  // network error) we fall through and the SDK loads drive the
   // loading state normally.
   const hydrated = await hydrateFromServer(startChainId, generation)
   if (!isCurrentVaultLoad(generation, startChainId)) return
@@ -1302,6 +1313,33 @@ export const useVaults = () => {
     )
   }
 
+  const isHiddenWithoutGovernanceCause = (address: string, family: VaultAssessmentFamily): boolean => {
+    const { chainId } = useEulerAddresses()
+    const { isReady, source, visibility, vaultAssessments, getVaultAssessmentEntry } = useEulerLabels()
+    if (!isReady.value || !chainId.value) return false
+    void vaultAssessments.value
+    return isHiddenForNonGovernanceCause(
+      getFlaggedVerdict(address, source.value, visibility.value),
+      getVaultAssessmentEntry(chainId.value, address, family),
+    )
+  }
+
+  // Identified answers who governs the vault; verified answers whether it is listed.
+  const isVaultGovernorIdentified = (vault: EVault): boolean =>
+    isVaultGovernorVerified(vault)
+    || (isHiddenWithoutGovernanceCause(vault.address, 'evk')
+      && verifyVaultGovernor(Object.assign({}, vault, { verified: true }), buildVerificationLabels()))
+
+  const isSecuritizeGovernorIdentified = (vault: SecuritizeCollateralVault): boolean =>
+    isSecuritizeGovernorVerified(vault)
+    || (isHiddenWithoutGovernanceCause(vault.address, 'evk')
+      && verifyVaultGovernor(Object.assign({}, vault, { verified: true }), buildVerificationLabels()))
+
+  const isEarnVaultOwnerIdentified = (earnVault: EulerEarn): boolean =>
+    isEarnVaultOwnerVerified(earnVault)
+    || (isHiddenWithoutGovernanceCause(earnVault.address, 'earn')
+      && verifyEarnVaultOwner(Object.assign({}, earnVault, { verified: true }), buildVerificationLabels()))
+
   return {
     // State
     isReady,
@@ -1345,6 +1383,9 @@ export const useVaults = () => {
     isVaultGovernorVerified,
     isSecuritizeGovernorVerified,
     isEarnVaultOwnerVerified,
+    isVaultGovernorIdentified,
+    isSecuritizeGovernorIdentified,
+    isEarnVaultOwnerIdentified,
 
     // Business logic computed (kept for complex queries)
     borrowList,

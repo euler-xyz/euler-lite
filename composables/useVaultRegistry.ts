@@ -12,6 +12,7 @@ import { isVaultNotExplorable, isVaultSelectedByTag } from '~/utils/eulerLabelsU
 import { liteSecuritizeVaultFetchOptions, liteVaultFetchOptions } from '~/utils/sdk-fetch-options'
 import { resolveEulerRouterGovernors } from '~/utils/vault/euler-router-governance'
 import { governableGovernorAbi } from '~/abis/oracle'
+import { subscribeToChainPolicyChanges } from '~/composables/useChainConfig'
 
 // Vault type enum - 3 types (escrow is a category of evk, not a separate type)
 export type VaultType = 'evk' | 'earn' | 'securitize'
@@ -87,6 +88,13 @@ const isCurrentResolution = (chainId: number, generation: number): boolean =>
 
 // In-flight resolution promises — deduplicates concurrent getOrFetch() calls for the same vault
 const pendingResolutions = new Map<string, Promise<VaultEntity | undefined>>()
+
+subscribeToChainPolicyChanges((chainId) => {
+  resolutionGenerations.set(chainId, getResolutionGeneration(chainId) + 1)
+  for (const key of pendingResolutions.keys()) {
+    if (key.startsWith(`${chainId}:`)) pendingResolutions.delete(key)
+  }
+})
 
 // Escrow address set - populated early, before full vault info is loaded
 // Used for O(1) lookups to determine if an address is an escrow vault

@@ -1,7 +1,3 @@
-import { getEnabledChainIds } from '~/utils/chain-env'
-import { parseChainIds } from '~/utils/parseChainIds'
-import type { ChainRegistry } from '~/utils/chain-status'
-import { applyChainRegistry } from '~/utils/chain-status'
 import { DEFAULT_V3_API_URL, readDisableV3, readResolvedV3ApiUrl, readBrowserVaultSource, readServerVaultCacheSource } from '~/utils/api-url-env'
 import { LabelsConfigurationError } from './labels-configuration-error'
 
@@ -34,20 +30,6 @@ export const readV3LabelsSelection = () => {
   return { labelSet, version }
 }
 
-/** Deprecated enabled chains retain metadata with on-chain verification. */
-export const isLabelsOnchainVerificationChain = (chainId: number, registry: ChainRegistry): boolean => {
-  const enabled = new Set(getEnabledChainIds())
-  if (!enabled.has(chainId)) return false
-  const deprecated = registry.statuses[chainId] === 'deprecated'
-    || parseChainIds(process.env.DEPRECATED_CHAINS, enabled).includes(chainId)
-  if (!deprecated) return false
-  const onchain = new Set(parseChainIds(process.env.ONCHAIN_SDK_CHAINS))
-  if (!onchain.has(chainId)) {
-    throw new LabelsConfigurationError(`Deprecated labels chains must be in ONCHAIN_SDK_CHAINS: ${chainId}. Add the chain ID and restart the service.`)
-  }
-  return true
-}
-
 function readHttpDirectory(value: string, setting: string): URL {
   try {
     const url = new URL(value)
@@ -72,7 +54,7 @@ export function readHostedLabelImageOrigins(): string[] {
   return [...new Set(origins)]
 }
 
-export function validateLabelsConfiguration(registry?: ChainRegistry): void {
+export function validateLabelsConfiguration(): void {
   const source = readLabelsSource()
   readHostedLabelImageOrigins()
   if (readDisableV3() && (readBrowserVaultSource() === 'v3' || readServerVaultCacheSource() === 'v3')) {
@@ -83,14 +65,4 @@ export function validateLabelsConfiguration(registry?: ChainRegistry): void {
     return
   }
   readV3LabelsSelection()
-  // Wait for admission before diagnosing chains: an incomplete launch or a
-  // hidden registry row must not turn healthy deployments into config errors.
-  if (!registry) return
-  const { enabledChainIds } = applyChainRegistry({
-    enabledChainIds: getEnabledChainIds(),
-    deprecatedChainIds: [],
-    onchainSdkChainIds: [],
-    eVaultFetchChunkChainIds: [],
-  }, registry, process.env.DOPPLER_ENVIRONMENT === 'prd')
-  for (const chainId of enabledChainIds) isLabelsOnchainVerificationChain(chainId, registry)
 }

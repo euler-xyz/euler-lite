@@ -15,24 +15,23 @@ const { type, vault, size = 'small', block = false, as = 'span', nudge = false }
 }>()
 
 const modal = useModal()
-const { isVaultGovernorVerified, isSecuritizeGovernorVerified, isEarnVaultOwnerVerified } = useVaults()
+const { isVaultGovernorIdentified, isSecuritizeGovernorIdentified, isEarnVaultOwnerIdentified } = useVaults()
 
-// Check if vault is verified by checking governorAdmin/owner matches declared entities
-const isVerified = computed(() => {
+const isGovernanceIdentified = computed(() => {
   if (type === 'escrow') {
     return true
   }
 
   if (type === 'managed') {
-    return isEarnVaultOwnerVerified(vault as EulerEarn)
+    return isEarnVaultOwnerIdentified(vault as EulerEarn)
   }
 
   if (type === 'securitize') {
-    return isSecuritizeGovernorVerified(vault as SecuritizeCollateralVault)
+    return isSecuritizeGovernorIdentified(vault as SecuritizeCollateralVault)
   }
 
   // governed, ungoverned, securitize
-  return isVaultGovernorVerified(vault as EVault)
+  return isVaultGovernorIdentified(vault as EVault)
 })
 
 const isKnownUngoverned = computed(() => type === 'ungoverned' && (
@@ -40,7 +39,7 @@ const isKnownUngoverned = computed(() => type === 'ungoverned' && (
     ? vault.governorAdmin?.toLowerCase() === zeroAddress
     : 'governor' in vault && vault.governor?.toLowerCase() === zeroAddress
 ))
-const hasKnownGovernanceType = computed(() => isVerified.value || isKnownUngoverned.value)
+const hasKnownGovernanceType = computed(() => isGovernanceIdentified.value || isKnownUngoverned.value)
 
 const isWarning = computed(() => !hasKnownGovernanceType.value || type === 'unknown')
 

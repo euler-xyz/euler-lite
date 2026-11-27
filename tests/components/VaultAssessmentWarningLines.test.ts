@@ -5,6 +5,8 @@ import { getAddress } from 'viem'
 import VaultAssessmentWarningLines from '~/components/entities/vault/VaultAssessmentWarningLines.vue'
 import VaultReference from '~/components/entities/vault/VaultReference.vue'
 
+vi.mock('#components', () => ({ UiModalPreviewTrigger: { render: () => null }, VaultAssessmentChecksModal: { render: () => null } }))
+
 const usdt = '0x00000000000000000000000000000000000000aa'
 const weth = '0x00000000000000000000000000000000000000bb'
 

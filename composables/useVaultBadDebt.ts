@@ -10,6 +10,22 @@ const badDebtByChain = shallowRef<Map<number, Map<string, VaultBadDebtCacheEntry
 const loadingChains = shallowRef<Set<number>>(new Set())
 const errorByChain = shallowRef<Map<number, Error>>(new Map())
 const inFlight = new Map<number, Promise<void>>()
+const failedAtByChain = new Map<number, number>()
+const BAD_DEBT_RETRY_AFTER_MS = 60_000
+const BAD_DEBT_TIMEOUT_MS = 15_000
+
+const fetchJsonWithTimeout = async (url: string): Promise<unknown> => {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), BAD_DEBT_TIMEOUT_MS)
+  try {
+    const response = await fetch(url, { headers: { accept: 'application/json' }, signal: controller.signal })
+    if (!response.ok) throw new Error(`Bad debt fetch failed with ${response.status}`)
+    return await response.json()
+  }
+  finally {
+    clearTimeout(timer)
+  }
+}
 
 const setChainLoading = (chainId: number, loading: boolean) => {
   const next = new Set(loadingChains.value)
@@ -49,14 +65,7 @@ const fetchBadDebtRows = async (
   const rows: V3VaultBadDebtRow[] = []
 
   while (true) {
-    const response = await fetch(buildBadDebtUrl(baseUrl, chainId, offset, limit), {
-      headers: { accept: 'application/json' },
-    })
-    if (!response.ok) {
-      throw new Error(`Bad debt fetch failed with ${response.status}`)
-    }
-
-    const body = await response.json()
+    const body = await fetchJsonWithTimeout(buildBadDebtUrl(baseUrl, chainId, offset, limit))
     const page = parseBadDebtResponse(body)
     rows.push(...page)
     if (page.length < limit) return rows
@@ -80,6 +89,8 @@ export const useVaultBadDebt = () => {
       return
     }
     if (!force && badDebtByChain.value.has(targetChainId) && !errorByChain.value.has(targetChainId)) return
+    const failedAt = failedAtByChain.get(targetChainId)
+    if (!force && failedAt !== undefined && Date.now() - failedAt < BAD_DEBT_RETRY_AFTER_MS) return
     const existing = inFlight.get(targetChainId)
     if (existing) return existing
 
@@ -88,9 +99,11 @@ export const useVaultBadDebt = () => {
       setChainError(targetChainId, null)
       try {
         const rows = await fetchBadDebtRows(envConfig.v3ApiUrl, targetChainId)
+        failedAtByChain.delete(targetChainId)
         setChainCache(targetChainId, buildBadDebtCache(rows))
       }
       catch (err) {
+        failedAtByChain.set(targetChainId, Date.now())
         setChainError(targetChainId, err instanceof Error ? err : new Error(String(err)))
       }
       finally {

@@ -3,7 +3,7 @@ import type { EVault } from '@eulerxyz/euler-v2-sdk'
 import { getUtilisationWarning } from '~/composables/useVaultWarnings'
 import { formatAssetValue } from '~/utils/sdk-prices'
 import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/string-utils'
-import { formatBadDebtOverviewValue } from '~/utils/vault-bad-debt'
+import { formatBadDebtOverview } from '~/utils/vault-bad-debt'
 import { VaultApyModal, UiModalPreviewTrigger } from '#components'
 import { withVaultIntrinsicApy, getVaultIntrinsicApy, getVaultIntrinsicApyInfo } from '~/utils/vault-intrinsic-apy'
 import { isVaultBorrowable } from '~/utils/vault/classification'
@@ -60,10 +60,12 @@ const totalSupplyDisplay = ref('-')
 const totalBorrowedDisplay = ref('-')
 const availableLiquidityDisplay = ref('-')
 const totalBorrowedUsd = ref<number | undefined>(undefined)
+const totalSupplyUsd = ref<number | undefined>(undefined)
 
 watchEffect(async () => {
   const price = await formatAssetValue(vault.totalAssets, vault, 'off-chain')
   totalSupplyDisplay.value = price.hasPrice ? formatCompactUsdValue(price.usdValue) : price.display
+  totalSupplyUsd.value = price.hasPrice ? price.usdValue : undefined
 })
 
 watchEffect(async () => {
@@ -82,12 +84,16 @@ watchEffect(() => {
   if (isBorrowable.value && isBadDebtEnabled.value) void loadBadDebtForChain()
 })
 
-const badDebtDisplay = computed(() => {
+const badDebtDisplay = computed((): { value: string, hint?: string } | null => {
   if (!isBorrowable.value || !isBadDebtEnabled.value) return null
   const badDebt = getVaultBadDebt(vault.address)
-  if (badDebt) return formatBadDebtOverviewValue(badDebt, totalBorrowedUsd.value)
-  if (isBadDebtLoading.value) return '...'
-  return isBadDebtLoaded.value ? '$0' : null
+  if (badDebt) {
+    const { value, borrowShare } = formatBadDebtOverview(badDebt, { supplyUsd: totalSupplyUsd.value, borrowsUsd: totalBorrowedUsd.value })
+    const hint = ['Debt that no collateral currently covers. Suppliers bear it if it is socialised.', borrowShare && `Bad debt is ${borrowShare}.`]
+    return { value, hint: hint.filter(Boolean).join(' ') }
+  }
+  if (isBadDebtLoading.value) return { value: '...' }
+  return isBadDebtLoaded.value ? { value: '$0' } : null
 })
 </script>
 
@@ -112,9 +118,28 @@ const badDebtDisplay = computed(() => {
     <VaultOverviewLabelValue
       v-if="badDebtDisplay"
       label="Pending bad debt"
-      :value="badDebtDisplay"
+      :value="badDebtDisplay.value"
       orientation="horizontal"
-    />
+    >
+      <template #label>
+        <span class="flex items-center gap-4">
+          Pending bad debt
+          <UiHoverPreviewTooltip
+            v-if="badDebtDisplay.hint"
+            title="Pending bad debt"
+            :text="badDebtDisplay.hint"
+            aria-label="About pending bad debt"
+            placement="top-start"
+          >
+            <SvgIcon
+              class="!w-20 !h-20 text-content-muted hover:text-content-secondary cursor-pointer"
+              name="info-circle"
+            />
+          </UiHoverPreviewTooltip>
+        </span>
+      </template>
+      {{ badDebtDisplay.value }}
+    </VaultOverviewLabelValue>
     <VaultOverviewLabelValue
       v-if="isBorrowable"
       label="Available liquidity"

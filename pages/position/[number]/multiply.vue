@@ -40,8 +40,7 @@ const route = useRoute()
 const router = useRouter()
 const modal = useModal()
 const { error } = useToast()
-const { address, isConnected } = useWagmi()
-const { isSpyMode } = useSpyMode()
+const { address, effectiveAddress, isConnected, isSpyMode } = useEffectiveAddress()
 const { isPositionsLoading, isPositionsLoaded, refreshAllPositions, getPositionBySubAccountIndex } = useEulerAccount()
 const { planMultiply, prepareTransactionPlan, prefetchPluginData, preloadSubAccountSnapshot } = useEulerTx()
 const { capture: captureReviewState } = useExecutionReview()
@@ -773,7 +772,9 @@ watch(
   { immediate: true },
 )
 
+const multiplyQuoteGuard = createRaceGuard()
 const resetMultiplyQuoteState = () => {
+  multiplyQuoteGuard.next()
   resetMultiplyQuoteStateInternal()
   setMultiplyAmounts(null, null)
 }
@@ -866,6 +867,7 @@ const addToBatch = async () => {
 }
 
 const requestMultiplyQuote = useDebounceFn(async () => {
+  const generation = multiplyQuoteGuard.next()
   multiplyQuoteError.value = null
 
   if (!multiplyLongVault.value || !multiplyShortVault.value) {
@@ -892,9 +894,12 @@ const requestMultiplyQuote = useDebounceFn(async () => {
     return
   }
   await ensureMultiplySubAccountSnapshot(subAccount as Address)
+  if (multiplyQuoteGuard.isStale(generation)) return
 
   setMultiplyAmounts(null, null)
   const requestParams = {
+    chainId: chainId.value!,
+    origin: (address.value || effectiveAddress.value) as Address,
     tokenIn: multiplyShortVault.value.asset.address as Address,
     tokenOut: multiplyLongVault.value.asset.address as Address,
     accountIn: subAccount as Address,
@@ -1091,6 +1096,14 @@ watch([isPositionsLoaded, () => route.params.number], ([loaded]) => {
     loadPosition()
   }
 }, { immediate: true })
+
+watch([effectiveAddress, address, isSpyMode, chainId, multiplySubAccount], () => {
+  clearMultiplySimulationError()
+  resetMultiplyQuoteState()
+  plan.value = null
+  preparedPlan.value = null
+  requestMultiplyQuote()
+}, { flush: 'sync' })
 
 watch([multiplySupplyVault, multiplyLongVault, multiplyShortVault], () => {
   clearMultiplySimulationError()

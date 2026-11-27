@@ -33,6 +33,19 @@ type SdkQueryRecorderWindow = Window & {
 const failureCache = new Map<string, { error: unknown, expiresAt: number }>()
 const queryGenerations = new Map<string, number>()
 
+/** Retained SDK instances keep their original policy namespace, including reads started later. */
+export const withSdkQueryScope = (buildQuery: BuildQueryFn, scope: string): BuildQueryFn =>
+  (queryName, fn, target, context) => buildQuery(queryName, fn, target, {
+    ...context,
+    getCacheKey: (args) => {
+      const key = context?.getCacheKey(args)
+      if (key === null) return null
+      const serialized = key ?? serializeQueryArgs(args)
+      if (serialized === null) throw new TypeError(`SDK query arguments for ${queryName} are not serializable`)
+      return JSON.stringify([scope, serialized])
+    },
+  })
+
 type SdkQueryInvalidationListener = (queryNames: ReadonlySet<string>) => void
 const sdkQueryInvalidationListeners = new Set<SdkQueryInvalidationListener>()
 

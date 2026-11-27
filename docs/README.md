@@ -27,6 +27,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Shareable Explore / Lend / Borrow / Earn query parameters and curator aliases
 - Explore listing: `groupHasExplorableMarket` then `isExploreListedMarket` (Lend/Borrow-table pair, fully deprecated exception)
 - Explore graph lines: one grey, thicker two-way pairs, dashes when neither side has borrow LTV, green only for the selected vault
+- Explore pair-matrix paused cells: `-` with tooltip title `Pair paused` and the liability/collateral pause reason
 - JSON-RPC proxy allowlist (`eth_createAccessList` for simulation), batch/timeout limits, and wagmi public-RPC fallback
 - API guards classify encoded `/api` via decoded `event.path`; provider proxies still inspect the raw URL
 
@@ -78,6 +79,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Oracle provider logos from the public images base the server reads from its V3 (`GET /v3/images`)
 - Curator / campaign logos use a separate allowlist (`https://v3.euler.finance/v3/images/labels/{slug}`); `token-images.euler.finance` is rejected
 - Vault checks pop-up: one row per subject vault; Earn collateral is the strategies'
+- Explore warning details load Securitize assessments on the EVK family (overview Vault checks still omit the wrapper)
 - Default liquidation-bot coverage badge is borrow-side only; unknown coverage renders nothing
 - `cyclical note` is the UI gate for the cyclical IRM overview (on-chain IRM type alone is not enough)
 - Curator profile pages (`/curators/{entityId}`): V3 profile + network index, chain-label fallback retry, completeness only on successful V3
@@ -101,6 +103,7 @@ Welcome to the documentation for the Euler Lite project. This documentation is d
 - Raw plugin-plan snapshot before in-place approval resolution; cart `expectedIntentPlans` reject preview drift; typed prepare errors stay verbatim in the modal
 - [User-facing review compatibility](./transaction-building.md#user-facing-review-compatibility): exhaustive internal reviewed executions remain separate from the unchanged handcrafted review
 - Add-time `captureSwapReview` keeps Swap row amounts when the live quote resets; batch close discards cached preparation so reopen reprepares
+- Lend deposit-with-swap drops selected quotes synchronously when spy/wallet/chain context changes; CoW collateral-swap review captures quote identity and closes stale Confirm
 - Spy-mode review uses `prepareReadOnly` and a synthetic approval-only wallet binding; confirm stays disabled
 - Wallet screening is connect-time only; reviewed execution does not re-screen or consult VPN evidence
 - An accepted exit-only verdict is enforced at execution without a second screening request; see [Geo-Blocking](./geo-blocking.md#exit-only-addresses)

@@ -48,7 +48,8 @@ const { addEntry: addBatchEntry } = useTxBatch()
 const { redirectAfterAdd } = useBatchRedirect()
 const { account: cachedAccount } = useFreshAccount()
 const { getVault, getSecuritizeVault: _getSecuritizeVault, getEscrowVault: _getEscrowVault, isMarketDataResolved } = useVaults()
-const { isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
+const { address, isConnected, isSpyMode, effectiveAddress } = useEffectiveAddress()
+const { chainId } = useEulerAddresses()
 const { runPreparedSimulation, simulationError, clearSimulationError } = useTransactionPlanSimulation()
 const {
   version: rewardsVersion,
@@ -414,6 +415,8 @@ const requestSwapQuote = useDebounceFn(async () => {
     ? (subAccount.value as Address)
     : userAddr
   await requestSwapQuotes({
+    chainId: chainId.value!,
+    origin: (address.value || userAddr) as Address,
     tokenIn: asset.value.address as Address,
     tokenOut: selectedOutputAsset.value.address as Address,
     accountIn: subAccountAddr,
@@ -748,6 +751,14 @@ watch([
 ], () => {
   queueAsyncEstimates()
 })
+
+// Clear both selected quotes and pending responses before the debounced refresh.
+watch([effectiveAddress, address, isSpyMode, chainId, subAccount], () => {
+  clearSimulationError()
+  resetSwapQuoteState()
+  preparedPlan.value = null
+  if (needsSwap.value && amount.value) requestSwapQuote()
+}, { flush: 'sync' })
 
 // Fetch swap quotes when output asset changes
 watch(selectedOutputAsset, () => {

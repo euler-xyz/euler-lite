@@ -2,6 +2,7 @@ import { computed, ref, shallowRef, type Ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SwapperMode, type EVault, type SecuritizeCollateralVault, type SwapQuote, type TransactionPlan } from '@eulerxyz/euler-v2-sdk'
 import { useSwapPageLogic } from '~/composables/useSwapPageLogic'
+import { valueToNano } from '~/utils/crypto-utils'
 
 const { captured, useSwapQuotesParallelMock } = vi.hoisted(() => ({
   captured: {
@@ -133,6 +134,8 @@ describe('useSwapPageLogic', () => {
 
     vi.stubGlobal('useRouter', () => ({ replace: vi.fn() }))
     vi.stubGlobal('useRoute', () => ({ query: {} }))
+    vi.stubGlobal('useEffectiveAddress', () => ({ address: ref(undefined), effectiveAddress: ref(undefined), isConnected: ref(true), isSpyMode: ref(false) }))
+    vi.stubGlobal('useEulerAddresses', () => ({ chainId: ref(1) }))
     vi.stubGlobal('useWagmi', () => ({
       isConnected: ref(true),
     }))
@@ -163,6 +166,7 @@ describe('useSwapPageLogic', () => {
     }))
     vi.stubGlobal('useDebounceFn', (fn: unknown) => fn)
     vi.stubGlobal('formatSmartAmount', (value: string) => value)
+    vi.stubGlobal('valueToNano', valueToNano)
     vi.stubGlobal('useOperationIntentFactory', () => ({ create: vi.fn() }))
     vi.stubGlobal('useExecutionReview', () => ({
       capture: (currentIntents: unknown[], options: unknown, preparedIntents?: unknown[]) => ({
@@ -277,6 +281,7 @@ describe('useSwapPageLogic', () => {
       swapperMode: SwapperMode.EXACT_IN,
     })
 
+    swap.fromAmount.value = '1'
     await swap.submit()
 
     expect(buildPlan).not.toHaveBeenCalled()
@@ -325,6 +330,7 @@ describe('useSwapPageLogic', () => {
       swapperMode: SwapperMode.EXACT_IN,
     })
 
+    swap.fromAmount.value = '1'
     await swap.submit()
 
     expect(buildPlan).toHaveBeenCalledTimes(1)

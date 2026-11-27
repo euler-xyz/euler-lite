@@ -6,6 +6,24 @@ import type { PublicEulerLabelsData } from '~/utils/public-labels'
 import { __setEulerLabelsDataForTest, useEulerLabels } from '~/composables/useEulerLabels'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { useVaults } from '~/composables/useVaults'
+import { useChainConfig } from '~/composables/useChainConfig'
+import {
+  EUSDC_42,
+  LIQUITY_HUB_ENTITY,
+  LIQUITY_HUB_GOVERNOR,
+  liquityHubHiddenVerdict,
+  makeEusdc42,
+} from '~/tests/fixtures/liquity-hub'
+import {
+  EUSDC_42_RAW_ASSESSMENT,
+  IDLE_CREDIT_VAULT,
+  IDLE_CREDIT_VAULT_RAW_ASSESSMENT,
+  IDLE_CREDIT_VAULT_VERDICT,
+  IDLE_ENTITY,
+  IDLE_GOVERNOR,
+  assessmentEntry,
+  makeIdleCreditVault,
+} from '~/tests/fixtures/v3-hidden-vault-assessments'
 
 const LABELED_EVAULT = '0x0000000000000000000000000000000000000101'
 const DYNAMIC_EVAULT = '0x0000000000000000000000000000000000000102'
@@ -38,6 +56,7 @@ const chainId = ref(1)
 
 describe('useVaults EVault verification metadata', () => {
   beforeEach(() => {
+    useChainConfig().unresolvedChainIds = []
     fetchVaults.mockReset()
     fetchEarnVaults.mockReset()
     fetchEarnVault.mockReset()
@@ -104,6 +123,24 @@ describe('useVaults EVault verification metadata', () => {
     expect(registry.getVault(ESCROW_EVAULT)).toBeUndefined()
   })
 
+  it.each([undefined, { deprecated: false, onchain: false, metadataOnly: false }])('rejects a cached server snapshot with missing or mismatched policy: %s', async (chainPolicy) => {
+    vi.stubGlobal('useChainConfig', () => ({
+      deprecatedChainIds: [1], onchainSdkChainIds: [1], metadataOnlyChainIds: [1], eVaultFetchChunkChainIds: [],
+    }))
+    vi.stubGlobal('$fetch', vi.fn().mockResolvedValue({
+      chainId: 1, fetchedAt: Date.now(),
+      chainPolicy,
+      evkVaults: [{ kind: 'evk', data: {
+        address: DYNAMIC_EVAULT, collaterals: [], asset: { decimals: 18 }, shares: { decimals: 18 },
+      } }],
+      earnVaults: [], securitizeVaults: [], escrowVaults: [],
+    }))
+    __setEulerLabelsDataForTest({ verifiedVaultAddresses: [getAddress(LABELED_EVAULT)] })
+    await useVaults().loadVaults()
+    expect(useVaultRegistry().getVault(DYNAMIC_EVAULT)).toBeUndefined()
+    expect(fetchVaults.mock.calls.flatMap(call => call[1])).toContain(getAddress(LABELED_EVAULT))
+  })
+
   it('refreshes SDK classification without promoting an unverified vault', async () => {
     const registry = useVaultRegistry()
     registry.set(DYNAMIC_EVAULT, makeVault(DYNAMIC_EVAULT), 'evk')
@@ -116,6 +153,19 @@ describe('useVaults EVault verification metadata', () => {
     await useVaults().updateEVaults([DYNAMIC_EVAULT], undefined, true)
     expect(registry.getVaultCategory(DYNAMIC_EVAULT)).toBe('standard')
     expect(registry.get(DYNAMIC_EVAULT)?.verified).toBe(false)
+  })
+
+  it('cannot hydrate cached verified vaults while cold policy is unresolved', async () => {
+    useChainConfig().unresolvedChainIds!.push(1)
+    const fetch = vi.fn().mockResolvedValue({
+      chainId: 1, fetchedAt: Date.now(), chainPolicy: { deprecated: false, onchain: false, metadataOnly: false },
+      evkVaults: [{ kind: 'evk', data: { address: DYNAMIC_EVAULT, collaterals: [], asset: { decimals: 18 }, shares: { decimals: 18 } } }],
+      earnVaults: [], securitizeVaults: [], escrowVaults: [],
+    })
+    vi.stubGlobal('$fetch', fetch)
+    await useVaults().loadVaults()
+    expect(fetch).not.toHaveBeenCalled()
+    expect(useVaultRegistry().getVault(DYNAMIC_EVAULT)).toBeUndefined()
   })
 
   it('does not grant verification when refreshing an SDK-classified escrow outside the perspective', async () => {
@@ -412,6 +462,85 @@ describe('useVaults EVault verification metadata', () => {
     // A stale registry flag cannot revive verification when V3 has no verdict.
     __setEulerLabelsDataForTest({ source: 'v3' })
     expect(registry.isVerifiedVault(LABELED_EVAULT)).toBe(false)
+  })
+
+  describe('governor identity of a hidden vault', () => {
+    const k3 = { name: 'K3 Capital', addresses: { [LIQUITY_HUB_GOVERNOR]: 'K3 governor' } }
+    const idle = { name: 'Idle DAO', addresses: { [IDLE_GOVERNOR]: 'Idle DAO Limited Governor' } }
+    const hostLabels = (
+      verdicts: Record<string, unknown>,
+      entries: Record<string, ReturnType<typeof assessmentEntry> | { status: string }>,
+      entities: Record<string, unknown> = { [LIQUITY_HUB_ENTITY]: k3, [IDLE_ENTITY]: idle },
+    ) => {
+      __setEulerLabelsDataForTest({
+        source: 'v3',
+        entities,
+        managingEntityByVault: { [EUSDC_42.toLowerCase()]: LIQUITY_HUB_ENTITY, [IDLE_CREDIT_VAULT.toLowerCase()]: IDLE_ENTITY },
+        visibility: verdicts,
+      } as unknown as Partial<PublicEulerLabelsData>)
+      vi.stubGlobal('useEulerLabels', () => ({
+        ...useEulerLabels(),
+        getVaultAssessmentEntry: (_chainId: number, address: string) => entries[address.toLowerCase()] ?? { status: 'idle' },
+      }))
+    }
+    const pausedEusdc42 = (decidedBy = 'config-suspended', entry: ReturnType<typeof assessmentEntry> | { status: string } = assessmentEntry(EUSDC_42_RAW_ASSESSMENT)) =>
+      hostLabels({ [EUSDC_42.toLowerCase()]: liquityHubHiddenVerdict(decidedBy) }, { [EUSDC_42.toLowerCase()]: entry })
+
+    it('names the curator of a paused vault whose assessment shows no governance cause', () => {
+      pausedEusdc42()
+      expect(useVaults().isVaultGovernorVerified(makeEusdc42())).toBe(false)
+      expect(useVaults().isVaultGovernorIdentified(makeEusdc42())).toBe(true)
+    })
+
+    it('keeps the Idle DAO credit vault blank: hidden as config-failed by a deprecated governor', () => {
+      hostLabels(
+        { [IDLE_CREDIT_VAULT.toLowerCase()]: IDLE_CREDIT_VAULT_VERDICT },
+        { [IDLE_CREDIT_VAULT.toLowerCase()]: assessmentEntry(IDLE_CREDIT_VAULT_RAW_ASSESSMENT) },
+      )
+      expect(useVaults().isVaultGovernorIdentified(makeIdleCreditVault())).toBe(false)
+    })
+
+    it.each(['consistency-suspended', 'consistency-revoked', 'not-explorable'])('keeps the curator blank for %s', (decidedBy) => {
+      pausedEusdc42(decidedBy)
+      expect(useVaults().isVaultGovernorIdentified(makeEusdc42())).toBe(false)
+    })
+
+    it('keeps the curator blank while the assessment loads or when consistency is not clear', () => {
+      pausedEusdc42('config-suspended', { status: 'loading' })
+      expect(useVaults().isVaultGovernorIdentified(makeEusdc42())).toBe(false)
+      pausedEusdc42('config-suspended', assessmentEntry(EUSDC_42_RAW_ASSESSMENT, { consistencyStatus: 'suspended' }))
+      expect(useVaults().isVaultGovernorIdentified(makeEusdc42())).toBe(false)
+    })
+
+    it('keeps the curator blank when the governor or router governor is not the label entity', () => {
+      hostLabels(
+        { [EUSDC_42.toLowerCase()]: liquityHubHiddenVerdict('config-suspended') },
+        { [EUSDC_42.toLowerCase()]: assessmentEntry(EUSDC_42_RAW_ASSESSMENT) },
+        { [LIQUITY_HUB_ENTITY]: { ...k3, addresses: {} } },
+      )
+      expect(useVaults().isVaultGovernorIdentified(makeEusdc42())).toBe(false)
+      pausedEusdc42()
+      const vault = Object.assign(makeEusdc42(), { eulerRouterGovernor: getAddress('0x00000000000000000000000000000000000000ee') })
+      expect(useVaults().isVaultGovernorIdentified(vault)).toBe(false)
+    })
+
+    it('does not change the vault it checks', () => {
+      pausedEusdc42()
+      const vault = makeEusdc42()
+      useVaults().isVaultGovernorIdentified(vault)
+      expect(vault).not.toHaveProperty('verified')
+    })
+
+    it.each([
+      ['config-suspended', true],
+      ['consistency-suspended', false],
+    ])('applies the same rule to Earn and Securitize vaults: %s', (decidedBy, identified) => {
+      pausedEusdc42(decidedBy)
+      const earn = { address: EUSDC_42, governance: { owner: LIQUITY_HUB_GOVERNOR } } as unknown as EulerEarn
+      const securitize = { address: EUSDC_42, governor: LIQUITY_HUB_GOVERNOR } as unknown as Parameters<ReturnType<typeof useVaults>['isSecuritizeGovernorIdentified']>[0]
+      expect(useVaults().isEarnVaultOwnerIdentified(earn)).toBe(identified)
+      expect(useVaults().isSecuritizeGovernorIdentified(securitize)).toBe(identified)
+    })
   })
 
   it('clears stale Earn verification when a vault is removed from curation', async () => {

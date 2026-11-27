@@ -24,6 +24,8 @@ import { buildEntityAddressSets, declaredKeysOf, tryChecksum } from './labels-he
 import { logger } from './logger'
 import { buildVaultAssetLookup, summarizeSdkIssue } from './observability'
 import { getServerSdk } from './sdk-server'
+import { loadServerChainReadPolicy } from './chain-policy'
+import { chainReadPolicyKey, type ChainReadPolicy } from '~/utils/chain-policy'
 import { isSdkErrorDiagnostic } from './sdk-diagnostics'
 import { getPublicEulerLabelsData } from './public-labels-source'
 import { getHostedEntityKeys, type VerificationLabels } from '~/utils/vault/governor-verification'
@@ -97,7 +99,7 @@ export interface LabelsView {
   verificationLabels: VerificationLabels
 }
 
-const inflight = createInFlightDedup<number, LabelsView>()
+const inflight = createInFlightDedup<string, LabelsView>()
 
 function strOrNull(value: unknown): string | null {
   if (typeof value !== 'string') return null
@@ -138,9 +140,6 @@ function overrideHasTag(
 ): boolean {
   return hasTag(overrides[address]?.tags, tag)
 }
-
-// SDK builder shared with vaults-cache via server/utils/sdk-server.ts.
-const getSdk = (chainId: number): Promise<EulerSDK> => getServerSdk(chainId)
 
 export async function fetchTokenList(chainId: number): Promise<TokenListEntry[]> {
   const data = await $fetch<TokenListResponse>('/api/internal/token-list', {
@@ -363,8 +362,8 @@ async function buildSnapshot(
   }
 }
 
-async function assembleLabelsView(chainId: number): Promise<LabelsView> {
-  const sdk = await getSdk(chainId)
+async function assembleLabelsView(chainId: number, policy: ChainReadPolicy): Promise<LabelsView> {
+  const sdk = await getServerSdk(chainId, policy)
   const [labels, tokens] = await Promise.allSettled([
     getPublicEulerLabelsData(chainId),
     fetchTokenList(chainId),
@@ -423,5 +422,13 @@ async function assembleLabelsView(chainId: number): Promise<LabelsView> {
 }
 
 export async function buildLabelsView(chainId: number): Promise<LabelsView> {
-  return inflight.run(chainId, () => assembleLabelsView(chainId))
+  const policy = await loadServerChainReadPolicy(chainId)
+  const key = chainReadPolicyKey(policy)
+  return inflight.run(`${chainId}:${key}`, async () => {
+    const view = await assembleLabelsView(chainId, policy)
+    if (chainReadPolicyKey(await loadServerChainReadPolicy(chainId)) !== key) {
+      throw new Error('Chain policy changed during labels view refresh')
+    }
+    return view
+  })
 }

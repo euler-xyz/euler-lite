@@ -1,7 +1,20 @@
 <script setup lang="ts">
-import type { VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
+import { getChainPolicyGeneration } from '~/composables/useChainConfig'
+import { isEVault, isEulerEarn, type VaultAssessmentFamily } from '@eulerxyz/euler-v2-sdk'
+import { isVaultPausedByGovernor } from '~/utils/vault-hooks'
+import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { hasOnlyAcceptedVaultCheckFindings } from '~/utils/vault-assessment/presentation'
-import { FLAGGED_VAULT_LABEL, FLAGGED_VAULT_TITLE, PAIR_SIDE_BADGE_LABELS, getFlaggedVaultLine, type VaultPairSide } from '~/utils/vault-assessment/flagged'
+import {
+  FLAGGED_VAULT_LABEL,
+  FLAGGED_VAULT_TITLE,
+  PAIR_SIDE_BADGE_LABELS,
+  PAUSED_VAULT_FALLBACK_REASON,
+  PAUSED_VAULT_LABEL,
+  PAUSED_VAULT_TITLE,
+  getFlaggedVaultLine,
+  isPausedVerdict,
+  type VaultPairSide,
+} from '~/utils/vault-assessment/flagged'
 
 const { address, hideDeprecated = false, hideChecks = false, pairSide, family = 'evk' } = defineProps<{
   address: string
@@ -12,7 +25,8 @@ const { address, hideDeprecated = false, hideChecks = false, pairSide, family = 
 }>()
 
 const { chainId } = useEulerAddresses()
-const { isReady, source, visibility, vaultAssessments, getVaultAssessmentEntry, loadVaultAssessment } = useEulerLabels()
+const { isReady, source, visibility, vaultAssessments, getVaultAssessmentEntry, loadVaultAssessment, ensureVaultAssessment } = useEulerLabels()
+const { get: registryGet } = useVaultRegistry()
 const verdict = computed(() => isReady.value && source.value === 'v3'
   ? visibility.value?.[address.toLowerCase()]
   : undefined)
@@ -20,11 +34,32 @@ const assessmentEntry = computed(() => {
   void vaultAssessments.value
   return chainId.value && family ? getVaultAssessmentEntry(chainId.value, address, family) : { status: 'idle' as const }
 })
+const registryVault = computed(() => registryGet(address)?.vault)
+// Securitize vaults pass no family but are assessed on the EVK route, which carries their pause rule.
+const pauseFamily = computed((): VaultAssessmentFamily | null => family === 'earn' || isEulerEarn(registryVault.value) ? null : 'evk')
+const pauseEntry = computed(() => {
+  void vaultAssessments.value
+  return chainId.value && pauseFamily.value ? getVaultAssessmentEntry(chainId.value, address, pauseFamily.value) : { status: 'idle' as const }
+})
+const isOnchainPaused = computed(() => isEVault(registryVault.value) ? isVaultPausedByGovernor(registryVault.value) : undefined)
+const isPaused = computed(() => isPausedVerdict(verdict.value, {
+  family: pauseFamily.value ? 'evk' : 'earn',
+  onchainPaused: isOnchainPaused.value,
+  assessment: pauseEntry.value.status === 'available' ? pauseEntry.value.assessment : undefined,
+  assessmentVerdictKey: pauseEntry.value.verdictKey,
+}))
+watchEffect(() => {
+  const id = chainId.value
+  const selectedFamily = pauseFamily.value
+  if (!id || !selectedFamily || isOnchainPaused.value !== undefined) return
+  if (verdict.value?.status !== 'hidden' || !verdict.value.decidedBy?.startsWith('config-')) return
+  void ensureVaultAssessment(id, address, selectedFamily)
+})
 const acceptedOnly = computed(() => verdict.value?.status === 'warning' && verdict.value.decidedBy === 'advisories'
   && assessmentEntry.value.status === 'available'
   && !!assessmentEntry.value.assessment && hasOnlyAcceptedVaultCheckFindings(assessmentEntry.value.assessment))
 watch(
-  () => [chainId.value, address, family, verdict.value?.status, verdict.value?.decidedBy, hideChecks] as const,
+  () => [chainId.value, address, family, verdict.value?.status, verdict.value?.decidedBy, hideChecks, getChainPolicyGeneration(chainId.value)] as const,
   ([id, vaultAddress, selectedFamily, status, decidedBy, suppressed]) => {
     if (id && selectedFamily && !suppressed && status === 'warning' && decidedBy === 'advisories' && assessmentEntry.value.status === 'idle') {
       void loadVaultAssessment(id, vaultAddress, selectedFamily)
@@ -50,6 +85,12 @@ const warning = computed(() => {
       description: verdict.value.reason || 'Some checks could not be completed for this vault.',
     }
   }
+  if (isPaused.value) {
+    return {
+      title: PAUSED_VAULT_TITLE,
+      description: verdict.value.reason || PAUSED_VAULT_FALLBACK_REASON,
+    }
+  }
   if (verdict.value.status === 'hidden') {
     return {
       title: FLAGGED_VAULT_TITLE,
@@ -62,9 +103,11 @@ const warning = computed(() => {
   }
 })
 const badgeLabel = computed(() => {
+  const paused = isPaused.value
   const flagged = verdict.value?.status === 'hidden'
-  if (pairSide) return PAIR_SIDE_BADGE_LABELS[pairSide][flagged ? 'flagged' : 'warning']
+  if (pairSide) return PAIR_SIDE_BADGE_LABELS[pairSide][paused ? 'paused' : flagged ? 'flagged' : 'warning']
   if (verdict.value?.decidedBy === 'deprecated') return 'Deprecated'
+  if (paused) return PAUSED_VAULT_LABEL
   return flagged ? FLAGGED_VAULT_LABEL : 'Warning'
 })
 </script>

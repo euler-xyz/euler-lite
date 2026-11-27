@@ -17,6 +17,8 @@ import {
   OP_PULL_DEBT,
   areAllUserOpsHooked,
   decodeHookedOperationsMask,
+  isVaultExitPaused,
+  isVaultPausedByGovernor,
   findBlockingDisabledOp,
   formatHookedOpsSummary,
   getHookedOperationMetas,
@@ -162,6 +164,28 @@ describe('isVaultEffectivelyPaused', () => {
   })
   it('is false when only some user ops are disabled', () => {
     expect(isVaultEffectivelyPaused(vault([OP_DEPOSIT, OP_BORROW], zeroAddress))).toBe(false)
+  })
+})
+
+describe('isVaultExitPaused', () => {
+  it.each<VaultOperation>([OP_WITHDRAW, OP_REDEEM, OP_TRANSFER, OP_LIQUIDATE, OP_REPAY, OP_REPAY_WITH_SHARES, OP_VAULT_STATUS_CHECK])(
+    'is true when %s is hooked with a zero target',
+    op => expect(isVaultExitPaused(vault([op], zeroAddress))).toBe(true),
+  )
+  it('is false when only entry operations are hooked', () => {
+    expect(isVaultExitPaused(vault([OP_DEPOSIT, OP_MINT, OP_BORROW, OP_SKIM], zeroAddress))).toBe(false)
+  })
+  it('is false when a hook target decides, even over exits', () => {
+    expect(isVaultExitPaused(vault([OP_WITHDRAW, OP_REDEEM], HOOK_TARGET))).toBe(false)
+  })
+})
+
+describe('isVaultPausedByGovernor', () => {
+  it('needs a governor that can lift the pause', () => {
+    const paused = vault([OP_WITHDRAW], zeroAddress)
+    expect(isVaultPausedByGovernor({ ...paused, governorAdmin: HOOK_TARGET } as unknown as EVault)).toBe(true)
+    expect(isVaultPausedByGovernor({ ...paused, governorAdmin: zeroAddress } as unknown as EVault)).toBe(false)
+    expect(isVaultPausedByGovernor({ ...paused, governorAdmin: undefined } as unknown as EVault)).toBe(false)
   })
 })
 

@@ -14,10 +14,11 @@ import { formatNumber, compactNumber, formatCompactUsdValue } from '~/utils/stri
 import { areTokenAddressesCorrelatedByTags, getTokenAddressesCorrelationCategoryLabel } from '~/utils/token-categories'
 import { getUnknownVaultCause } from '~/utils/vault-assessment/presentation'
 import type { EVault } from '@eulerxyz/euler-v2-sdk'
+import { useHiddenVaultEvidence } from '~/composables/useHiddenVaultEvidence'
 
 const { pair, assessmentUi = 'badge' } = defineProps<{ pair: AnyBorrowVaultPair, assessmentUi?: 'badge' | 'field' | 'none' }>()
 const { enableEntityBranding } = useDeployConfig()
-const { isVaultGovernorVerified, isSecuritizeGovernorVerified } = useVaults()
+const { isVaultGovernorVerified, isSecuritizeGovernorVerified, isVaultGovernorIdentified, isSecuritizeGovernorIdentified } = useVaults()
 const { getVaultCategory, isVerifiedVault } = useVaultRegistry()
 const { getTokenCategoryTags, isLoaded: isTokenListLoaded } = useTokenList()
 const pairKey = computed(() => `${pair.collateral.address.toLowerCase()}:${pair.borrow.address.toLowerCase()}`)
@@ -29,6 +30,14 @@ const isAnyGovernorUnverified = computed(() => {
     : !isVaultGovernorVerified(pair.collateral)
   return borrowUnverified || collateralUnverified
 })
+const isAnyGovernorUnidentified = computed(() => {
+  const borrowUnidentified = !isVaultGovernorIdentified(pair.borrow)
+  const collateralUnidentified = isSecuritizeBorrowPair(pair)
+    ? !isSecuritizeGovernorIdentified(pair.collateral)
+    : !isVaultGovernorIdentified(pair.collateral)
+  return borrowUnidentified || collateralUnidentified
+})
+useHiddenVaultEvidence(() => [pair.collateral, pair.borrow].map(vault => ({ chainId: vault.chainId, address: vault.address, family: 'evk' as const })))
 const isPairUngoverned = computed(() => pair.borrow.governorAdmin?.toLowerCase() === zeroAddress
   && (isSecuritizeBorrowPair(pair)
     ? pair.collateral.governor?.toLowerCase() === zeroAddress
@@ -48,6 +57,8 @@ const entityDisplay = computed(() => {
     entities: all,
   }
 })
+const isPairCuratorUnknown = computed(() => isAnyGovernorUnidentified.value
+  || (isAnyGovernorUnverified.value && !entityDisplay.value.name))
 
 const { settings } = useUserSettings()
 const enableIntrinsicApy = computed(() => settings.value.enableIntrinsicApy)
@@ -497,7 +508,7 @@ const linkPath = computed(() => ({
           Ungoverned
         </div>
         <div
-          v-else-if="isAnyGovernorUnverified"
+          v-else-if="isPairCuratorUnknown"
           class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
         >
           <SvgIcon
@@ -511,7 +522,7 @@ const linkPath = computed(() => ({
           class="flex items-center gap-6"
           :class="{ 'opacity-20': isAnyGovernanceLimited }"
         >
-          <VaultEntityDisclosureTooltip :entities="pairEntities">
+          <VaultEntityDisclosureTooltip :entities="isAnyGovernorUnverified ? [] : pairEntities">
             <CuratorEntityLink
               :entities="entityDisplay.entities"
               :label="entityDisplay.name"
@@ -726,7 +737,7 @@ const linkPath = computed(() => ({
             Ungoverned
           </div>
           <div
-            v-else-if="isAnyGovernorUnverified"
+            v-else-if="isPairCuratorUnknown"
             class="flex gap-8 items-center py-4 px-8 rounded-8 bg-error-100 text-error-500 text-p2 w-fit"
           >
             <SvgIcon

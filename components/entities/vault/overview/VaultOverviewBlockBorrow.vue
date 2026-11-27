@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { SecuritizeCollateralVault, EVaultCollateral, EVault } from '@eulerxyz/euler-v2-sdk'
-import { getCollateralExposureGroups, getCollateralExposurePairs } from '~/utils/vault/collateral-exposure'
+import { getCollateralExposureGroups, getCollateralExposurePairs, sumOpenInterestUsd } from '~/utils/vault/collateral-exposure'
+import { formatUncoveredBorrows } from '~/composables/useVaultCheckWeights'
 import { useVaultRegistry } from '~/composables/useVaultRegistry'
 import { logWarn } from '~/utils/errorHandling'
 import { VaultRampDownModal } from '#components'
@@ -56,12 +57,18 @@ const allCollateralPairs = computed(() =>
 const openInterestUsdByCollateral = computed<Record<string, number>>(() =>
   isOpenInterestEnabled.value ? getOpenInterestForVault(vault.address) : {},
 )
+const { getUncoveredBorrows } = useVaultCheckWeights(() => vault.address)
+const uncoveredLine = computed(() => {
+  const uncovered = getUncoveredBorrows()
+  return uncovered ? formatUncoveredBorrows(uncovered) : null
+})
+// Covered value cannot say which collateral carries bad debt, so it only orders collateral while there is none.
 const collateralGroups = computed(() =>
-  getCollateralExposureGroups(allCollateralPairs.value, openInterestUsdByCollateral.value),
+  getCollateralExposureGroups(allCollateralPairs.value, uncoveredLine.value ? {} : openInterestUsdByCollateral.value),
 )
-const totalOpenInterestUsd = computed(() =>
-  collateralGroups.value.reduce((sum, group) => sum + group.openInterestUsd, 0),
-)
+const totalOpenInterestUsd = computed(() => sumOpenInterestUsd(openInterestUsdByCollateral.value))
+// Unresolved collateral drops out of the pairs, so only the configured LTVs can say that none is accepted.
+const acceptsCollateral = computed(() => vault.collaterals.some(ltv => ltv.borrowLTV > 0 || ltv.currentLiquidationLTV > 0))
 const collateralPairs = computed(() => collateralGroups.value.flatMap(group => group.items))
 const getPairOpenInterestUsd = (pair: { collateral: EVault | SecuritizeCollateralVault }) => {
   const entry = Object.entries(openInterestUsdByCollateral.value)
@@ -74,7 +81,7 @@ const hasLiveExposureData = computed(() =>
 const sectionTitle = 'Collateral exposure'
 const sectionDescription = computed(() =>
   isOpenInterestEnabled.value
-    ? 'Review current borrow exposure and configured collateral vaults before supplying.'
+    ? 'Review the borrows each collateral covers and the configured collateral vaults before supplying.'
     : 'Review configured collateral vaults and LTVs before supplying.',
 )
 const formatExposurePercent = (valueUsd: number) =>
@@ -92,20 +99,45 @@ watchEffect(() => {
 
 <template>
   <VaultOverviewAccordionSection
-    v-if="collateralGroups.length"
+    v-if="collateralGroups.length || uncoveredLine"
     :title="sectionTitle"
     icon="section-collateral-exposure"
     :default-open="defaultOpen"
     content-class="flex flex-col gap-24"
   >
     <div>
-      <p class="text-content-secondary">
+      <p
+        v-if="collateralGroups.length"
+        class="text-content-secondary"
+      >
         Deposits in this vault can be borrowed.
         {{ sectionDescription }}
       </p>
+      <p
+        v-else-if="acceptsCollateral"
+        class="text-content-secondary"
+      >
+        Collateral details are not available right now.
+      </p>
+      <p
+        v-else
+        class="text-content-secondary"
+      >
+        No collateral is currently accepted for this vault's borrows.
+      </p>
+      <p
+        v-if="uncoveredLine"
+        class="mt-8 text-warning-500"
+        data-id="collateral-exposure-uncovered"
+      >
+        {{ uncoveredLine }}
+      </p>
     </div>
 
-    <div class="flex flex-col gap-12">
+    <div
+      v-if="collateralPairs.length"
+      class="flex flex-col gap-12"
+    >
       <div
         v-for="pair in collateralPairs"
         :key="pair.collateral.address"
@@ -123,11 +155,11 @@ watchEffect(() => {
           >
             <template #label>
               <span class="flex items-center gap-4">
-                Current exposure
+                Covered borrows
                 <span @click.stop.prevent>
                   <UiHoverPreviewTooltip
-                    title="Current exposure"
-                    text="The amount currently borrowed against this collateral."
+                    title="Covered borrows"
+                    text="Borrows this collateral's current value covers. Debt above a collateral's value is not counted here."
                     icon-class="text-content-muted hover:text-content-secondary"
                   />
                 </span>

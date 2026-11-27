@@ -395,6 +395,7 @@ describe('useCollateralForm', () => {
       prefetchPluginData: vi.fn(),
     }))
     vi.stubGlobal('useEffectiveAddress', () => ({
+      address: ref('0x0000000000000000000000000000000000000001'),
       isConnected: ref(true),
       isSpyMode: ref(false),
       effectiveAddress: ref('0x0000000000000000000000000000000000000001'),
