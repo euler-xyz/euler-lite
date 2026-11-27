@@ -81,7 +81,7 @@ const isShownRule = (key: string, finding: VaultAssessmentFinding): boolean => {
   if (/^collateral\.[^.]+\.ltv$/.test(key)) return true
   if (key === 'governance.timelock' || key === 'governance.owner-registered' || key === 'governance.curator-registered') return true
   if (/^strategy\.[^.]+\.(recognized|visible)$/.test(key)) return true
-  if (/^collateral\.[^.]+\.visible$/.test(key)) return true
+  if (/^collateral\.[^.]+\.(visible|listed)$/.test(key) || key === 'asset.listed') return true
   return false
 }
 
